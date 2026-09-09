@@ -12,6 +12,59 @@ from app import v21_demo  # noqa: E402
 
 
 class AutoTradeBotTests(unittest.TestCase):
+    def candidate(self, score=85, opportunity=85, direction="LONG", **overrides):
+        candidate = {
+            "symbol": "TESTUSDT", "direction": direction, "status": "SELECTED",
+            "score": score, "analysis_score": score, "opportunity_score": opportunity,
+            "decision_status": v21_demo._decision_status(score),
+            "opportunity_breakdown": {"liquidity_quality": 80, "mtf_confirmation": 80},
+            "entry": 100, "stop_loss": 99, "tp1": 101, "tp2": 102, "tp3": 103,
+            "risk_reward": 3, "data_health": True, "signal_age_seconds": 0,
+        }
+        candidate.update(overrides)
+        return candidate
+
+    def test_decision_status_thresholds(self):
+        expected = ((59, "BEKLE"), (60, "ZAYIF / İŞLEM YOK"), (70, "İZLE"), (80, "GÜÇLÜ ADAY"), (85, "AUTO TRADE ADAYI"))
+        for score, label in expected:
+            self.assertEqual(v21_demo._decision_status(score), label)
+
+    def test_high_analysis_score_with_low_opportunity_is_not_tradeable(self):
+        self.assertFalse(v21_demo.candidate_is_tradeable(self.candidate(90, 65), v21_demo.DEFAULT_SETTINGS))
+
+    def test_analysis_score_75_can_be_tradeable_without_changing_decision_band(self):
+        candidate = self.candidate(75, 75)
+        self.assertEqual(candidate["decision_status"], "İZLE")
+        self.assertTrue(v21_demo.candidate_is_tradeable(candidate, v21_demo.DEFAULT_SETTINGS))
+
+    def test_high_analysis_score_with_bad_risk_reward_is_not_tradeable(self):
+        self.assertFalse(v21_demo.candidate_is_tradeable(self.candidate(90, 85, risk_reward=0), v21_demo.DEFAULT_SETTINGS))
+
+    def test_mtf_confirmation_improves_opportunity_ranking(self):
+        weak = self.candidate(90, 0, opportunity_breakdown={"liquidity_quality": 80, "mtf_confirmation": 25})
+        strong = self.candidate(90, 0, opportunity_breakdown={"liquidity_quality": 80, "mtf_confirmation": 100})
+        weak_score, _ = v21_demo._quality_score(weak, 90)
+        strong_score, _ = v21_demo._quality_score(strong, 90)
+        self.assertGreater(strong_score, weak_score)
+
+    def test_low_liquidity_and_stale_signal_reduce_opportunity(self):
+        fresh = self.candidate(90, 0, volume_ratio=1.5, signal_age_seconds=0)
+        stale = self.candidate(90, 0, volume_ratio=0.1, signal_age_seconds=v21_demo.MAX_SIGNAL_AGE_SECONDS)
+        fresh_score, _ = v21_demo._quality_score(fresh, 90)
+        stale_score, _ = v21_demo._quality_score(stale, 90)
+        self.assertGreater(fresh_score, stale_score)
+
+    def test_long_and_short_directions_are_preserved(self):
+        self.assertEqual(v21_demo._enrich_scan_candidates([self.candidate(90, 90, "LONG")])[0]["direction"], "LONG")
+        self.assertEqual(v21_demo._enrich_scan_candidates([self.candidate(90, 90, "SHORT")])[0]["direction"], "SHORT")
+
+    def test_candidate_selection_keeps_three_position_and_duplicate_limits(self):
+        candidates = [self.candidate(90, 90, symbol=f"COIN{index}USDT") for index in range(4)]
+        candidates.append(self.candidate(95, 95, symbol="COIN0USDT"))
+        selected = v21_demo.select_auto_candidates(candidates, v21_demo.DEFAULT_SETTINGS, set())
+        self.assertEqual(len(selected), 3)
+        self.assertEqual(len({item["symbol"] for item in selected}), 3)
+
     def test_scan_100_symbols_and_filter_invalid_symbols(self):
         symbols = []
         tickers = []

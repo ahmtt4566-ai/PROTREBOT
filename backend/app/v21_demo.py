@@ -542,11 +542,61 @@ def _build_candidate_reasons(item: dict[str, Any]) -> list[str]:
     return reasons[:5]
 
 
+def _decision_status(score: float) -> str:
+    if score < 60:
+        return "BEKLE"
+    if score < 70:
+        return "ZAYIF / İŞLEM YOK"
+    if score < 80:
+        return "İZLE"
+    if score < 85:
+        return "GÜÇLÜ ADAY"
+    return "AUTO TRADE ADAYI"
+
+
+def _quality_score(item: dict[str, Any], analysis_score: float) -> tuple[float, dict[str, float]]:
+    supplied = item.get("opportunity_breakdown") if isinstance(item.get("opportunity_breakdown"), dict) else {}
+    volume_ratio = max(0.0, float(item.get("volume_ratio", 0) or 0))
+    liquidity = max(0.0, min(100.0, volume_ratio / 1.5 * 100.0))
+    volatility = max(0.0, float(item.get("volatility_pct", 0) or 0))
+    volatility_limit = float(item.get("max_volatility_pct", 3.5) or 3.5)
+    volatility_quality = 100.0 if 0 < volatility <= volatility_limit else max(0.0, 100.0 - max(0.0, volatility - volatility_limit) * 30.0)
+    mtf_confirmation = 100.0 if bool(item.get("mtf_aligned")) else 50.0 if item.get("mtf_trend") else 25.0
+    age = float(item.get("signal_age_seconds", 0) or 0)
+    freshness = max(0.0, min(100.0, 100.0 - age / MAX_SIGNAL_AGE_SECONDS * 100.0))
+    risk_reward = max(0.0, min(100.0, float(item.get("risk_reward", 0) or 0) / 3.0 * 100.0))
+    breakdown = {
+        "analysis_score": max(0.0, min(100.0, analysis_score)),
+        "liquidity_quality": round(liquidity, 2),
+        "volatility_quality": round(volatility_quality, 2),
+        "mtf_confirmation": round(mtf_confirmation, 2),
+        "signal_freshness": round(freshness, 2),
+        "risk_reward_quality": round(risk_reward, 2),
+    }
+    for key in breakdown:
+        if key in supplied:
+            breakdown[key] = max(0.0, min(100.0, float(supplied[key])))
+    opportunity = (
+        breakdown["analysis_score"] * 0.45
+        + breakdown["liquidity_quality"] * 0.15
+        + breakdown["volatility_quality"] * 0.10
+        + breakdown["mtf_confirmation"] * 0.15
+        + breakdown["signal_freshness"] * 0.10
+        + breakdown["risk_reward_quality"] * 0.05
+    )
+    return round(max(0.0, min(100.0, opportunity)), 2), breakdown
+
+
 def _enrich_scan_candidates(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ranked: list[dict[str, Any]] = []
-    ordered = sorted(results, key=lambda item: float(item.get("opportunity_score", 0) or 0), reverse=True)
-    for index, item in enumerate(ordered, start=1):
-        score = int(round(float(item.get("opportunity_score", 0) or 0)))
+    prepared = []
+    for item in results:
+        analysis_score = float(item.get("analysis_score", item.get("opportunity_score", item.get("score", 0))) or 0)
+        opportunity_score, breakdown = _quality_score(item, analysis_score)
+        prepared.append((item, analysis_score, opportunity_score, breakdown))
+    ordered = sorted(prepared, key=lambda entry: entry[2], reverse=True)
+    for index, (item, analysis_score, opportunity_score, breakdown) in enumerate(ordered, start=1):
+        score = int(round(analysis_score))
         direction = str(item.get("direction", "NEUTRAL")).upper()
         if direction == "BEKLE":
             direction = "NEUTRAL"
@@ -555,6 +605,11 @@ def _enrich_scan_candidates(results: list[dict[str, Any]]) -> list[dict[str, Any
             "rank": index,
             "symbol": str(item.get("symbol")),
             "score": max(0, min(100, score)),
+            "analysis_score": max(0, min(100, score)),
+            "opportunity_score": opportunity_score,
+            "opportunity_breakdown": breakdown,
+            "decision_status": _decision_status(score),
+            "decision_reason": "Opportunity quality insufficient" if opportunity_score < 70 else "Quality filters passed; ranked for Auto Trade",
             "direction": direction,
             "confidence": _candidate_confidence_label(confidence_value),
             "confidence_value": confidence_value,
@@ -625,12 +680,13 @@ async def scan_demo_universe(client: BinanceDemoClient, occupied: set[str], sett
             data_health = signal_age <= MAX_SIGNAL_AGE_SECONDS and volatility > 0 and decision["risk_reward"] > 0
             status = "WATCH" if rejection or score < float(settings.get("min_score_threshold", 70)) else "SELECTED"
             return {
-                "symbol": symbol, "direction": "NEUTRAL" if direction == "BEKLE" else direction, "opportunity_score": round(score, 2),
+                "symbol": symbol, "direction": "NEUTRAL" if direction == "BEKLE" else direction, "analysis_score": round(score, 2), "opportunity_score": round(score, 2),
                 "confidence": confidence, "entry": decision["entry"], "stop_loss": decision["stop_loss"],
                 "tp1": decision["tp1"], "tp2": decision["tp2"], "tp3": decision["tp3"],
                 "volatility_pct": round(volatility, 3), "risk_reward": decision["risk_reward"],
                 "trend": decision["trend"], "momentum": decision["momentum"],
                 "mtf_trend": mtf_trend, "macd_confirmation": macd_confirmation, "rsi": decision["rsi"],
+                "mtf_aligned": mtf_aligned, "max_volatility_pct": float(settings["max_volatility_pct"]),
                 "status": status if data_health else "REJECTED",
                 "signal_time": signal_time, "signal_age_seconds": max(0, round(signal_age)),
                 "data_health": data_health,
@@ -675,7 +731,15 @@ def candidate_is_tradeable(candidate: dict[str, Any], settings: dict[str, Any]) 
     allowed_symbols = _effective_allowed_symbols(settings)
     if allowed_symbols is not None and symbol not in allowed_symbols:
         return False
+    analysis_score = float(candidate.get("analysis_score", candidate.get("score", 0)) or 0)
+    opportunity_score = float(candidate.get("opportunity_score", analysis_score) or analysis_score)
+    decision_status = str(candidate.get("decision_status") or _decision_status(analysis_score))
+    breakdown = candidate.get("opportunity_breakdown") or {}
     if direction not in {"LONG", "SHORT"} or candidate.get("status") != "SELECTED":
+        return False
+    if analysis_score < 75 or opportunity_score < 70:
+        return False
+    if float(breakdown.get("liquidity_quality", 100) or 0) < 50 or float(breakdown.get("mtf_confirmation", 100) or 0) < 50:
         return False
     if direction == "LONG" and not settings.get("allow_long", True):
         return False
@@ -716,7 +780,7 @@ def select_auto_candidates(ranked: list[dict[str, Any]], settings: dict[str, Any
     allowed_symbols = _effective_allowed_symbols(settings)
     selected: list[dict[str, Any]] = []
     seen: set[str] = set()
-    ordered = sorted(ranked, key=lambda item: float(item.get("score", item.get("opportunity_score", 0)) or 0), reverse=True)
+    ordered = sorted(ranked, key=lambda item: float(item.get("opportunity_score", item.get("score", 0)) or 0), reverse=True)
     for candidate in ordered:
         symbol = normalize_symbol(str(candidate.get("symbol") or ""))
         if symbol in occupied or symbol in seen or (allowed_symbols is not None and symbol not in allowed_symbols) or not candidate_is_tradeable(candidate, settings):
@@ -1139,7 +1203,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
         str(candidate.get("symbol")) for candidate in ranked
         if candidate_is_tradeable(candidate, settings)
     }
-    desired_symbols = set(sorted(desired_symbols, key=lambda symbol: next((float(item.get("score", 0) or 0) for item in ranked if item.get("symbol") == symbol), 0), reverse=True)[:MAX_OPEN_POSITIONS])
+    desired_symbols = set(sorted(desired_symbols, key=lambda symbol: next((float(item.get("opportunity_score", item.get("score", 0)) or 0) for item in ranked if item.get("symbol") == symbol), 0), reverse=True)[:MAX_OPEN_POSITIONS])
     if available_slots <= 0:
         rotated = await rotate_safe_demo_positions(application, snapshot, desired_symbols)
         if rotated:
