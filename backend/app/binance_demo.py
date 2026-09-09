@@ -764,8 +764,13 @@ def enrich_snapshot_with_plans(snapshot: dict[str, Any], state: dict[str, Any]) 
 async def symbol_rules(client: BinanceDemoClient, symbol: str) -> dict[str, Decimal]:
     payload = await client.public_get("/fapi/v1/exchangeInfo")
     row = next((item for item in payload.get("symbols", []) if item.get("symbol") == symbol), None)
-    if not row or row.get("status") != "TRADING":
-        raise BinanceDemoError(f"{symbol} Demo vadeli işlemlerde açık değil.", http_status=422)
+    if (
+        not row
+        or row.get("status") != "TRADING"
+        or row.get("contractType") != "PERPETUAL"
+        or row.get("quoteAsset") != "USDT"
+    ):
+        raise BinanceDemoError(f"{symbol} Demo USDT perpetual market olarak geçerli değil.", http_status=422)
     filters = {item.get("filterType"): item for item in row.get("filters", [])}
     lot = filters.get("LOT_SIZE", {})
     price_filter = filters.get("PRICE_FILTER", {})
@@ -1007,8 +1012,9 @@ def validate_entry_risk(
 ) -> None:
     """Final fail-closed gate shared by manual and automatic Demo entries."""
     symbol = normalize_symbol(body.symbol)
-    allowed = {normalize_symbol(value) for value in settings.get("_auto_universe", settings.get("allowed_symbols", []))}
-    if symbol not in allowed:
+    configured = settings.get("_auto_universe") or settings.get("allowed_symbols") or []
+    allowed = {normalize_symbol(value) for value in configured if value}
+    if allowed and symbol not in allowed:
         raise BinanceDemoError(f"{symbol} izinli pariteler dışında; emir açılmadı.", http_status=409)
     if body.direction == "LONG" and not settings.get("allow_long", True):
         raise BinanceDemoError("LONG girişleri risk politikası tarafından kapatıldı.", http_status=409)

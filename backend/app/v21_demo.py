@@ -78,7 +78,7 @@ BLOCKED_AUTO_BASE_ASSETS = frozenset({
 })
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "allowed_symbols": list(AUTO_TRADE_SYMBOLS),
+    "allowed_symbols": [],
     "allow_long": True,
     "allow_short": True,
     "max_loss_per_trade": 5.0,
@@ -1115,7 +1115,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
     occupied = {item["symbol"] for item in snapshot["positions"] + snapshot["open_orders"]}
     state["scanner"].update({"active": True, "last_stage": "TARAMA", "selected_symbols": []})
     ranked = await scan_demo_universe(client, set(), settings)
-    allowed_symbols = {normalize_symbol(value) for value in settings.get("_auto_universe", settings.get("allowed_symbols", AUTO_TRADE_SYMBOLS))}
+    allowed_symbols = _effective_allowed_symbols(settings)
     desired_symbols = {
         str(candidate.get("symbol")) for candidate in ranked
         if candidate_is_tradeable(candidate, settings)
@@ -1135,7 +1135,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
             return
     top_candidates = select_auto_candidates(ranked, settings, occupied, available_slots)
     if not top_candidates:
-        disallowed = next((candidate for candidate in ranked if normalize_symbol(candidate.get("symbol", "")) not in allowed_symbols), None)
+        disallowed = next((candidate for candidate in ranked if allowed_symbols is not None and normalize_symbol(candidate.get("symbol", "")) not in allowed_symbols), None)
         if disallowed:
             _set_rejection(state, "ALLOWED_SYMBOLS", f"{disallowed.get('symbol', 'Aday')} izinli pariteler dışında; emir açılmadı.")
     scanner = state["scanner"]
@@ -1148,7 +1148,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
         if not symbol or direction == "NEUTRAL":
             _set_rejection(state, "SIGNAL_DIRECTION", f"{symbol or 'Aday'} için işlem yönü bulunamadı; emir açılmadı.")
             continue
-        if symbol not in allowed_symbols:
+        if allowed_symbols is not None and symbol not in allowed_symbols:
             _set_rejection(state, "ALLOWED_SYMBOLS", f"{symbol} izinli pariteler dışında; emir açılmadı.")
             continue
         if not candidate_is_tradeable(candidate, settings):
@@ -1594,10 +1594,8 @@ async def v21_settings(request: Request, body: SettingsUpdate) -> dict[str, Any]
         symbols = []
         for value in updates["allowed_symbols"]:
             symbol = normalize_symbol(value)
-            if symbol in AUTO_TRADE_SYMBOL_SET and symbol not in symbols:
+            if symbol and symbol not in symbols:
                 symbols.append(symbol)
-        if not symbols:
-            raise HTTPException(422, "En az bir izinli USDT paritesi seçin.")
         updates["allowed_symbols"] = symbols
     state["settings"].update(updates)
     state["settings"]["max_margin_per_trade"] = min(float(MAX_MARGIN_USDT), float(state["settings"]["max_margin_per_trade"]))
@@ -1621,8 +1619,8 @@ async def v21_risk_size(request: Request, body: RiskSizeRequest) -> dict[str, An
 async def v21_demo_smoke_test(request: Request) -> dict[str, Any]:
     state = state_for(request)
     candidates = state["scanner"].get("top_candidates", [])
-    allowed_symbols = {normalize_symbol(value) for value in state["settings"].get("allowed_symbols", [])}
-    candidate = next((item for item in candidates if normalize_symbol(item.get("symbol", "")) in allowed_symbols), None)
+    allowed_symbols = _effective_allowed_symbols(state["settings"])
+    candidate = next((item for item in candidates if allowed_symbols is None or normalize_symbol(item.get("symbol", "")) in allowed_symbols), None)
     if candidate is None:
         _set_rejection(state, "ALLOWED_SYMBOLS", "Demo işlemi testi için izinli ve seçili aday bulunamadı.")
         persist_state(state)
