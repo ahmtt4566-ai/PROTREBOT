@@ -53,6 +53,17 @@ class DemoSymbolValidationTests(unittest.TestCase):
             daily_realized_pnl=0,
         )
 
+    def test_auto_trade_universe_does_not_restrict_manual_default_validation(self):
+        body = DemoOrderRequest(symbol="FLOCKUSDT", direction="LONG", margin_usdt=20, leverage=2, stop_loss=99, tp1=101, tp2=102, tp3=103)
+        validate_entry_risk(
+            {"positions": [], "open_orders": [], "available_balance": 1000},
+            body,
+            {"notional_usdt": 40, "current_price": 100, "stop_loss": "99"},
+            {**DEFAULT_SETTINGS, "_auto_universe": ["BTCUSDT"]},
+            daily_realized_pnl=0,
+            use_auto_universe=False,
+        )
+
     def test_explicit_allowlist_remains_narrowing(self):
         body = DemoOrderRequest(symbol="ETHUSDT", direction="LONG", margin_usdt=20, leverage=2, stop_loss=99, tp1=101, tp2=102, tp3=103)
         with self.assertRaisesRegex(BinanceDemoError, "izinli pariteler"):

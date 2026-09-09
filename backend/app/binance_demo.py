@@ -1009,10 +1009,11 @@ def validate_entry_risk(
     *,
     daily_realized_pnl: float,
     paper_positions: list[dict[str, Any]] | None = None,
+    use_auto_universe: bool = True,
 ) -> None:
     """Final fail-closed gate shared by manual and automatic Demo entries."""
     symbol = normalize_symbol(body.symbol)
-    configured = settings.get("_auto_universe") or settings.get("allowed_symbols") or []
+    configured = (settings.get("_auto_universe") if use_auto_universe else None) or settings.get("allowed_symbols") or []
     allowed = {normalize_symbol(value) for value in configured if value}
     if allowed and symbol not in allowed:
         raise BinanceDemoError(f"{symbol} izinli pariteler dışında; emir açılmadı.", http_status=409)
@@ -1394,6 +1395,7 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
                 snapshot, body, spec, policy,
                 daily_realized_pnl=verified_realized_pnl(v21_state),
                 paper_positions=v21_state.get("paper_positions", []),
+                use_auto_universe=source != "MANUAL",
             )
             await set_isolated_margin(client, spec["symbol"])
             leverage_audit = await apply_verified_leverage(client, spec["symbol"], spec["leverage"])
@@ -1403,6 +1405,7 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
                 snapshot, body, spec, policy,
                 daily_realized_pnl=verified_realized_pnl(v21_state),
                 paper_positions=v21_state.get("paper_positions", []),
+                use_auto_universe=source != "MANUAL",
             )
             plan_id = uuid.uuid4().hex[:12]
             client_order_id = new_client_id("ENTRY")
