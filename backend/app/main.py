@@ -651,7 +651,7 @@ async def health_check_frontend(application: FastAPI) -> dict:
 async def health_check_market_data(application: FastAPI) -> dict:
     started = time.perf_counter()
     try:
-        response = await asyncio.wait_for(application.state.http.get(f"{FUTURES_MARKET_DATA_API}/fapi/v1/ping"), timeout=10)
+        response = await asyncio.wait_for(market_data_request(application, "/fapi/v1/ping"), timeout=10)
         if response.status_code == 200:
             return health_item("Market data", "ACTIVE", "Read-only market data endpoint reachable.", started)
         return health_item("Market data", "ERROR", f"Market data responded with HTTP {response.status_code}.", started)
@@ -1031,7 +1031,7 @@ async def web_access_check():
 @app.get("/api/markets")
 async def markets(limit: int = Query(100, ge=1, le=200)):
     try:
-        response = await app.state.http.get(f"{FUTURES_MARKET_DATA_API}/fapi/v1/ticker/24hr")
+        response = await market_data_request(app, "/fapi/v1/ticker/24hr")
         response.raise_for_status()
     except httpx.HTTPError as exc:
         raise market_data_http_exception("Binance Futures piyasa özeti alınamadı", exc) from exc
@@ -1060,8 +1060,9 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
         raise HTTPException(400, "Desteklenmeyen zaman dilimi")
     safe_symbol = "".join(char for char in symbol.upper() if char.isalnum())
     try:
-        response = await app.state.http.get(
-            f"{FUTURES_MARKET_DATA_API}/fapi/v1/klines",
+        response = await market_data_request(
+            app,
+            "/fapi/v1/klines",
             params={"symbol": safe_symbol, "interval": interval, "limit": limit},
         )
         response.raise_for_status()
@@ -1080,6 +1081,24 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
         }
         for row in rows
     ]
+
+
+async def market_data_request(application: FastAPI, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
+    """Retry only transient public market-data failures; preserve final error mapping."""
+    last_error: httpx.HTTPError | None = None
+    for attempt in range(3):
+        try:
+            response = await application.state.http.get(f"{FUTURES_MARKET_DATA_API}{path}", params=params)
+            if response.status_code not in {500, 502, 503, 504} or attempt == 2:
+                return response
+        except httpx.RequestError as exc:
+            last_error = exc
+            if attempt == 2:
+                raise
+        await asyncio.sleep(0.5 * (2 ** attempt))
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Market data request retry loop ended unexpectedly")
 
 
 def market_data_http_exception(prefix: str, error: httpx.HTTPError) -> HTTPException:

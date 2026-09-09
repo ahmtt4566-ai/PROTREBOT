@@ -170,6 +170,14 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertEqual(vercel["framework"], "vite")
         self.assertIn("VITE_BUILD_COMMIT", (ROOT / "vite.config.ts").read_text(encoding="utf-8"))
 
+    def test_live_market_data_retries_only_transient_upstream_failures(self):
+        self.assertIn("async def market_data_request", MAIN_TEXT)
+        self.assertIn("for attempt in range(3)", MAIN_TEXT)
+        self.assertIn("{500, 502, 503, 504}", MAIN_TEXT)
+        self.assertIn("0.5 * (2 ** attempt)", MAIN_TEXT)
+        self.assertIn("market_data_request(app, \"/fapi/v1/ticker/24hr\")", MAIN_TEXT)
+        self.assertIn("market_data_request(\n            app,\n            \"/fapi/v1/klines\"", MAIN_TEXT)
+
     def test_connector_is_hard_locked_to_official_demo_hosts(self):
         self.assertIn('DEMO_REST_BASE = "https://demo-fapi.binance.com"', SOURCE_TEXT)
         self.assertIn('DEMO_WS_BASE = "wss://demo-fstream.binance.com"', SOURCE_TEXT)
