@@ -43,7 +43,7 @@ class DemoSymbolValidationTests(unittest.TestCase):
             asyncio.run(resolve_demo_symbol(client, "FAKECOIN"))
 
     def test_valid_demo_usdt_perpetual_symbols_pass_exchange_validation(self):
-        for symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "BODUSDT"):
+        for symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "FLOCKUSDT", "RAYUSDT"):
             client = SimpleNamespace(public_get=AsyncMock(return_value=exchange_info(symbol)))
             try:
                 asyncio.run(symbol_rules(client, symbol))
@@ -78,15 +78,38 @@ class DemoSymbolValidationTests(unittest.TestCase):
             use_auto_universe=False,
         )
 
-    def test_explicit_allowlist_remains_narrowing(self):
+    def test_manual_order_ignores_explicit_allowlist(self):
         body = DemoOrderRequest(symbol="ETHUSDT", direction="LONG", margin_usdt=20, leverage=2, stop_loss=99, tp1=101, tp2=102, tp3=103)
+        validate_entry_risk(
+            {"positions": [], "open_orders": [], "available_balance": 1000},
+            body,
+            {"notional_usdt": 40, "current_price": 100, "stop_loss": "99"},
+            {**DEFAULT_SETTINGS, "allowed_symbols": ["BTCUSDT"]},
+            daily_realized_pnl=0,
+            use_auto_universe=False,
+        )
+
+    def test_manual_order_ignores_legacy_allowlist_for_rayusdt(self):
+        body = DemoOrderRequest(symbol="RAYUSDT", direction="LONG", margin_usdt=20, leverage=2, stop_loss=99, tp1=101, tp2=102, tp3=103)
+        validate_entry_risk(
+            {"positions": [], "open_orders": [], "available_balance": 1000},
+            body,
+            {"notional_usdt": 40, "current_price": 100, "stop_loss": "99"},
+            {**DEFAULT_SETTINGS, "allowed_symbols": ["BTCUSDT", "ETHUSDT"]},
+            daily_realized_pnl=0,
+            use_auto_universe=False,
+        )
+
+    def test_auto_trade_universe_still_restricts_candidates(self):
+        body = DemoOrderRequest(symbol="RAYUSDT", direction="LONG", margin_usdt=20, leverage=2, stop_loss=99, tp1=101, tp2=102, tp3=103)
         with self.assertRaisesRegex(BinanceDemoError, "izinli pariteler"):
             validate_entry_risk(
                 {"positions": [], "open_orders": [], "available_balance": 1000},
                 body,
                 {"notional_usdt": 40, "current_price": 100, "stop_loss": "99"},
-                {**DEFAULT_SETTINGS, "allowed_symbols": ["BTCUSDT"]},
+                {**DEFAULT_SETTINGS, "_auto_universe": ["BTCUSDT"]},
                 daily_realized_pnl=0,
+                use_auto_universe=True,
             )
 
     def test_existing_notional_limit_still_blocks(self):
