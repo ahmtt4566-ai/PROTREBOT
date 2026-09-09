@@ -149,6 +149,7 @@ export default function TestnetFirstApp() {
   const [markets,setMarkets] = useState<Market[]>([])
   const [symbol,setSymbol] = useState('BTCUSDT')
   const [marketQuery,setMarketQuery] = useState('')
+  const [marketPickerOpen,setMarketPickerOpen] = useState(false)
   const [interval,setInterval] = useState('15m')
   const [analysis,setAnalysis] = useState<Analysis|null>(null)
   const [analysisProgress,setAnalysisProgress] = useState(0)
@@ -162,7 +163,9 @@ export default function TestnetFirstApp() {
   const [showBackToTop,setShowBackToTop] = useState(false)
   const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
   const notificationRef = useRef<HTMLDivElement>(null)
+  const marketPickerRef = useRef<HTMLDivElement>(null)
   const notifications = healthNotifications(health)
+  const selectedMarket = markets.find(market => market.symbol === symbol)
 
   const navigate = (target:View) => {
     setView(target)
@@ -263,6 +266,17 @@ export default function TestnetFirstApp() {
   },[notificationsOpen])
 
   useEffect(() => {
+    if (!marketPickerOpen) return
+    const closeOnOutsideClick = (event:MouseEvent) => {
+      if (marketPickerRef.current && !marketPickerRef.current.contains(event.target as Node)) setMarketPickerOpen(false)
+    }
+    const closeOnEscape = (event:KeyboardEvent) => {if (event.key === 'Escape') setMarketPickerOpen(false)}
+    document.addEventListener('mousedown',closeOnOutsideClick)
+    document.addEventListener('keydown',closeOnEscape)
+    return () => {document.removeEventListener('mousedown',closeOnOutsideClick);document.removeEventListener('keydown',closeOnEscape)}
+  },[marketPickerOpen])
+
+  useEffect(() => {
     let previousY = window.scrollY
     let ticking = false
     const updateScrollState = () => {
@@ -320,7 +334,13 @@ export default function TestnetFirstApp() {
     {view === 'testnet' && <>
       <section className="v26MarketBar">
         <div className="v26MarketTitle"><Activity/><span><small>SEÇİLİ TESTNET PAZARI</small><b>{symbol.replace('USDT','/USDT')}</b></span><strong className={analysis?.direction === 'SHORT' ? 'short' : analysis?.direction === 'LONG' ? 'long' : ''}>{analysis?.direction || (analysisProgress < 0 ? 'ANALİZ HATASI' : 'HESAPLANIYOR')} <em>{analysis ? `%${analysis.confidence}` : analysisProgress < 0 ? 'TEKRAR DENEYİN' : analysisProgress > 0 ? `%${analysisProgress}` : 'BAŞLATILIYOR'}</em></strong></div>
-        <div className="v26MarketPicker">{markets.filter(market => `${market.display} ${market.symbol}`.toUpperCase().includes(marketQuery.trim().toUpperCase())).map(market => <button key={market.symbol} className={market.symbol === symbol ? 'active' : ''} onClick={() => setSymbol(market.symbol)}><b>{market.display}</b><span>{format(market.price)}</span><em className={market.change >= 0 ? 'up' : 'down'}>{market.change >= 0 ? '+' : ''}{market.change.toFixed(2)}%</em></button>)}</div>
+        <div className="v26MarketPicker" ref={marketPickerRef}>
+          <button type="button" className="v26MarketTrigger" aria-expanded={marketPickerOpen} onClick={() => setMarketPickerOpen(open => !open)}><span><small>MARKET</small><b>{selectedMarket?.display || symbol.replace('USDT','/USDT')}</b></span><em>▼</em></button>
+          {marketPickerOpen && <div className="v26MarketPopover" role="dialog" aria-label="Testnet market selector">
+            <input autoFocus aria-label="Testnet market search" placeholder="Sembol ara" value={marketQuery} onChange={event => setMarketQuery(event.target.value)} />
+            <div className="v26MarketOptions">{markets.filter(market => `${market.display} ${market.symbol}`.toUpperCase().includes(marketQuery.trim().toUpperCase())).map(market => <button type="button" key={market.symbol} className={market.symbol === symbol ? 'active' : ''} onClick={() => {setSymbol(market.symbol);setMarketPickerOpen(false);setMarketQuery('')}}><b>{market.display}</b><span>{format(market.price)}</span><em className={market.change >= 0 ? 'up' : 'down'}>{market.change >= 0 ? '+' : ''}{market.change.toFixed(2)}%</em></button>)}</div>
+          </div>}
+        </div>
         <div className="v26Intervals">{['1m','5m','15m','1h','4h'].map(item => <button key={item} className={interval === item ? 'active' : ''} onClick={() => setInterval(item)}>{item}</button>)}</div>
       </section>
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Testnet merkezi hazırlanıyor…</div>}>
