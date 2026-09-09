@@ -260,10 +260,11 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn("DEMO_CLOCK_SYNCED_AT > request_started", SOURCE_TEXT)
 
     def test_account_snapshot_reads_are_sequential_and_algo_orders_optional(self):
-        self.assertIn('account = await client.signed("GET", "/fapi/v3/account")', SOURCE_TEXT)
-        self.assertIn('positions = await client.signed("GET", "/fapi/v3/positionRisk")', SOURCE_TEXT)
-        self.assertIn('orders = await client.signed("GET", "/fapi/v1/openOrders")', SOURCE_TEXT)
-        self.assertIn("algo_orders = await optional_open_algo_orders(client)", SOURCE_TEXT)
+        self.assertIn('await snapshot_request(client, "/fapi/v3/account"', SOURCE_TEXT)
+        self.assertIn('await snapshot_request(client, "/fapi/v3/positionRisk"', SOURCE_TEXT)
+        self.assertIn('await snapshot_request(client, "/fapi/v1/openOrders"', SOURCE_TEXT)
+        self.assertIn('await snapshot_request(client, "/fapi/v1/openAlgoOrders"', SOURCE_TEXT)
+        self.assertIn('await snapshot_request(client, "/fapi/v1/symbolConfig"', SOURCE_TEXT)
         self.assertNotIn("account, positions, orders, algo_orders, hedge_mode, configurations = await asyncio.gather(", SOURCE_TEXT)
 
     def test_analysis_universe_supports_full_100_symbol_market_scope(self):
@@ -326,12 +327,12 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn("demoLiveChart", FRONTEND_TEXT)
         self.assertIn("apiErrorMessage", FRONTEND_TEXT)
         self.assertIn("parsed <= 100", FRONTEND_TEXT)
-        self.assertIn("Giriş, Stop, TP ve Seviye Haritası", FRONTEND_TEXT)
+        self.assertIn("PositionMap", FRONTEND_TEXT)
         self.assertIn("ACİL DEMO DURDUR", FRONTEND_TEXT)
         self.assertIn("KALDIRAÇ VE MARJİN DENETİMİ", FRONTEND_TEXT)
         self.assertIn("İstenen kaldıraç", FRONTEND_TEXT)
         self.assertIn("demoTicketFeedback", FRONTEND_TEXT)
-        self.assertIn("await ensure_one_way_position_mode(client)", SOURCE_TEXT)
+        self.assertIn('traced_stage("ensure_one_way_position_mode"', SOURCE_TEXT)
         self.assertIn("await ensure_one_way_position_mode(client)", ROOT_SOURCE_TEXT)
         self.assertIn(".demoPositionMap", STYLE_TEXT)
         self.assertIn(".appShell.view-v20-demo>.binanceDemoDeck", STYLE_TEXT)

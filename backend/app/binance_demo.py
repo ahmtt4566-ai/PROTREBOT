@@ -18,6 +18,7 @@ import os
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from pathlib import Path
@@ -45,6 +46,53 @@ DEMO_SNAPSHOT_LOCK = asyncio.Lock()
 DEMO_CLOCK_LOCK = asyncio.Lock()
 DEMO_CLOCK_OFFSET_MS = 0
 DEMO_CLOCK_SYNCED_AT = 0.0
+
+
+def request_correlation_id(request: Request | None = None) -> str:
+    return str(request.headers.get("Rndr-Id") or f"local-{uuid.uuid4().hex[:16]}") if request else f"local-{uuid.uuid4().hex[:16]}"
+
+
+def trace_log(event: str, request_id: str, **fields: Any) -> None:
+    values = " ".join(f"{key}={str(value).replace(chr(10), ' ')[:240]}" for key, value in fields.items())
+    logger.info("[DEMO_ORDER_TRACE] %s request_id=%s%s", event, request_id, f" {values}" if values else "")
+
+
+def safe_trace_error(error: Exception, client: "BinanceDemoClient" | None = None) -> str:
+    message = str(error)
+    api_key = getattr(client, "api_key", "") if client is not None else ""
+    if api_key:
+        message = message.replace(api_key, "[gizli]")
+    return message[:240]
+
+
+async def traced_stage(stage: str, request_id: str, operation: Any, *, client: "BinanceDemoClient" | None = None) -> Any:
+    started = time.monotonic()
+    trace_log(f"{stage}.start", request_id)
+    try:
+        result = await operation
+    except Exception as exc:
+        trace_log(
+            f"{stage}.end",
+            request_id,
+            duration_ms=round((time.monotonic() - started) * 1000, 2),
+            success=False,
+            error_type=type(exc).__name__,
+            error_message=safe_trace_error(exc, client),
+        )
+        raise
+    trace_log(f"{stage}.end", request_id, duration_ms=round((time.monotonic() - started) * 1000, 2), success=True)
+    return result
+
+
+@asynccontextmanager
+async def traced_lock(lock: asyncio.Lock, request_id: str, name: str) -> Any:
+    wait_started = time.monotonic()
+    await lock.acquire()
+    trace_log(f"{name}.lock", request_id, lock_wait_ms=round((time.monotonic() - wait_started) * 1000, 2))
+    try:
+        yield
+    finally:
+        lock.release()
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = BACKEND_ROOT / ".env"
@@ -278,6 +326,8 @@ class BinanceDemoClient:
         self.public_only = public_only
         self.time_offset_ms = 0
         self.last_time_sync = 0.0
+        self.last_status_code: int | None = None
+        self.trace_request_id: str | None = None
         self._clock_lock = asyncio.Lock()
 
     async def public_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -357,6 +407,9 @@ class BinanceDemoClient:
         headers = {"X-MBX-APIKEY": self.api_key} if signed or api_key_header else {}
         request_url = f"{url}?{encoded_query}&signature={signature}" if signed else url
         attempts = 2 if method == "GET" and (method, path) in PRIVATE_PATHS else 1
+        trace_request_id = self.trace_request_id if path in {"/fapi/v1/order", "/fapi/v1/algoOrder"} else None
+        if trace_request_id:
+            logger.info("[DEMO_HTTP_TRACE] request_start request_id=%s method=%s url_path=%s", trace_request_id, method, path)
         for attempt in range(attempts):
             try:
                 response = await self.http.request(
@@ -369,11 +422,36 @@ class BinanceDemoClient:
                 break
             except httpx.RequestError as exc:
                 if attempt + 1 == attempts:
+                    if trace_request_id:
+                        logger.warning(
+                            "[DEMO_HTTP_TRACE] request_end request_id=%s method=%s url_path=%s success=false error_type=%s",
+                            trace_request_id,
+                            method,
+                            path,
+                            type(exc).__name__,
+                        )
                     raise BinanceDemoError(
                         f"Binance Demo {method} {path} bağlantısı başarısız ({type(exc).__name__})."
                     ) from exc
+                logger.warning(
+                    "[DEMO_HTTP_TRACE] retry method=%s attempt=%s url_path=%s reason=%s delay_ms=250",
+                    method,
+                    attempt + 2,
+                    path,
+                    type(exc).__name__,
+                )
                 await asyncio.sleep(0.25)
 
+        self.last_status_code = response.status_code
+        if trace_request_id:
+            logger.info(
+                "[DEMO_HTTP_TRACE] request_end request_id=%s method=%s url_path=%s success=%s http_status=%s",
+                trace_request_id,
+                method,
+                path,
+                response.status_code < 400,
+                response.status_code,
+            )
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -642,21 +720,77 @@ async def optional_open_algo_orders(client: BinanceDemoClient) -> Any:
         return []
 
 
-async def account_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
-    async with DEMO_SNAPSHOT_LOCK:
-        return await _account_snapshot(client)
+async def snapshot_request(client: BinanceDemoClient, path: str, request_id: str) -> Any:
+    started = time.monotonic()
+    trace_log(f"account_snapshot.{path}.start", request_id)
+    try:
+        result = await client.signed("GET", path)
+    except Exception as exc:
+        trace_log(
+            f"account_snapshot.{path}.end",
+            request_id,
+            duration_ms=round((time.monotonic() - started) * 1000, 2),
+            success=False,
+            http_status=getattr(client, "last_status_code", None),
+            error_type=type(exc).__name__,
+            error_message=safe_trace_error(exc, client),
+        )
+        raise
+    trace_log(
+        f"account_snapshot.{path}.end",
+        request_id,
+        duration_ms=round((time.monotonic() - started) * 1000, 2),
+        success=True,
+        http_status=getattr(client, "last_status_code", None),
+    )
+    return result
 
 
-async def _account_snapshot(client: BinanceDemoClient) -> dict[str, Any]:
+async def account_snapshot(client: BinanceDemoClient, request_id: str | None = None) -> dict[str, Any]:
+    correlation_id = request_id or f"local-{uuid.uuid4().hex[:16]}"
+    wait_started = time.monotonic()
+    await DEMO_SNAPSHOT_LOCK.acquire()
+    lock_wait_ms = round((time.monotonic() - wait_started) * 1000, 2)
+    if lock_wait_ms > 0:
+        trace_log("account_snapshot.lock", correlation_id, lock_wait_ms=lock_wait_ms)
+    try:
+        started = time.monotonic()
+        trace_log("account_snapshot.start", correlation_id)
+        try:
+            result = await _account_snapshot(client, correlation_id)
+        except Exception as exc:
+            trace_log(
+                "account_snapshot.end",
+                correlation_id,
+                duration_ms=round((time.monotonic() - started) * 1000, 2),
+                success=False,
+                error_type=type(exc).__name__,
+                error_message=safe_trace_error(exc, client),
+            )
+            raise
+        trace_log("account_snapshot.end", correlation_id, duration_ms=round((time.monotonic() - started) * 1000, 2), success=True)
+        return result
+    finally:
+        DEMO_SNAPSHOT_LOCK.release()
+
+
+async def _account_snapshot(client: BinanceDemoClient, request_id: str | None = None) -> dict[str, Any]:
     # Keep private snapshot reads sequential on the shared HTTP client.  This
     # avoids a burst of signed requests competing with the protection loop for
     # the same Render connection pool.
-    account = await client.signed("GET", "/fapi/v3/account")
-    positions = await client.signed("GET", "/fapi/v3/positionRisk")
-    orders = await client.signed("GET", "/fapi/v1/openOrders")
-    algo_orders = await optional_open_algo_orders(client)
-    hedge_mode = await position_mode(client)
-    configurations = await optional_symbol_configurations(client)
+    correlation_id = request_id or f"local-{uuid.uuid4().hex[:16]}"
+    account = await snapshot_request(client, "/fapi/v3/account", correlation_id)
+    positions = await snapshot_request(client, "/fapi/v3/positionRisk", correlation_id)
+    orders = await snapshot_request(client, "/fapi/v1/openOrders", correlation_id)
+    try:
+        algo_orders = await snapshot_request(client, "/fapi/v1/openAlgoOrders", correlation_id)
+    except BinanceDemoError:
+        algo_orders = []
+    hedge_mode = await snapshot_request(client, "/fapi/v1/positionSide/dual", correlation_id)
+    try:
+        configurations = await snapshot_request(client, "/fapi/v1/symbolConfig", correlation_id)
+    except BinanceDemoError:
+        configurations = []
     config_by_symbol = {
         str(item.get("symbol") or "").upper(): item
         for item in response_rows(configurations)
@@ -1125,11 +1259,12 @@ async def post_algo(client: BinanceDemoClient, params: dict[str, Any]) -> dict[s
         return recovered
 
 
-async def install_protection(client: BinanceDemoClient, state: dict[str, Any], plan: dict[str, Any]) -> None:
+async def install_protection(client: BinanceDemoClient, state: dict[str, Any], plan: dict[str, Any], *, request_id: str | None = None) -> None:
     symbol = plan["symbol"]
+    correlation_id = request_id or f"local-{uuid.uuid4().hex[:16]}"
     if plan.get("stop_protection_cancelled"):
         return
-    rows = await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol})
+    rows = await traced_stage("protection.positionRisk", correlation_id, client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol}), client=client)
     position = next((item for item in response_rows(rows) if position_amount(item.get("positionAmt")) != 0), None)
     if position is None:
         plan["status"] = "DOLUM BEKLİYOR"
@@ -1159,6 +1294,8 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
         "clientAlgoId": stop_client_id,
     }
     protection_ids: list[int] = []
+    stop_started = time.monotonic()
+    trace_log("protection.SL.start", correlation_id)
     try:
         stop_result = await post_algo(client, stop_params)
         if stop_result.get("algoId"):
@@ -1167,7 +1304,9 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
             plan["stop_algo_id"] = stop_algo_id
         else:
             raise BinanceDemoError("Binance Demo Stop koruma kimliği doğrulanamadı.", http_status=409)
+        trace_log("protection.SL.end", correlation_id, duration_ms=round((time.monotonic() - stop_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
     except BinanceDemoError as exc:
+        trace_log("protection.SL.end", correlation_id, duration_ms=round((time.monotonic() - stop_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
         plan["status"] = "CRITICAL / UNPROTECTED"
         plan["protection_status"] = "CRITICAL / UNPROTECTED"
         plan["recovery_attempts"] = int(plan.get("recovery_attempts", 0)) + 1
@@ -1218,15 +1357,21 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
                 "clientAlgoId": algo_client_id,
             }
             try:
+                target_started = time.monotonic()
+                trace_log(f"protection.TP{index}.start", correlation_id)
                 result = await post_algo(client, params)
                 if result.get("algoId"):
                     protection_ids.append(int(result["algoId"]))
-            except BinanceDemoError:
+                trace_log(f"protection.TP{index}.end", correlation_id, duration_ms=round((time.monotonic() - target_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
+            except BinanceDemoError as exc:
+                trace_log(f"protection.TP{index}.end", correlation_id, duration_ms=round((time.monotonic() - target_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
                 monitoring_targets.append(f"TP{index}")
     else:
         monitoring_targets.extend(["TP1", "TP2"])
 
     tp3_client_id = plan.setdefault("tp3_client_id", new_client_id("TP3"))
+    tp3_started = time.monotonic()
+    trace_log("protection.TP3.start", correlation_id)
     try:
         tp3_result = await post_algo(client, {
             **common,
@@ -1237,7 +1382,9 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
         })
         if tp3_result.get("algoId"):
             protection_ids.append(int(tp3_result["algoId"]))
-    except BinanceDemoError:
+        trace_log("protection.TP3.end", correlation_id, duration_ms=round((time.monotonic() - tp3_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
+    except BinanceDemoError as exc:
+        trace_log("protection.TP3.end", correlation_id, duration_ms=round((time.monotonic() - tp3_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
         monitoring_targets.append("TP3")
 
     plan["protection_ids"] = protection_ids
@@ -1363,8 +1510,11 @@ async def demo_connect(request: Request) -> dict[str, Any]:
 @router.get("/account")
 async def demo_account(request: Request) -> dict[str, Any]:
     state = state_for(request)
+    request_id = request_correlation_id(request)
+    started = time.monotonic()
+    trace_log("account.start", request_id)
     try:
-        snapshot = await account_snapshot(client_for(request))
+        snapshot = await account_snapshot(client_for(request), request_id)
         reconciliation = reconcile_demo_plans(state, snapshot)
         if reconciliation["changed"]:
             persist_runtime(state)
@@ -1372,9 +1522,11 @@ async def demo_account(request: Request) -> dict[str, Any]:
         state.update({"connected": True, "last_checked": utc_now(), "last_error": None})
         result = {**public_status(state), **snapshot, "plans": list(state.get("plans", {}).values())[-12:]}
         result["configured"] = credentials_configured(request)
+        trace_log("account.complete", request_id, duration_ms=round((time.monotonic() - started) * 1000, 2), success=True)
         return result
     except BinanceDemoError as exc:
         state.update({"connected": False, "last_checked": utc_now(), "last_error": str(exc)[:240]})
+        trace_log("account.failed", request_id, duration_ms=round((time.monotonic() - started) * 1000, 2), success=False, error_type=type(exc).__name__, error_message=safe_trace_error(exc))
         raise safe_exchange_error(exc) from exc
 
 
@@ -1436,19 +1588,23 @@ async def demo_order(request: Request, body: DemoOrderRequest) -> dict[str, Any]
 async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source: str = "MANUAL", request: Request | None = None) -> dict[str, Any]:
     """Submit one hard-capped Demo order for the manual or V21 automation path."""
     state = application.state.binance_demo
+    request_id = request_correlation_id(request)
+    total_started = time.monotonic()
+    trace_log("start", request_id, symbol=body.symbol, side="BUY" if body.direction == "LONG" else "SELL")
     if not armed(state):
         raise HTTPException(423, "Demo emir kilidi kapalı veya süresi doldu; önce 10 dakikalık kilidi açın.")
-    async with state["lock"]:
+    async with traced_lock(state["lock"], request_id, "state"):
         try:
             client = client_for(request) if request is not None else BinanceDemoClient(application.state.http, *load_demo_credentials())
-            await ensure_one_way_position_mode(client)
-            snapshot = await account_snapshot(client)
+            client.trace_request_id = request_id
+            await traced_stage("ensure_one_way_position_mode", request_id, ensure_one_way_position_mode(client), client=client)
+            snapshot = await traced_stage("first_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
             symbol = await resolve_demo_symbol(client, body.symbol)
             body = body.model_copy(update={"symbol": symbol})
             reconciliation = reconcile_demo_plans(state, snapshot)
             if reconciliation["changed"]:
                 persist_runtime(state)
-            spec = await build_order_spec(client, body)
+            spec = await traced_stage("build_order_spec", request_id, build_order_spec(client, body), client=client)
             policy = getattr(application.state, "v21_demo", {}).get("settings", {})
             v21_state = getattr(application.state, "v21_demo", {})
             if source == "MANUAL":
@@ -1459,12 +1615,12 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
                 paper_positions=v21_state.get("paper_positions", []),
                 use_auto_universe=source != "MANUAL",
             )
-            await set_isolated_margin(client, spec["symbol"])
-            leverage_audit = await apply_verified_leverage(client, spec["symbol"], spec["leverage"])
-            spec = await build_order_spec(client, body)
+            await traced_stage("set_isolated_margin", request_id, set_isolated_margin(client, spec["symbol"]), client=client)
+            leverage_audit = await traced_stage("apply_verified_leverage", request_id, apply_verified_leverage(client, spec["symbol"], spec["leverage"]), client=client)
+            spec = await traced_stage("second_build_order_spec", request_id, build_order_spec(client, body), client=client)
             if source == "MANUAL":
                 adjust_manual_spec_to_risk(spec, policy)
-            snapshot = await account_snapshot(client)
+            snapshot = await traced_stage("second_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
             validate_entry_risk(
                 snapshot, body, spec, policy,
                 daily_realized_pnl=verified_realized_pnl(v21_state),
@@ -1510,7 +1666,38 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             }
             state.setdefault("plans", {})[plan_id] = plan
             persist_runtime(state)
-            result = await submit_entry(client, spec, test_only=False, client_id=client_order_id)
+            submit_started = time.monotonic()
+            trace_log("submit_entry.start", request_id, entry_client_order_id=client_order_id, symbol=spec["symbol"], side=spec["side"], quantity=spec["quantity"])
+            try:
+                result = await submit_entry(client, spec, test_only=False, client_id=client_order_id)
+            except Exception as exc:
+                trace_log(
+                    "submit_entry.end",
+                    request_id,
+                    entry_client_order_id=client_order_id,
+                    duration_ms=round((time.monotonic() - submit_started) * 1000, 2),
+                    http_status=getattr(client, "last_status_code", None),
+                    success=False,
+                    unknown_execution=getattr(exc, "unknown_execution", False),
+                    symbol=spec["symbol"],
+                    side=spec["side"],
+                    quantity=spec["quantity"],
+                    error_type=type(exc).__name__,
+                    error_message=safe_trace_error(exc, client),
+                )
+                raise
+            trace_log(
+                "submit_entry.end",
+                request_id,
+                entry_client_order_id=client_order_id,
+                duration_ms=round((time.monotonic() - submit_started) * 1000, 2),
+                http_status=getattr(client, "last_status_code", None),
+                success=True,
+                unknown_execution=False,
+                symbol=spec["symbol"],
+                side=spec["side"],
+                quantity=spec["quantity"],
+            )
             plan["entry_order_id"] = int(result.get("orderId", 0)) or None
             plan["entry_client_order_id"] = result.get("clientOrderId") or client_order_id
             plan["status"] = "DOLUM BEKLİYOR"
@@ -1522,10 +1709,10 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             )
             add_event(state, "DEMO EMİR GÖNDERİLDİ", f"{spec['symbol']} {spec['direction']} {spec['order_type']} emri Demo hesabına gönderildi ({source}).")
             if spec["order_type"] == "MARKET":
-                await install_protection(client, state, plan)
+                await traced_stage("install_protection", request_id, install_protection(client, state, plan, request_id=request_id), client=client)
                 persist_runtime(state)
-            verified_snapshot = await account_snapshot(client)
-            return {
+            verified_snapshot = await traced_stage("final_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
+            response = {
                 "ok": True,
                 "message": f"Emir yalnızca Binance Futures Demo hesabına gönderildi; {leverage_audit['applied_leverage']}x ISOLATED doğrulandı.",
                 "order": {
@@ -1544,9 +1731,15 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
                 "open_algo_order_count": len(verified_snapshot["open_algo_orders"]),
                 "real_trading_locked": True,
             }
+            trace_log("complete", request_id, duration_ms=round((time.monotonic() - total_started) * 1000, 2), success=True)
+            return response
         except BinanceDemoError as exc:
             state["last_error"] = str(exc)[:240]
+            trace_log("failed", request_id, duration_ms=round((time.monotonic() - total_started) * 1000, 2), success=False, error_type=type(exc).__name__, error_message=safe_trace_error(exc, client if "client" in locals() else None))
             raise safe_exchange_error(exc) from exc
+        except Exception as exc:
+            trace_log("failed", request_id, duration_ms=round((time.monotonic() - total_started) * 1000, 2), success=False, error_type=type(exc).__name__, error_message=safe_trace_error(exc, client if "client" in locals() else None))
+            raise
 
 
 @router.post("/order/cancel")
