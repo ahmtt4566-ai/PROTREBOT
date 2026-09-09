@@ -66,6 +66,13 @@ type DemoOrder = {
   reduce_only:boolean
 }
 
+type DemoRiskPreview = {
+  quantity?:string|number
+  notional_usdt?:number
+  risk_per_trade?:number
+  risk_adjusted?:boolean
+}
+
 type DemoAlgoOrder = {
   symbol:string
   algo_id:number
@@ -247,6 +254,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const [busy,setBusy] = useState(false)
   const [message,setMessage] = useState('Önce bağlantıyı test edin; ardından analiz planını doğrulayın.')
   const [messageKind,setMessageKind] = useState<'info'|'ok'|'error'>('info')
+  const [orderPreview,setOrderPreview] = useState<DemoRiskPreview|null>(null)
   const [clock,setClock] = useState(Date.now())
   const [tab,setTab] = useState<V21Tab>('trade')
   const [v21,setV21] = useState<V21Summary|null>(null)
@@ -332,6 +340,8 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
 
   useEffect(() => { setBacktestSymbol(symbol) },[symbol])
 
+  useEffect(() => { setOrderPreview(null) },[form.direction,form.orderType,form.margin,form.leverage,form.limitPrice,form.stop,form.tp1,form.tp2,form.tp3])
+
   useEffect(() => {
     const newest = v21?.journal?.[0]
     if (!newest) return
@@ -407,7 +417,13 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
 
   const runAction = async (action:() => Promise<unknown>,success:string) => {
     setBusy(true);setMessageKind('info');setMessage('İşlem Binance Futures Demo üzerinde doğrulanıyor…')
-    try { await action();setMessage(success);setMessageKind('ok');await refreshStatus();await refreshAccount(true) }
+    try {
+      const result = await action() as {risk_adjusted?:boolean;preview?:DemoRiskPreview;plan?:DemoRiskPreview} | null
+      const preview = result?.preview || result?.plan
+      if (preview) setOrderPreview(preview)
+      setMessage(result?.risk_adjusted ? 'Risk limiti nedeniyle pozisyon büyüklüğü otomatik olarak azaltıldı.' : success)
+      setMessageKind('ok');await refreshStatus();await refreshAccount(true)
+    }
     catch (error) { setMessage(error instanceof Error ? error.message : 'İşlem tamamlanamadı.');setMessageKind('error') }
     finally { setBusy(false) }
   }
@@ -696,6 +712,9 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const riskAmount = Math.abs(entryValue - stopValue)
   const rewardAmount = Math.abs(tp1Value - entryValue)
   const rewardRatio = riskAmount > 0 ? (rewardAmount / riskAmount).toFixed(2) : '—'
+  const fallbackPositionSize = numberValue(form.margin) * Number(form.leverage)
+  const displayedPositionSize = Number(orderPreview?.notional_usdt ?? fallbackPositionSize)
+  const displayedRisk = Number(orderPreview?.risk_per_trade ?? (displayedPositionSize * riskAmount / Math.max(entryValue, 1e-12)))
 
   return <section className="binanceDemoDeck" aria-label="Binance Futures Demo Köprüsü">
     <section className="demoHero">
@@ -990,7 +1009,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
           <label><span>TP2 · %30</span><input value={form.tp2} onChange={event => setForm({...form,tp2:event.target.value})}/></label>
           <label><span>TP3 · KALANI</span><input value={form.tp3} onChange={event => setForm({...form,tp3:event.target.value})}/></label>
         </div>
-        <div className="demoExposure"><span><small>MAKS. POZİSYON</small><b>{fmt(numberValue(form.margin)*Number(form.leverage))} USDT</b></span><span><small>GERÇEK PARA</small><b>0 USDT</b></span></div>
+        <div className="demoExposure"><span><small>POSITION SIZE</small><b>{fmt(displayedPositionSize)} USDT</b></span><span><small>RISK / TRADE</small><b>{fmt(displayedRisk)} USDT</b></span><span><small>GERÇEK PARA</small><b>0 USDT</b></span></div>
         <button className="demoTest" disabled={busy || !status?.connected} onClick={testOrder}><TestTube2/> EMİR TESTİ · OLUŞTURMAZ</button>
         <button className="demoSubmit" disabled={busy || !status?.armed} onClick={submitOrder}><Send/> BINANCE DEMO EMRİ GÖNDER</button>
         <div className="demoOrderSummary">

@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,7 +9,7 @@ from unittest.mock import AsyncMock
 BACKEND = Path(__file__).parents[1]
 sys.path.insert(0, str(BACKEND))
 
-from app.binance_demo import DemoOrderRequest, BinanceDemoError, ensure_one_way_position_mode, resolve_demo_symbol, symbol_rules, validate_entry_risk
+from app.binance_demo import DemoOrderRequest, BinanceDemoError, adjust_manual_spec_to_risk, ensure_one_way_position_mode, entry_risk, resolve_demo_symbol, symbol_rules, validate_entry_risk
 from app.v21_demo import DEFAULT_SETTINGS
 
 
@@ -29,6 +30,56 @@ def exchange_info(symbol: str, *, status: str = "TRADING", contract_type: str = 
 
 
 class DemoSymbolValidationTests(unittest.TestCase):
+    def risk_spec(self, quantity: str = "2.000") -> dict:
+        return {
+            "current_price": 100.0,
+            "stop_loss": "84.00",
+            "notional_usdt": float(Decimal(quantity) * Decimal("100")),
+            "quantity": quantity,
+            "quantity_decimal": Decimal(quantity),
+            "step": Decimal("0.100"),
+            "min_qty": Decimal("0.100"),
+            "min_notional": 10.0,
+            "margin_usdt": 20.0,
+            "leverage": 10,
+            "targets": ["110.00", "120.00", "130.00"],
+        }
+
+    def test_manual_risk_limit_reduces_quantity_and_preserves_levels(self):
+        spec = self.risk_spec()
+        adjust_manual_spec_to_risk(spec, {"max_loss_per_trade": 20})
+        self.assertTrue(spec["risk_adjusted"])
+        self.assertLessEqual(spec["risk_per_trade"], 20)
+        self.assertEqual(spec["stop_loss"], "84.00")
+        self.assertEqual(spec["targets"], ["110.00", "120.00", "130.00"])
+        self.assertEqual(spec["margin_usdt"], 20.0)
+        self.assertEqual(spec["leverage"], 10)
+
+    def test_manual_quantity_is_unchanged_when_risk_is_within_limit(self):
+        spec = self.risk_spec("1.000")
+        original = spec["quantity"]
+        adjust_manual_spec_to_risk(spec, {"max_loss_per_trade": 20})
+        self.assertFalse(spec["risk_adjusted"])
+        self.assertEqual(spec["quantity"], original)
+
+    def test_manual_quantity_rounds_down_to_step_size(self):
+        spec = self.risk_spec("1.237")
+        adjust_manual_spec_to_risk(spec, {"max_loss_per_trade": 15})
+        self.assertEqual(spec["quantity_decimal"] % spec["step"], Decimal("0"))
+        self.assertLessEqual(spec["quantity_decimal"], Decimal("1.237"))
+
+    def test_manual_risk_is_recalculated_after_rounding(self):
+        spec = self.risk_spec("2.000")
+        adjust_manual_spec_to_risk(spec, {"max_loss_per_trade": 19})
+        self.assertEqual(spec["risk_per_trade"], entry_risk(spec))
+        self.assertLessEqual(spec["risk_per_trade"], 19)
+
+    def test_manual_order_is_rejected_when_minimum_quantity_cannot_meet_risk(self):
+        spec = self.risk_spec("0.200")
+        spec["min_qty"] = Decimal("0.200")
+        with self.assertRaisesRegex(BinanceDemoError, "minimum miktarı"):
+            adjust_manual_spec_to_risk(spec, {"max_loss_per_trade": 1})
+
     def test_one_way_mode_is_read_without_change_request(self):
         calls = []
 

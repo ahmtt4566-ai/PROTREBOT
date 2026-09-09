@@ -1053,10 +1053,48 @@ def validate_entry_risk(
         raise BinanceDemoError(duplicate_reason, http_status=409)
     if float(snapshot.get("available_balance", 0)) < float(body.margin_usdt):
         raise BinanceDemoError("Demo hesabında seçilen marjin için yeterli kullanılabilir bakiye yok.", http_status=409)
-    distance = abs(float(spec["current_price"]) - float(spec["stop_loss"]))
-    estimated_loss = float(spec["notional_usdt"]) * distance / max(float(spec["current_price"]), 1e-12)
+    estimated_loss = entry_risk(spec)
     if estimated_loss > float(settings.get("max_loss_per_trade", 0)) + 1e-9:
         raise BinanceDemoError("Stop Loss riski işlem başı maksimum zarar limitini aşıyor.", http_status=409)
+
+
+def entry_risk(spec: dict[str, Any]) -> float:
+    distance = abs(float(spec["current_price"]) - float(spec["stop_loss"]))
+    return float(spec["notional_usdt"]) * distance / max(float(spec["current_price"]), 1e-12)
+
+
+def adjust_manual_spec_to_risk(spec: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    """Reduce only manual Demo quantity until the existing risk gate passes."""
+    max_allowed_risk = float(settings.get("max_loss_per_trade", 0))
+    current_risk = entry_risk(spec)
+    spec["risk_per_trade"] = current_risk
+    spec["risk_adjusted"] = False
+    if current_risk <= max_allowed_risk + 1e-9:
+        return spec
+
+    quantity = spec["quantity_decimal"]
+    entry = Decimal(str(spec["current_price"]))
+    step = spec["step"]
+    min_qty = spec["min_qty"]
+    min_notional = Decimal(str(spec["min_notional"]))
+    candidate = floor_step(quantity * Decimal(str(max_allowed_risk)) / Decimal(str(current_risk)), step)
+    if candidate >= quantity:
+        candidate = floor_step(quantity - step, step)
+
+    while candidate >= min_qty:
+        if candidate * entry < min_notional:
+            break
+        spec["quantity_decimal"] = candidate
+        spec["quantity"] = decimal_text(candidate)
+        spec["notional_usdt"] = float(candidate * entry)
+        current_risk = entry_risk(spec)
+        if current_risk <= max_allowed_risk + 1e-9:
+            spec["risk_per_trade"] = current_risk
+            spec["risk_adjusted"] = True
+            return spec
+        candidate = floor_step(candidate - step, step)
+
+    raise BinanceDemoError("Stop Loss riski için borsa minimum miktarı yeterince küçültülemiyor; emir açılmadı.", http_status=409)
 
 
 def verified_realized_pnl(state: dict[str, Any]) -> float:
@@ -1372,12 +1410,15 @@ async def demo_order_test(request: Request, body: DemoOrderRequest) -> dict[str,
         if await position_mode(client):
             raise BinanceDemoError("Pozisyon Modu 'Tek Yön / One-way' olmalı.", http_status=409)
         spec = await build_order_spec(client, body)
+        policy = getattr(request.app.state, "v21_demo", {}).get("settings", {})
+        adjust_manual_spec_to_risk(spec, policy)
         await submit_entry(client, spec, test_only=True)
         add_event(state, "EMİR TESTİ BAŞARILI", f"{spec['symbol']} {spec['direction']} planı Demo doğrulamasından geçti; emir oluşmadı.")
         return {
             "ok": True,
             "message": "Demo emir testi başarılı; hiçbir pozisyon veya emir oluşturulmadı.",
             "preview": {key: value for key, value in spec.items() if not key.endswith("_decimal") and key not in {"step"}},
+            "risk_adjusted": bool(spec.get("risk_adjusted")),
             "real_trading_locked": True,
         }
     except BinanceDemoError as exc:
@@ -1408,6 +1449,8 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             spec = await build_order_spec(client, body)
             policy = getattr(application.state, "v21_demo", {}).get("settings", {})
             v21_state = getattr(application.state, "v21_demo", {})
+            if source == "MANUAL":
+                adjust_manual_spec_to_risk(spec, policy)
             validate_entry_risk(
                 snapshot, body, spec, policy,
                 daily_realized_pnl=verified_realized_pnl(v21_state),
@@ -1417,6 +1460,8 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             await set_isolated_margin(client, spec["symbol"])
             leverage_audit = await apply_verified_leverage(client, spec["symbol"], spec["leverage"])
             spec = await build_order_spec(client, body)
+            if source == "MANUAL":
+                adjust_manual_spec_to_risk(spec, policy)
             snapshot = await account_snapshot(client)
             validate_entry_risk(
                 snapshot, body, spec, policy,
@@ -1457,6 +1502,9 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
                 "demo_only": True,
                 "source": source,
                 "initial_stop_loss": spec["stop_loss"],
+                "notional_usdt": spec["notional_usdt"],
+                "risk_per_trade": spec["risk_per_trade"],
+                "risk_adjusted": bool(spec.get("risk_adjusted")),
             }
             state.setdefault("plans", {})[plan_id] = plan
             persist_runtime(state)
@@ -1485,8 +1533,11 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
                     "status": result.get("status", plan["status"]),
                     "type": result.get("type", spec["order_type"]),
                     "side": result.get("side", spec["side"]),
+                    "quantity": spec["quantity"],
                 },
                 "plan": plan,
+                "risk_adjusted": bool(spec.get("risk_adjusted")),
+                "risk_per_trade": spec["risk_per_trade"],
                 "open_order_count": len(verified_snapshot["open_orders"]),
                 "open_algo_order_count": len(verified_snapshot["open_algo_orders"]),
                 "real_trading_locked": True,
