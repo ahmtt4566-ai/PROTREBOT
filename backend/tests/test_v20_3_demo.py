@@ -134,6 +134,18 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn('client_for(request) if request is not None', SOURCE_TEXT)
         self.assertIn('BinanceDemoClient(application.state.http, *load_demo_credentials())', SOURCE_TEXT)
 
+    def test_demo_confirmations_are_browser_compatible_and_backend_confirmations_remain(self):
+        self.assertNotIn("window.prompt", FRONTEND_TEXT)
+        self.assertIn("demoConfirmationBackdrop", FRONTEND_TEXT)
+        self.assertIn("confirmation:'DEMO'", FRONTEND_TEXT)
+        self.assertIn("confirmation:'DEMO KAPAT'", FRONTEND_TEXT)
+        self.assertIn("confirmation:'DEMO ACİL DURDUR'", FRONTEND_TEXT)
+        self.assertIn('body.confirmation.strip().upper() != "DEMO"', SOURCE_TEXT)
+
+    def test_demo_account_configured_flag_uses_request_scoped_credentials(self):
+        self.assertIn('result["configured"] = credentials_configured(request)', SOURCE_TEXT)
+        self.assertNotIn('return {**public_status(state), **snapshot, "plans":', SOURCE_TEXT)
+
     def test_analysis_fill_uses_only_directional_plans_and_refreshes_scanner_candidates(self):
         self.assertIn("isCompleteAnalysisPlan(plan)", PRODUCTION_FRONTEND_TEXT)
         self.assertIn("/scanner/candidates", PRODUCTION_FRONTEND_TEXT)

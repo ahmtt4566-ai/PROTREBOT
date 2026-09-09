@@ -1370,7 +1370,9 @@ async def demo_account(request: Request) -> dict[str, Any]:
             persist_runtime(state)
         snapshot = enrich_snapshot_with_plans(snapshot, state)
         state.update({"connected": True, "last_checked": utc_now(), "last_error": None})
-        return {**public_status(state), **snapshot, "plans": list(state.get("plans", {}).values())[-12:]}
+        result = {**public_status(state), **snapshot, "plans": list(state.get("plans", {}).values())[-12:]}
+        result["configured"] = credentials_configured(request)
+        return result
     except BinanceDemoError as exc:
         state.update({"connected": False, "last_checked": utc_now(), "last_error": str(exc)[:240]})
         raise safe_exchange_error(exc) from exc

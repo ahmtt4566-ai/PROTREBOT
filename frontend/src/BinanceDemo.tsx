@@ -73,6 +73,13 @@ type DemoRiskPreview = {
   risk_adjusted?:boolean
 }
 
+type DemoConfirmation = {
+  title:string
+  message:string
+  expected:string
+  action:() => Promise<unknown>
+}
+
 type DemoAlgoOrder = {
   symbol:string
   algo_id:number
@@ -255,6 +262,8 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const [message,setMessage] = useState('Önce bağlantıyı test edin; ardından analiz planını doğrulayın.')
   const [messageKind,setMessageKind] = useState<'info'|'ok'|'error'>('info')
   const [orderPreview,setOrderPreview] = useState<DemoRiskPreview|null>(null)
+  const [confirmation,setConfirmation] = useState<DemoConfirmation|null>(null)
+  const [confirmationText,setConfirmationText] = useState('')
   const [clock,setClock] = useState(Date.now())
   const [tab,setTab] = useState<V21Tab>('trade')
   const [v21,setV21] = useState<V21Summary|null>(null)
@@ -433,21 +442,40 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const disarm = () => runAction(() => apiCall('/disarm',{method:'POST'}),'Yeni Demo giriş emirleri kilitlendi; mevcut korumalar açık kalır.')
   const testOrder = () => runAction(() => apiCall('/order/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}),'Emir testi geçti; hiçbir emir veya pozisyon oluşturulmadı.')
   const submitOrder = () => {
-    const confirmation = window.prompt('Demo emrini açmak için DEMO yazın:') || ''
-    if (!confirmation.trim()) return
-    return runAction(() => apiCall('/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload(),confirmation:confirmation.trim()})}),'Emir yalnızca Binance Futures Demo hesabına gönderildi; koruma durumu yenileniyor.')
+    setConfirmationText('')
+    setConfirmation({
+      title:'Demo emrini onayla',
+      message:'Demo/Testnet işlemi gönderilecek. Gerçek para kullanılmaz.',
+      expected:'DEMO',
+      action:() => runAction(() => apiCall('/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload(),confirmation:'DEMO'})}),'Emir yalnızca Binance Futures Demo hesabına gönderildi; koruma durumu yenileniyor.'),
+    })
   }
   const cancelOrder = (order:DemoOrder) => runAction(() => apiCall('/order/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:order.symbol,order_id:order.order_id})}),`${order.symbol} Demo emri iptal edildi.`)
   const cancelAlgo = (order:DemoAlgoOrder) => runAction(() => apiCall('/algo/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:order.symbol,algo_id:order.algo_id})}),`${order.symbol} koşullu Demo emri iptal edildi.`)
   const closePosition = (position:DemoPosition) => {
-    const confirmation = window.prompt(`${position.symbol} Demo pozisyonunu kapatmak için DEMO KAPAT yazın:`) || ''
-    if (!confirmation) return
-    runAction(() => apiCall('/position/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:position.symbol,confirmation})}),`${position.symbol} için reduce-only Demo kapatma emri gönderildi.`)
+    setConfirmationText('')
+    setConfirmation({
+      title:`${position.symbol} Demo pozisyonunu kapat`,
+      message:'Bu yalnızca Binance Demo/Testnet üzerinde reduce-only kapatma işlemidir.',
+      expected:'DEMO KAPAT',
+      action:() => runAction(() => apiCall('/position/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:position.symbol,position_side:position.position_side || 'BOTH',confirmation:'DEMO KAPAT'})}),`${position.symbol} için reduce-only Demo kapatma emri gönderildi.`),
+    })
   }
   const emergency = () => {
-    const confirmation = window.prompt('Bot emirlerini iptal edip tüm Demo pozisyonlarını kapatmak için DEMO ACİL DURDUR yazın:') || ''
-    if (!confirmation) return
-    runAction(() => apiCall('/emergency',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation,close_positions:true})}),'Acil Demo durdurma tamamlandı; giriş kilidi kapandı.')
+    setConfirmationText('')
+    setConfirmation({
+      title:'Acil Demo durdurmayı onayla',
+      message:'Demo emirleri iptal edilecek ve Demo pozisyonları kapatılacaktır.',
+      expected:'DEMO ACİL DURDUR',
+      action:() => runAction(() => apiCall('/emergency',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation:'DEMO ACİL DURDUR',close_positions:true})}),'Acil Demo durdurma tamamlandı; giriş kilidi kapandı.'),
+    })
+  }
+  const confirmAction = () => {
+    if (!confirmation || confirmationText.trim().toUpperCase() !== confirmation.expected) return
+    const action = confirmation.action
+    setConfirmation(null)
+    setConfirmationText('')
+    void action()
   }
 
   const runV21 = async (action:() => Promise<V21Summary|unknown>,success:string) => {
@@ -1142,5 +1170,14 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       <div className="v21CertificateLayout"><article className="v21Card v21Score"><div className="v21ScoreRing" style={{'--score':`${v21?.certificate.score || 0}%`} as CSSProperties}><span><b>%{v21?.certificate.score ?? 0}</b><small>DEMO KANIT</small></span></div><h3>{v21?.certificate.passed_gates ?? 0} / {v21?.certificate.total_gates ?? 0} kapı geçti</h3><p>{v21?.certificate.reason}</p><button onClick={enableNotifications}><Bell/> MASAÜSTÜ BİLDİRİMLERİNİ AÇ</button></article><article className="v21Card v21CertificateGates"><header><ShieldCheck/><div><small>ZORUNLU KANIT KAPILARI</small><h3>V21 Kontrol Listesi</h3></div></header><div>{v21?.certificate.gates.map(gate => <section className={gate.passed ? 'passed' : ''} key={gate.name}><i>{gate.passed ? '✓' : '!'}</i><span><b>{gate.name}</b><small>Hedef: {gate.target}</small></span><strong>{gate.value}</strong></section>)}</div></article><article className="v21Card v21Health"><header><Activity/><div><small>BAĞLANTI VE KURTARMA</small><h3>Canlı Sistem Sağlığı</h3></div></header><span><small>Demo REST</small><b>{status?.connected ? 'BAĞLI' : 'BEKLİYOR'}</b></span><span><small>Kullanıcı akışı</small><b>{v21?.stream.status || '—'}</b></span><span><small>Aktarım yolu</small><b>{v21?.stream.transport || '—'}</b></span><span><small>Akış hatası</small><b>{v21?.stream.error_count ?? 0}</b></span><span><small>Son yedek</small><b>{stamp(v21?.last_saved)}</b></span><div><button disabled={v21Busy} onClick={() => runDrill('RECONNECT')}>BAĞLANTI TATBİKATI</button><button disabled={v21Busy} onClick={() => runDrill('PROTECTION')}>STOP TATBİKATI</button><button disabled={v21Busy} onClick={() => runDrill('EMERGENCY')}>ACİL DURDURMA TATBİKATI</button></div></article></div>
       <div className="v21SafetyLock"><LockKeyhole/><span><b>GERÇEK PARA VE GERÇEK BINANCE EMİR KANALI FİZİKSEL OLARAK YOK</b><small>Bu paket yalnızca https://demo-fapi.binance.com ve wss://demo-fstream.binance.com adreslerini kullanır.</small></span><strong>DEMO ONLY</strong></div>
     </section>}
-  </section>
+
+    {confirmation && <div className="demoConfirmationBackdrop" role="presentation" onClick={() => { setConfirmation(null); setConfirmationText('') }}>
+      <section className="demoConfirmation" role="dialog" aria-modal="true" aria-labelledby="demo-confirmation-title" onClick={event => event.stopPropagation()}>
+        <h2 id="demo-confirmation-title">{confirmation.title}</h2>
+        <p>{confirmation.message}</p>
+        <label><span>Onay için {confirmation.expected} yazın</span><input autoFocus value={confirmationText} onChange={event => setConfirmationText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') confirmAction() }} /></label>
+        <div><button type="button" onClick={() => { setConfirmation(null); setConfirmationText('') }}>İptal</button><button type="button" disabled={confirmationText.trim().toUpperCase() !== confirmation.expected} onClick={confirmAction}>Onayla</button></div>
+      </section>
+    </div>}
+    </section>
 }

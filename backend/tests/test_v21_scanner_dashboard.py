@@ -57,7 +57,8 @@ class V21ScannerDashboardTests(unittest.TestCase):
     def test_root_frontend_arm_uses_user_confirmation(self):
         source = ROOT_FRONTEND.read_text(encoding="utf-8")
         self.assertIn("confirmation:armText", source)
-        self.assertNotIn("confirmation:'DEMO'", source)
+        self.assertIn("demoConfirmationBackdrop", source)
+        self.assertNotIn("window.prompt", source)
 
     def test_performance_aggregation_uses_real_closed_journal_events(self):
         state = v21_demo.initial_state()
