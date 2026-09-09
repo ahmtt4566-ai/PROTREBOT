@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 BACKEND = Path(__file__).parents[1]
 sys.path.insert(0, str(BACKEND))
 
-from app.binance_demo import DemoOrderRequest, BinanceDemoError, symbol_rules, validate_entry_risk
+from app.binance_demo import DemoOrderRequest, BinanceDemoError, resolve_demo_symbol, symbol_rules, validate_entry_risk
 from app.v21_demo import DEFAULT_SETTINGS
 
 
@@ -16,6 +16,7 @@ def exchange_info(symbol: str, *, status: str = "TRADING", contract_type: str = 
     return {
         "symbols": [{
             "symbol": symbol,
+            "baseAsset": symbol.removesuffix("USDT"),
             "status": status,
             "contractType": contract_type,
             "quoteAsset": quote_asset,
@@ -28,6 +29,19 @@ def exchange_info(symbol: str, *, status: str = "TRADING", contract_type: str = 
 
 
 class DemoSymbolValidationTests(unittest.TestCase):
+    def test_demo_symbol_normalization_formats(self):
+        client = SimpleNamespace(public_get=AsyncMock(return_value=exchange_info("FLOCKUSDT")))
+        for raw in ("FLOCKUSDT", "FLOCK/USDT", "FLOCK-USDT", "FLOCK_USDT", " flock/usdt "):
+            self.assertEqual(asyncio.run(resolve_demo_symbol(client, raw)), "FLOCKUSDT")
+        for raw in ("BTCUSDT", "ETHUSDT"):
+            self.assertEqual(asyncio.run(resolve_demo_symbol(client, raw)), raw)
+
+    def test_suffixless_symbol_requires_a_real_demo_market(self):
+        client = SimpleNamespace(public_get=AsyncMock(return_value=exchange_info("FLOCKUSDT")))
+        self.assertEqual(asyncio.run(resolve_demo_symbol(client, "FLOCK")), "FLOCKUSDT")
+        with self.assertRaisesRegex(BinanceDemoError, "USDT vadeli"):
+            asyncio.run(resolve_demo_symbol(client, "FAKECOIN"))
+
     def test_valid_demo_usdt_perpetual_symbols_pass_exchange_validation(self):
         for symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "BODUSDT"):
             client = SimpleNamespace(public_get=AsyncMock(return_value=exchange_info(symbol)))

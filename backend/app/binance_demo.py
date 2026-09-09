@@ -151,6 +151,22 @@ def normalize_symbol(value: str) -> str:
     return symbol
 
 
+async def resolve_demo_symbol(client: BinanceDemoClient, value: str) -> str:
+    cleaned = re.sub(r"[^A-Z0-9]", "", value.strip().upper())
+    if cleaned.endswith("USDT"):
+        return normalize_symbol(cleaned)
+    payload = await client.public_get("/fapi/v1/exchangeInfo")
+    row = next((item for item in payload.get("symbols", []) if (
+        str(item.get("baseAsset") or "").upper() == cleaned
+        and item.get("status") == "TRADING"
+        and item.get("contractType") == "PERPETUAL"
+        and item.get("quoteAsset") == "USDT"
+    )), None)
+    if row and row.get("symbol"):
+        return normalize_symbol(str(row["symbol"]))
+    return normalize_symbol(cleaned)
+
+
 def response_rows(payload: Any) -> list[dict[str, Any]]:
     """Normalize Binance list/object responses without trusting their shape."""
     if isinstance(payload, list):
@@ -804,7 +820,7 @@ def validate_levels(direction: str, entry: Decimal, stop: Decimal, targets: list
 
 
 async def build_order_spec(client: BinanceDemoClient, order: DemoOrderRequest) -> dict[str, Any]:
-    symbol = normalize_symbol(order.symbol)
+    symbol = await resolve_demo_symbol(client, order.symbol)
     current_price, rules = await asyncio.gather(ticker_price(client, symbol), symbol_rules(client, symbol))
     if order.order_type == "LIMIT" and order.limit_price is None:
         raise BinanceDemoError("Limit emir için limit fiyatı zorunludur.", http_status=422)
@@ -1384,7 +1400,8 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             client = client_for(request) if request is not None else BinanceDemoClient(application.state.http, *load_demo_credentials())
             await ensure_one_way_position_mode(client)
             snapshot = await account_snapshot(client)
-            symbol = normalize_symbol(body.symbol)
+            symbol = await resolve_demo_symbol(client, body.symbol)
+            body = body.model_copy(update={"symbol": symbol})
             reconciliation = reconcile_demo_plans(state, snapshot)
             if reconciliation["changed"]:
                 persist_runtime(state)
