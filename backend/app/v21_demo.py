@@ -211,11 +211,26 @@ def _read_state_file(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def migrate_legacy_allowed_symbols(settings: dict[str, Any]) -> bool:
+    legacy_default = frozenset({
+        "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
+        "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "BCHUSDT", "DOTUSDT",
+        "UNIUSDT", "NEARUSDT", "ATOMUSDT", "ETCUSDT", "FILUSDT", "APTUSDT",
+        "ARBUSDT", "OPUSDT", "SUIUSDT", "INJUSDT", "SEIUSDT", "TIAUSDT",
+    })
+    configured = {str(value).strip().upper() for value in settings.get("allowed_symbols", []) if value}
+    if configured == legacy_default:
+        settings["allowed_symbols"] = []
+        return True
+    return False
+
+
 def load_state() -> dict[str, Any]:
     base = initial_state()
     saved = _read_state_file(STATE_PATH) or _read_state_file(BACKUP_PATH) or {}
     if isinstance(saved.get("settings"), dict):
         base["settings"].update({key: value for key, value in saved["settings"].items() if key in DEFAULT_SETTINGS})
+    migrated_allowlist = migrate_legacy_allowed_symbols(base["settings"])
     base["settings"]["scan_seconds"] = DEFAULT_SETTINGS["scan_seconds"]
     for key in (
         "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
@@ -244,6 +259,10 @@ def load_state() -> dict[str, Any]:
     base["risk"].setdefault("kill_switch", False)
     base["notifications"].setdefault("seen", [])
     base["notifications"].setdefault("unread", 0)
+    if migrated_allowlist:
+        persist = globals().get("persist_state")
+        if callable(persist):
+            persist(base)
     return base
 
 

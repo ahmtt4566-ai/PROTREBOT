@@ -43,7 +43,7 @@ def atr(highs: list[float], lows: list[float], closes: list[float], period: int 
 
 def load_core() -> dict[str, Any]:
     tree = ast.parse(V21_SOURCE)
-    wanted = {"initial_state", "_read_state_file", "load_state", "risk_size_values", "backtest_engine", "certificate_payload"}
+    wanted = {"initial_state", "_read_state_file", "migrate_legacy_allowed_symbols", "load_state", "risk_size_values", "backtest_engine", "certificate_payload"}
     nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in wanted]
     namespace: dict[str, Any] = {
         "Any": Any,
@@ -103,6 +103,32 @@ class V21DemoSafetyTests(unittest.TestCase):
                 self.assertIsNone(restored["auto"]["confirmation"])
                 self.assertEqual(restored["settings"]["daily_trade_limit"], 4)
                 self.assertIn("onayı bekleniyor", restored["auto"]["last_decision"])
+        finally:
+            CORE["STATE_PATH"] = original_state_path
+            CORE["BACKUP_PATH"] = original_backup_path
+
+    def test_load_state_migrates_only_the_legacy_default_allowlist(self):
+        original_state_path = CORE["STATE_PATH"]
+        original_backup_path = CORE["BACKUP_PATH"]
+        legacy_default = [
+            "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
+            "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "BCHUSDT", "DOTUSDT",
+            "UNIUSDT", "NEARUSDT", "ATOMUSDT", "ETCUSDT", "FILUSDT", "APTUSDT",
+            "ARBUSDT", "OPUSDT", "SUIUSDT", "INJUSDT", "SEIUSDT", "TIAUSDT",
+        ]
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                CORE["STATE_PATH"] = Path(temp_dir) / "state.json"
+                CORE["BACKUP_PATH"] = Path(temp_dir) / "state.backup.json"
+                payload = CORE["initial_state"]()
+                payload["settings"]["allowed_symbols"] = legacy_default
+                CORE["STATE_PATH"].write_text(json.dumps(payload), encoding="utf-8")
+                restored = CORE["load_state"]()
+                self.assertEqual(restored["settings"]["allowed_symbols"], [])
+                payload["settings"]["allowed_symbols"] = ["BTCUSDT", "ETHUSDT"]
+                CORE["STATE_PATH"].write_text(json.dumps(payload), encoding="utf-8")
+                restored = CORE["load_state"]()
+                self.assertEqual(restored["settings"]["allowed_symbols"], ["BTCUSDT", "ETHUSDT"])
         finally:
             CORE["STATE_PATH"] = original_state_path
             CORE["BACKUP_PATH"] = original_backup_path
