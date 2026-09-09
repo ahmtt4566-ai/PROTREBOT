@@ -605,7 +605,7 @@ async def position_mode(client: BinanceDemoClient) -> bool:
 
 
 async def ensure_one_way_position_mode(client: BinanceDemoClient) -> int:
-    """Prepare one-way mode without deleting positions or protection orders."""
+    """Read the mode before an order; never change it as part of order submission."""
     if not DEMO_REST_BASE.endswith("demo-fapi.binance.com"):
         raise BinanceDemoError("Demo sunucu kilidi doğrulanamadı.", http_status=500)
     if not await position_mode(client):
@@ -617,13 +617,13 @@ async def ensure_one_way_position_mode(client: BinanceDemoClient) -> int:
     actual_positions = [item for item in response_rows(positions) if position_amount(item.get("positionAmt")) != 0]
     if actual_positions or response_rows(orders) or response_rows(algo_orders):
         raise BinanceDemoError(
-            "Pozisyon modu güvenli biçimde değiştirilemez; mevcut pozisyon ve koruma emirleri korunuyor.",
+            "Demo hesap Hedge Mode'da ve açık emir/pozisyon var; position mode değiştirilmedi.",
             http_status=409,
         )
-    await client.signed("POST", "/fapi/v1/positionSide/dual", {"dualSidePosition": "false"})
-    if await position_mode(client):
-        raise BinanceDemoError("Binance Demo Pozisyon Modu ONE-WAY olarak doğrulanamadı.", http_status=409)
-    return 0
+    raise BinanceDemoError(
+        "Demo hesap Hedge Mode'da; yeni emir öncesi position mode otomatik değiştirilmedi.",
+        http_status=409,
+    )
 
 
 async def optional_symbol_configurations(client: BinanceDemoClient) -> Any:

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 BACKEND = Path(__file__).parents[1]
 sys.path.insert(0, str(BACKEND))
 
-from app.binance_demo import DemoOrderRequest, BinanceDemoError, resolve_demo_symbol, symbol_rules, validate_entry_risk
+from app.binance_demo import DemoOrderRequest, BinanceDemoError, ensure_one_way_position_mode, resolve_demo_symbol, symbol_rules, validate_entry_risk
 from app.v21_demo import DEFAULT_SETTINGS
 
 
@@ -29,6 +29,37 @@ def exchange_info(symbol: str, *, status: str = "TRADING", contract_type: str = 
 
 
 class DemoSymbolValidationTests(unittest.TestCase):
+    def test_one_way_mode_is_read_without_change_request(self):
+        calls = []
+
+        async def signed(method, path, params=None):
+            calls.append((method, path, params))
+            return {"dualSidePosition": False}
+
+        client = SimpleNamespace(signed=signed)
+        self.assertEqual(asyncio.run(ensure_one_way_position_mode(client)), 0)
+        self.assertEqual(calls, [("GET", "/fapi/v1/positionSide/dual", None)])
+
+    def test_hedge_mode_with_open_orders_is_rejected_without_mode_change(self):
+        calls = []
+
+        async def signed(method, path, params=None):
+            calls.append((method, path, params))
+            if path == "/fapi/v1/positionSide/dual":
+                return {"dualSidePosition": True}
+            if path == "/fapi/v3/positionRisk":
+                return []
+            if path == "/fapi/v1/openOrders":
+                return [{"symbol": "BTCUSDT", "orderId": 1}]
+            if path == "/fapi/v1/openAlgoOrders":
+                return []
+            raise AssertionError(path)
+
+        client = SimpleNamespace(signed=signed)
+        with self.assertRaisesRegex(BinanceDemoError, "açık emir/pozisyon"):
+            asyncio.run(ensure_one_way_position_mode(client))
+        self.assertNotIn(("POST", "/fapi/v1/positionSide/dual", {"dualSidePosition": "false"}), calls)
+
     def test_demo_symbol_normalization_formats(self):
         client = SimpleNamespace(public_get=AsyncMock(return_value=exchange_info("FLOCKUSDT")))
         for raw in ("FLOCKUSDT", "FLOCK/USDT", "FLOCK-USDT", "FLOCK_USDT", " flock/usdt "):
