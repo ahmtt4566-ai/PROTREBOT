@@ -495,30 +495,30 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 .masterTradeOverview {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 12px;
+  gap: 6px;
 }
 
 .metricCard {
   display: grid;
-  gap: 8px;
-  min-height: 112px;
-  padding: 16px 18px;
+  gap: 5px;
+  min-height: 68px;
+  padding: 9px 11px;
   border: 1px solid var(--terminal-line);
-  border-radius: 16px;
+  border-radius: 7px;
   background: rgba(9, 16, 23, 0.9);
 }
 
 .metricCard small,
 .metricCard span {
   color: var(--terminal-muted);
-  font-size: 10px;
+  font-size: 8px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .metricCard strong {
   color: var(--terminal-text);
-  font-size: clamp(1.14rem, 1.8vw, 1.6rem);
+  font-size: 15px;
   font-weight: 800;
 }
 
@@ -733,7 +733,8 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 .chartVolume.up { fill: var(--terminal-positive); }
 .chartVolume.down { fill: var(--terminal-negative); }
 .chartLevel line { stroke-width: 1; opacity: .8; }
-.chartLevel text { fill: currentColor; font-size: 8px; font-weight: 800; letter-spacing: .04em; }
+.chartLevel rect, .currentPriceLine rect { fill: rgba(10, 16, 23, .94); stroke: currentColor; stroke-width: .5; opacity: .96; }
+.chartLevel text { fill: currentColor; font-size: 7px; font-weight: 800; letter-spacing: .03em; }
 .level-entry { color: var(--terminal-warning); }
 .level-entry line { stroke: var(--terminal-warning); }
 .level-stop { color: var(--terminal-negative); }
@@ -746,6 +747,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 .level-resistance line { stroke: #d6a75d; }
 .level-trigger { color: #f0c674; }
 .level-trigger line { stroke: #f0c674; stroke-width: 1.5; }
+.currentPriceLine { color: var(--terminal-warning); }
 .currentPriceLine line { stroke: var(--terminal-warning); stroke-dasharray: 3 3; opacity: .9; }
 .currentPriceLine text { fill: var(--terminal-warning); font-size: 9px; font-weight: 800; }
 .chartCrosshair line { stroke: rgba(226, 232, 240, .42); stroke-dasharray: 3 3; }
@@ -768,28 +770,35 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 
 .indicatorGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 9px;
+  border: 1px solid var(--terminal-line);
+  background: var(--terminal-line);
 }
 
 .indicatorGrid article {
   display: grid;
-  gap: 5px;
-  padding: 12px 10px;
-  border: 1px solid var(--terminal-line);
-  border-radius: 12px;
-  background: rgba(9, 16, 23, 0.8);
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 7px;
+  background: rgba(9, 16, 23, 0.92);
 }
 
 .indicatorGrid small {
   color: var(--terminal-muted);
-  font-size: 10px;
+  overflow: hidden;
+  font-size: 8px;
   letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .indicatorGrid strong {
-  font-size: 14px;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .indicatorTerminalGrid { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 8px; margin-top: 9px; }
@@ -1326,10 +1335,10 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .masterTradeTopbar { padding: 14px; }
   .masterTradeTopbarLeft { flex-direction: column; align-items: flex-start; }
   .fieldGrid,
-  .indicatorGrid,
   .performanceMetrics,
   .emergencyActions,
   .drawerMeta { grid-template-columns: 1fr; }
+  .indicatorGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tableWrap table { min-width: 640px; }
   .chartCanvas,
   .chartCanvas svg { min-height: 250px; }

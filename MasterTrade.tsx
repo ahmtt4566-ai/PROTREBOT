@@ -52,6 +52,17 @@ const fmtCompact = (value: number | undefined) =>
 const fmtDecisionNumber = (value: number | null | undefined, decimals = 0) =>
   value === null || value === undefined || !Number.isFinite(value) ? '--' : value.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
 
+const fmtMarketPrice = (value: number | null | undefined) => {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
+  const decimals = Math.abs(value) >= 100 ? 2 : Math.abs(value) >= 1 ? 4 : 6
+  return value.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
+}
+
+const fmtSigned = (value: number | null | undefined) => {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
+  return `${value >= 0 ? '+' : ''}${value.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`
+}
+
 const fmtSignalAge = (seconds: number | null) => {
   if (seconds === null) return '--'
   if (seconds < 60) return `${seconds}s`
@@ -328,6 +339,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     { label: 'RESISTANCE', value: analysis?.resistance, tone: 'resistance' },
     { label: 'TRIGGER', value: triggerMonitor.triggerPrice ?? undefined, tone: 'trigger' },
   ].filter((line): line is { label: string; value: number; tone: string } => typeof line.value === 'number' && Number.isFinite(line.value))
+  const positionedLevelLines = [...levelLines].sort((left, right) => chartY(left.value) - chartY(right.value)).reduce<Array<{ label: string; value: number; tone: string; labelY: number }>>((rows, line) => {
+    const rawY = chartY(line.value)
+    const labelY = rows.length ? Math.max(rawY, rows[rows.length - 1].labelY + 15) : rawY
+    rows.push({ ...line, labelY: Math.min(250, labelY) })
+    return rows
+  }, [])
   const hoveredCandle = chartHoverIndex === null ? null : chartCandles[chartHoverIndex]
   const selectMarket = (symbol: string) => {
     setDraft(current => ({ ...current, market: symbol, entry: 0, stopLoss: 0, tp1: 0, tp2: 0, tp3: 0 }))
@@ -442,7 +459,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="chartPriceSummary">
               <div>
                 <span className="chartSymbol">{draft.market}</span>
-                <strong>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${snapshot.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 6 })}` : '--'}</strong>
+                <strong>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</strong>
               </div>
               <span className={`delta ${selectedMarket && selectedMarket.change >= 0 ? 'positive' : 'negative'}`}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</span>
             </div>
@@ -450,8 +467,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="marketStatsStrip">
               <span><small>24H CHANGE</small><b className={selectedMarket && selectedMarket.change < 0 ? 'negative' : 'positive'}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</b></span>
               <span><small>VOLUME</small><b>{selectedMarket?.volume ? fmtCompact(selectedMarket.volume) : '--'}</b></span>
-              <span><small>HIGH</small><b>{chartCandles.length ? fmtDecisionNumber(Math.max(...chartCandles.map(candle => candle.high)), 6) : '--'}</b></span>
-              <span><small>LOW</small><b>{chartCandles.length ? fmtDecisionNumber(Math.min(...chartCandles.map(candle => candle.low)), 6) : '--'}</b></span>
+              <span><small>HIGH</small><b>{chartCandles.length ? fmtMarketPrice(Math.max(...chartCandles.map(candle => candle.high))) : '--'}</b></span>
+              <span><small>LOW</small><b>{chartCandles.length ? fmtMarketPrice(Math.min(...chartCandles.map(candle => candle.low))) : '--'}</b></span>
               <span><small>DATA HEALTH</small><b className={dataHealth === 'LIVE' ? 'positive' : dataHealth === 'STALE' ? 'warning' : 'negative'}>{dataHealth}</b></span>
             </div>
 
@@ -463,29 +480,29 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="chartCanvas marketOhlcChart">
               {dataLoading && !chartCandles.length ? <div className="chartEmpty">LOADING SNAPSHOT</div> : !chartCandles.length ? <div className="chartEmpty">{dataError || 'DATA UNAVAILABLE'}</div> : <svg viewBox="0 0 760 300" preserveAspectRatio="none" aria-label={`${draft.market} ${interval} candlestick chart`} onMouseLeave={() => setChartHoverIndex(null)} onMouseMove={event => { const box = event.currentTarget.getBoundingClientRect(); const index = Math.round(((event.clientX - box.left) / box.width) * (chartCandles.length - 1)); setChartHoverIndex(Math.max(0, Math.min(chartCandles.length - 1, index))) }}>
                 <g className="chartGrid">{[...Array(7)].map((_, index) => <line key={`h-${index}`} x1="0" x2="760" y1={22 + index * 35} y2={22 + index * 35} />)}{[...Array(9)].map((_, index) => <line key={`v-${index}`} x1={index * 95} x2={index * 95} y1="0" y2="260" />)}</g>
-                {showChartLevels && levelLines.map(line => <g key={`${line.label}-${line.value}`} className={`chartLevel level-${line.tone}`}><line x1="0" x2="760" y1={chartY(line.value)} y2={chartY(line.value)} strokeDasharray={line.tone === 'trigger' ? '5 4' : '2 3'} /><text x="8" y={chartY(line.value) - 4}>{line.label} {fmtDecisionNumber(line.value, 6)}</text></g>)}
+                {showChartLevels && positionedLevelLines.map(line => <g key={`${line.label}-${line.value}`} className={`chartLevel level-${line.tone}`}><line x1="0" x2="760" y1={chartY(line.value)} y2={chartY(line.value)} strokeDasharray={line.tone === 'trigger' ? '5 4' : '2 3'} /><rect x="668" y={line.labelY - 11} width="88" height="14" rx="2" /><text x="752" y={line.labelY - 1} textAnchor="end">{line.label} {fmtMarketPrice(line.value)}</text></g>)}
                 {chartCandles.map((candle, index) => { const x = chartX(index); const bodyTop = chartY(Math.max(candle.open, candle.close)); const bodyBottom = chartY(Math.min(candle.open, candle.close)); const bodyHeight = Math.max(2, bodyBottom - bodyTop); const bullish = candle.close >= candle.open; const candleWidth = Math.max(2, Math.min(10, 700 / chartCandles.length)); return <g key={`${candle.time}-${index}`} className={bullish ? 'candle bullish' : 'candle bearish'}><line x1={x} x2={x} y1={chartY(candle.high)} y2={chartY(candle.low)} /><rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} /></g> })}
                 {showChartVolume && chartCandles.map((candle, index) => { const x = chartX(index); const height = candle.volume / volumeMax * 28; return <rect key={`vol-${candle.time}`} className={`chartVolume ${candle.close >= candle.open ? 'up' : 'down'}`} x={x - 2} y={273 - height} width="4" height={height} /> })}
-                {snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined && <g className="currentPriceLine"><line x1="0" x2="760" y1={chartY(snapshot.currentPrice)} y2={chartY(snapshot.currentPrice)} /><text x="670" y={chartY(snapshot.currentPrice) - 5}>{fmtDecisionNumber(snapshot.currentPrice, 6)}</text></g>}
+                {snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined && <g className="currentPriceLine"><line x1="0" x2="760" y1={chartY(snapshot.currentPrice)} y2={chartY(snapshot.currentPrice)} /><rect x="674" y={chartY(snapshot.currentPrice) - 11} width="82" height="14" rx="2" /><text x="752" y={chartY(snapshot.currentPrice) - 1} textAnchor="end">{fmtMarketPrice(snapshot.currentPrice)}</text></g>}
                 {chartHoverIndex !== null && <g className="chartCrosshair"><line x1={chartX(chartHoverIndex)} x2={chartX(chartHoverIndex)} y1="0" y2="260" /><circle cx={chartX(chartHoverIndex)} cy={chartY(chartCandles[chartHoverIndex].close)} r="3" /></g>}
               </svg>}
-              <div className="chartBadge">{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${snapshot.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 6 })}` : '--'}</div>
+              <div className="chartBadge">{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</div>
             </div>
 
             <div className="indicatorGrid">
               <article><small>TREND</small><strong className="positive">{analysis?.trend || '--'}</strong></article>
               <article><small>MOMENTUM</small><strong>{analysis?.momentum || '--'}</strong></article>
-              <article><small>RSI</small><strong>{analysis?.rsi ?? '--'}</strong></article>
-              <article><small>MACD</small><strong className={analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}>{analysis?.macd ?? '--'}</strong></article>
-              <article><small>VOLUME</small><strong>{analysis?.volume_ratio ? `${analysis.volume_ratio}x` : '--'}</strong></article>
+              <article><small>RSI</small><strong>{fmtDecisionNumber(analysis?.rsi, 2)}</strong></article>
+              <article><small>MACD</small><strong className={analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}>{fmtSigned(analysis?.macd)}</strong></article>
+              <article><small>VOLUME</small><strong>{analysis?.volume_ratio ? `${fmtDecisionNumber(analysis.volume_ratio, 2)}x` : '--'}</strong></article>
               <article><small>CONFIDENCE</small><strong className="positive">{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</strong></article>
               <article><small>OPPORTUNITY</small><strong className="decisionAccent">{fmtDecisionNumber(tradeDecision.opportunityScore)}</strong></article>
             </div>
 
             <div className="indicatorTerminalGrid">
-              <article><header><span>VOLUME</span><b>{analysis?.volume_ratio ? `${analysis.volume_ratio}x` : '--'}</b></header><div className="volumeMeter">{chartCandles.slice(-24).map((candle, index) => <i key={`${candle.time}-${index}`} style={{ height: `${Math.max(8, candle.volume / volumeMax * 100)}%` }} className={candle.close >= candle.open ? 'up' : 'down'} />)}</div></article>
-              <article><header><span>RSI</span><b>{analysis?.rsi ?? '--'}</b></header><div className="indicatorScale"><i /><em>30</em><em>50</em><em>70</em></div><small>{analysis?.rsi === undefined ? 'DATA UNAVAILABLE' : analysis.rsi >= 70 ? 'OVERBOUGHT' : analysis.rsi <= 30 ? 'OVERSOLD' : 'HEALTHY RANGE'}</small></article>
-              <article><header><span>MACD</span><b>{analysis?.macd ?? '--'}</b></header><div className={`macdPulse ${analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}`} /><small>{analysis?.macd === undefined ? 'DATA UNAVAILABLE' : analysis.macd >= 0 ? 'BULLISH' : 'BEARISH'}</small></article>
+              <article><header><span>VOLUME</span><b>{analysis?.volume_ratio ? `${fmtDecisionNumber(analysis.volume_ratio, 2)}x` : '--'}</b></header><div className="volumeMeter">{chartCandles.slice(-24).map((candle, index) => <i key={`${candle.time}-${index}`} style={{ height: `${Math.max(8, candle.volume / volumeMax * 100)}%` }} className={candle.close >= candle.open ? 'up' : 'down'} />)}</div></article>
+              <article><header><span>RSI</span><b>{fmtDecisionNumber(analysis?.rsi, 2)}</b></header><div className="indicatorScale"><i /><em>30</em><em>50</em><em>70</em></div><small>{analysis?.rsi === undefined ? 'DATA UNAVAILABLE' : analysis.rsi >= 70 ? 'OVERBOUGHT' : analysis.rsi <= 30 ? 'OVERSOLD' : 'HEALTHY RANGE'}</small></article>
+              <article><header><span>MACD</span><b>{fmtSigned(analysis?.macd)}</b></header><div className={`macdPulse ${analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}`} /><small>{analysis?.macd === undefined ? 'DATA UNAVAILABLE' : analysis.macd >= 0 ? 'BULLISH' : 'BEARISH'}</small></article>
             </div>
             <div className="scoreMeters"><div><span>CONFIDENCE</span><b>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</b><i><em style={{ width: `${tradeDecision.confidenceScore ?? 0}%` }} /></i></div><div><span>OPPORTUNITY</span><b>{fmtDecisionNumber(tradeDecision.opportunityScore)}</b><i><em style={{ width: `${tradeDecision.opportunityScore ?? 0}%` }} /></i></div></div>
 
