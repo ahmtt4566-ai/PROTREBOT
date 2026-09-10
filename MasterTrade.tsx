@@ -75,7 +75,14 @@ const MTF_INTERVALS = ['1m', '5m', '15m', '1h', '4h']
 
 const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   const responses = await Promise.all(MTF_INTERVALS.map(timeframe => fetch(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal })))
-  const values = await Promise.all(responses.map(async (response, index) => response.ok ? { ...(await response.json() as Analysis), timeframe: MTF_INTERVALS[index] } : null))
+  const values = await Promise.all(responses.map(async (response, index) => {
+    if (!response.ok) return null
+    try {
+      return { ...(await response.json() as Analysis), timeframe: MTF_INTERVALS[index] }
+    } catch {
+      return null
+    }
+  }))
   return values.filter((item): item is MtfAnalysis => item !== null)
 }
 
@@ -372,8 +379,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     setAnalysisFillError('')
     try {
       const response = await fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`)
-      if (!response.ok) throw new Error('Analysis unavailable')
-      const nextAnalysis = await response.json() as Analysis
+      const payload = await response.json().catch(() => null) as (Analysis & { detail?: unknown; message?: unknown }) | null
+      if (!response.ok) {
+        const detail = typeof payload?.detail === 'string' ? payload.detail : typeof payload?.message === 'string' ? payload.message : `Analysis unavailable (HTTP ${response.status}).`
+        throw new Error(detail)
+      }
+      if (!payload || typeof payload !== 'object') throw new Error('Invalid analysis response.')
+      const nextAnalysis = payload
       const nextMtf = await fetchMtfAnalyses(draft.market)
       const directionText = String(nextAnalysis.normalized_signal || nextAnalysis.direction || '').toUpperCase()
       const nextSide: TradeSide | null = /SHORT|SELL/.test(directionText) ? 'SHORT' : /LONG|BUY/.test(directionText) ? 'LONG' : null
@@ -399,8 +411,9 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         tp3: orderedTargets[2],
       }))
       setAnalysisSyncedAt(new Date().toLocaleTimeString('en-GB'))
-    } catch {
-      setAnalysisFillError('Güncel analiz alınamadı. Lütfen tekrar deneyin.')
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return
+      setAnalysisFillError(error instanceof Error ? error.message : 'Analysis unavailable.')
     } finally {
       setAnalysisFillLoading(false)
     }
