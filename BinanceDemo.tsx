@@ -604,7 +604,6 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
     setConfirmationText('')
     setConfirmationChecked(false)
     setConfirmation({title:'Demo order onayı',message:'Bu demo order\'ı gerçekten göndermek istiyor musun?',expected:'DEMO',checkbox:true,action:async () => {
-      await apiCall('/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation:'DEMO'})})
       return runAction(async () => {
         const result = await apiCall<{order?:DemoOrderResult}>('/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload(),confirmation:'DEMO'})})
         setLastOrder(result.order || null)

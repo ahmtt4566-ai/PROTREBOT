@@ -452,7 +452,6 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       expected:'DEMO',
       checkbox:true,
       action:async () => {
-        await apiCall('/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation:'DEMO'})})
         return runAction(() => apiCall('/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload(),confirmation:'DEMO'})}),'Emir yalnızca Binance Futures Demo hesabına gönderildi; koruma durumu yenileniyor.')
       },
     })

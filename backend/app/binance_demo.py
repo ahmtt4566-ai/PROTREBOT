@@ -1591,7 +1591,7 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
     request_id = request_correlation_id(request)
     total_started = time.monotonic()
     trace_log("start", request_id, symbol=body.symbol, side="BUY" if body.direction == "LONG" else "SELL")
-    if not armed(state):
+    if not armed(state) and source != "MANUAL":
         raise HTTPException(423, "Demo emir kilidi kapalı veya süresi doldu; önce 10 dakikalık kilidi açın.")
     async with traced_lock(state["lock"], request_id, "state"):
         try:

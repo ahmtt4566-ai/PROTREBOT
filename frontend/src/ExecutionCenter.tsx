@@ -17,6 +17,8 @@ type CandleResponse = {symbol:string;interval:string;candles:Candle[];updated_at
 type Status = {
   version:string;host:string;credentials:{configured:boolean;fingerprint:string|null;storage:string};consent:{active:boolean;accepted_at:string|null;expires_at:string|null;fingerprint:string|null;storage?:string};connected:boolean;connection:{last_checked:string|null;last_error:string|null;clock_offset_ms:number|null};stream:{status:string;transport:string;last_event:string|null;last_error:string|null;event_count:number;reconnect_count:number};armed:boolean;armed_until:string|null;auto_session_until:string|null;auto:{enabled:boolean;busy:boolean;cycles:number;last_scan:string|null;last_decision:string;last_error:string|null};policy:Policy;policy_digest:string;policy_acknowledged:boolean;readiness:{ready:boolean;score:number;gates:Gate[];demo_certificate:{status?:string;score?:number;gates?:{name:string;passed:boolean;value:string|number;target:string|number}[]}};account:{wallet_balance:number|null;available_balance:number|null;unrealized_pnl:number|null;positions:Position[];open_orders:unknown[];open_algo_orders:unknown[];hedge_mode:boolean|null};daily:{entries:number;realized_pnl:number;unverified_closures:number};plans:Plan[];events:Event[];emergency:{active:boolean;triggered_at:string|null;reason:string|null};profit_guaranteed:boolean
 }
+type LiveVaultConnection = {configured:boolean;active:boolean;fingerprint:string|null;last_test_ok:boolean;last_test_at:string|null;last_error:string|null;storage:string}
+type LiveVaultStatus = {vault:{ready:boolean;reason:string|null};connections:{LIVE:LiveVaultConnection}}
 
 type OrderForm = {symbol:string;direction:'LONG'|'SHORT';order_type:'MARKET'|'LIMIT';limit_price:string;margin_usdt:string;leverage:string;stop_loss:string;tp1:string;tp2:string;tp3:string}
 
@@ -109,6 +111,9 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
   const [test,setTest] = useState<OrderForm>({symbol:'BTCUSDT',direction:'LONG',order_type:'MARKET',limit_price:'',margin_usdt:'10',leverage:'1',stop_loss:'',tp1:'',tp2:'',tp3:''})
   const [chartSymbol,setChartSymbol] = useState('BTCUSDT')
   const [chartPlanId,setChartPlanId] = useState<string|null>(null)
+  const [liveVault,setLiveVault] = useState<LiveVaultStatus|null>(null)
+  const [liveCredentials,setLiveCredentials] = useState({apiKey:'',secretKey:''})
+  const [liveVaultBusy,setLiveVaultBusy] = useState('')
 
   const call = async <T,>(path:string,options:RequestInit={}):Promise<T> => {
     const headers = new Headers(options.headers)
@@ -135,10 +140,19 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
     }
   }
 
+  const refreshLiveVault = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/exchange-connections/status`)
+      if (response.ok) setLiveVault(await response.json() as LiveVaultStatus)
+    } catch { /* Keep the Live Guard fail-closed when the vault is unavailable. */ }
+  }
+
   useEffect(() => {
     void refresh(true)
+    void refreshLiveVault()
     const timer = window.setInterval(() => void refresh(true),5000)
-    return () => window.clearInterval(timer)
+    const vaultTimer = window.setInterval(() => void refreshLiveVault(),5000)
+    return () => {window.clearInterval(timer);window.clearInterval(vaultTimer)}
   },[token])
 
   const run = async (key:string,path:string,body?:unknown,success='İşlem tamamlandı.') => {
@@ -218,6 +232,30 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
     finally {setBusy('')}
   }
 
+  const verifyLiveCredentials = async () => {
+    if (!liveCredentials.apiKey.trim() || !liveCredentials.secretKey.trim()) {setNotice('Live API Key ve API Secret birlikte girilmelidir.');setNoticeKind('warn');return}
+    setLiveVaultBusy('verify')
+    try {
+      const response = await fetch(`${API_BASE}/exchange-connections/test`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'LIVE',['api' + '_key']:liveCredentials.apiKey,['secret' + '_key']:liveCredentials.secretKey})})
+      const payload = await response.json().catch(() => null) as {detail?:unknown}|null
+      if (!response.ok) throw new Error(errorText(payload?.detail))
+      setNotice('Live bağlantı ve imza doğrulandı; hiçbir emir oluşturulmadı.');setNoticeKind('ok');await refreshLiveVault()
+    } catch (error) {setNotice(error instanceof Error ? error.message : 'Live bağlantı doğrulanamadı.');setNoticeKind('error')}
+    finally {setLiveVaultBusy('')}
+  }
+
+  const saveLiveCredentials = async () => {
+    if (!liveCredentials.apiKey.trim() || !liveCredentials.secretKey.trim()) {setNotice('Live API Key ve API Secret birlikte girilmelidir.');setNoticeKind('warn');return}
+    setLiveVaultBusy('save')
+    try {
+      const response = await fetch(`${API_BASE}/exchange-connections/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'LIVE',['api' + '_key']:liveCredentials.apiKey,['secret' + '_key']:liveCredentials.secretKey,confirmation:'CANLI KASAYA KAYDET'})})
+      const payload = await response.json().catch(() => null) as {detail?:unknown;message?:string}|null
+      if (!response.ok) throw new Error(errorText(payload?.detail))
+      setLiveCredentials({apiKey:'',secretKey:''});setNotice(payload?.message || 'Live credentials şifreli kasaya kaydedildi ve doğrulandı.');setNoticeKind('ok');await refreshLiveVault();await refresh(true)
+    } catch (error) {setNotice(error instanceof Error ? error.message : 'Live credentials kaydedilemedi.');setNoticeKind('error')}
+    finally {setLiveVaultBusy('')}
+  }
+
   const submitLiveOrder = async () => {
     if (!status?.credentials.configured) {
       setNotice('Live trading için API credentials gerekli.')
@@ -256,6 +294,13 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
 
     <div className="executionRiskBanner"><AlertTriangle/><div><b>KÂR VE “SORUNSUZ ÇALIŞMA” GARANTİSİ YOKTUR</b><span>Vadeli işlemler tüm sermayeyi kaybettirebilir. V25 yalnızca teknik ve operasyonel hataları azaltan korumalar uygular; piyasa riskini yok etmez.</span></div></div>
     <div className={`executionNotice ${noticeKind}`}>{notice}</div>
+
+    <section className="executionCard liveCredentialsCard" aria-label="Live API credentials">
+      <div className="executionHead"><div><small>V28 · ŞİFRELİ LIVE KASA</small><h3>Live API Credentials</h3><p>Secret değerleri yalnızca mevcut PostgreSQL + Fernet kasasına gider; arayüze geri döndürülmez.</p></div><KeyRound/></div>
+      <div className="executionFields"><label>Live API Key<input type="password" autoComplete="new-password" value={liveCredentials.apiKey} onChange={event => setLiveCredentials(current => ({...current,apiKey:event.target.value}))} placeholder={liveVault?.connections.LIVE.configured ? 'Kayıtlı anahtar mevcut' : 'Live API Key'}/></label><label>Live API Secret<input type="password" autoComplete="new-password" value={liveCredentials.secretKey} onChange={event => setLiveCredentials(current => ({...current,secretKey:event.target.value}))} placeholder={liveVault?.connections.LIVE.configured ? 'Kayıtlı secret görüntülenmez' : 'Live API Secret'}/></label></div>
+      <div className="orderButtons"><button onClick={() => void verifyLiveCredentials()} disabled={!!liveVaultBusy || !liveVault?.vault.ready}><Activity/>{liveVaultBusy === 'verify' ? 'DOĞRULANIYOR…' : 'VERIFY LIVE CONNECTION'}</button><button className="savePolicy" onClick={() => void saveLiveCredentials()} disabled={!!liveVaultBusy || !liveVault?.vault.ready}><Save/>{liveVaultBusy === 'save' ? 'KAYDEDİLİYOR…' : 'SAVE SECURELY'}</button></div>
+      <p>{liveVault?.connections.LIVE.configured ? `Kasa: ${liveVault.connections.LIVE.storage} · İz: ${liveVault.connections.LIVE.fingerprint || '—'} · ${liveVault.connections.LIVE.last_test_ok ? 'Bağlantı doğrulandı' : 'Doğrulama bekleniyor'}` : liveVault?.vault.reason || 'Live kasa durumu bekleniyor.'}</p>
+    </section>
 
     <section className="executionPulse" aria-label="Sistem durumu">
       <article className={status.credentials.configured ? 'ok' : 'wait'}><KeyRound/><small>ŞİFRELİ API KASASI</small><b>{status.credentials.configured ? 'UYGULAMADA AKTİF' : 'API BEKLİYOR'}</b><span>{status.credentials.fingerprint ? `İz ${status.credentials.fingerprint}` : 'Borsa Bağlantıları sekmesinden ekleyin · BINANCE-CANLI-AYARLA.bat'}</span></article>
