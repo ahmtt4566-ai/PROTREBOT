@@ -31,6 +31,25 @@ export type MtfAnalysis = DecisionAnalysis & { timeframe: string }
 export type MtfRow = { timeframe: string; trend: string; momentum: string; direction: DecisionDirection; available: boolean }
 export type ScoreBreakdown = { analysis: number; liquidity: number; volatility: number; mtf: number; freshness: number; riskReward: number }
 
+export type TriggerLifecycle = 'WAITING' | 'ARMED' | 'TRIGGERED' | 'CONFIRMED' | 'INVALIDATED' | 'EXPIRED'
+export type TriggerCondition = { key: string; label: string; passed: boolean; available: boolean; detail: string }
+export type PreTradeCheck = { label: string; status: 'PASS' | 'LOCKED' | 'UNAVAILABLE'; detail: string }
+export type TriggerMonitor = {
+  lifecycle: TriggerLifecycle
+  available: boolean
+  direction: DecisionDirection
+  triggerPrice: number | null
+  currentPrice: number | null
+  distancePct: number | null
+  conditions: TriggerCondition[]
+  remainingConditions: number | null
+  invalidation: string[]
+  waitingMessage: string
+  statusMessage: string
+  entryPreview: { entry: number; stopLoss: number; tp1: number; tp2: number; tp3: number; riskReward: number } | null
+  preTradeChecks: PreTradeCheck[]
+}
+
 export type TradeDecision = {
   status: DecisionStatus
   direction: DecisionDirection
@@ -86,6 +105,79 @@ function scoreForMtf(direction: DecisionDirection, rows: MtfRow[]) {
   const available = rows.filter(row => row.available)
   if (!available.length || direction === 'NEUTRAL') return null
   return clamp((available.filter(row => row.direction === direction).length / available.length) * 100)
+}
+
+const unavailableTrigger = (): TriggerMonitor => ({
+  lifecycle: 'WAITING', available: false, direction: 'NEUTRAL', triggerPrice: null, currentPrice: null,
+  distancePct: null, conditions: [], remainingConditions: null, invalidation: ['Market data unavailable'],
+  waitingMessage: 'DATA UNAVAILABLE', statusMessage: 'WAITING FOR MARKET DATA', entryPreview: null,
+  preTradeChecks: [
+    { label: 'Market data', status: 'UNAVAILABLE', detail: 'No current snapshot' },
+    { label: 'Live trading', status: 'LOCKED', detail: 'Execution is disabled' },
+  ],
+})
+
+export function buildTriggerMonitor(
+  decision: TradeDecision,
+  analysis: DecisionAnalysis | null,
+  candles: DecisionCandle[],
+  previousLifecycle: TriggerLifecycle | null = null,
+  currentPrice?: number,
+): TriggerMonitor {
+  if (!analysis || candles.length < 2 || decision.direction === 'NEUTRAL') return unavailableTrigger()
+  const latest = candles[candles.length - 1]
+  const price = finite(currentPrice) && currentPrice > 0 ? currentPrice : latest.close
+  const direction = decision.direction
+  const triggerPrice = direction === 'LONG' ? (finite(analysis.resistance) ? analysis.resistance : null) : (finite(analysis.support) ? analysis.support : null)
+  const volumePassed = finite(analysis.volume_ratio) && analysis.volume_ratio >= 1
+  const momentumPassed = finite(analysis.rsi) && finite(analysis.macd) && (direction === 'LONG' ? analysis.rsi >= 50 && analysis.rsi <= 72 && analysis.macd > 0 : analysis.rsi >= 28 && analysis.rsi <= 50 && analysis.macd < 0)
+  const trendPassed = labelDirection(analysis.direction) === direction
+  const mtfPassed = decision.mtfScore !== null && decision.mtfScore >= 60
+  const rrPassed = decision.riskReward !== null && decision.riskReward >= 1.5
+  const freshnessPassed = decision.freshness === 'FRESH' || decision.freshness === 'RECENT'
+  const breakoutPassed = triggerPrice !== null && (direction === 'LONG' ? price >= triggerPrice : price <= triggerPrice)
+  const conditions: TriggerCondition[] = [
+    { key: 'trend', label: `${decision.direction === 'LONG' ? '15m' : '15m'} Trend`, passed: trendPassed, available: Boolean(analysis.trend), detail: analysis.trend || '--' },
+    { key: 'momentum', label: 'Momentum', passed: momentumPassed, available: finite(analysis.rsi) && finite(analysis.macd), detail: analysis.momentum || '--' },
+    { key: 'volume', label: 'Volume', passed: volumePassed, available: finite(analysis.volume_ratio), detail: finite(analysis.volume_ratio) ? `${analysis.volume_ratio.toFixed(2)}x` : '--' },
+    { key: 'breakout', label: direction === 'LONG' ? 'Breakout' : 'Breakdown', passed: breakoutPassed, available: triggerPrice !== null, detail: triggerPrice === null ? '--' : `Trigger ${triggerPrice}` },
+    { key: 'mtf', label: 'MTF', passed: mtfPassed, available: decision.mtfScore !== null, detail: decision.mtfConfirmed === null ? '--' : `${decision.mtfConfirmed}/${decision.mtfTotal}` },
+    { key: 'riskReward', label: 'R/R', passed: rrPassed, available: decision.riskReward !== null, detail: decision.riskReward === null ? '--' : `1:${decision.riskReward.toFixed(2)}` },
+    { key: 'freshness', label: 'Freshness', passed: freshnessPassed, available: decision.freshness !== null, detail: decision.freshness || '--' },
+  ]
+  const unavailableCount = conditions.filter(condition => !condition.available).length
+  const failedCount = conditions.filter(condition => condition.available && !condition.passed).length
+  const allPassed = unavailableCount === 0 && failedCount === 0
+  const invalidation: string[] = direction === 'LONG'
+    ? ['Support lost', 'MTF conflict', 'Volume deterioration', 'Signal stale']
+    : ['Resistance reclaimed', 'Bullish MTF reversal', 'Volume deterioration', 'Signal stale']
+  const invalidated = previousLifecycle !== null && ['ARMED', 'TRIGGERED', 'CONFIRMED'].includes(previousLifecycle)
+    && ((direction === 'LONG' && finite(analysis.support) && price < analysis.support) || (direction === 'SHORT' && finite(analysis.resistance) && price > analysis.resistance) || (decision.mtfScore !== null && decision.mtfScore < 40))
+  const expired = decision.freshness === 'STALE'
+  const canArm = failedCount === 1 && unavailableCount === 0 && trendPassed && momentumPassed && mtfPassed && rrPassed && freshnessPassed
+  const lifecycle: TriggerLifecycle = expired ? 'EXPIRED' : invalidated ? 'INVALIDATED' : allPassed ? 'CONFIRMED' : breakoutPassed ? 'TRIGGERED' : canArm ? 'ARMED' : 'WAITING'
+  const distancePct = triggerPrice !== null && price > 0 ? Math.abs(triggerPrice - price) / price * 100 : null
+  const waitingMessage = lifecycle === 'CONFIRMED' ? `${direction} TRIGGER REACHED` : triggerPrice === null ? 'WAITING — trigger price unavailable' : `${lifecycle === 'ARMED' ? 'ARMED' : 'WAITING'} — ${distancePct === null ? '--' : `${distancePct.toFixed(2)}%`} TO ${direction} TRIGGER`
+  const preTradeChecks: PreTradeCheck[] = [
+    { label: 'Market data', status: 'PASS', detail: 'Current snapshot available' },
+    { label: 'Signal freshness', status: freshnessPassed ? 'PASS' : 'UNAVAILABLE', detail: decision.freshness || '--' },
+    { label: 'MTF confirmation', status: mtfPassed ? 'PASS' : 'UNAVAILABLE', detail: decision.mtfScore === null ? '--' : `${decision.mtfConfirmed}/${decision.mtfTotal}` },
+    { label: 'Liquidity', status: volumePassed ? 'PASS' : 'UNAVAILABLE', detail: finite(analysis.volume_ratio) ? `${analysis.volume_ratio.toFixed(2)}x volume` : '--' },
+    { label: 'Risk/Reward', status: rrPassed ? 'PASS' : 'UNAVAILABLE', detail: decision.riskReward === null ? '--' : `1:${decision.riskReward.toFixed(2)}` },
+    { label: 'Stop Loss', status: finite(analysis.stop_loss) ? 'PASS' : 'UNAVAILABLE', detail: finite(analysis.stop_loss) ? String(analysis.stop_loss) : '--' },
+    { label: 'Position limit', status: 'UNAVAILABLE', detail: 'Existing account gate decides' },
+    { label: 'Duplicate symbol', status: 'UNAVAILABLE', detail: 'Existing account gate decides' },
+    { label: 'Daily loss', status: 'UNAVAILABLE', detail: 'Existing risk gate decides' },
+    { label: 'Live trading', status: 'LOCKED', detail: 'Live execution is fail-closed' },
+  ]
+  return {
+    lifecycle, available: true, direction, triggerPrice, currentPrice: price, distancePct,
+    conditions, remainingConditions: unavailableCount + failedCount, invalidation, waitingMessage,
+    statusMessage: lifecycle === 'CONFIRMED' ? 'SETUP CONFIRMED — NO ORDER SENT' : lifecycle,
+    entryPreview: allPassed && finite(analysis.entry) && finite(analysis.stop_loss) && finite(analysis.tp1) && finite(analysis.tp2) && finite(analysis.tp3) && decision.riskReward !== null
+      ? { entry: analysis.entry, stopLoss: analysis.stop_loss, tp1: analysis.tp1, tp2: analysis.tp2, tp3: analysis.tp3, riskReward: decision.riskReward } : null,
+    preTradeChecks,
+  }
 }
 
 export function buildTradeDecision(analysis: DecisionAnalysis | null, candles: DecisionCandle[], mtfAnalyses: MtfAnalysis[]): TradeDecision {

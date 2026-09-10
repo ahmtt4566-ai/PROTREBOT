@@ -3668,3 +3668,51 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .decisionBreakdownGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .decisionMtfGrid { grid-template-columns: repeat(5, minmax(52px, 1fr)); overflow-x: auto; }
 }
+
+.triggerMonitor { display: grid; gap: 11px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--terminal-line); }
+.triggerHeader, .triggerSummary, .triggerDetailGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.triggerHeader { align-items: start; }
+.triggerHeader h4, .triggerPreview h4, .preTradeCheck h4 { margin: 0; color: var(--terminal-warning); font-size: 9px; letter-spacing: .1em; }
+.triggerHeader strong { display: block; margin-top: 4px; color: var(--terminal-text); font-size: 16px; letter-spacing: .05em; }
+.triggerHeader small, .triggerHeader>span { color: var(--terminal-muted); font-size: 9px; }
+.triggerHeader>span { justify-self: end; color: var(--terminal-info); letter-spacing: .08em; }
+.trigger-confirmed .triggerHeader strong, .trigger-confirmed .triggerSummary strong { color: var(--terminal-positive); }
+.trigger-invalidated .triggerHeader strong, .trigger-expired .triggerHeader strong { color: var(--terminal-negative); }
+.trigger-armed .triggerHeader strong, .trigger-triggered .triggerHeader strong { color: var(--terminal-warning); }
+.triggerSummary { grid-template-columns: repeat(3, 1fr); }
+.triggerSummary > div, .triggerConditionGrid > span, .triggerPreviewGrid > span, .preTradeCheckGrid > span { display: grid; gap: 4px; min-width: 0; padding: 8px; border: 1px solid var(--terminal-line); border-radius: 8px; background: rgba(15, 24, 33, .72); }
+.triggerSummary small, .triggerPreviewGrid small, .preTradeCheckGrid small { color: var(--terminal-muted); font-size: 8px; letter-spacing: .08em; }
+.triggerSummary strong { overflow: hidden; color: var(--terminal-text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.triggerSummary em { color: var(--terminal-muted); font-size: 8px; font-style: normal; line-height: 1.3; }
+.triggerConditions, .triggerPreview, .preTradeCheck { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--terminal-line); }
+.triggerConditionGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.triggerConditionGrid > span { grid-template-columns: auto 1fr; align-items: center; padding: 7px; }
+.triggerConditionGrid b { grid-row: span 2; color: var(--terminal-warning); font-size: 14px; }
+.triggerConditionGrid small { overflow: hidden; color: var(--terminal-text); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.triggerConditionGrid em { overflow: hidden; color: var(--terminal-muted); font-size: 8px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.triggerConditionGrid .passed { border-color: rgba(74, 222, 128, .35); }
+.triggerConditionGrid .passed b { color: var(--terminal-positive); }
+.triggerConditionGrid .pending { border-color: rgba(251, 191, 36, .3); }
+.triggerConditionGrid .unavailable { opacity: .65; }
+.triggerUnavailable { margin: 0; color: var(--terminal-muted); font-size: 10px; }
+.triggerDetailGrid { grid-template-columns: 1fr 1fr; }
+.triggerDetailGrid .decisionList { margin: 0; }
+.triggerPreviewGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.triggerPreviewGrid strong { overflow: hidden; color: var(--terminal-text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.preTradeCheck .decisionSubheading { margin-bottom: 0; }
+.preTradeCheckGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.preTradeCheckGrid > span { grid-template-columns: auto 1fr; align-items: center; padding: 7px; }
+.preTradeCheckGrid b { font-size: 8px; letter-spacing: .05em; }
+.preTradeCheckGrid em { grid-column: 2; overflow: hidden; color: var(--terminal-muted); font-size: 8px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.check-pass b { color: var(--terminal-positive); }
+.check-locked b { color: var(--terminal-warning); }
+.check-unavailable b { color: var(--terminal-muted); }
+
+@media (max-width: 700px) {
+  .triggerHeader, .triggerDetailGrid { grid-template-columns: 1fr; }
+  .triggerHeader>span { justify-self: start; }
+  .triggerSummary { grid-template-columns: 1fr 1fr; }
+  .triggerSummary > div:last-child { grid-column: 1 / -1; }
+  .triggerConditionGrid { grid-template-columns: repeat(2, 1fr); }
+  .triggerPreviewGrid, .preTradeCheckGrid { grid-template-columns: repeat(2, 1fr); }
+}

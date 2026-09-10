@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
-import { buildTradeDecision, type MtfAnalysis, type TradeDecision } from './masterTradeDecision'
+import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 
 type TradeSide = 'LONG' | 'SHORT'
 type Source = 'MANUAL' | 'AUTO'
@@ -219,6 +219,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [candles, setCandles] = useState<Candle[]>([])
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [mtfAnalyses, setMtfAnalyses] = useState<MtfAnalysis[]>([])
+  const triggerLifecycleRef = useRef<TriggerLifecycle | null>(null)
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
   const [analysisFillLoading, setAnalysisFillLoading] = useState(false)
@@ -247,29 +248,35 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    setDataLoading(true)
-    setDataError('')
-    setCandles([])
-    setAnalysis(null)
-    setMtfAnalyses([])
-    Promise.all([
-      fetch(`${API_BASE}/klines/${draft.market}?interval=${interval}&limit=160`, { signal: controller.signal }),
-      fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }),
-      fetchMtfAnalyses(draft.market, controller.signal),
-    ])
-      .then(async ([candleResponse, analysisResponse, nextMtf]) => {
+    let firstLoad = true
+    const refresh = async () => {
+      if (firstLoad) setDataLoading(true)
+      try {
+        const [candleResponse, analysisResponse, nextMtf] = await Promise.all([
+          fetch(`${API_BASE}/klines/${draft.market}?interval=${interval}&limit=160`, { signal: controller.signal }),
+          fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }),
+          fetchMtfAnalyses(draft.market, controller.signal),
+        ])
         if (!candleResponse.ok) throw new Error('Market data unavailable')
         const nextCandles = await candleResponse.json() as Candle[]
         const nextAnalysis = analysisResponse.ok ? await analysisResponse.json() as Analysis : null
+        if (!nextCandles.length || !nextAnalysis) throw new Error('Market data unavailable')
         setCandles(nextCandles)
         setAnalysis(nextAnalysis)
         setMtfAnalyses(nextMtf)
         const latest = nextCandles[nextCandles.length - 1]
         if (latest) setDraft(current => ({ ...current, entry: latest.close }))
-      })
-      .catch(error => { if (error.name !== 'AbortError') { setDataError('Market data unavailable'); setCandles([]); setAnalysis(null); setMtfAnalyses([]) } })
-      .finally(() => setDataLoading(false))
-    return () => controller.abort()
+        setDataError('')
+      } catch (error) {
+        if (error instanceof Error && error.name !== 'AbortError') setDataError('DATA STALE / DATA UNAVAILABLE')
+      } finally {
+        firstLoad = false
+        setDataLoading(false)
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 15000)
+    return () => { controller.abort(); window.clearInterval(timer) }
   }, [draft.market, interval])
 
   useEffect(() => {
@@ -310,6 +317,11 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   }, [draft])
 
   const tradeDecision = useMemo<TradeDecision>(() => buildTradeDecision(analysis, candles, mtfAnalyses), [analysis, candles, mtfAnalyses])
+  const triggerMonitor = useMemo<TriggerMonitor>(() => buildTriggerMonitor(tradeDecision, analysis, candles, triggerLifecycleRef.current, candles[candles.length - 1]?.close), [tradeDecision, analysis, candles])
+
+  useEffect(() => {
+    triggerLifecycleRef.current = triggerMonitor.lifecycle
+  }, [triggerMonitor.lifecycle])
 
   const addTradeRecord = () => {
     const next: TradeHistoryRow = {
@@ -576,6 +588,15 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
               <div className="decisionMtf"><div className="decisionSubheading"><h4>MULTI-TIMEFRAME MATRIX</h4><strong>{tradeDecision.mtfScore === null ? 'MTF BIAS: --' : `MTF CONFIRMATION: ${tradeDecision.mtfConfirmed} / ${tradeDecision.mtfTotal}`}</strong></div><div className="decisionMtfGrid">{tradeDecision.mtfRows.length ? tradeDecision.mtfRows.map(row => <span key={row.timeframe}><b>{row.timeframe}</b><em>{row.available ? row.direction : '--'}</em><small>{row.trend || '--'}</small></span>) : <span>DATA UNAVAILABLE</span>}</div></div>
               <div className="decisionAutoTrade"><span>AUTO TRADE</span><strong>SEPARATE SAFETY GATES</strong><small>Final Decision does not send orders or grant Auto Trade eligibility.</small></div>
+
+              <section className={`triggerMonitor trigger-${triggerMonitor.lifecycle.toLowerCase()}`} aria-label="Trigger monitor">
+                <header className="triggerHeader"><div><h4>TRIGGER MONITOR</h4><strong>{triggerMonitor.lifecycle}</strong><small>{triggerMonitor.statusMessage}</small></div><span>{triggerMonitor.available ? 'LIVE SNAPSHOT' : 'DATA UNAVAILABLE'}</span></header>
+                <div className="triggerSummary"><div><small>CURRENT</small><strong>{triggerMonitor.currentPrice === null ? '--' : `$${fmtDecisionNumber(triggerMonitor.currentPrice, 6)}`}</strong></div><div><small>{triggerMonitor.direction === 'SHORT' ? 'SHORT TRIGGER BELOW' : 'LONG TRIGGER ABOVE'}</small><strong>{triggerMonitor.triggerPrice === null ? '--' : `$${fmtDecisionNumber(triggerMonitor.triggerPrice, 6)}`}</strong></div><div><small>DISTANCE</small><strong>{triggerMonitor.distancePct === null ? '--' : `${triggerMonitor.distancePct.toFixed(2)}%`}</strong><em>{triggerMonitor.waitingMessage}</em></div></div>
+                <div className="triggerConditions"><div className="decisionSubheading"><h4>TRIGGER CONDITIONS</h4><strong>{triggerMonitor.remainingConditions === null ? '--' : `${triggerMonitor.remainingConditions} CONDITIONS REMAINING`}</strong></div>{triggerMonitor.conditions.length ? <div className="triggerConditionGrid">{triggerMonitor.conditions.map(condition => <span key={condition.key} className={!condition.available ? 'unavailable' : condition.passed ? 'passed' : 'pending'}><b>{condition.passed ? '✓' : condition.available ? '✕' : '--'}</b><small>{condition.label}</small><em>{condition.detail}</em></span>)}</div> : <p className="triggerUnavailable">NO TRADE — waiting for a complete market snapshot.</p>}</div>
+                <div className="triggerDetailGrid"><div className="decisionList"><h4>INVALIDATION</h4><ul>{triggerMonitor.invalidation.map(item => <li key={item}>- {item}</li>)}</ul></div><div className="decisionList"><h4>DECISION TIMELINE</h4>{latestCandle ? <ul><li>{new Date(latestCandle.time * (latestCandle.time < 1_000_000_000_000 ? 1000 : 1)).toLocaleTimeString('en-GB')} · Snapshot {triggerMonitor.lifecycle}</li><li>Current price · {triggerMonitor.currentPrice === null ? '--' : fmtDecisionNumber(triggerMonitor.currentPrice, 6)}</li><li>Conditions · {triggerMonitor.remainingConditions === null ? '--' : `${triggerMonitor.remainingConditions} remaining`}</li></ul> : <p>DATA UNAVAILABLE</p>}</div></div>
+                {triggerMonitor.entryPreview && <div className="triggerPreview"><h4>ENTRY PREVIEW</h4><div className="triggerPreviewGrid"><span><small>ENTRY</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.entry, 6)}</strong></span><span><small>SL</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.stopLoss, 6)}</strong></span><span><small>TP1 · 30%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp1, 6)}</strong></span><span><small>TP2 · 30%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp2, 6)}</strong></span><span><small>TP3 · 40%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp3, 6)}</strong></span><span><small>R / R</small><strong>1 : {fmtDecisionNumber(triggerMonitor.entryPreview.riskReward, 2)}</strong></span></div></div>}
+                <div className="preTradeCheck"><div className="decisionSubheading"><h4>PRE-TRADE CHECK · READ ONLY</h4><strong>NO ORDER SENT</strong></div><div className="preTradeCheckGrid">{triggerMonitor.preTradeChecks.map(check => <span key={check.label} className={`check-${check.status.toLowerCase()}`}><b>{check.status}</b><small>{check.label}</small><em>{check.detail}</em></span>)}</div></div>
+              </section>
             </section>
           </main>
 
