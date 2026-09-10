@@ -3611,3 +3611,60 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .riskMonitorFooter { flex-wrap: wrap; }
   .riskMonitorFooter strong { margin-right: 5px; }
 }
+
+.tradeDecisionPanel {
+  min-width: 0;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--terminal-line);
+  border-top: 2px solid var(--terminal-warning);
+  border-radius: 12px;
+  background: rgba(9, 16, 23, 0.86);
+}
+.tradeDecisionPanel.decision-strong-long { border-top-color: var(--terminal-positive); }
+.tradeDecisionPanel.decision-strong-short { border-top-color: var(--terminal-negative); }
+.tradeDecisionPanel.decision-no-trade { border-top-color: var(--terminal-muted); }
+.tradeDecisionHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--terminal-line); }
+.tradeDecisionHeader h3 { margin: 5px 0 3px; color: var(--terminal-text); font-size: 20px; letter-spacing: .04em; }
+.tradeDecisionHeader small { color: var(--terminal-muted); font-size: 10px; }
+.decisionScore { display: flex; align-items: baseline; gap: 5px; color: var(--terminal-muted); text-align: right; }
+.decisionScore strong { color: var(--terminal-warning); font-size: 28px; line-height: 1; }
+.decisionScore span { font-size: 8px; letter-spacing: .08em; }
+.decisionMetricGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 11px; }
+.decisionMetricGrid > div { display: grid; gap: 4px; min-width: 0; padding: 8px; border: 1px solid var(--terminal-line); border-radius: 9px; background: rgba(15, 24, 33, .72); }
+.decisionMetricGrid small, .decisionBreakdown small { color: var(--terminal-muted); font-size: 8px; letter-spacing: .08em; }
+.decisionMetricGrid strong { overflow: hidden; color: var(--terminal-text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.decisionMetricGrid em { color: var(--terminal-muted); font-size: 9px; font-style: normal; }
+.decisionAccent { color: var(--terminal-warning)!important; }
+.decisionSectionGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.decisionList, .decisionBreakdown, .decisionMtf { min-width: 0; padding-top: 10px; border-top: 1px solid var(--terminal-line); }
+.decisionList h4, .decisionBreakdown h4, .decisionSubheading h4 { margin: 0; color: var(--terminal-warning); font-size: 9px; letter-spacing: .1em; }
+.decisionList ul { display: grid; gap: 5px; margin: 8px 0 0; padding: 0; list-style: none; }
+.decisionList li, .decisionList p, .decisionBreakdown p { margin: 0; color: var(--terminal-text); font-size: 10px; line-height: 1.35; }
+.decisionList .riskList li { color: var(--terminal-negative); }
+.decisionWaitGrid .decisionList li { color: var(--terminal-warning); }
+.decisionBreakdown { margin-top: 12px; }
+.decisionBreakdownGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+.decisionBreakdownGrid span { display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 6px 7px; border: 1px solid var(--terminal-line); border-radius: 7px; }
+.decisionBreakdownGrid strong { color: var(--terminal-text); font-size: 10px; }
+.decisionSubheading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.decisionSubheading strong { color: var(--terminal-info); font-size: 9px; letter-spacing: .05em; }
+.decisionMtfGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; margin-top: 8px; }
+.decisionMtfGrid span { display: grid; gap: 3px; min-width: 0; padding: 6px; border: 1px solid var(--terminal-line); border-radius: 7px; background: rgba(15, 24, 33, .72); }
+.decisionMtfGrid b { color: var(--terminal-muted); font-size: 9px; }
+.decisionMtfGrid em { color: var(--terminal-text); font-size: 10px; font-style: normal; }
+.decisionMtfGrid small { overflow: hidden; color: var(--terminal-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.decisionAutoTrade { display: grid; gap: 3px; margin-top: 12px; padding: 8px 9px; border: 1px solid rgba(251, 191, 36, .25); border-radius: 8px; background: rgba(251, 191, 36, .05); }
+.decisionAutoTrade span { color: var(--terminal-warning); font-size: 8px; font-weight: 800; letter-spacing: .1em; }
+.decisionAutoTrade strong { color: var(--terminal-text); font-size: 10px; }
+.decisionAutoTrade small { color: var(--terminal-muted); font-size: 9px; line-height: 1.35; }
+
+@media (max-width: 700px) {
+  .tradeDecisionPanel { padding: 11px; }
+  .tradeDecisionHeader h3 { font-size: 16px; }
+  .decisionScore strong { font-size: 23px; }
+  .decisionMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .decisionSectionGrid { grid-template-columns: 1fr; gap: 8px; }
+  .decisionBreakdownGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .decisionMtfGrid { grid-template-columns: repeat(5, minmax(52px, 1fr)); overflow-x: auto; }
+}

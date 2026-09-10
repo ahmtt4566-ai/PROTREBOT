@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
+import { buildTradeDecision, type MtfAnalysis, type TradeDecision } from './masterTradeDecision'
 
 type TradeSide = 'LONG' | 'SHORT'
 type Source = 'MANUAL' | 'AUTO'
@@ -62,7 +63,7 @@ type OrderRow = {
 
 type MarketRow = { symbol: string; display: string; price: number; change: number; volume: number; status?: string; contractType?: string; quoteAsset?: string; filters?: unknown[] }
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number }
-type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; volume_ratio?: number; normalized_signal?: string }
+type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; adx?: number; atr?: number; support?: number; resistance?: number; radar?: { trap_score?: number; breakout_quality?: number; entry_timing?: string }; volume_ratio?: number; normalized_signal?: string }
 
 const STORAGE_KEY = 'protrebot-master-trade-history-v2'
 const SNAPSHOT_KEY = 'protrebot-master-trade-demo-snapshot-v2'
@@ -170,6 +171,23 @@ const fmtNum = (value: number | undefined, decimals = 2) =>
 const fmtCompact = (value: number | undefined) =>
   value === undefined ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
 
+const fmtDecisionNumber = (value: number | null | undefined, decimals = 0) =>
+  value === null || value === undefined || !Number.isFinite(value) ? '--' : value.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
+
+const fmtSignalAge = (seconds: number | null) => {
+  if (seconds === null) return '--'
+  if (seconds < 60) return `${seconds}s`
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+}
+
+const MTF_INTERVALS = ['1m', '5m', '15m', '1h', '4h']
+
+const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
+  const responses = await Promise.all(MTF_INTERVALS.map(timeframe => fetch(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal })))
+  const values = await Promise.all(responses.map(async (response, index) => response.ok ? { ...(await response.json() as Analysis), timeframe: MTF_INTERVALS[index] } : null))
+  return values.filter((item): item is MtfAnalysis => item !== null)
+}
+
 export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [history, setHistory] = useState<TradeHistoryRow[]>(() => {
     if (typeof window === 'undefined') return seedHistory
@@ -200,6 +218,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [interval, setInterval] = useState('15m')
   const [candles, setCandles] = useState<Candle[]>([])
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [mtfAnalyses, setMtfAnalyses] = useState<MtfAnalysis[]>([])
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
   const [analysisFillLoading, setAnalysisFillLoading] = useState(false)
@@ -232,20 +251,23 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     setDataError('')
     setCandles([])
     setAnalysis(null)
+    setMtfAnalyses([])
     Promise.all([
       fetch(`${API_BASE}/klines/${draft.market}?interval=${interval}&limit=160`, { signal: controller.signal }),
       fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }),
+      fetchMtfAnalyses(draft.market, controller.signal),
     ])
-      .then(async ([candleResponse, analysisResponse]) => {
+      .then(async ([candleResponse, analysisResponse, nextMtf]) => {
         if (!candleResponse.ok) throw new Error('Market data unavailable')
         const nextCandles = await candleResponse.json() as Candle[]
         const nextAnalysis = analysisResponse.ok ? await analysisResponse.json() as Analysis : null
         setCandles(nextCandles)
         setAnalysis(nextAnalysis)
+        setMtfAnalyses(nextMtf)
         const latest = nextCandles[nextCandles.length - 1]
         if (latest) setDraft(current => ({ ...current, entry: latest.close }))
       })
-      .catch(error => { if (error.name !== 'AbortError') { setDataError('Market data unavailable'); setCandles([]); setAnalysis(null) } })
+      .catch(error => { if (error.name !== 'AbortError') { setDataError('Market data unavailable'); setCandles([]); setAnalysis(null); setMtfAnalyses([]) } })
       .finally(() => setDataLoading(false))
     return () => controller.abort()
   }, [draft.market, interval])
@@ -287,6 +309,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     return { riskUsd, reward, rr, riskPercent }
   }, [draft])
 
+  const tradeDecision = useMemo<TradeDecision>(() => buildTradeDecision(analysis, candles, mtfAnalyses), [analysis, candles, mtfAnalyses])
+
   const addTradeRecord = () => {
     const next: TradeHistoryRow = {
       id: `MT-${Date.now()}`,
@@ -325,7 +349,9 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       const response = await fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`)
       if (!response.ok) throw new Error('Analysis unavailable')
       const nextAnalysis = await response.json() as Analysis
+      const nextMtf = await fetchMtfAnalyses(draft.market)
       setAnalysis(nextAnalysis)
+      setMtfAnalyses(nextMtf)
       setDraft(current => ({
         ...current,
         side: /SHORT/i.test(nextAnalysis.normalized_signal || nextAnalysis.direction || '') ? 'SHORT' : /LONG/i.test(nextAnalysis.normalized_signal || nextAnalysis.direction || '') ? 'LONG' : current.side,
@@ -513,9 +539,44 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <article><small>RSI</small><strong>{analysis?.rsi ?? '--'}</strong></article>
               <article><small>MACD</small><strong className={analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}>{analysis?.macd ?? '--'}</strong></article>
               <article><small>VOLUME</small><strong>{analysis?.volume_ratio ? `${analysis.volume_ratio}x` : '--'}</strong></article>
-              <article><small>ANALYSIS SCORE</small><strong className="positive">{analysis?.confidence ? `${analysis.confidence}%` : '--'}</strong></article>
-              <article><small>OPPORTUNITY</small><strong>--</strong></article>
+              <article><small>CONFIDENCE</small><strong className="positive">{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</strong></article>
+              <article><small>OPPORTUNITY</small><strong className="decisionAccent">{fmtDecisionNumber(tradeDecision.opportunityScore)}</strong></article>
             </div>
+
+            <section className={`tradeDecisionPanel decision-${tradeDecision.status.toLowerCase().replaceAll(' ', '-')}`} aria-label="Trade decision analysis">
+              <header className="tradeDecisionHeader">
+                <div><span className="panelEyebrow">FINAL DECISION</span><h3>{tradeDecision.status}</h3><small>{draft.market} · {interval} · {tradeDecision.marketRegime}</small></div>
+                <div className="decisionScore"><strong>{fmtDecisionNumber(tradeDecision.opportunityScore)}</strong><span>/ 100<br />OPPORTUNITY</span></div>
+              </header>
+              <div className="decisionMetricGrid">
+                <div><small>CONFIDENCE</small><strong>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</strong></div>
+                <div><small>DIRECTION</small><strong>{tradeDecision.direction}</strong></div>
+                <div><small>SIGNAL STRENGTH</small><strong>{tradeDecision.signalStrength || '--'}</strong></div>
+                <div><small>ENTRY QUALITY</small><strong>{tradeDecision.entryQuality || '--'}</strong></div>
+                <div><small>RISK / REWARD</small><strong>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</strong></div>
+                <div><small>SIGNAL</small><strong>{tradeDecision.freshness || '--'}</strong><em>Age {fmtSignalAge(tradeDecision.signalAgeSeconds)}</em></div>
+              </div>
+
+              <div className="decisionSectionGrid">
+                <div className="decisionList"><h4>WHY THIS DECISION</h4>{tradeDecision.reasons.length ? <ul>{tradeDecision.reasons.map(reason => <li key={reason}>+ {reason}</li>)}</ul> : <p>DATA UNAVAILABLE</p>}</div>
+                <div className="decisionList"><h4>RISK FLAGS</h4>{tradeDecision.riskFlags.length ? <ul className="riskList">{tradeDecision.riskFlags.map(flag => <li key={flag}>! {flag}</li>)}</ul> : <p className="positive">NO MAJOR RISK FLAGS</p>}</div>
+              </div>
+
+              {(tradeDecision.status === 'WAIT' || tradeDecision.status === 'WATCH' || tradeDecision.status === 'NO TRADE') && <div className="decisionSectionGrid decisionWaitGrid">
+                <div className="decisionList"><h4>WHY WAIT?</h4><ul>{tradeDecision.whyWait.length ? tradeDecision.whyWait.map(reason => <li key={reason}>- {reason}</li>) : <li>Confirmation still required</li>}</ul></div>
+                <div className="decisionList"><h4>WHAT WE ARE WAITING FOR</h4><ul>{tradeDecision.waitingFor.length ? tradeDecision.waitingFor.map(reason => <li key={reason}>✓ {reason}</li>) : <li>Fresh market confirmation</li>}</ul><p>Trigger: --</p></div>
+              </div>}
+
+              <div className="decisionSectionGrid">
+                <div className="decisionList"><h4>LONG CASE</h4><ul>{tradeDecision.longCase.map(item => <li key={item}>{item}</li>)}</ul></div>
+                <div className="decisionList"><h4>SHORT CASE</h4><ul>{tradeDecision.shortCase.map(item => <li key={item}>{item}</li>)}</ul></div>
+              </div>
+
+              <div className="decisionBreakdown"><h4>WHY THIS SCORE?</h4>{tradeDecision.breakdown ? <div className="decisionBreakdownGrid">{[['Analysis', tradeDecision.breakdown.analysis], ['Liquidity', tradeDecision.breakdown.liquidity], ['Volatility', tradeDecision.breakdown.volatility], ['MTF', tradeDecision.breakdown.mtf], ['Freshness', tradeDecision.breakdown.freshness], ['Risk/Reward', tradeDecision.breakdown.riskReward]].map(([label, value]) => <span key={label}><small>{label}</small><strong>{fmtDecisionNumber(value)}</strong></span>)}</div> : <p>DATA UNAVAILABLE</p>}</div>
+
+              <div className="decisionMtf"><div className="decisionSubheading"><h4>MULTI-TIMEFRAME MATRIX</h4><strong>{tradeDecision.mtfScore === null ? 'MTF BIAS: --' : `MTF CONFIRMATION: ${tradeDecision.mtfConfirmed} / ${tradeDecision.mtfTotal}`}</strong></div><div className="decisionMtfGrid">{tradeDecision.mtfRows.length ? tradeDecision.mtfRows.map(row => <span key={row.timeframe}><b>{row.timeframe}</b><em>{row.available ? row.direction : '--'}</em><small>{row.trend || '--'}</small></span>) : <span>DATA UNAVAILABLE</span>}</div></div>
+              <div className="decisionAutoTrade"><span>AUTO TRADE</span><strong>SEPARATE SAFETY GATES</strong><small>Final Decision does not send orders or grant Auto Trade eligibility.</small></div>
+            </section>
           </main>
 
           <aside className="masterTradePanel orderPanel">
