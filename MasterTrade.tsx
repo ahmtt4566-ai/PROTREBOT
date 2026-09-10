@@ -62,7 +62,7 @@ type OrderRow = {
 
 type MarketRow = { symbol: string; display: string; price: number; change: number; volume: number; status?: string; contractType?: string; quoteAsset?: string; filters?: unknown[] }
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number }
-type Analysis = { direction?: string; confidence?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; volume_ratio?: number; normalized_signal?: string }
+type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; volume_ratio?: number; normalized_signal?: string }
 
 const STORAGE_KEY = 'protrebot-master-trade-history-v2'
 const SNAPSHOT_KEY = 'protrebot-master-trade-demo-snapshot-v2'
@@ -202,6 +202,9 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
+  const [analysisFillLoading, setAnalysisFillLoading] = useState(false)
+  const [analysisFillError, setAnalysisFillError] = useState('')
+  const [analysisSyncedAt, setAnalysisSyncedAt] = useState('')
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 7, margin: 1000, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
   const [automation] = useState([
     { symbol: 'BTCUSDT', side: 'LONG', analysis: 92, opportunity: 88, liquidity: 'HIGH', volatility: 'GOOD', confirmation: 'MTF ✓', reason: 'Strong trend + risk aligned' },
@@ -276,11 +279,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     const entry = Number(draft.entry)
     const stop = Number(draft.stopLoss)
     const distance = Math.max(1, Math.abs(entry - stop))
-    const riskUsd = (Math.max(0, draft.margin) * (Math.abs(entry - stop) / entry)) * 0.7
+    const riskUsd = entry > 0 ? (Math.max(0, draft.margin) * (Math.abs(entry - stop) / entry)) * 0.7 : 0
     const tp = Number(draft.tp1)
     const reward = Math.abs(tp - entry) * Number(draft.quantity)
-    const rr = distance > 0 ? reward / (distance * Number(draft.quantity)) : 0
-    return { riskUsd, reward, rr }
+    const rr = entry > 0 && Number(draft.quantity) > 0 ? reward / (distance * Number(draft.quantity)) : 0
+    const riskPercent = entry > 0 ? (Math.abs(entry - stop) / entry) * 100 : 0
+    return { riskUsd, reward, rr, riskPercent }
   }, [draft])
 
   const addTradeRecord = () => {
@@ -314,6 +318,31 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     setSelectedTrade(next)
   }
 
+  const fillFromCurrentAnalysis = async () => {
+    setAnalysisFillLoading(true)
+    setAnalysisFillError('')
+    try {
+      const response = await fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`)
+      if (!response.ok) throw new Error('Analysis unavailable')
+      const nextAnalysis = await response.json() as Analysis
+      setAnalysis(nextAnalysis)
+      setDraft(current => ({
+        ...current,
+        side: /SHORT/i.test(nextAnalysis.normalized_signal || nextAnalysis.direction || '') ? 'SHORT' : /LONG/i.test(nextAnalysis.normalized_signal || nextAnalysis.direction || '') ? 'LONG' : current.side,
+        entry: typeof nextAnalysis.entry === 'number' ? nextAnalysis.entry : current.entry,
+        stopLoss: typeof nextAnalysis.stop_loss === 'number' ? nextAnalysis.stop_loss : current.stopLoss,
+        tp1: typeof nextAnalysis.tp1 === 'number' ? nextAnalysis.tp1 : current.tp1,
+        tp2: typeof nextAnalysis.tp2 === 'number' ? nextAnalysis.tp2 : current.tp2,
+        tp3: typeof nextAnalysis.tp3 === 'number' ? nextAnalysis.tp3 : current.tp3,
+      }))
+      setAnalysisSyncedAt(new Date().toLocaleTimeString('en-GB'))
+    } catch {
+      setAnalysisFillError('Güncel analiz alınamadı. Lütfen tekrar deneyin.')
+    } finally {
+      setAnalysisFillLoading(false)
+    }
+  }
+
   const normalizedMarketQuery = marketQuery.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
   const filteredMarkets = markets.filter(market => {
     if (!normalizedMarketQuery) return true
@@ -333,8 +362,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
   }).join(' ')
   const selectMarket = (symbol: string) => {
-    setDraft(current => ({ ...current, market: symbol }))
+    setDraft(current => ({ ...current, market: symbol, entry: 0, stopLoss: 0, tp1: 0, tp2: 0, tp3: 0 }))
     setMarketQuery('')
+    setAnalysisFillError('')
+    setAnalysisSyncedAt('')
   }
 
   const opportunityBreakdown = [
@@ -515,20 +546,25 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
             <div className="riskSummary">
               <div className="summaryHeading">ORDER PREVIEW</div>
-              <div><small>Stop Loss</small><strong>${fmtCompact(draft.stopLoss)}</strong></div>
+              <div><small>Stop Loss</small><strong>{draft.stopLoss > 0 ? `$${fmtCompact(draft.stopLoss)}` : '--'}</strong></div>
               <div><small>Risk $</small><strong>${fmtCompact(riskPreview.riskUsd)}</strong></div>
-              <div><small>Risk %</small><strong>{((Math.abs(Number(draft.entry) - Number(draft.stopLoss)) / Number(draft.entry) * 100) || 0).toFixed(2)}%</strong></div>
+              <div><small>Risk %</small><strong>{draft.entry > 0 ? `${riskPreview.riskPercent.toFixed(2)}%` : '--'}</strong></div>
               <div><small>R / R</small><strong>{riskPreview.rr > 0 ? `1:${riskPreview.rr.toFixed(2)}` : '—'}</strong></div>
               <div><small>Position Size</small><strong>{fmtCompact(Number(draft.entry) * Number(draft.quantity))}</strong></div>
               <div><small>Est. Fees</small><strong>--</strong></div>
             </div>
 
             <div className="tpGroup">
-              <div><span>TP1</span><strong>{Number(draft.tp1).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div>
-              <div><span>TP2</span><strong>{Number(draft.tp2).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div>
-              <div><span>TP3</span><strong>{Number(draft.tp3).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div>
+              <div><span>TP1</span><strong>{draft.tp1 > 0 ? Number(draft.tp1).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</strong></div>
+              <div><span>TP2</span><strong>{draft.tp2 > 0 ? Number(draft.tp2).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</strong></div>
+              <div><span>TP3</span><strong>{draft.tp3 > 0 ? Number(draft.tp3).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</strong></div>
             </div>
 
+            <button type="button" className="analysisFillButton" onClick={() => void fillFromCurrentAnalysis()} disabled={analysisFillLoading || dataLoading}>
+              {analysisFillLoading ? 'ANALİZ YÜKLENİYOR...' : 'GÜNCEL ANALİZDEN DOLDUR'}
+            </button>
+            {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
+            {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
             <button type="button" className="primaryOrderButton" onClick={addTradeRecord} disabled>DEMO ORDER</button>
             <div className="lockNotice"><Lock /> LIVE TRADING LOCKED</div>
           </aside>

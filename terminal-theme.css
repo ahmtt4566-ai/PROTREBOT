@@ -866,6 +866,25 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   filter: brightness(1.06);
 }
 
+.analysisFillButton {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 14px;
+  border: 1px solid rgba(212, 168, 79, 0.55);
+  border-radius: 10px;
+  background: rgba(212, 168, 79, 0.1);
+  color: #f5d98b;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+.analysisFillButton:hover:not(:disabled) { border-color: #f3cd74; background: rgba(212, 168, 79, 0.18); box-shadow: 0 0 16px rgba(212, 168, 79, 0.12); transform: translateY(-1px); }
+.analysisFillButton:active:not(:disabled) { transform: translateY(0); }
+.analysisFillButton:disabled { opacity: .6; }
+.analysisSyncStatus { margin-top: 7px; color: var(--terminal-positive); font-size: 9px; text-align: center; }
+.analysisFillError { margin-top: 7px; padding: 8px 10px; border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 9px; background: rgba(248, 113, 113, 0.08); color: var(--terminal-negative); font-size: 10px; line-height: 1.4; text-align: center; }
+
 .lockNotice,
 .premiumBadge,
 .livePill {
@@ -1353,6 +1372,9 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .v26MasterTradeButton:active { transform: none; }
   .masterTradeDrawerBackdrop,
   .masterTradeDrawer { animation: none; }
+  .analysisFillButton { transition: none; }
+  .analysisFillButton:hover:not(:disabled),
+  .analysisFillButton:active:not(:disabled) { transform: none; }
 }
 .demoEventPanel article:nth-child(3n+1) i, .executionEvents article:nth-child(3n+1) i { background: var(--success); }
 .demoEventPanel article:nth-child(3n+2), .executionEvents article:nth-child(3n+2) { border-left-color: var(--warning); }
