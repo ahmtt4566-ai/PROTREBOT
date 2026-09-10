@@ -187,7 +187,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       return { mode: 'DEMO', account: 'Demo account snapshot ready', lastUpdated: new Date().toISOString(), recovery: 'Local cache restored' }
     }
   })
-  const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(seedHistory[0])
+  const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(null)
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 7, margin: 1000, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
   const [automation] = useState([
     { symbol: 'BTCUSDT', side: 'LONG', analysis: 92, opportunity: 88, liquidity: 'HIGH', volatility: 'GOOD', confirmation: 'MTF ✓', reason: 'Strong trend + risk aligned' },
@@ -262,202 +262,389 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     setSelectedTrade(next)
   }
 
+  const marketWatch = [
+    { symbol: 'BTCUSDT', price: 61380.12, change: 2.31, signal: 'LONG', score: 91 },
+    { symbol: 'ETHUSDT', price: 3315.42, change: -0.84, signal: 'SHORT', score: 88 },
+    { symbol: 'SOLUSDT', price: 148.32, change: 1.56, signal: 'LONG', score: 84 },
+    { symbol: 'BNBUSDT', price: 612.1, change: 0.72, signal: 'LONG', score: 80 },
+    { symbol: 'XRPUSDT', price: 0.54, change: -1.2, signal: 'SHORT', score: 76 },
+  ]
+
+  const opportunityBreakdown = [
+    { label: 'Trend', value: 92 },
+    { label: 'Momentum', value: 89 },
+    { label: 'Volume', value: 94 },
+    { label: 'MTF Confirmation', value: 91 },
+    { label: 'Signal Freshness', value: 87 },
+    { label: 'Risk / Reward', value: 90 },
+  ]
+
+  const overviewCards = [
+    { label: 'BALANCE', value: '$4,995.63', note: 'Demo Futures Wallet', tone: 'default' },
+    { label: 'AVAILABLE', value: '$4,974.92', note: 'Ready Margin', tone: 'default' },
+    { label: 'UNREALIZED PNL', value: '+$182.40', note: 'Net Open PnL', tone: 'positive' },
+    { label: 'REALIZED PNL', value: '+$94.20', note: 'Today', tone: 'positive' },
+    { label: 'MARGIN USED', value: '$1,840.00', note: '7.2% Utilized', tone: 'default' },
+    { label: 'OPEN POSITIONS', value: '2 / 3', note: 'Active Exposure', tone: 'default' },
+  ]
+
+  const performanceTrend = [35, 40, 38, 48, 52, 46, 57, 64, 60, 68, 72, 76]
+
   return (
     <section className="masterTrade">
       <div className="masterTradeShell">
         <header className="masterTradeTopbar">
-          <div>
-            <span className="masterTradeEyebrow">MASTER TRADE V2</span>
-            <h2>Professional execution cockpit</h2>
+          <div className="masterTradeTopbarLeft">
+            {onBack && (
+              <button type="button" className="masterTradeBackButton" onClick={onBack}>← Dashboard</button>
+            )}
+            <div>
+              <span className="masterTradeEyebrow">MASTER TRADE</span>
+              <h2>Professional execution terminal</h2>
+            </div>
           </div>
-          {onBack && (
-            <button type="button" className="masterTradeBackButton" onClick={onBack}>← BACK TO DASHBOARD</button>
-          )}
+
           <div className="masterTradeStatusRow">
             <span className="statusPill online"><Activity /> CONNECTED</span>
-            <span className="statusPill demo"><Wallet /> DEMO</span>
+            <span className="statusPill demo"><Wallet /> DEMO / TESTNET</span>
             <span className="statusPill locked"><Lock /> LIVE TRADING LOCKED</span>
-          </div>
-          <div className="masterTradeMetrics">
-            <div><small>Balance</small><b>$ 12,450.00</b></div>
-            <div><small>Margin</small><b>$ 3,820.00</b></div>
-            <div><small>U PnL</small><b className="up">+$ 182.40</b></div>
-            <div><small>Today</small><b className="up">+$ 94.20</b></div>
-            <div><small>ROI</small><b>2.14%</b></div>
-            <div><small>WSS</small><b>LIVE</b></div>
           </div>
         </header>
 
-        <div className="masterTradeGrid">
+        <div className="masterTradeOverview">
+          {overviewCards.map((card) => (
+            <article key={card.label} className={`metricCard ${card.tone}`}>
+              <small>{card.label}</small>
+              <strong>{card.value}</strong>
+              <span>{card.note}</span>
+            </article>
+          ))}
+        </div>
+
+        <div className="masterTradeWorkspace">
           <aside className="masterTradePanel watchlistPanel">
-            <div className="panelTitleRow">
-              <span>MARKET WATCHLIST</span>
-              <button type="button">ALL</button>
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">MARKET WATCH</span>
+                <h3>Live Markets</h3>
+              </div>
+              <button type="button" className="panelGhostButton">ALL</button>
             </div>
-            <div className="watchlistRows">
-              {['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'].map((symbol, index) => (
-                <button key={symbol} type="button" className={index === 0 ? 'active' : ''}>
-                  <span><b>{symbol}</b><small>{index === 0 ? 0.8 : index === 1 ? -0.4 : 1.3}%</small></span>
-                  <strong>{index === 0 ? '61380.00' : index === 1 ? '3315.40' : index === 2 ? '148.32' : index === 3 ? '612.10' : '0.540'}</strong>
+
+            <div className="watchlistList">
+              {marketWatch.map((item, index) => (
+                <button key={item.symbol} type="button" className={index === 0 ? 'watchlistItem active' : 'watchlistItem'}>
+                  <div className="watchlistMeta">
+                    <b>{item.symbol}</b>
+                    <span>{item.change >= 0 ? '+' : ''}{item.change.toFixed(2)}%</span>
+                  </div>
+                  <div className="watchlistStats">
+                    <strong>${item.price.toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong>
+                    <em className={item.signal === 'LONG' ? 'positive' : 'negative'}>{item.signal}</em>
+                    <small>{item.score}</small>
+                  </div>
                 </button>
               ))}
             </div>
           </aside>
 
           <main className="masterTradePanel chartPanel">
-            <div className="panelTitleRow">
-              <span>{draft.market}</span>
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">MARKET</span>
+                <h3>{draft.market}</h3>
+              </div>
               <div className="chartControls">
-                <button type="button">1m</button>
-                <button type="button" className="active">15m</button>
-                <button type="button">1h</button>
+                {['1m','5m','15m','1h','4h','1D'].map((range) => (
+                  <button key={range} type="button" className={range === '15m' ? 'active' : ''}>{range}</button>
+                ))}
               </div>
             </div>
-            <div className="chartCanvas">
-              <div className="chartGrid">
-                {Array.from({ length: 18 }).map((_, index) => <span key={`grid-${index}`} />)}
+
+            <div className="chartPriceSummary">
+              <div>
+                <span className="chartSymbol">{draft.market}</span>
+                <strong>${Number(draft.entry).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong>
               </div>
-              <svg viewBox="0 0 640 260" preserveAspectRatio="none" aria-label="Master trade chart preview">
-                <path d="M0 170 L80 150 L150 162 L220 130 L300 110 L380 130 L450 85 L520 92 L640 40" fill="none" stroke="#36d98d" strokeWidth="3" strokeLinecap="round"/>
-                <path d="M0 190 L80 175 L150 180 L220 156 L300 170 L380 168 L450 145 L520 155 L640 120" fill="none" stroke="#f26a5c" strokeWidth="2" strokeDasharray="6 5" strokeLinecap="round"/>
+              <span className="delta positive">+2.31%</span>
+            </div>
+
+            <div className="chartCanvas">
+              <svg viewBox="0 0 760 300" preserveAspectRatio="none" aria-label="Master Trade chart preview">
+                <defs>
+                  <linearGradient id="masterTradeChartGlow" x1="0" x2="1" y1="0" y2="0">
+                    <stop offset="0%" stopColor="#22c55e" stopOpacity="0.32" />
+                    <stop offset="100%" stopColor="#22c55e" stopOpacity="0.08" />
+                  </linearGradient>
+                </defs>
+                <g opacity="0.18" stroke="#334155" strokeWidth="1">
+                  {[...Array(11)].map((_, index) => (
+                    <line key={`v-${index}`} x1="0" x2="760" y1={30 + index * 24} y2={30 + index * 24} />
+                  ))}
+                </g>
+                <path d="M0 188 L68 170 L128 160 L194 138 L264 148 L332 122 L404 116 L470 92 L542 98 L610 72 L686 48 L760 32" fill="none" stroke="#34d399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M0 188 L68 170 L128 160 L194 138 L264 148 L332 122 L404 116 L470 92 L542 98 L610 72 L686 48 L760 32 L760 300 L0 300 Z" fill="url(#masterTradeChartGlow)" opacity="0.7" />
               </svg>
-              <div className="priceBadge">$ {fmtCompact(Number(draft.entry))}</div>
+              <div className="chartBadge">$61,380.00</div>
+            </div>
+
+            <div className="indicatorGrid">
+              <article><small>TREND</small><strong className="positive">BULLISH</strong></article>
+              <article><small>MOMENTUM</small><strong>STRONG</strong></article>
+              <article><small>RSI</small><strong>62.4</strong></article>
+              <article><small>MACD</small><strong className="positive">+0.92</strong></article>
+              <article><small>VOLUME</small><strong>1.3x</strong></article>
+              <article><small>MTF</small><strong className="positive">CONFIRMED</strong></article>
             </div>
           </main>
 
           <aside className="masterTradePanel orderPanel">
-            <div className="panelTitleRow">
-              <span>ORDER PANEL</span>
-              <span className="lockedLabel">LIVE LOCKED</span>
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">TRADE</span>
+                <h3>{draft.market}</h3>
+              </div>
+              <span className="premiumBadge">PREMIUM</span>
             </div>
-            <div className="orderSideRow">
+
+            <div className="tradeTabs">
               <button type="button" className={draft.side === 'LONG' ? 'selected long' : ''} onClick={() => setDraft((current) => ({ ...current, side: 'LONG' }))}>LONG</button>
               <button type="button" className={draft.side === 'SHORT' ? 'selected short' : ''} onClick={() => setDraft((current) => ({ ...current, side: 'SHORT' }))}>SHORT</button>
-              <button type="button">Market</button>
             </div>
-            <div className="orderFormGrid">
+
+            <div className="modeTabs">
+              <button type="button" className="active">MARKET</button>
+              <button type="button">LIMIT</button>
+            </div>
+
+            <div className="fieldGrid">
               <label><span>Margin</span><input value={draft.margin} onChange={(event) => setDraft((current) => ({ ...current, margin: Number(event.target.value) || 0 }))} /></label>
               <label><span>Leverage</span><input value={draft.leverage} onChange={(event) => setDraft((current) => ({ ...current, leverage: Number(event.target.value) || 1 }))} /></label>
               <label><span>Quantity</span><input value={draft.quantity} onChange={(event) => setDraft((current) => ({ ...current, quantity: Number(event.target.value) || 0 }))} /></label>
-              <label><span>Entry</span><input value={draft.entry} onChange={(event) => setDraft((current) => ({ ...current, entry: Number(event.target.value) || 0 }))} /></label>
-              <label><span>SL</span><input value={draft.stopLoss} onChange={(event) => setDraft((current) => ({ ...current, stopLoss: Number(event.target.value) || 0 }))} /></label>
-              <label><span>TP1</span><input value={draft.tp1} onChange={(event) => setDraft((current) => ({ ...current, tp1: Number(event.target.value) || 0 }))} /></label>
-              <label><span>TP2</span><input value={draft.tp2} onChange={(event) => setDraft((current) => ({ ...current, tp2: Number(event.target.value) || 0 }))} /></label>
-              <label><span>TP3</span><input value={draft.tp3} onChange={(event) => setDraft((current) => ({ ...current, tp3: Number(event.target.value) || 0 }))} /></label>
+              <label><span>Entry Price</span><input value={draft.entry} onChange={(event) => setDraft((current) => ({ ...current, entry: Number(event.target.value) || 0 }))} /></label>
             </div>
-            <div className="riskPreview">
-              <div><small>MAX LOSS</small><b>${fmtCompact(riskPreview.riskUsd)}</b></div>
-              <div><small>POTENTIAL TP</small><b>${fmtCompact(riskPreview.reward)}</b></div>
-              <div><small>R/R</small><b>1:{fmtCompact(riskPreview.rr)}</b></div>
+
+            <div className="riskSummary">
+              <div><small>Stop Loss</small><strong>${fmtCompact(draft.stopLoss)}</strong></div>
+              <div><small>Risk $</small><strong>${fmtCompact(riskPreview.riskUsd)}</strong></div>
+              <div><small>Risk %</small><strong>{((Math.abs(Number(draft.entry) - Number(draft.stopLoss)) / Number(draft.entry) * 100) || 0).toFixed(2)}%</strong></div>
+              <div><small>R / R</small><strong>{riskPreview.rr > 0 ? `1:${riskPreview.rr.toFixed(2)}` : '—'}</strong></div>
             </div>
-            <button type="button" className="riskSubmit" onClick={addTradeRecord} disabled>Place order — LIVE LOCKED</button>
+
+            <div className="tpGroup">
+              <div><span>TP1</span><strong>{Number(draft.tp1).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div>
+              <div><span>TP2</span><strong>{Number(draft.tp2).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div>
+              <div><span>TP3</span><strong>{Number(draft.tp3).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong></div>
+            </div>
+
+            <button type="button" className="primaryOrderButton" onClick={addTradeRecord} disabled>DEMO ORDER</button>
+            <div className="lockNotice"><Lock /> LIVE TRADING LOCKED</div>
           </aside>
         </div>
 
-        <div className="masterTradeBottomGrid">
-          <section className="masterTradePanel positionsPanel">
-            <div className="panelTitleRow">
-              <span>OPEN POSITIONS</span>
-              <button type="button">25%  50%  75%  100%</button>
+        <div className="masterTradeDataGrid">
+          <section className="masterTradePanel positionsPanel widePanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">OPEN POSITIONS</span>
+                <h3>Portfolio</h3>
+              </div>
+              <button type="button" className="panelGhostButton">25% · 50% · 75% · 100%</button>
             </div>
-            <div className="positionsTable">
-              {seedPositions.map((position) => (
-                <div key={position.symbol} className="positionRow">
-                  <div><b>{position.symbol}</b><small>{position.side}</small></div>
-                  <div><small>Entry</small><b>{fmtNum(position.entry)}</b></div>
-                  <div><small>Mark</small><b>{fmtNum(position.mark)}</b></div>
-                  <div><small>Qty</small><b>{fmtNum(position.quantity, 2)}</b></div>
-                  <div><small>Leverage</small><b>{position.leverage}x</b></div>
-                  <div><small>Margin</small><b>${fmtCompact(position.margin)}</b></div>
-                  <div><small>PnL</small><b className={position.pnl >= 0 ? 'up' : 'down'}>{position.pnl >= 0 ? '+' : ''}${fmtCompact(position.pnl)}</b></div>
-                  <div><small>Liquidation</small><b>{fmtNum(position.liquidation)}</b></div>
-                  <div><small>SL</small><b>{fmtNum(position.stopLoss)}</b></div>
-                </div>
+
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Size</th>
+                    <th>Entry</th>
+                    <th>Mark</th>
+                    <th>Leverage</th>
+                    <th>Margin</th>
+                    <th>PnL</th>
+                    <th>PnL%</th>
+                    <th>SL</th>
+                    <th>TP</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {seedPositions.map((position) => (
+                    <tr key={position.symbol}>
+                      <td><strong>{position.symbol}</strong></td>
+                      <td><span className={position.side === 'LONG' ? 'positive' : 'negative'}>{position.side}</span></td>
+                      <td>{fmtNum(position.quantity, 2)}</td>
+                      <td>${fmtNum(position.entry)}</td>
+                      <td>${fmtNum(position.mark)}</td>
+                      <td>{position.leverage}x</td>
+                      <td>${fmtCompact(position.margin)}</td>
+                      <td className={position.pnl >= 0 ? 'positive' : 'negative'}>{position.pnl >= 0 ? '+' : ''}${fmtCompact(position.pnl)}</td>
+                      <td className={position.pnl >= 0 ? 'positive' : 'negative'}>{position.pnlPercent >= 0 ? '+' : ''}{position.pnlPercent.toFixed(2)}%</td>
+                      <td>${fmtNum(position.stopLoss)}</td>
+                      <td>${fmtNum(position.tp1)}</td>
+                      <td><span className="statusBadge open">OPEN</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="masterTradePanel ordersPanel compactPanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">ACTIVE ORDERS</span>
+                <h3>Orders</h3>
+              </div>
+            </div>
+
+            <div className="tableWrap compactTable">
+              {seedOrders.length ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Side</th>
+                      <th>Type</th>
+                      <th>Price</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {seedOrders.map((order) => (
+                      <tr key={`${order.symbol}-${order.created}`}>
+                        <td>{order.symbol}</td>
+                        <td className={order.side === 'LONG' ? 'positive' : 'negative'}>{order.side}</td>
+                        <td>{order.type}</td>
+                        <td>${fmtNum(order.price)}</td>
+                        <td><span className={`statusBadge ${order.status === 'Open' ? 'open' : order.status === 'Filled' ? 'filled' : 'cancelled'}`}>{order.status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="emptyState">No active orders</div>
+              )}
+            </div>
+          </section>
+
+          <section className="masterTradePanel historyPanel widePanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">TRADE HISTORY</span>
+                <h3>Persistent trade log</h3>
+              </div>
+              <div className="historyControls">
+                <button type="button" className="chip active">All</button>
+                <button type="button" className="chip">Manual</button>
+                <button type="button" className="chip">Auto</button>
+              </div>
+            </div>
+
+            <div className="tableWrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>PnL</th>
+                    <th>PnL%</th>
+                    <th>Duration</th>
+                    <th>Source</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((trade) => (
+                    <tr key={trade.id} onClick={() => setSelectedTrade(trade)} className="historyRow">
+                      <td>{new Date(trade.closeTime).toLocaleDateString('en-GB')}</td>
+                      <td><strong>{trade.symbol}</strong></td>
+                      <td className={trade.side === 'LONG' ? 'positive' : 'negative'}>{trade.side}</td>
+                      <td>${fmtNum(trade.entryPrice)}</td>
+                      <td>${fmtNum(trade.exitPrice)}</td>
+                      <td className={trade.realizedPnl >= 0 ? 'positive' : 'negative'}>{trade.realizedPnl >= 0 ? '+' : ''}${fmtCompact(trade.realizedPnl)}</td>
+                      <td className={trade.realizedPnl >= 0 ? 'positive' : 'negative'}>{trade.pnlPercent >= 0 ? '+' : ''}{trade.pnlPercent.toFixed(2)}%</td>
+                      <td>{trade.duration}</td>
+                      <td>{trade.source}</td>
+                      <td><span className={`statusBadge ${trade.realizedPnl >= 0 ? 'win' : 'loss'}`}>{trade.realizedPnl >= 0 ? 'WIN' : 'LOSS'}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="masterTradePanel performancePanel compactPanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">PERFORMANCE</span>
+                <h3>Execution summary</h3>
+              </div>
+            </div>
+
+            <div className="performanceMetrics">
+              <div><small>Total trades</small><strong>{performance.total}</strong></div>
+              <div><small>Wins</small><strong>{performance.wins}</strong></div>
+              <div><small>Losses</small><strong>{performance.losses}</strong></div>
+              <div><small>Win rate</small><strong>{performance.winRate.toFixed(1)}%</strong></div>
+              <div><small>Total PnL</small><strong className={performance.realized >= 0 ? 'positive' : 'negative'}>${fmtCompact(performance.realized)}</strong></div>
+              <div><small>Avg win</small><strong>${fmtCompact(performance.avgWin)}</strong></div>
+              <div><small>Avg loss</small><strong>${fmtCompact(performance.avgLoss)}</strong></div>
+              <div><small>Profit factor</small><strong>{performance.total ? '1.74' : '—'}</strong></div>
+            </div>
+
+            <div className="miniSparkline" aria-label="Performance trend">
+              {performanceTrend.map((point, index) => (
+                <span key={index} style={{ height: `${point}%` }} />
               ))}
             </div>
           </section>
 
-          <section className="masterTradePanel ordersPanel">
-            <div className="panelTitleRow">
-              <span>ORDERS</span>
+          <section className="masterTradePanel scannerPanel compactPanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">MARKET SCANNER</span>
+                <h3>Top opportunities</h3>
+              </div>
+              <span className="livePill">LIVE</span>
             </div>
-            <div className="miniTable">
-              {seedOrders.map((order) => (
-                <div key={`${order.symbol}-${order.created}`} className="miniRow">
-                  <span>{order.symbol}</span>
-                  <span>{order.side}</span>
-                  <span>{order.type}</span>
-                  <span>{fmtNum(order.price)}</span>
-                  <span>{fmtNum(order.quantity, 2)}</span>
-                  <span>{order.status}</span>
-                </div>
-              ))}
-            </div>
-          </section>
 
-          <section className="masterTradePanel performancePanel">
-            <div className="panelTitleRow">
-              <span>PERFORMANCE</span>
-            </div>
-            <div className="perfMetrics">
-              <div><small>Total Trades</small><b>{performance.total}</b></div>
-              <div><small>Wins</small><b>{performance.wins}</b></div>
-              <div><small>Losses</small><b>{performance.losses}</b></div>
-              <div><small>Win Rate</small><b>{performance.winRate.toFixed(1)}%</b></div>
-              <div><small>Realized PnL</small><b className={performance.realized >= 0 ? 'up' : 'down'}>${fmtCompact(performance.realized)}</b></div>
-              <div><small>Best</small><b>${fmtCompact(performance.best)}</b></div>
-            </div>
-          </section>
-
-          <section className="masterTradePanel automationPanel">
-            <div className="panelTitleRow">
-              <span>AUTO TRADE</span>
-              <span className="lockedLabel">MANUAL | AUTO</span>
-            </div>
-            <div className="autoGrid">
+            <div className="scannerList">
               {automation.map((candidate) => (
-                <div key={candidate.symbol} className="autoCandidate">
-                  <div><b>{candidate.symbol}</b><span>{candidate.side}</span></div>
-                  <small>{candidate.reason}</small>
-                  <div className="autoStats">
-                    <span>Score {candidate.analysis}</span>
-                    <span>Oppo {candidate.opportunity}</span>
-                    <span>{candidate.confirmation}</span>
+                <article key={candidate.symbol}>
+                  <div>
+                    <strong>{candidate.symbol}</strong>
+                    <small>{candidate.side}</small>
                   </div>
-                </div>
+                  <div className="scannerScore"><span>{candidate.analysis}</span></div>
+                  <small>{candidate.reason}</small>
+                </article>
               ))}
             </div>
           </section>
 
-          <section className="masterTradePanel historyPanel">
-            <div className="panelTitleRow">
-              <span>PERSISTENT HISTORY · TRADE HISTORY</span>
+          <section className="masterTradePanel safetyPanel compactPanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">ACCOUNT SYNC</span>
+                <h3>Recovery status</h3>
+              </div>
             </div>
-            <div className="historyRows">
-              {history.map((trade) => (
-                <button key={trade.id} type="button" className="historyItem" onClick={() => setSelectedTrade(trade)}>
-                  <span>{trade.symbol}</span>
-                  <span>{trade.side}</span>
-                  <span>{trade.pnlPercent.toFixed(2)}%</span>
-                  <strong className={trade.realizedPnl >= 0 ? 'up' : 'down'}>${fmtCompact(trade.realizedPnl)}</strong>
-                </button>
-              ))}
-            </div>
-          </section>
 
-          <section className="masterTradePanel emergencyPanel">
-            <div className="panelTitleRow">
-              <span>DEMO ACCOUNT SNAPSHOT / RECOVERY</span>
+            <div className="systemStatus">
+              <div className="statusRow"><i className="onlineDot" /> <span>Connected</span></div>
+              <div className="statusRow muted"><span>Last synchronized</span><strong>{new Date(snapshotState.lastUpdated).toLocaleTimeString('en-GB')}</strong></div>
+              <div className="statusRow muted"><span>Recovery</span><strong>{snapshotState.recovery}</strong></div>
             </div>
-            <div className="securityInfo">
-              <ShieldCheck /> <span>{snapshotState.account} · {snapshotState.recovery}</span>
-            </div>
+
             <div className="emergencyActions">
               <button type="button" className="dangerBtn" disabled>STOP AUTO TRADE</button>
               <button type="button" className="dangerBtn" disabled>EMERGENCY CLOSE ALL</button>
-            </div>
-            <div className="securityInfo">
-              <ShieldCheck /> <span>LIVE TRADING remains fail-closed. Demo/Testnet protections stay active.</span>
             </div>
           </section>
         </div>
@@ -473,27 +660,37 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               </div>
               <button type="button" onClick={() => setSelectedTrade(null)}>Close</button>
             </header>
-            <div className="drawerGrid">
-              <div><small>LONG/SHORT</small><b>{selectedTrade.side}</b></div>
+            <div className="drawerMeta">
+              <div><small>Direction</small><b>{selectedTrade.side}</b></div>
+              <div><small>Result</small><b className={selectedTrade.realizedPnl >= 0 ? 'positive' : 'negative'}>{selectedTrade.realizedPnl >= 0 ? 'WIN' : 'LOSS'}</b></div>
               <div><small>Entry</small><b>${fmtNum(selectedTrade.entryPrice)}</b></div>
               <div><small>Exit</small><b>${fmtNum(selectedTrade.exitPrice)}</b></div>
-              <div><small>PnL</small><b className={selectedTrade.realizedPnl >= 0 ? 'up' : 'down'}>${fmtCompact(selectedTrade.realizedPnl)}</b></div>
+              <div><small>PnL</small><b className={selectedTrade.realizedPnl >= 0 ? 'positive' : 'negative'}>${fmtCompact(selectedTrade.realizedPnl)}</b></div>
               <div><small>ROI</small><b>{selectedTrade.pnlPercent.toFixed(2)}%</b></div>
-              <div><small>Duration</small><b>{selectedTrade.duration}</b></div>
-              <div><small>Analysis</small><b>{selectedTrade.analysisScore}</b></div>
-              <div><small>Opportunity</small><b>{selectedTrade.opportunityScore}</b></div>
-              <div><small>Source</small><b>{selectedTrade.source}</b></div>
             </div>
-            <ul className="timelineList">
-              <li><span>Signal generated</span><em>{selectedTrade.scanCycle}</em></li>
-              <li><span>Order submitted</span><em>{selectedTrade.openTime}</em></li>
-              <li><span>Entry filled</span><em>{selectedTrade.openTime}</em></li>
-              <li><span>TP1</span><em>{selectedTrade.tp1}</em></li>
-              <li><span>Break-even</span><em>{selectedTrade.stopLoss}</em></li>
-              <li><span>TP2</span><em>{selectedTrade.tp2}</em></li>
-              <li><span>TP3</span><em>{selectedTrade.tp3}</em></li>
-              <li><span>Closed</span><em>{selectedTrade.closeReason}</em></li>
-            </ul>
+
+            <div className="drawerSection">
+              <h4>TRADE LIFECYCLE</h4>
+              <div className="timelineList">
+                {[
+                  ['Signal Generated', selectedTrade.scanCycle],
+                  ['Order Submitted', selectedTrade.openTime],
+                  ['Entry Filled', selectedTrade.openTime],
+                  ['TP1', String(selectedTrade.tp1)],
+                  ['TP2', String(selectedTrade.tp2)],
+                  ['TP3', String(selectedTrade.tp3)],
+                  ['Closed', selectedTrade.closeReason],
+                ].map(([event, detail], index) => (
+                  <div key={`${event}-${index}`} className="timelineItem">
+                    <span className="timelineDot" />
+                    <div>
+                      <strong>{event}</strong>
+                      <small>{detail}</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </aside>
         </div>
       )}
