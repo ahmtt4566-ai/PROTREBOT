@@ -334,7 +334,7 @@ export default function TestnetFirstApp() {
         <span className={health?.live_guard === 'SALT OKUNUR BAĞLI' ? 'ok' : 'locked'}><LockKeyhole/>{health?.live_guard || 'CANLI API BEKLİYOR'}</span>
       </div>
       <div className="v26HeaderActions">
-        <button className="v26MasterTradeButton" onClick={() => navigate('master-trade')}><ShieldCheck/><span><b>MASTER TRADE</b><small>PREMIUM</small></span></button>
+        <button className="v26MasterTradeButton" onClick={() => navigate('master-trade')}><ShieldCheck/><span><b>MASTER TRADE</b></span></button>
         <button className="v26SubscriptionBadge" onClick={() => navigate('billing')}><Sparkles/> PLANS &amp; BILLING</button>
         <button className="v26Refresh" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'YENİLENİYOR' : 'YENİLE'}</button>
         <button className="mobileMenuButton" type="button" aria-label={mobileMenuOpen ? 'Menüyü kapat' : 'Menüyü aç'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? <X/> : <Menu/>}</button>
