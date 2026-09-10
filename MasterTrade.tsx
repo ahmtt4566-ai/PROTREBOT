@@ -165,7 +165,7 @@ const fmtNum = (value: number | undefined, decimals = 2) =>
 const fmtCompact = (value: number | undefined) =>
   value === undefined ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
 
-export default function MasterTrade() {
+export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [history, setHistory] = useState<TradeHistoryRow[]>(() => {
     if (typeof window === 'undefined') return seedHistory
     const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -270,6 +270,9 @@ export default function MasterTrade() {
             <span className="masterTradeEyebrow">MASTER TRADE V2</span>
             <h2>Professional execution cockpit</h2>
           </div>
+          {onBack && (
+            <button type="button" className="masterTradeBackButton" onClick={onBack}>← BACK TO DASHBOARD</button>
+          )}
           <div className="masterTradeStatusRow">
             <span className="statusPill online"><Activity /> CONNECTED</span>
             <span className="statusPill demo"><Wallet /> DEMO</span>

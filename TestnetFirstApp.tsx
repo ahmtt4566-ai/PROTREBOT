@@ -11,7 +11,7 @@ const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
 const MasterTrade = lazy(() => import('./MasterTrade'))
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT
 
-type View = 'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'
+type View = 'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'|'master-trade'
 type Market = {symbol:string;display:string;price:number;change:number;volume:number}
 type Candle = {time:number;open:number;high:number;low:number;close:number;volume:number}
 type Point = {time:number;value:number}
@@ -145,8 +145,9 @@ function TestnetMarketChart({symbol,interval,onAnalysis,onAnalysisProgress,showL
 }
 
 export default function TestnetFirstApp() {
-  const initialView = ():View => window.location.pathname === '/pricing' ? 'pricing' : window.location.pathname === '/billing' ? 'billing' : 'testnet'
+  const initialView = ():View => window.location.pathname === '/pricing' ? 'pricing' : window.location.pathname === '/billing' ? 'billing' : window.location.pathname === '/master-trade' ? 'master-trade' : 'testnet'
   const [view,setView] = useState<View>(initialView)
+  const [masterTradeAccess,setMasterTradeAccess] = useState<'loading'|'granted'|'locked'|'unauthenticated'>('loading')
   const [markets,setMarkets] = useState<Market[]>([])
   const [symbol,setSymbol] = useState('BTCUSDT')
   const [marketQuery,setMarketQuery] = useState('')
@@ -171,8 +172,11 @@ export default function TestnetFirstApp() {
   const navigate = (target:View) => {
     setView(target)
     setMobileMenuOpen(false)
-    if (target === 'pricing' || target === 'billing') window.history.pushState({},'',`/${target}`)
-    else if (window.location.pathname === '/pricing' || window.location.pathname === '/billing') window.history.pushState({},'', '/')
+    if (target === 'pricing' || target === 'billing' || target === 'master-trade') {
+      window.history.pushState({},'', `/${target}`)
+    } else if (window.location.pathname === '/pricing' || window.location.pathname === '/billing' || window.location.pathname === '/master-trade') {
+      window.history.pushState({},'', '/')
+    }
   }
 
   useEffect(() => {
@@ -182,6 +186,30 @@ export default function TestnetFirstApp() {
     window.addEventListener('popstate',onHistory)
     return () => { window.removeEventListener('protrebot-navigate',onNavigate);window.removeEventListener('popstate',onHistory) }
   },[])
+
+  useEffect(() => {
+    if (view !== 'master-trade') return
+    const token = userSessionToken()
+    if (!token) {
+      window.location.assign('/login')
+      return
+    }
+    let active = true
+    setMasterTradeAccess('loading')
+    const headers = new Headers({Authorization: `Bearer ${token}`})
+    fetch(`${API_BASE}/v22/profile`, { headers })
+      .then(async response => {
+        if (!response.ok) throw new Error('Unauthorized')
+        const payload = await response.json() as { subscription?: {plan?: string}; user?: { subscription?: {plan?: string} } }
+        const plan = String(payload.subscription?.plan || payload.user?.subscription?.plan || 'FREE').toUpperCase()
+        if (!active) return
+        setMasterTradeAccess(['PRO', 'ELITE'].includes(plan) ? 'granted' : 'locked')
+      })
+      .catch(() => {
+        if (active) setMasterTradeAccess('locked')
+      })
+    return () => { active = false }
+  }, [view])
 
   const refresh = async () => {
     setLoading(true)
@@ -306,6 +334,7 @@ export default function TestnetFirstApp() {
         <span className={health?.live_guard === 'SALT OKUNUR BAĞLI' ? 'ok' : 'locked'}><LockKeyhole/>{health?.live_guard || 'CANLI API BEKLİYOR'}</span>
       </div>
       <div className="v26HeaderActions">
+        <button className="v26MasterTradeButton" onClick={() => navigate('master-trade')}><ShieldCheck/> MASTER TRADE</button>
         <button className="v26SubscriptionBadge" onClick={() => navigate('billing')}><Sparkles/> PLANS &amp; BILLING</button>
         <button className="v26Refresh" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'YENİLENİYOR' : 'YENİLE'}</button>
         <button className="mobileMenuButton" type="button" aria-label={mobileMenuOpen ? 'Menüyü kapat' : 'Menüyü aç'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? <X/> : <Menu/>}</button>
@@ -347,19 +376,24 @@ export default function TestnetFirstApp() {
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Testnet merkezi hazırlanıyor…</div>}>
         <BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis} onAnalysisProgress={setAnalysisProgress}/>}/>
       </Suspense>
-      <div className="v26MasterTradeExposure" style={{marginTop:'1.2rem'}}>
-        <h3 style={{margin:'0 0 0.6rem',display:'flex',alignItems:'center',gap:'0.5rem'}}><ShieldCheck size={18}/> MASTER TRADE</h3>
-        <div style={{display:'flex',flexWrap:'wrap',gap:'0.75rem',padding:'0.85rem 1rem',border:'1px solid rgba(148,163,184,0.28)',background:'rgba(11,18,32,0.82)',borderRadius:'12px'}}>
-          <span style={{padding:'0.32rem 0.7rem',borderRadius:'999px',background:'rgba(16,185,129,0.12)',color:'#86efac',fontSize:'0.72rem',fontWeight:700}}>LIVE TRADING LOCKED</span>
-          <span style={{padding:'0.32rem 0.7rem',borderRadius:'999px',background:'rgba(59,130,246,0.12)',color:'#93c5fd',fontSize:'0.72rem',fontWeight:700}}>DEMO ONLY</span>
-          <span style={{padding:'0.32rem 0.7rem',borderRadius:'999px',background:'rgba(251,191,36,0.12)',color:'#fcd34d',fontSize:'0.72rem',fontWeight:700}}>Risk preview</span>
-        </div>
-      </div>
-      <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Master Trade hazırlanıyor…</div>}>
-        <MasterTrade />
-      </Suspense>
       <CoinAnalysisCenter interval={interval} onIntervalChange={setInterval} chart={(selectedSymbol,selectedInterval,showLevels,showEma) => <TestnetMarketChart symbol={selectedSymbol} interval={selectedInterval} showLevels={showLevels} showEma={showEma} onAnalysis={() => undefined}/>}/>
     </>}
+
+    {view === 'master-trade' && (
+      masterTradeAccess === 'loading' ? <div className="v26Loading"><RefreshCw className="spin"/>Master Trade erişim kontrol ediliyor…</div> :
+      masterTradeAccess === 'locked' ? <section className="premiumGatePanel" style={{margin:'1.5rem auto',maxWidth:'900px',padding:'2rem',background:'rgba(15,23,42,0.9)',border:'1px solid rgba(148,163,184,0.26)',borderRadius:'18px',boxShadow:'0 18px 45px rgba(15,23,42,0.35)'}}>
+        <div style={{display:'grid',gap:'0.75rem',justifyItems:'flex-start'}}>
+          <span style={{display:'inline-flex',alignItems:'center',gap:'0.5rem',padding:'0.35rem 0.8rem',borderRadius:'999px',border:'1px solid rgba(251,191,36,0.4)',background:'rgba(251,191,36,0.08)',color:'#fcd34d',fontWeight:700,fontSize:'0.72rem',letterSpacing:'0.12em'}}>PREMIUM</span>
+          <h3 style={{margin:0,fontSize:'2rem',lineHeight:1.1}}>MASTER TRADE</h3>
+          <p style={{margin:0,maxWidth:'620px',color:'#cbd5e1',fontSize:'1rem'}}>Professional trading workspace</p>
+          <p style={{margin:0,maxWidth:'620px',color:'#cbd5e1'}}>Premium members only.</p>
+          <button type="button" onClick={() => navigate('billing')} style={{marginTop:'0.5rem',padding:'0.9rem 1.4rem',border:'1px solid rgba(59,130,246,0.35)',background:'linear-gradient(135deg, rgba(59,130,246,0.14), rgba(14,165,233,0.22))',color:'#eff6ff',borderRadius:'12px',fontWeight:700,letterSpacing:'0.06em',cursor:'pointer'}}>UPGRADE TO PREMIUM</button>
+        </div>
+      </section> :
+      <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Master Trade hazırlanıyor…</div>}>
+        <MasterTrade onBack={() => navigate('testnet')} />
+      </Suspense>
+    )}
 
     {(view === 'pricing' || view === 'billing') && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Subscription workspace hazırlanıyor…</div>}><SubscriptionCenter mode={view} onNavigate={navigate}/></Suspense>}
 
