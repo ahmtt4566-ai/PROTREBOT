@@ -8,6 +8,7 @@ const BinanceDemo = lazy(() => import('./BinanceDemo'))
 const CommercialHub = lazy(() => import('./CommercialHub'))
 const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
 const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
+const MasterTrade = lazy(() => import('./MasterTrade'))
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT
 
 type View = 'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'
@@ -345,6 +346,17 @@ export default function TestnetFirstApp() {
       </section>
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Testnet merkezi hazırlanıyor…</div>}>
         <BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis} onAnalysisProgress={setAnalysisProgress}/>}/>
+      </Suspense>
+      <div className="v26MasterTradeExposure" style={{marginTop:'1.2rem'}}>
+        <h3 style={{margin:'0 0 0.6rem',display:'flex',alignItems:'center',gap:'0.5rem'}}><ShieldCheck size={18}/> MASTER TRADE</h3>
+        <div style={{display:'flex',flexWrap:'wrap',gap:'0.75rem',padding:'0.85rem 1rem',border:'1px solid rgba(148,163,184,0.28)',background:'rgba(11,18,32,0.82)',borderRadius:'12px'}}>
+          <span style={{padding:'0.32rem 0.7rem',borderRadius:'999px',background:'rgba(16,185,129,0.12)',color:'#86efac',fontSize:'0.72rem',fontWeight:700}}>LIVE TRADING LOCKED</span>
+          <span style={{padding:'0.32rem 0.7rem',borderRadius:'999px',background:'rgba(59,130,246,0.12)',color:'#93c5fd',fontSize:'0.72rem',fontWeight:700}}>DEMO ONLY</span>
+          <span style={{padding:'0.32rem 0.7rem',borderRadius:'999px',background:'rgba(251,191,36,0.12)',color:'#fcd34d',fontSize:'0.72rem',fontWeight:700}}>Risk preview</span>
+        </div>
+      </div>
+      <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Master Trade hazırlanıyor…</div>}>
+        <MasterTrade />
       </Suspense>
       <CoinAnalysisCenter interval={interval} onIntervalChange={setInterval} chart={(selectedSymbol,selectedInterval,showLevels,showEma) => <TestnetMarketChart symbol={selectedSymbol} interval={selectedInterval} showLevels={showLevels} showEma={showEma} onAnalysis={() => undefined}/>}/>
     </>}
