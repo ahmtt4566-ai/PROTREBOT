@@ -324,7 +324,7 @@ export default function TestnetFirstApp() {
     return () => window.removeEventListener('scroll',onScroll)
   },[])
 
-  return <main className="v26App">
+  return <main className={`v26App ${view === 'master-trade' ? 'masterTradeRoute' : ''}`}>
     <header className={`v26Header ${headerHidden ? 'v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
       <div className="v26Brand"><span>X</span><div><b>PROTREBOT ELITE X</b><small>V27 · CLOUD OPERATIONS / TESTNET-FIRST</small></div></div>
       <div className="v26HeaderSignals">
@@ -334,7 +334,7 @@ export default function TestnetFirstApp() {
         <span className={health?.live_guard === 'SALT OKUNUR BAĞLI' ? 'ok' : 'locked'}><LockKeyhole/>{health?.live_guard || 'CANLI API BEKLİYOR'}</span>
       </div>
       <div className="v26HeaderActions">
-        <button className="v26MasterTradeButton" onClick={() => navigate('master-trade')}><ShieldCheck/> MASTER TRADE</button>
+        <button className="v26MasterTradeButton" onClick={() => navigate('master-trade')}><ShieldCheck/><span><b>MASTER TRADE</b><small>PREMIUM</small></span></button>
         <button className="v26SubscriptionBadge" onClick={() => navigate('billing')}><Sparkles/> PLANS &amp; BILLING</button>
         <button className="v26Refresh" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'YENİLENİYOR' : 'YENİLE'}</button>
         <button className="mobileMenuButton" type="button" aria-label={mobileMenuOpen ? 'Menüyü kapat' : 'Menüyü aç'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? <X/> : <Menu/>}</button>

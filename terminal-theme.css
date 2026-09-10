@@ -1233,6 +1233,98 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 .demoEventPanel article, .executionEvents article, .v27Events article { border-left: 2px solid var(--info); padding-left: 9px; }
 .demoEventPanel article i, .executionEvents article i, .v27Events article i { background: var(--info); }
 .demoEventPanel article:nth-child(3n+1), .executionEvents article:nth-child(3n+1), .v27Events article:nth-child(3n+1) { border-left-color: var(--success); }
+
+.v26MasterTradeButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid rgba(212, 168, 79, 0.72);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(212, 168, 79, 0.2), rgba(126, 88, 27, 0.42));
+  box-shadow: 0 5px 18px rgba(122, 82, 22, 0.2), inset 0 1px 0 rgba(255, 241, 190, 0.16);
+  color: #f5d98b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: left;
+  transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+
+.v26MasterTradeButton svg {
+  width: 17px;
+  height: 17px;
+  color: #f6d98a;
+  filter: drop-shadow(0 0 4px rgba(245, 198, 93, 0.28));
+  flex: 0 0 auto;
+}
+
+.v26MasterTradeButton span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.v26MasterTradeButton b,
+.v26MasterTradeButton small { display: block; white-space: nowrap; }
+.v26MasterTradeButton small { color: rgba(255, 231, 161, 0.72); font-size: 8px; letter-spacing: 0.16em; }
+.v26MasterTradeButton:hover {
+  border-color: #f3cd74;
+  background: linear-gradient(135deg, rgba(226, 184, 91, 0.28), rgba(145, 100, 31, 0.5));
+  box-shadow: 0 8px 24px rgba(155, 106, 27, 0.3), 0 0 14px rgba(212, 168, 79, 0.14), inset 0 1px 0 rgba(255, 247, 210, 0.22);
+  transform: translateY(-1px);
+}
+.v26MasterTradeButton:active { transform: translateY(0); }
+
+.masterTradeRoute {
+  min-height: 100vh;
+  width: 100%;
+  padding: 0;
+  background: #060b10;
+}
+
+.masterTradeRoute > .v26Header,
+.masterTradeRoute > .v26Nav,
+.masterTradeRoute > .v26ModeBar,
+.masterTradeRoute > .mobileMenuBackdrop { display: none; }
+
+.masterTradeRoute .masterTradePage {
+  min-height: 100vh;
+  width: 100%;
+  background: radial-gradient(circle at 50% 0%, rgba(212, 168, 79, 0.08), transparent 34%), #060b10;
+}
+
+.masterTradeRoute .masterTradeShell {
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  padding: 24px clamp(14px, 2.6vw, 42px) 32px;
+}
+
+.masterTradeRoute .masterTradeTopbar {
+  position: relative;
+  border-color: rgba(212, 168, 79, 0.3);
+  box-shadow: 0 26px 60px rgba(2, 6, 12, 0.42), 0 1px 0 rgba(212, 168, 79, 0.12);
+}
+
+.masterTradeRoute .masterTradeTopbar::after {
+  position: absolute;
+  right: 20px;
+  bottom: -1px;
+  left: 20px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(212, 168, 79, 0.68), transparent);
+  content: '';
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v26MasterTradeButton { transition: none; }
+  .v26MasterTradeButton:hover,
+  .v26MasterTradeButton:active { transform: none; }
+}
 .demoEventPanel article:nth-child(3n+1) i, .executionEvents article:nth-child(3n+1) i { background: var(--success); }
 .demoEventPanel article:nth-child(3n+2), .executionEvents article:nth-child(3n+2) { border-left-color: var(--warning); }
 .demoEventPanel article:nth-child(3n+2) i { background: var(--warning); }

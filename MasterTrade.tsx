@@ -291,7 +291,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const performanceTrend = [35, 40, 38, 48, 52, 46, 57, 64, 60, 68, 72, 76]
 
   return (
-    <section className="masterTrade">
+    <section className="masterTradePage masterTrade">
       <div className="masterTradeShell">
         <header className="masterTradeTopbar">
           <div className="masterTradeTopbarLeft">
