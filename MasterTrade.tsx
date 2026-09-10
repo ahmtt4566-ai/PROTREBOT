@@ -1026,20 +1026,21 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                   </div>
                 ))}
 
-                {demoConfirmationOpen && <div className="masterTradeConfirmationBackdrop" role="presentation" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>
-                  <section className="masterTradeConfirmation" role="dialog" aria-modal="true" aria-labelledby="master-trade-confirmation-title" onClick={event => event.stopPropagation()}>
-                    <h2 id="master-trade-confirmation-title">Demo order onayı</h2>
-                    <p>Bu demo order'ı gerçekten göndermek istiyor musun?</p>
-                    <label><input type="checkbox" checked={demoConfirmationChecked} onChange={event => setDemoConfirmationChecked(event.target.checked)} /><span>Bu işlemi onaylıyorum</span></label>
-                    {demoOrderError && <div role="alert">{demoOrderError}</div>}
-                    <div><button type="button" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>İPTAL</button><button type="button" disabled={!demoConfirmationChecked || demoOrderBusy} onClick={() => void submitDemoOrder()}>{demoOrderBusy ? 'SUBMITTING DEMO ORDER...' : 'ONAYLA VE GÖNDER'}</button></div>
-                  </section>
-                </div>}
               </div>
             </div>
           </aside>
         </div>
       )}
+
+      {demoConfirmationOpen && <div className="masterTradeConfirmationBackdrop" role="presentation" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>
+        <section className="masterTradeConfirmation" role="dialog" aria-modal="true" aria-labelledby="master-trade-confirmation-title" onClick={event => event.stopPropagation()}>
+          <h2 id="master-trade-confirmation-title">Demo order onayı</h2>
+          <p>Bu demo order'ı gerçekten göndermek istiyor musun?</p>
+          <label><input type="checkbox" checked={demoConfirmationChecked} onChange={event => setDemoConfirmationChecked(event.target.checked)} /><span>Bu işlemi onaylıyorum</span></label>
+          {demoOrderError && <div role="alert">{demoOrderError}</div>}
+          <div><button type="button" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>İPTAL</button><button type="button" disabled={!demoConfirmationChecked || demoOrderBusy} onClick={() => void submitDemoOrder()}>{demoOrderBusy ? 'SUBMITTING DEMO ORDER...' : 'ONAYLA VE GÖNDER'}</button></div>
+        </section>
+      </div>}
     </section>
   )
 }
