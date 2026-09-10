@@ -59,7 +59,8 @@ type OrderRow = {
   created: string
 }
 
-const STORAGE_KEY = 'protrebot-master-trade-history-v1'
+const STORAGE_KEY = 'protrebot-master-trade-history-v2'
+const SNAPSHOT_KEY = 'protrebot-master-trade-demo-snapshot-v2'
 
 const seedHistory: TradeHistoryRow[] = [
   {
@@ -176,6 +177,16 @@ export default function MasterTrade() {
       return seedHistory
     }
   })
+  const [snapshotState] = useState(() => {
+    if (typeof window === 'undefined') return { mode: 'DEMO', account: 'Demo account snapshot ready', lastUpdated: new Date().toISOString(), recovery: 'Local cache restored' }
+    const raw = window.localStorage.getItem(SNAPSHOT_KEY)
+    if (!raw) return { mode: 'DEMO', account: 'Demo account snapshot ready', lastUpdated: new Date().toISOString(), recovery: 'Local cache restored' }
+    try {
+      return JSON.parse(raw) as { mode: string; account: string; lastUpdated: string; recovery: string }
+    } catch {
+      return { mode: 'DEMO', account: 'Demo account snapshot ready', lastUpdated: new Date().toISOString(), recovery: 'Local cache restored' }
+    }
+  })
   const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(seedHistory[0])
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 7, margin: 1000, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
   const [automation] = useState([
@@ -187,6 +198,12 @@ export default function MasterTrade() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(history))
+      window.localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({
+        mode: 'DEMO',
+        account: 'Demo account snapshot ready',
+        lastUpdated: new Date().toISOString(),
+        recovery: 'Recovered from local persistent cache',
+      }))
     }
   }, [history])
 
@@ -250,7 +267,7 @@ export default function MasterTrade() {
       <div className="masterTradeShell">
         <header className="masterTradeTopbar">
           <div>
-            <span className="masterTradeEyebrow">MASTER TRADE</span>
+            <span className="masterTradeEyebrow">MASTER TRADE V2</span>
             <h2>Professional execution cockpit</h2>
           </div>
           <div className="masterTradeStatusRow">
@@ -411,7 +428,7 @@ export default function MasterTrade() {
 
           <section className="masterTradePanel historyPanel">
             <div className="panelTitleRow">
-              <span>TRADE HISTORY</span>
+              <span>PERSISTENT HISTORY · TRADE HISTORY</span>
             </div>
             <div className="historyRows">
               {history.map((trade) => (
@@ -427,7 +444,10 @@ export default function MasterTrade() {
 
           <section className="masterTradePanel emergencyPanel">
             <div className="panelTitleRow">
-              <span>EMERGENCY</span>
+              <span>DEMO ACCOUNT SNAPSHOT / RECOVERY</span>
+            </div>
+            <div className="securityInfo">
+              <ShieldCheck /> <span>{snapshotState.account} · {snapshotState.recovery}</span>
             </div>
             <div className="emergencyActions">
               <button type="button" className="dangerBtn" disabled>STOP AUTO TRADE</button>
