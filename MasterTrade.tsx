@@ -408,15 +408,28 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       if (!response.ok) throw new Error('Analysis unavailable')
       const nextAnalysis = await response.json() as Analysis
       const nextMtf = await fetchMtfAnalyses(draft.market)
+      const directionText = String(nextAnalysis.normalized_signal || nextAnalysis.direction || '').toUpperCase()
+      const nextSide: TradeSide | null = /SHORT|SELL/.test(directionText) ? 'SHORT' : /LONG|BUY/.test(directionText) ? 'LONG' : null
+      const entry = nextAnalysis.entry
+      const stopLoss = nextAnalysis.stop_loss
+      const targets = [nextAnalysis.tp1, nextAnalysis.tp2, nextAnalysis.tp3]
+      if (!nextSide || ![entry, stopLoss, ...targets].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+        throw new Error('Güncel analizde geçerli yön, Entry, Stop Loss ve TP seviyeleri bulunamadı.')
+      }
+      const orderedTargets = [...targets].sort((left, right) => nextSide === 'LONG' ? left - right : right - left)
+      const levelsValid = nextSide === 'LONG'
+        ? stopLoss < entry && entry < orderedTargets[0] && orderedTargets[0] < orderedTargets[1] && orderedTargets[1] < orderedTargets[2]
+        : orderedTargets[2] < orderedTargets[1] && orderedTargets[1] < orderedTargets[0] && orderedTargets[0] < entry && entry < stopLoss
+      if (!levelsValid) throw new Error(nextSide === 'LONG' ? 'LONG analiz seviyeleri SL < Entry < TP1 < TP2 < TP3 sırasını sağlamıyor.' : 'SHORT analiz seviyeleri TP3 < TP2 < TP1 < Entry < SL sırasını sağlamıyor.')
       setSnapshot(current => current ? { ...current, analysis: nextAnalysis, mtf: nextMtf, marketUpdatedAt: new Date().toISOString(), marketError: '' } : current)
       setDraft(current => ({
         ...current,
-        side: /SHORT/i.test(nextAnalysis.normalized_signal || nextAnalysis.direction || '') ? 'SHORT' : /LONG/i.test(nextAnalysis.normalized_signal || nextAnalysis.direction || '') ? 'LONG' : current.side,
-        entry: typeof nextAnalysis.entry === 'number' ? nextAnalysis.entry : current.entry,
-        stopLoss: typeof nextAnalysis.stop_loss === 'number' ? nextAnalysis.stop_loss : current.stopLoss,
-        tp1: typeof nextAnalysis.tp1 === 'number' ? nextAnalysis.tp1 : current.tp1,
-        tp2: typeof nextAnalysis.tp2 === 'number' ? nextAnalysis.tp2 : current.tp2,
-        tp3: typeof nextAnalysis.tp3 === 'number' ? nextAnalysis.tp3 : current.tp3,
+        side: nextSide,
+        entry,
+        stopLoss,
+        tp1: orderedTargets[0],
+        tp2: orderedTargets[1],
+        tp3: orderedTargets[2],
       }))
       setAnalysisSyncedAt(new Date().toLocaleTimeString('en-GB'))
     } catch {
