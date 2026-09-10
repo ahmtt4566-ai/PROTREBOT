@@ -37,7 +37,7 @@ type MarketRow = { symbol: string; display: string; price: number; change: numbe
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number }
 type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; adx?: number; atr?: number; support?: number; resistance?: number; radar?: { trap_score?: number; breakout_quality?: number; entry_timing?: string }; volume_ratio?: number; normalized_signal?: string }
 type AccountPlan = { symbol?: string; stop_loss?: string; targets?: string[]; margin_usdt?: number; created_at?: string }
-type AccountPosition = { symbol: string; direction?: TradeSide; quantity?: number; entry_price?: number; mark_price?: number; unrealized_pnl?: number; leverage?: number | null; stop_loss?: number; tp1?: number; age?: string }
+type AccountPosition = { symbol: string; position_side?: 'BOTH' | 'LONG' | 'SHORT'; direction?: TradeSide; quantity?: number; entry_price?: number; mark_price?: number; liquidation_price?: number; unrealized_pnl?: number; leverage?: number | null; margin_type?: string | null; stop_loss?: number; tp1?: number; age?: string }
 type AccountOrder = { symbol?: string; side?: string; type?: string; price?: number; quantity?: number; status?: string; reduce_only?: boolean }
 type AccountSnapshot = { wallet_balance?: number; available_balance?: number; margin_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; plans?: AccountPlan[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number; max_margin_usdt?: number } }
 type PerformanceSnapshot = { total_trades: number; wins: number; losses: number; win_rate: number; total_profit: number; total_loss: number; net_profit: number; average_trade: number; best_trade: number; worst_trade: number; profit_factor: number | null; average_win: number | null; average_loss: number | null; losing_streak: number; max_drawdown: number; history_quality: string }
@@ -97,6 +97,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [marketError, setMarketError] = useState('')
   const [interval, setInterval] = useState('15m')
   const [snapshot, setSnapshot] = useState<MasterTradeSnapshot | null>(null)
+  const [accountRefreshNonce, setAccountRefreshNonce] = useState(0)
   const accountRef = useRef<AccountSnapshot | null>(null)
   const timelineKeysRef = useRef<string[]>([])
   const [decisionTimeline, setDecisionTimeline] = useState<Array<{ time: string; message: string }>>([])
@@ -114,6 +115,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [demoConfirmationChecked, setDemoConfirmationChecked] = useState(false)
   const [demoOrderBusy, setDemoOrderBusy] = useState(false)
   const [demoOrderError, setDemoOrderError] = useState('')
+  const [positionAction, setPositionAction] = useState<{ mode: 'DETAILS' | 'REDUCE' | 'CLOSE'; position: AccountPosition } | null>(null)
+  const [positionActionBusy, setPositionActionBusy] = useState(false)
+  const [positionActionError, setPositionActionError] = useState('')
+  const [reduceQuantity, setReduceQuantity] = useState('')
   const [liveVault, setLiveVault] = useState<LiveVaultStatus | null>(null)
   const [liveCredentials, setLiveCredentials] = useState({ apiKey: '', secretKey: '' })
   const [liveBusy, setLiveBusy] = useState('')
@@ -232,7 +237,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     void refreshAccount()
     const timer = window.setInterval(() => void refreshAccount(), 5000)
     return () => { active = false; controller.abort(); window.clearInterval(timer) }
-  }, [])
+  }, [accountRefreshNonce])
 
   const riskPreview = useMemo(() => {
     const entry = Number(draft.entry)
@@ -314,6 +319,43 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       setDemoOrderError(error instanceof Error ? error.message : 'Demo order gönderilemedi.')
     } finally {
       setDemoOrderBusy(false)
+    }
+  }
+
+  const submitPositionAction = async () => {
+    if (!positionAction || positionAction.mode === 'DETAILS' || positionActionBusy) return
+    const quantity = positionAction.position.quantity || 0
+    const requestedQuantity = positionAction.mode === 'CLOSE' ? quantity : Number(reduceQuantity)
+    if (!(requestedQuantity > 0) || requestedQuantity > quantity) {
+      setPositionActionError('Miktar 0’dan büyük ve mevcut pozisyon miktarını aşmamalı.')
+      return
+    }
+    setPositionActionBusy(true)
+    setPositionActionError('')
+    try {
+      const token = userSessionToken()
+      const headers = new Headers({ 'Content-Type': 'application/json' })
+      if (token) headers.set('Authorization', `Bearer ${token}`)
+      const isClose = positionAction.mode === 'CLOSE'
+      const response = await fetch(`${API_BASE}/binance-demo/position/${isClose ? 'close' : 'reduce'}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(isClose
+          ? { symbol: positionAction.position.symbol, position_side: positionAction.position.position_side || 'BOTH', confirmation: 'DEMO KAPAT' }
+          : { symbol: positionAction.position.symbol, position_side: positionAction.position.position_side || 'BOTH', quantity: requestedQuantity, confirmation: 'DEMO AZALT' }),
+      })
+      const payload = await response.json().catch(() => null) as { detail?: unknown; message?: string } | null
+      if (!response.ok) {
+        const detail = typeof payload?.detail === 'string' ? payload.detail : payload?.message
+        throw new Error(detail || `Pozisyon işlemi başarısız (HTTP ${response.status}).`)
+      }
+      setPositionAction(null)
+      setReduceQuantity('')
+      setAccountRefreshNonce(value => value + 1)
+    } catch (error) {
+      setPositionActionError(error instanceof Error ? error.message : 'Pozisyon işlemi başarısız.')
+    } finally {
+      setPositionActionBusy(false)
     }
   }
 
@@ -787,6 +829,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                     <th>SL</th>
                     <th>TP</th>
                     <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -808,9 +851,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td>${fmtNum(stopLoss)}</td>
                       <td>${fmtNum(target)}</td>
                       <td><span className="statusBadge open">OPEN</span></td>
+                      <td><div className="positionActions"><button type="button" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'DETAILS', position }) }}>DETAILS</button><button type="button" onClick={() => { setPositionActionError(''); setReduceQuantity(String((position.quantity || 0) * 0.25)); setPositionAction({ mode: 'REDUCE', position }) }}>REDUCE</button><button type="button" className="dangerAction" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position }) }}>CLOSE</button></div></td>
                     </tr>
                     )
-                  }) : <tr><td colSpan={12} className="emptyState">{snapshot?.accountError || 'NO OPEN POSITIONS'}</td></tr>}
+                  }) : <tr><td colSpan={13} className="emptyState">{snapshot?.accountError || 'NO OPEN POSITIONS'}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -980,6 +1024,35 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           </section>
         </div>
       </div>
+
+      {positionAction && (
+        <div className="positionActionBackdrop" role="presentation" onClick={() => { if (!positionActionBusy) { setPositionAction(null); setPositionActionError('') } }}>
+          <section className="positionActionModal" role="dialog" aria-modal="true" onClick={event => event.stopPropagation()}>
+            <header><div><span>DEMO / TESTNET</span><h2>{positionAction.mode === 'DETAILS' ? 'POSITION DETAILS' : positionAction.mode === 'REDUCE' ? 'REDUCE ONLY' : 'CLOSE DEMO POSITION'}</h2></div><button type="button" onClick={() => setPositionAction(null)} disabled={positionActionBusy}>CLOSE</button></header>
+            <div className="positionActionGrid">
+              <div><small>Symbol</small><b>{positionAction.position.symbol}</b></div>
+              <div><small>Direction</small><b>{positionAction.position.direction || '--'}</b></div>
+              <div><small>Status</small><b>OPEN</b></div>
+              <div><small>Quantity</small><b>{fmtNum(positionAction.position.quantity, 6)}</b></div>
+              <div><small>Entry Price</small><b>${fmtNum(positionAction.position.entry_price)}</b></div>
+              <div><small>Mark Price</small><b>${fmtNum(positionAction.position.mark_price)}</b></div>
+              <div><small>Leverage</small><b>{positionAction.position.leverage ? `${positionAction.position.leverage}x` : '--'}</b></div>
+              <div><small>Margin</small><b>--</b></div>
+              <div><small>Liquidation</small><b>${fmtNum(positionAction.position.liquidation_price)}</b></div>
+              <div><small>Unrealized PnL</small><b className={(positionAction.position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{positionAction.position.unrealized_pnl === undefined ? '--' : `${positionAction.position.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(positionAction.position.unrealized_pnl)}`}</b></div>
+              <div><small>PnL %</small><b>--</b></div>
+              <div><small>Stop Loss</small><b>${fmtNum(positionAction.position.stop_loss)}</b></div>
+              <div><small>TP1</small><b>${fmtNum(positionAction.position.tp1)}</b></div>
+              <div><small>TP2</small><b>--</b></div>
+              <div><small>TP3</small><b>--</b></div>
+            </div>
+            {positionAction.mode === 'REDUCE' && <div className="reduceControls"><label>Quantity<input type="number" min="0" max={positionAction.position.quantity || undefined} step="any" value={reduceQuantity} onChange={event => setReduceQuantity(event.target.value)} /></label><div><button type="button" onClick={() => setReduceQuantity(String((positionAction.position.quantity || 0) * 0.25))}>25%</button><button type="button" onClick={() => setReduceQuantity(String((positionAction.position.quantity || 0) * 0.5))}>50%</button><button type="button" onClick={() => setReduceQuantity(String((positionAction.position.quantity || 0) * 0.75))}>75%</button><button type="button" onClick={() => setReduceQuantity(String(positionAction.position.quantity || 0))}>100%</button></div></div>}
+            {positionAction.mode !== 'DETAILS' && <p className="positionActionWarning">This action will modify the selected Demo/Testnet position using a reduce-only order.</p>}
+            {positionActionError && <div className="positionActionError" role="alert">{positionActionError}</div>}
+            {positionAction.mode !== 'DETAILS' && <footer><button type="button" onClick={() => { setPositionAction(null); setPositionActionError('') }} disabled={positionActionBusy}>CANCEL</button><button type="button" className="dangerAction" onClick={() => void submitPositionAction()} disabled={positionActionBusy}>{positionActionBusy ? positionAction.mode === 'CLOSE' ? 'CLOSING POSITION...' : 'REDUCING POSITION...' : positionAction.mode === 'CLOSE' ? 'CLOSE POSITION' : 'REDUCE ONLY'}</button></footer>}
+          </section>
+        </div>
+      )}
 
       {selectedTrade && (
         <div className="masterTradeDrawerBackdrop" onClick={() => setSelectedTrade(null)}>

@@ -28,6 +28,12 @@
 html, body, #root { width: 100%; min-width: 0; }
 html { background: var(--app-bg-deep); }
 body { margin: 0; background: var(--app-bg-deep); color: var(--text); font-family: "Segoe UI Variable", "Segoe UI", sans-serif; }
+body.site-copy-protected { user-select: none; -webkit-user-select: none; }
+body.site-copy-protected input,
+body.site-copy-protected textarea,
+body.site-copy-protected select,
+body.site-copy-protected option,
+body.site-copy-protected [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-3); color: var(--text); transition: border-color .16s ease, background-color .16s ease, color .16s ease, transform .16s ease; }
 button:disabled { cursor: not-allowed; opacity: .55; }
@@ -1669,6 +1675,29 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   animation: masterTradeBackdropIn 180ms ease both;
 }
 
+.positionActions { display: flex; flex-wrap: wrap; gap: 5px; min-width: 190px; }
+.positionActions button, .positionActionModal button { min-height: 30px; padding: 0 8px; border: 1px solid rgba(145, 180, 169, .28); border-radius: 7px; background: rgba(25, 38, 39, .8); color: #d9eee6; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.positionActions button:hover:not(:disabled), .positionActionModal button:hover:not(:disabled) { border-color: rgba(91, 226, 173, .5); background: rgba(30, 86, 68, .8); }
+.positionActions .dangerAction, .positionActionModal .dangerAction { border-color: rgba(255, 125, 112, .5); background: rgba(113, 35, 31, .65); color: #ffe1dc; }
+.positionActionBackdrop { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px; background: rgba(2, 7, 9, .78); backdrop-filter: blur(8px); }
+.positionActionModal { width: min(620px, 100%); max-height: min(90vh, 760px); overflow: auto; padding: 22px; border: 1px solid rgba(91, 226, 173, .34); border-radius: 14px; background: #101a1c; box-shadow: 0 24px 70px rgba(0, 0, 0, .42); color: #effff8; }
+.positionActionModal header, .positionActionModal footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.positionActionModal header { margin-bottom: 18px; }
+.positionActionModal header span { color: #8fa9a0; font-size: 10px; letter-spacing: .12em; }
+.positionActionModal h2 { margin: 4px 0 0; font-size: 19px; }
+.positionActionGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.positionActionGrid > div { min-width: 0; padding: 10px; border: 1px solid rgba(145, 180, 169, .16); border-radius: 8px; background: rgba(25, 38, 39, .58); }
+.positionActionGrid small, .positionActionGrid b { display: block; }
+.positionActionGrid small { color: #8fa9a0; font-size: 10px; }
+.positionActionGrid b { margin-top: 4px; overflow-wrap: anywhere; font-size: 12px; }
+.reduceControls { display: grid; gap: 8px; margin-top: 14px; }
+.reduceControls label { display: grid; gap: 5px; color: #a4bcb4; font-size: 11px; }
+.reduceControls input { min-height: 36px; width: 100%; padding: 0 9px; border: 1px solid rgba(145, 180, 169, .24); border-radius: 7px; background: rgba(4, 10, 12, .72); color: #f0fff8; }
+.reduceControls > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.positionActionWarning { margin: 16px 0 0; color: #f4c77a; font-size: 11px; line-height: 1.45; }
+.positionActionError { margin-top: 12px; color: #ff9d91; font-size: 12px; line-height: 1.4; }
+.positionActionModal footer { justify-content: flex-end; margin-top: 20px; }
+
 .masterTradeDrawer {
   width: min(620px, calc(100vw - 24px));
   max-height: min(80vh, 760px);
@@ -1815,6 +1844,9 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .chartEmpty { min-height: 250px; }
   .masterTradeDrawerBackdrop { align-items: end; }
   .masterTradeDrawer { width: 100%; max-height: 88vh; border-radius: 18px 18px 0 0; }
+  .positionActionBackdrop { align-items: end; padding: 0; }
+  .positionActionModal { width: 100%; max-height: 92vh; border-radius: 18px 18px 0 0; padding: 18px; }
+  .positionActionGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .v26HeaderSignals .locked i { background: var(--warning); }

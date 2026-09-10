@@ -183,6 +183,13 @@ class ClosePositionRequest(BaseModel):
     position_side: Literal["BOTH", "LONG", "SHORT"] = "BOTH"
 
 
+class ReducePositionRequest(BaseModel):
+    symbol: str = Field(min_length=5, max_length=20)
+    quantity: float = Field(gt=0)
+    confirmation: str = Field(min_length=1, max_length=32)
+    position_side: Literal["BOTH", "LONG", "SHORT"] = "BOTH"
+
+
 class EmergencyRequest(BaseModel):
     confirmation: str = Field(min_length=1, max_length=48)
     close_positions: bool = True
@@ -1111,6 +1118,38 @@ async def close_symbol_position(client: BinanceDemoClient, symbol: str, position
     return await client.signed("POST", "/fapi/v1/order", params)
 
 
+async def reduce_symbol_position(client: BinanceDemoClient, symbol: str, quantity: Decimal, position_side: str = "BOTH") -> dict[str, Any] | None:
+    rows = await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol})
+    normalized_side = str(position_side or "BOTH").upper()
+    row = next((item for item in response_rows(rows)
+                if str(item.get("positionSide") or "BOTH").upper() == normalized_side
+                and position_amount(item.get("positionAmt")) != 0), None)
+    if row is None:
+        return None
+    amount = abs(position_amount(row.get("positionAmt")))
+    rules = await symbol_rules(client, symbol)
+    rounded = floor_step(quantity, rules["step"])
+    if rounded <= 0 or rounded > amount:
+        raise BinanceDemoError("Reduce-only miktarı mevcut pozisyon miktarı içinde olmalı.", http_status=422)
+    mark_price = Decimal(str(row.get("markPrice") or "0"))
+    if rounded < rules["min_qty"] or rounded * mark_price < rules["min_notional"]:
+        raise BinanceDemoError("Reduce-only miktarı borsa minimum miktar/notional kurallarını sağlamıyor.", http_status=422)
+    raw_amount = position_amount(row.get("positionAmt"))
+    params = {
+        "symbol": symbol,
+        "side": "SELL" if raw_amount > 0 else "BUY",
+        "type": "MARKET",
+        "quantity": decimal_text(rounded),
+        "reduceOnly": "true",
+        "newClientOrderId": new_client_id("REDUCE"),
+        "newOrderRespType": "RESULT",
+    }
+    if normalized_side != "BOTH":
+        params["positionSide"] = normalized_side
+        params.pop("reduceOnly", None)
+    return await client.signed("POST", "/fapi/v1/order", params)
+
+
 def update_position_lifecycle(plan: dict[str, Any], amount: Decimal) -> None:
     """Keep the durable demo plan aligned with the exchange position amount."""
     remaining = abs(amount)
@@ -1788,6 +1827,21 @@ async def demo_close_position(request: Request, body: ClosePositionRequest) -> d
                 plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "tp3_status": "FILLED", "closed_at": utc_now()})
         add_event(state, "POZİSYON KAPATILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle kapatıldı.")
         persist_runtime(state)
+        return {"ok": True, "symbol": symbol, "order_id": result.get("orderId")}
+    except BinanceDemoError as exc:
+        raise safe_exchange_error(exc) from exc
+
+
+@router.post("/position/reduce")
+async def demo_reduce_position(request: Request, body: ReducePositionRequest) -> dict[str, Any]:
+    if body.confirmation.strip().upper() != "DEMO AZALT":
+        raise HTTPException(422, "Pozisyonu azaltmak için DEMO AZALT yazın.")
+    try:
+        symbol = normalize_symbol(body.symbol)
+        result = await reduce_symbol_position(client_for(request), symbol, Decimal(str(body.quantity)), body.position_side)
+        if result is None:
+            raise BinanceDemoError("Bu paritede açık Demo pozisyonu yok.", http_status=404)
+        add_event(state_for(request), "POZİSYON AZALTILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle azaltıldı.")
         return {"ok": True, "symbol": symbol, "order_id": result.get("orderId")}
     except BinanceDemoError as exc:
         raise safe_exchange_error(exc) from exc
