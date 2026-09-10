@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, KeyRound, Lock, Save, Send, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
-import { API_BASE } from './api'
+import { API_BASE, userSessionToken } from './api'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 
 type TradeSide = 'LONG' | 'SHORT'
@@ -322,9 +322,17 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     setDemoOrderBusy(true)
     setDemoOrderError('')
     try {
-      const response = await fetch(`${API_BASE}/binance-demo/order`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(demoOrderPayload()) })
-      const payload = await response.json().catch(() => null) as { detail?: unknown } | null
-      if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Demo order gönderilemedi.')
+      const token = userSessionToken()
+      const headers = new Headers({ 'Content-Type': 'application/json' })
+      if (token) headers.set('Authorization', `Bearer ${token}`)
+      const response = await fetch(`${API_BASE}/binance-demo/order`, { method: 'POST', headers, body: JSON.stringify(demoOrderPayload()) })
+      const payload = await response.json().catch(() => null) as { detail?: unknown; message?: string } | null
+      if (!response.ok) {
+        const detail = Array.isArray(payload?.detail)
+          ? payload.detail.map(item => typeof item === 'object' && item && 'msg' in item ? String(item.msg) : String(item)).join(' · ')
+          : typeof payload?.detail === 'string' ? payload.detail : payload?.message
+        throw new Error(detail || `Demo order gönderilemedi (HTTP ${response.status}).`)
+      }
       addTradeRecord()
       setDemoConfirmationOpen(false)
       setDemoConfirmationChecked(false)
@@ -1024,7 +1032,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                     <p>Bu demo order'ı gerçekten göndermek istiyor musun?</p>
                     <label><input type="checkbox" checked={demoConfirmationChecked} onChange={event => setDemoConfirmationChecked(event.target.checked)} /><span>Bu işlemi onaylıyorum</span></label>
                     {demoOrderError && <div role="alert">{demoOrderError}</div>}
-                    <div><button type="button" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>İPTAL</button><button type="button" disabled={!demoConfirmationChecked || demoOrderBusy} onClick={() => void submitDemoOrder()}>{demoOrderBusy ? 'GÖNDERİLİYOR…' : 'ONAYLA VE GÖNDER'}</button></div>
+                    <div><button type="button" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>İPTAL</button><button type="button" disabled={!demoConfirmationChecked || demoOrderBusy} onClick={() => void submitDemoOrder()}>{demoOrderBusy ? 'SUBMITTING DEMO ORDER...' : 'ONAYLA VE GÖNDER'}</button></div>
                   </section>
                 </div>}
               </div>
