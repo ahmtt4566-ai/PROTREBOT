@@ -279,11 +279,11 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     const entry = Number(draft.entry)
     const stop = Number(draft.stopLoss)
     const distance = Math.max(1, Math.abs(entry - stop))
-    const riskUsd = entry > 0 ? (Math.max(0, draft.margin) * (Math.abs(entry - stop) / entry)) * 0.7 : 0
+    const riskUsd = entry > 0 && stop > 0 ? (Math.max(0, draft.margin) * (Math.abs(entry - stop) / entry)) * 0.7 : 0
     const tp = Number(draft.tp1)
     const reward = Math.abs(tp - entry) * Number(draft.quantity)
-    const rr = entry > 0 && Number(draft.quantity) > 0 ? reward / (distance * Number(draft.quantity)) : 0
-    const riskPercent = entry > 0 ? (Math.abs(entry - stop) / entry) * 100 : 0
+    const rr = entry > 0 && stop > 0 && tp > 0 && Number(draft.quantity) > 0 ? reward / (distance * Number(draft.quantity)) : 0
+    const riskPercent = entry > 0 && stop > 0 ? (Math.abs(entry - stop) / entry) * 100 : 0
     return { riskUsd, reward, rr, riskPercent }
   }, [draft])
 
