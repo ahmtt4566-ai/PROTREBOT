@@ -1029,27 +1029,35 @@ async def web_access_check():
 
 
 @app.get("/api/markets")
-async def markets(limit: int = Query(100, ge=1, le=200)):
+async def markets(limit: int = Query(500, ge=1, le=500)):
     try:
-        response = await market_data_request(app, "/fapi/v1/ticker/24hr")
-        response.raise_for_status()
+        exchange_response, ticker_response = await asyncio.gather(
+            market_data_request(app, "/fapi/v1/exchangeInfo"),
+            market_data_request(app, "/fapi/v1/ticker/24hr"),
+        )
+        exchange_response.raise_for_status()
+        ticker_response.raise_for_status()
     except httpx.HTTPError as exc:
         raise market_data_http_exception("Binance Futures piyasa özeti alınamadı", exc) from exc
-    blocked = {"USDC", "FDUSD", "TUSD", "USDP", "DAI", "BUSD", "USD1", "USDE", "USDS"}
+    tickers = {item.get("symbol", ""): item for item in ticker_response.json()}
     result = []
-    for item in response.json():
-        symbol = item.get("symbol", "")
-        if not symbol.endswith("USDT"):
+    for contract in exchange_response.json().get("symbols", []):
+        symbol = contract.get("symbol", "")
+        if contract.get("status") != "TRADING" or contract.get("contractType") != "PERPETUAL" or contract.get("quoteAsset") != "USDT":
             continue
-        base = symbol[:-4]
-        if base in blocked or any(word in base for word in ("UP", "DOWN", "BULL", "BEAR")):
+        ticker = tickers.get(symbol)
+        if not ticker:
             continue
         result.append({
             "symbol": symbol,
-            "display": f"{base}/USDT",
-            "price": float(item["lastPrice"]),
-            "change": float(item["priceChangePercent"]),
-            "volume": float(item["quoteVolume"]),
+            "display": f"{contract.get('baseAsset', symbol[:-4])}/USDT",
+            "price": float(ticker["lastPrice"]),
+            "change": float(ticker["priceChangePercent"]),
+            "volume": float(ticker["quoteVolume"]),
+            "status": contract["status"],
+            "contractType": contract["contractType"],
+            "quoteAsset": contract["quoteAsset"],
+            "filters": contract.get("filters", []),
         })
     result.sort(key=lambda market: market["volume"], reverse=True)
     return result[:limit]

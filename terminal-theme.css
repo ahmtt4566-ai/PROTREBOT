@@ -590,7 +590,21 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 .watchlistList {
   display: grid;
   gap: 8px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 3px;
 }
+
+.marketSearch { position: relative; display: grid; gap: 6px; margin-bottom: 10px; }
+.marketSearch span { color: var(--terminal-muted); font-size: 9px; font-weight: 800; letter-spacing: 0.1em; }
+.marketSearch input { width: 100%; min-height: 38px; padding: 8px 34px 8px 10px; border: 1px solid var(--terminal-line); border-radius: 10px; background: rgba(5, 12, 18, 0.9); color: var(--terminal-text); }
+.marketSearch input:focus { border-color: var(--terminal-line-strong); box-shadow: 0 0 0 3px rgba(212, 168, 79, 0.08); outline: none; }
+.marketSearch button { position: absolute; right: 7px; bottom: 5px; width: 26px; height: 26px; border: 0; background: transparent; color: var(--terminal-muted); font-size: 18px; line-height: 1; }
+.marketSearch button:disabled { opacity: .35; }
+.marketCount { min-width: 30px; padding: 5px 7px; border: 1px solid var(--terminal-line); border-radius: 8px; color: var(--terminal-muted); font-size: 9px; text-align: center; }
+.marketEmpty { display: grid; gap: 5px; min-height: 90px; place-items: center; padding: 15px; border: 1px dashed var(--terminal-line); border-radius: 12px; color: var(--terminal-muted); font-size: 11px; text-align: center; }
+.marketEmpty strong { color: var(--terminal-text); }
+.marketEmpty.error { color: var(--terminal-negative); }
 
 .watchlistItem {
   display: grid;
@@ -692,6 +706,8 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   height: 100%;
   min-height: 310px;
 }
+
+.chartEmpty { display: grid; min-height: 310px; place-items: center; color: var(--terminal-muted); font-size: 12px; }
 
 .chartBadge {
   position: absolute;
@@ -811,6 +827,8 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   border-radius: 12px;
   background: rgba(9, 16, 23, 0.8);
 }
+
+.riskSummary .summaryHeading { grid-column: 1 / -1; min-height: 0; padding: 0 2px; border: 0; background: transparent; color: var(--terminal-warning); font-size: 9px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
 
 .riskSummary small,
 .tpGroup span,
@@ -1230,6 +1248,8 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .chartCanvas svg { min-height: 250px; }
   .watchlistItem { grid-template-columns: 1fr; }
   .watchlistStats { justify-items: start; }
+  .watchlistList { max-height: 300px; }
+  .chartEmpty { min-height: 250px; }
   .masterTradeDrawerBackdrop { align-items: end; }
   .masterTradeDrawer { width: 100%; max-height: 88vh; border-radius: 18px 18px 0 0; }
 }

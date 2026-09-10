@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
+import { API_BASE } from './api'
 
 type TradeSide = 'LONG' | 'SHORT'
 type Source = 'MANUAL' | 'AUTO'
@@ -58,6 +59,10 @@ type OrderRow = {
   status: 'Open' | 'Filled' | 'Cancelled'
   created: string
 }
+
+type MarketRow = { symbol: string; display: string; price: number; change: number; volume: number; status?: string; contractType?: string; quoteAsset?: string; filters?: unknown[] }
+type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number }
+type Analysis = { direction?: string; confidence?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; volume_ratio?: number; normalized_signal?: string }
 
 const STORAGE_KEY = 'protrebot-master-trade-history-v2'
 const SNAPSHOT_KEY = 'protrebot-master-trade-demo-snapshot-v2'
@@ -188,12 +193,59 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     }
   })
   const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(null)
+  const [markets, setMarkets] = useState<MarketRow[]>([])
+  const [marketQuery, setMarketQuery] = useState('')
+  const [marketLoading, setMarketLoading] = useState(true)
+  const [marketError, setMarketError] = useState('')
+  const [interval, setInterval] = useState('15m')
+  const [candles, setCandles] = useState<Candle[]>([])
+  const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [dataLoading, setDataLoading] = useState(false)
+  const [dataError, setDataError] = useState('')
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 7, margin: 1000, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
   const [automation] = useState([
     { symbol: 'BTCUSDT', side: 'LONG', analysis: 92, opportunity: 88, liquidity: 'HIGH', volatility: 'GOOD', confirmation: 'MTF ✓', reason: 'Strong trend + risk aligned' },
     { symbol: 'ETHUSDT', side: 'SHORT', analysis: 84, opportunity: 79, liquidity: 'MED', volatility: 'GOOD', confirmation: 'MTF ✓', reason: 'Fade after sweep resistance' },
     { symbol: 'SOLUSDT', side: 'LONG', analysis: 80, opportunity: 76, liquidity: 'HIGH', volatility: 'HIGH', confirmation: 'MTF ✓', reason: 'Ema stack + impulse breakout' },
   ])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setMarketLoading(true)
+    fetch(`${API_BASE}/markets?limit=500`, { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error('Market data unavailable')
+        return await response.json() as MarketRow[]
+      })
+      .then(items => { setMarkets(items); setMarketError('') })
+      .catch(error => { if (error.name !== 'AbortError') setMarketError('Market data unavailable') })
+      .finally(() => setMarketLoading(false))
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setDataLoading(true)
+    setDataError('')
+    setCandles([])
+    setAnalysis(null)
+    Promise.all([
+      fetch(`${API_BASE}/klines/${draft.market}?interval=${interval}&limit=160`, { signal: controller.signal }),
+      fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }),
+    ])
+      .then(async ([candleResponse, analysisResponse]) => {
+        if (!candleResponse.ok) throw new Error('Market data unavailable')
+        const nextCandles = await candleResponse.json() as Candle[]
+        const nextAnalysis = analysisResponse.ok ? await analysisResponse.json() as Analysis : null
+        setCandles(nextCandles)
+        setAnalysis(nextAnalysis)
+        const latest = nextCandles[nextCandles.length - 1]
+        if (latest) setDraft(current => ({ ...current, entry: latest.close }))
+      })
+      .catch(error => { if (error.name !== 'AbortError') { setDataError('Market data unavailable'); setCandles([]); setAnalysis(null) } })
+      .finally(() => setDataLoading(false))
+    return () => controller.abort()
+  }, [draft.market, interval])
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -262,13 +314,28 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     setSelectedTrade(next)
   }
 
-  const marketWatch = [
-    { symbol: 'BTCUSDT', price: 61380.12, change: 2.31, signal: 'LONG', score: 91 },
-    { symbol: 'ETHUSDT', price: 3315.42, change: -0.84, signal: 'SHORT', score: 88 },
-    { symbol: 'SOLUSDT', price: 148.32, change: 1.56, signal: 'LONG', score: 84 },
-    { symbol: 'BNBUSDT', price: 612.1, change: 0.72, signal: 'LONG', score: 80 },
-    { symbol: 'XRPUSDT', price: 0.54, change: -1.2, signal: 'SHORT', score: 76 },
-  ]
+  const normalizedMarketQuery = marketQuery.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const filteredMarkets = markets.filter(market => {
+    if (!normalizedMarketQuery) return true
+    const display = market.display.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    return market.symbol.includes(normalizedMarketQuery) || display.includes(normalizedMarketQuery) || market.symbol.replace(/USDT$/, '').includes(normalizedMarketQuery)
+  })
+  const selectedMarket = markets.find(market => market.symbol === draft.market)
+  const latestCandle = candles[candles.length - 1]
+  const chartCandles = candles.slice(-80)
+  const chartValues = chartCandles.map(candle => candle.close)
+  const chartMin = chartValues.length ? Math.min(...chartValues) : 0
+  const chartMax = chartValues.length ? Math.max(...chartValues) : 1
+  const chartRange = Math.max(chartMax - chartMin, chartMax * 0.001, 1)
+  const chartPath = chartCandles.map((candle, index) => {
+    const x = chartCandles.length > 1 ? (index / (chartCandles.length - 1)) * 760 : 380
+    const y = 270 - ((candle.close - chartMin) / chartRange) * 230
+    return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
+  }).join(' ')
+  const selectMarket = (symbol: string) => {
+    setDraft(current => ({ ...current, market: symbol }))
+    setMarketQuery('')
+  }
 
   const opportunityBreakdown = [
     { label: 'Trend', value: 92 },
@@ -288,7 +355,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     { label: 'OPEN POSITIONS', value: '2 / 3', note: 'Active Exposure', tone: 'default' },
   ]
 
-  const performanceTrend = [35, 40, 38, 48, 52, 46, 57, 64, 60, 68, 72, 76]
+  const performanceTrend = history.length ? [35, 40, 38, 48, 52, 46, 57, 64, 60, 68, 72, 76] : []
   const openPositions = seedPositions
   const openRisk = openPositions.reduce((sum, position) => sum + Math.abs(position.entry - position.stopLoss) * position.quantity, 0)
   const usedMargin = openPositions.reduce((sum, position) => sum + position.margin, 0)
@@ -349,20 +416,20 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 <span className="panelEyebrow">MARKET WATCH</span>
                 <h3>Live Markets</h3>
               </div>
-              <button type="button" className="panelGhostButton">ALL</button>
+              <span className="marketCount">{markets.length || '--'}</span>
             </div>
 
+            <label className="marketSearch"><span>SEARCH MARKETS</span><input aria-label="Search markets" placeholder="BTC, ETH, SOL..." value={marketQuery} onChange={event => setMarketQuery(event.target.value)} /><button type="button" aria-label="Clear market search" onClick={() => setMarketQuery('')} disabled={!marketQuery}>×</button></label>
             <div className="watchlistList">
-              {marketWatch.map((item, index) => (
-                <button key={item.symbol} type="button" className={index === 0 ? 'watchlistItem active' : 'watchlistItem'}>
+              {marketLoading ? <div className="marketEmpty">Loading markets...</div> : marketError ? <div className="marketEmpty error">{marketError}</div> : filteredMarkets.length === 0 ? <div className="marketEmpty"><strong>No markets found</strong><span>Try another symbol or market name.</span></div> : filteredMarkets.map(item => (
+                <button key={item.symbol} type="button" className={item.symbol === draft.market ? 'watchlistItem active' : 'watchlistItem'} onClick={() => selectMarket(item.symbol)}>
                   <div className="watchlistMeta">
                     <b>{item.symbol}</b>
                     <span>{item.change >= 0 ? '+' : ''}{item.change.toFixed(2)}%</span>
                   </div>
                   <div className="watchlistStats">
-                    <strong>${item.price.toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong>
-                    <em className={item.signal === 'LONG' ? 'positive' : 'negative'}>{item.signal}</em>
-                    <small>{item.score}</small>
+                    <strong>${item.price.toLocaleString('en-US', { maximumFractionDigits: 6 })}</strong>
+                    <em className={item.change >= 0 ? 'positive' : 'negative'}>{item.change >= 0 ? 'LONG' : 'SHORT'}</em>
                   </div>
                 </button>
               ))}
@@ -376,8 +443,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 <h3>{draft.market}</h3>
               </div>
               <div className="chartControls">
-                {['1m','5m','15m','1h','4h','1D'].map((range) => (
-                  <button key={range} type="button" className={range === '15m' ? 'active' : ''}>{range}</button>
+                {['1m','5m','15m','1h','4h','1d'].map((range) => (
+                  <button key={range} type="button" className={range === interval ? 'active' : ''} onClick={() => setInterval(range)}>{range}</button>
                 ))}
               </div>
             </div>
@@ -385,13 +452,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="chartPriceSummary">
               <div>
                 <span className="chartSymbol">{draft.market}</span>
-                <strong>${Number(draft.entry).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong>
+                <strong>{latestCandle ? `$${latestCandle.close.toLocaleString('en-US', { maximumFractionDigits: 6 })}` : '--'}</strong>
               </div>
-              <span className="delta positive">+2.31%</span>
+              <span className={`delta ${selectedMarket && selectedMarket.change >= 0 ? 'positive' : 'negative'}`}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</span>
             </div>
 
             <div className="chartCanvas">
-              <svg viewBox="0 0 760 300" preserveAspectRatio="none" aria-label="Master Trade chart preview">
+              {dataLoading ? <div className="chartEmpty">Loading market data...</div> : dataError || !chartPath ? <div className="chartEmpty">{dataError || 'No data available'}</div> : <svg viewBox="0 0 760 300" preserveAspectRatio="none" aria-label={`${draft.market} ${interval} price chart`}>
                 <defs>
                   <linearGradient id="masterTradeChartGlow" x1="0" x2="1" y1="0" y2="0">
                     <stop offset="0%" stopColor="#22c55e" stopOpacity="0.32" />
@@ -403,19 +470,20 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                     <line key={`v-${index}`} x1="0" x2="760" y1={30 + index * 24} y2={30 + index * 24} />
                   ))}
                 </g>
-                <path d="M0 188 L68 170 L128 160 L194 138 L264 148 L332 122 L404 116 L470 92 L542 98 L610 72 L686 48 L760 32" fill="none" stroke="#34d399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M0 188 L68 170 L128 160 L194 138 L264 148 L332 122 L404 116 L470 92 L542 98 L610 72 L686 48 L760 32 L760 300 L0 300 Z" fill="url(#masterTradeChartGlow)" opacity="0.7" />
-              </svg>
-              <div className="chartBadge">$61,380.00</div>
+                <path d={chartPath} fill="none" stroke="#34d399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d={`${chartPath} L760 300 L0 300 Z`} fill="url(#masterTradeChartGlow)" opacity="0.7" />
+              </svg>}
+              <div className="chartBadge">{latestCandle ? `$${latestCandle.close.toLocaleString('en-US', { maximumFractionDigits: 6 })}` : '--'}</div>
             </div>
 
             <div className="indicatorGrid">
-              <article><small>TREND</small><strong className="positive">BULLISH</strong></article>
-              <article><small>MOMENTUM</small><strong>STRONG</strong></article>
-              <article><small>RSI</small><strong>62.4</strong></article>
-              <article><small>MACD</small><strong className="positive">+0.92</strong></article>
-              <article><small>VOLUME</small><strong>1.3x</strong></article>
-              <article><small>MTF</small><strong className="positive">CONFIRMED</strong></article>
+              <article><small>TREND</small><strong className="positive">{analysis?.trend || '--'}</strong></article>
+              <article><small>MOMENTUM</small><strong>{analysis?.momentum || '--'}</strong></article>
+              <article><small>RSI</small><strong>{analysis?.rsi ?? '--'}</strong></article>
+              <article><small>MACD</small><strong className={analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}>{analysis?.macd ?? '--'}</strong></article>
+              <article><small>VOLUME</small><strong>{analysis?.volume_ratio ? `${analysis.volume_ratio}x` : '--'}</strong></article>
+              <article><small>ANALYSIS SCORE</small><strong className="positive">{analysis?.confidence ? `${analysis.confidence}%` : '--'}</strong></article>
+              <article><small>OPPORTUNITY</small><strong>--</strong></article>
             </div>
           </main>
 
@@ -446,10 +514,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </div>
 
             <div className="riskSummary">
+              <div className="summaryHeading">ORDER PREVIEW</div>
               <div><small>Stop Loss</small><strong>${fmtCompact(draft.stopLoss)}</strong></div>
               <div><small>Risk $</small><strong>${fmtCompact(riskPreview.riskUsd)}</strong></div>
               <div><small>Risk %</small><strong>{((Math.abs(Number(draft.entry) - Number(draft.stopLoss)) / Number(draft.entry) * 100) || 0).toFixed(2)}%</strong></div>
               <div><small>R / R</small><strong>{riskPreview.rr > 0 ? `1:${riskPreview.rr.toFixed(2)}` : '—'}</strong></div>
+              <div><small>Position Size</small><strong>{fmtCompact(Number(draft.entry) * Number(draft.quantity))}</strong></div>
+              <div><small>Est. Fees</small><strong>--</strong></div>
             </div>
 
             <div className="tpGroup">
