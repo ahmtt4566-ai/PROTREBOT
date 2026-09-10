@@ -77,6 +77,7 @@ type DemoConfirmation = {
   title:string
   message:string
   expected:string
+  checkbox:boolean
   action:() => Promise<unknown>
 }
 
@@ -264,6 +265,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const [orderPreview,setOrderPreview] = useState<DemoRiskPreview|null>(null)
   const [confirmation,setConfirmation] = useState<DemoConfirmation|null>(null)
   const [confirmationText,setConfirmationText] = useState('')
+  const [confirmationChecked,setConfirmationChecked] = useState(false)
   const [clock,setClock] = useState(Date.now())
   const [tab,setTab] = useState<V21Tab>('trade')
   const [v21,setV21] = useState<V21Summary|null>(null)
@@ -443,11 +445,16 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const testOrder = () => runAction(() => apiCall('/order/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}),'Emir testi geçti; hiçbir emir veya pozisyon oluşturulmadı.')
   const submitOrder = () => {
     setConfirmationText('')
+    setConfirmationChecked(false)
     setConfirmation({
-      title:'Demo emrini onayla',
-      message:'Demo/Testnet işlemi gönderilecek. Gerçek para kullanılmaz.',
+      title:'Demo order onayı',
+      message:'Bu demo order\'ı gerçekten göndermek istiyor musun?',
       expected:'DEMO',
-      action:() => runAction(() => apiCall('/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload(),confirmation:'DEMO'})}),'Emir yalnızca Binance Futures Demo hesabına gönderildi; koruma durumu yenileniyor.'),
+      checkbox:true,
+      action:async () => {
+        await apiCall('/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation:'DEMO'})})
+        return runAction(() => apiCall('/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload(),confirmation:'DEMO'})}),'Emir yalnızca Binance Futures Demo hesabına gönderildi; koruma durumu yenileniyor.')
+      },
     })
   }
   const cancelOrder = (order:DemoOrder) => runAction(() => apiCall('/order/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:order.symbol,order_id:order.order_id})}),`${order.symbol} Demo emri iptal edildi.`)
@@ -458,6 +465,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       title:`${position.symbol} Demo pozisyonunu kapat`,
       message:'Bu yalnızca Binance Demo/Testnet üzerinde reduce-only kapatma işlemidir.',
       expected:'DEMO KAPAT',
+      checkbox:false,
       action:() => runAction(() => apiCall('/position/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:position.symbol,position_side:position.position_side || 'BOTH',confirmation:'DEMO KAPAT'})}),`${position.symbol} için reduce-only Demo kapatma emri gönderildi.`),
     })
   }
@@ -467,14 +475,16 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       title:'Acil Demo durdurmayı onayla',
       message:'Demo emirleri iptal edilecek ve Demo pozisyonları kapatılacaktır.',
       expected:'DEMO ACİL DURDUR',
+      checkbox:false,
       action:() => runAction(() => apiCall('/emergency',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation:'DEMO ACİL DURDUR',close_positions:true})}),'Acil Demo durdurma tamamlandı; giriş kilidi kapandı.'),
     })
   }
   const confirmAction = () => {
-    if (!confirmation || confirmationText.trim().toUpperCase() !== confirmation.expected) return
+    if (!confirmation || (confirmation.checkbox ? !confirmationChecked : confirmationText.trim().toUpperCase() !== confirmation.expected)) return
     const action = confirmation.action
     setConfirmation(null)
     setConfirmationText('')
+    setConfirmationChecked(false)
     void action()
   }
 
@@ -1000,8 +1010,6 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
 
     <section className={`demoCommandBar ${tab !== 'trade' ? 'demoTabHidden' : ''}`}>
       <button className="demoConnect" disabled={busy || !status?.configured} onClick={connect}><Radio/> BAĞLANTIYI TEST ET</button>
-      <label><span>10 DAKİKALIK KİLİT İÇİN</span><input value={armText} onChange={event => setArmText(event.target.value)} placeholder="DEMO yaz"/></label>
-      <button className={status?.armed ? 'demoLock' : 'demoUnlock'} disabled={busy || !status?.connected} onClick={status?.armed ? disarm : arm}>{status?.armed ? <LockKeyhole/> : <UnlockKeyhole/>}{status?.armed ? ' ŞİMDİ KİLİTLE' : ' DEMO EMRİNİ AÇ'}</button>
       <div><ShieldCheck/><span><b>DEMO GÜVENLİK SINIRI</b><small>100 USDT marjin · 2x · 200 USDT sanal pozisyon · 3 pozisyon</small></span></div>
       <button className="demoEmergency" disabled={busy || !status?.configured} onClick={emergency}><TriangleAlert/> ACİL DEMO DURDUR</button>
     </section>
@@ -1039,7 +1047,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
         </div>
         <div className="demoExposure"><span><small>POSITION SIZE</small><b>{fmt(displayedPositionSize)} USDT</b></span><span><small>RISK / TRADE</small><b>{fmt(displayedRisk)} USDT</b></span><span><small>GERÇEK PARA</small><b>0 USDT</b></span></div>
         <button className="demoTest" disabled={busy || !status?.connected} onClick={testOrder}><TestTube2/> EMİR TESTİ · OLUŞTURMAZ</button>
-        <button className="demoSubmit" disabled={busy || !status?.armed} onClick={submitOrder}><Send/> BINANCE DEMO EMRİ GÖNDER</button>
+        <button className="demoSubmit" disabled={busy || !status?.connected} onClick={submitOrder}><Send/> BINANCE DEMO EMRİ GÖNDER</button>
         <div className="demoOrderSummary">
           <div className="demoSummaryHeader">
             <span>TRADE SUMMARY</span>
@@ -1171,12 +1179,12 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       <div className="v21SafetyLock"><LockKeyhole/><span><b>GERÇEK PARA VE GERÇEK BINANCE EMİR KANALI FİZİKSEL OLARAK YOK</b><small>Bu paket yalnızca https://demo-fapi.binance.com ve wss://demo-fstream.binance.com adreslerini kullanır.</small></span><strong>DEMO ONLY</strong></div>
     </section>}
 
-    {confirmation && <div className="demoConfirmationBackdrop" role="presentation" onClick={() => { setConfirmation(null); setConfirmationText('') }}>
+    {confirmation && <div className="demoConfirmationBackdrop" role="presentation" onClick={() => { setConfirmation(null); setConfirmationText(''); setConfirmationChecked(false) }}>
       <section className="demoConfirmation" role="dialog" aria-modal="true" aria-labelledby="demo-confirmation-title" onClick={event => event.stopPropagation()}>
         <h2 id="demo-confirmation-title">{confirmation.title}</h2>
         <p>{confirmation.message}</p>
-        <label><span>Onay için {confirmation.expected} yazın</span><input autoFocus value={confirmationText} onChange={event => setConfirmationText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') confirmAction() }} /></label>
-        <div><button type="button" onClick={() => { setConfirmation(null); setConfirmationText('') }}>İptal</button><button type="button" disabled={confirmationText.trim().toUpperCase() !== confirmation.expected} onClick={confirmAction}>Onayla</button></div>
+        {confirmation.checkbox ? <label><input type="checkbox" checked={confirmationChecked} onChange={event => setConfirmationChecked(event.target.checked)} /><span>Demo order'ın gönderilmesini onaylıyorum.</span></label> : <label><span>Onay için {confirmation.expected} yazın</span><input autoFocus value={confirmationText} onChange={event => setConfirmationText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') confirmAction() }} /></label>}
+        <div><button type="button" onClick={() => { setConfirmation(null); setConfirmationText(''); setConfirmationChecked(false) }}>İPTAL</button><button type="button" disabled={confirmation.checkbox ? !confirmationChecked : confirmationText.trim().toUpperCase() !== confirmation.expected} onClick={confirmAction}>{confirmation.checkbox ? 'ONAYLA VE GÖNDER' : 'Onayla'}</button></div>
       </section>
     </div>}
     </section>

@@ -231,6 +231,11 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
   }
 
   const submitLiveOrder = async () => {
+    if (!status?.credentials.configured) {
+      setNotice('Live trading için API credentials gerekli.')
+      setNoticeKind('error')
+      return
+    }
     if (!validOrderForm()) return
     const phrase = window.prompt('Bu işlem GERÇEK PARA kullanabilir. Göndermek için aynen yazın: CANLI EMİR GÖNDER')
     if (!phrase) return
@@ -258,7 +263,7 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
   return <div className="executionV25">
     <header className="executionHero">
       <div><span><ShieldCheck/></span><div><small>V27 · FAIL-CLOSED LIVE READY</small><h2>Canlı Kasa & Otonom Emir Merkezi</h2><p>Binance Futures Demo kanıtı → salt-okunur canlı hesap → süreli gerçek emir zinciri.</p></div></div>
-      <aside className={status.readiness.ready ? 'ready' : 'locked'}><b>{status.readiness.ready ? 'CANLI ADAY HAZIR' : 'CANLI KİLİTLİ'}</b><strong>%{status.readiness.score}</strong><span>{pendingGate ? `${pendingGate.label} bekleniyor` : 'Bütün yayın kapıları geçti'}</span></aside>
+      <aside className={status.readiness.ready ? 'ready' : 'locked'}><b>{status.readiness.ready ? 'CANLI HAZIR' : 'CANLI KONTROLLER'}</b><strong>%{status.readiness.score}</strong><span>{pendingGate ? `${pendingGate.label} kontrolü bekleniyor` : 'Bütün yayın kapıları geçti'}</span></aside>
     </header>
 
     <div className="executionRiskBanner"><AlertTriangle/><div><b>KÂR VE “SORUNSUZ ÇALIŞMA” GARANTİSİ YOKTUR</b><span>Vadeli işlemler tüm sermayeyi kaybettirebilir. V25 yalnızca teknik ve operasyonel hataları azaltan korumalar uygular; piyasa riskini yok etmez.</span></div></div>
@@ -332,7 +337,7 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
           <label>TP2<input type="number" value={test.tp2} onChange={e => setTest({...test,tp2:e.target.value})}/></label>
           <label>TP3<input type="number" value={test.tp3} onChange={e => setTest({...test,tp3:e.target.value})}/></label>
         </div>
-        <div className="orderButtons"><button className="testOrder" onClick={orderTest} disabled={!!busy || !status.connected}><TestTube2/>{busy === 'test' ? 'DOĞRULANIYOR…' : '1 · GERÇEK EMİR OLUŞTURMADAN TEST ET'}</button><button className="liveOrder" onClick={submitLiveOrder} disabled={!!busy || !status.connected || !status.readiness.ready || !status.armed}><Send/>{busy === 'live-order' ? 'GÖNDERİLİYOR…' : '2 · ÇİFT ONAYLA CANLI EMİR GÖNDER'}</button></div>
+        <div className="orderButtons"><button className="testOrder" onClick={orderTest} disabled={!!busy || !status.connected}><TestTube2/>{busy === 'test' ? 'DOĞRULANIYOR…' : '1 · GERÇEK EMİR OLUŞTURMADAN TEST ET'}</button><button className="liveOrder" onClick={submitLiveOrder} disabled={!!busy || !status.connected}><Send/>{busy === 'live-order' ? 'GÖNDERİLİYOR…' : '2 · ÇİFT ONAYLA CANLI EMİR GÖNDER'}</button></div>
         <p>Test düğmesi Binance <b>/fapi/v1/order/test</b> çağrısı yapar ve emir oluşturmaz. Canlı düğme ancak tüm yayın kapıları geçip 5 dakikalık kilit açıldığında etkinleşir.</p>
       </section>
 
