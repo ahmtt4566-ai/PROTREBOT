@@ -552,54 +552,81 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           </main>
 
           <aside className="masterTradePanel orderPanel">
-            <div className="panelHeader">
-              <div>
-                <span className="panelEyebrow">TRADE</span>
-                <h3>{draft.market}</h3>
+            <div className="panelHeader orderHeader">
+              <div className="tradeTerminalHeader">
+                <span className="panelEyebrow">TRADE TERMINAL</span>
+                <div className="tradeSymbolRow">
+                  <strong>{draft.market}</strong>
+                  <span className="demoBadge">DEMO</span>
+                </div>
               </div>
-              <span className="premiumBadge">PREMIUM</span>
             </div>
 
-            <div className="tradeTabs">
-              <button type="button" className={draft.side === 'LONG' ? 'selected long' : ''} onClick={() => setDraft((current) => ({ ...current, side: 'LONG' }))}>LONG</button>
-              <button type="button" className={draft.side === 'SHORT' ? 'selected short' : ''} onClick={() => setDraft((current) => ({ ...current, side: 'SHORT' }))}>SHORT</button>
-            </div>
+            <div className="tradeTerminalStack">
+              <div className="tradeSegmentGroup">
+                <button type="button" className={draft.side === 'LONG' ? 'selected long' : ''} onClick={() => setDraft((current) => ({ ...current, side: 'LONG' }))}>LONG</button>
+                <button type="button" className={draft.side === 'SHORT' ? 'selected short' : ''} onClick={() => setDraft((current) => ({ ...current, side: 'SHORT' }))}>SHORT</button>
+              </div>
 
-            <div className="modeTabs">
-              <button type="button" className="active">MARKET</button>
-              <button type="button">LIMIT</button>
-            </div>
+              <div className="tradeSegmentGroup compact">
+                <button type="button" className="active">MARKET</button>
+                <button type="button">LIMIT</button>
+              </div>
 
-            <div className="fieldGrid">
-              <label><span>Margin</span><input value={draft.margin} onChange={(event) => setDraft((current) => ({ ...current, margin: Number(event.target.value) || 0 }))} /></label>
-              <label><span>Leverage</span><input value={draft.leverage} onChange={(event) => setDraft((current) => ({ ...current, leverage: Number(event.target.value) || 1 }))} /></label>
-              <label><span>Quantity</span><input value={draft.quantity} onChange={(event) => setDraft((current) => ({ ...current, quantity: Number(event.target.value) || 0 }))} /></label>
-              <label><span>Entry Price</span><input value={draft.entry} onChange={(event) => setDraft((current) => ({ ...current, entry: Number(event.target.value) || 0 }))} /></label>
-            </div>
+              <div className="tradeSection">
+                <div className="tradeSectionLabel">ORDER PARAMETERS</div>
+                <div className="fieldGrid compactFields">
+                  <label><span>Margin</span><input value={draft.margin} onChange={(event) => setDraft((current) => ({ ...current, margin: Number(event.target.value) || 0 }))} /></label>
+                  <label><span>Leverage</span><input value={draft.leverage} onChange={(event) => setDraft((current) => ({ ...current, leverage: Number(event.target.value) || 1 }))} /></label>
+                  <label><span>Quantity</span><input value={draft.quantity} onChange={(event) => setDraft((current) => ({ ...current, quantity: Number(event.target.value) || 0 }))} /></label>
+                  <label><span>Entry Price</span><input value={draft.entry} onChange={(event) => setDraft((current) => ({ ...current, entry: Number(event.target.value) || 0 }))} /></label>
+                </div>
+              </div>
 
-            <div className="riskSummary">
-              <div className="summaryHeading">ORDER PREVIEW</div>
-              <div><small>Stop Loss</small><strong>{draft.stopLoss > 0 ? `$${fmtCompact(draft.stopLoss)}` : '--'}</strong></div>
-              <div><small>Risk $</small><strong>${fmtCompact(riskPreview.riskUsd)}</strong></div>
-              <div><small>Risk %</small><strong>{draft.entry > 0 ? `${riskPreview.riskPercent.toFixed(2)}%` : '--'}</strong></div>
-              <div><small>R / R</small><strong>{riskPreview.rr > 0 ? `1:${riskPreview.rr.toFixed(2)}` : '—'}</strong></div>
-              <div><small>Position Size</small><strong>{fmtCompact(Number(draft.entry) * Number(draft.quantity))}</strong></div>
-              <div><small>Est. Fees</small><strong>--</strong></div>
-            </div>
+              <div className="tradeSection">
+                <div className="tradeSectionLabel">ORDER PREVIEW</div>
+                <div className="orderSummaryList">
+                  <div className="orderSummaryRow"><span>Entry</span><strong>{draft.entry > 0 ? `$${fmtMarketPrice(Number(draft.entry))}` : '--'}</strong></div>
+                  <div className="orderSummaryRow"><span>Quantity</span><strong>{draft.quantity > 0 ? `${fmtCompact(Number(draft.quantity))}` : '--'}</strong></div>
+                  <div className="orderSummaryRow"><span>Position</span><strong>{draft.entry > 0 && draft.quantity > 0 ? `${fmtMarketPrice((Number(draft.entry) * Number(draft.quantity)))} USDT` : '--'}</strong></div>
+                  <div className="orderSummaryRow"><span>Risk</span><strong>${fmtCompact(riskPreview.riskUsd)}</strong></div>
+                  <div className="orderSummaryRow"><span>Risk %</span><strong>{draft.entry > 0 ? `${riskPreview.riskPercent.toFixed(2)}%` : '--'}</strong></div>
+                  <div className="orderSummaryRow"><span>R/R</span><strong>{riskPreview.rr > 0 ? `1:${riskPreview.rr.toFixed(2)}` : '—'}</strong></div>
+                  <div className="orderSummaryRow"><span>Fees</span><strong>--</strong></div>
+                </div>
+              </div>
 
-            <div className="tpGroup">
-              <div><span>TP1</span><strong>{draft.tp1 > 0 ? Number(draft.tp1).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</strong></div>
-              <div><span>TP2</span><strong>{draft.tp2 > 0 ? Number(draft.tp2).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</strong></div>
-              <div><span>TP3</span><strong>{draft.tp3 > 0 ? Number(draft.tp3).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</strong></div>
-            </div>
+              <div className="tradeSection">
+                <div className="tradeSectionLabel">STOP LOSS</div>
+                <div className="slRow">
+                  <span>SL</span>
+                  <strong>{draft.stopLoss > 0 ? `$${fmtCompact(draft.stopLoss)}` : '--'}</strong>
+                </div>
+                <div className="orderSummaryList microList">
+                  <div className="orderSummaryRow"><span>Risk</span><strong>{draft.entry > 0 ? `${riskPreview.riskPercent.toFixed(2)}%` : '--'}</strong></div>
+                  <div className="orderSummaryRow"><span>Value</span><strong>${fmtCompact(riskPreview.riskUsd)}</strong></div>
+                </div>
+              </div>
 
-            <button type="button" className="analysisFillButton" onClick={() => void fillFromCurrentAnalysis()} disabled={analysisFillLoading || dataLoading}>
-              {analysisFillLoading ? 'ANALİZ YÜKLENİYOR...' : 'GÜNCEL ANALİZDEN DOLDUR'}
-            </button>
-            {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
-            {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
-            <button type="button" className="primaryOrderButton" onClick={addTradeRecord} disabled>DEMO ORDER</button>
-            <div className="lockNotice"><Lock /> LIVE TRADING LOCKED</div>
+              <div className="tradeSection">
+                <div className="tradeSectionLabel">TAKE PROFIT</div>
+                <div className="tpGroup compactTpGroup">
+                  <div><span>TP1</span><strong>{draft.tp1 > 0 ? `$${fmtMarketPrice(Number(draft.tp1))}` : '--'}</strong></div>
+                  <div><span>TP2</span><strong>{draft.tp2 > 0 ? `$${fmtMarketPrice(Number(draft.tp2))}` : '--'}</strong></div>
+                  <div><span>TP3</span><strong>{draft.tp3 > 0 ? `$${fmtMarketPrice(Number(draft.tp3))}` : '--'}</strong></div>
+                </div>
+              </div>
+
+              <div className="tradeActions">
+                <button type="button" className="analysisFillButton" onClick={() => void fillFromCurrentAnalysis()} disabled={analysisFillLoading || dataLoading}>
+                  {analysisFillLoading ? 'ANALİZ YÜKLENİYOR...' : 'GÜNCEL ANALİZDEN DOLDUR'}
+                </button>
+                {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
+                {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
+                <button type="button" className="primaryOrderButton" onClick={addTradeRecord} disabled>DEMO ORDER</button>
+                <div className="lockNotice"><Lock /> LIVE TRADING LOCKED</div>
+              </div>
+            </div>
           </aside>
         </div>
 
