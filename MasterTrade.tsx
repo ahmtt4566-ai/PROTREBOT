@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, KeyRound, Lock, Save, Send, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 
@@ -40,6 +40,8 @@ type AccountPosition = { symbol: string; direction?: TradeSide; quantity?: numbe
 type AccountOrder = { symbol?: string; side?: string; type?: string; price?: number; quantity?: number; status?: string; reduce_only?: boolean }
 type AccountSnapshot = { wallet_balance?: number; available_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number } }
 type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[]; analysis: Analysis | null; mtf: MtfAnalysis[]; account: AccountSnapshot | null; currentPrice: number | null; priceUpdatedAt: string | null; marketUpdatedAt: string | null; accountUpdatedAt: string | null; marketError: string; accountError: string }
+type LiveConnection = { configured: boolean; active: boolean; fingerprint: string | null; last_test_ok: boolean; last_test_at: string | null; last_error: string | null; storage: string }
+type LiveVaultStatus = { vault: { ready: boolean; reason: string | null }; connections: { LIVE: LiveConnection } }
 
 const STORAGE_KEY = 'protrebot-master-trade-history-v3'
 
@@ -109,6 +111,14 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [showChartLevels, setShowChartLevels] = useState(true)
   const [showChartVolume, setShowChartVolume] = useState(true)
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 7, margin: 1000, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
+  const [demoConfirmationOpen, setDemoConfirmationOpen] = useState(false)
+  const [demoConfirmationChecked, setDemoConfirmationChecked] = useState(false)
+  const [demoOrderBusy, setDemoOrderBusy] = useState(false)
+  const [demoOrderError, setDemoOrderError] = useState('')
+  const [liveVault, setLiveVault] = useState<LiveVaultStatus | null>(null)
+  const [liveCredentials, setLiveCredentials] = useState({ apiKey: '', secretKey: '' })
+  const [liveBusy, setLiveBusy] = useState('')
+  const [liveNotice, setLiveNotice] = useState('')
   const candles = snapshot?.candles ?? []
   const analysis = snapshot?.analysis ?? null
   const mtfAnalyses = snapshot?.mtf ?? []
@@ -284,6 +294,94 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     setSelectedTrade(next)
   }
 
+  const demoOrderPayload = () => ({
+    symbol: draft.market,
+    direction: draft.side,
+    order_type: 'MARKET',
+    margin_usdt: draft.margin,
+    leverage: draft.leverage,
+    limit_price: null,
+    stop_loss: draft.stopLoss,
+    tp1: draft.tp1,
+    tp2: draft.tp2,
+    tp3: draft.tp3,
+  })
+
+  const submitDemoOrder = async () => {
+    if (!demoConfirmationChecked || demoOrderBusy) return
+    setDemoOrderBusy(true)
+    setDemoOrderError('')
+    try {
+      const response = await fetch(`${API_BASE}/binance-demo/order`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(demoOrderPayload()) })
+      const payload = await response.json().catch(() => null) as { detail?: unknown } | null
+      if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Demo order gönderilemedi.')
+      addTradeRecord()
+      setDemoConfirmationOpen(false)
+      setDemoConfirmationChecked(false)
+    } catch (error) {
+      setDemoOrderError(error instanceof Error ? error.message : 'Demo order gönderilemedi.')
+    } finally {
+      setDemoOrderBusy(false)
+    }
+  }
+
+  const refreshLiveVault = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/exchange-connections/status`)
+      if (response.ok) setLiveVault(await response.json() as LiveVaultStatus)
+    } catch {
+      setLiveVault(null)
+    }
+  }
+
+  useEffect(() => { void refreshLiveVault() }, [])
+
+  const verifyLiveCredentials = async () => {
+    if (!liveCredentials.apiKey.trim() || !liveCredentials.secretKey.trim()) { setLiveNotice('Live API Key ve API Secret birlikte girilmelidir.'); return }
+    setLiveBusy('verify')
+    try {
+      const response = await fetch(`${API_BASE}/exchange-connections/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'LIVE', ['api' + '_key']: liveCredentials.apiKey, ['secret' + '_key']: liveCredentials.secretKey }) })
+      const payload = await response.json().catch(() => null) as { detail?: unknown } | null
+      if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Live bağlantı doğrulanamadı.')
+      setLiveNotice('Live bağlantı ve imza doğrulandı; hiçbir emir oluşturulmadı.')
+      await refreshLiveVault()
+    } catch (error) {
+      setLiveNotice(error instanceof Error ? error.message : 'Live bağlantı doğrulanamadı.')
+    } finally { setLiveBusy('') }
+  }
+
+  const saveLiveCredentials = async () => {
+    if (!liveCredentials.apiKey.trim() || !liveCredentials.secretKey.trim()) { setLiveNotice('Live API Key ve API Secret birlikte girilmelidir.'); return }
+    setLiveBusy('save')
+    try {
+      const response = await fetch(`${API_BASE}/exchange-connections/save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'LIVE', ['api' + '_key']: liveCredentials.apiKey, ['secret' + '_key']: liveCredentials.secretKey, confirmation: 'CANLI KASAYA KAYDET' }) })
+      const payload = await response.json().catch(() => null) as { detail?: unknown; message?: string } | null
+      if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Live credentials kaydedilemedi.')
+      setLiveCredentials({ apiKey: '', secretKey: '' })
+      setLiveNotice(payload?.message || 'Live credentials şifreli kasaya kaydedildi ve doğrulandı.')
+      await refreshLiveVault()
+    } catch (error) {
+      setLiveNotice(error instanceof Error ? error.message : 'Live credentials kaydedilemedi.')
+    } finally { setLiveBusy('') }
+  }
+
+  const submitLiveOrder = async () => {
+    if (!liveVault?.connections.LIVE.configured || !liveVault.connections.LIVE.active || !liveVault.connections.LIVE.last_test_ok) {
+      setLiveNotice('Live trading için API credentials gerekli ve bağlantı doğrulanmış olmalı.')
+      return
+    }
+    if (window.prompt('Bu işlem GERÇEK PARA kullanabilir. Göndermek için aynen yazın: CANLI EMİR GÖNDER') !== 'CANLI EMİR GÖNDER') return
+    setLiveBusy('order')
+    try {
+      const response = await fetch(`${API_BASE}/v25/order`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: draft.market, direction: draft.side, order_type: 'MARKET', margin_usdt: draft.margin, leverage: draft.leverage, limit_price: null, stop_loss: draft.stopLoss, tp1: draft.tp1, tp2: draft.tp2, tp3: draft.tp3, intent_id: `master-live-${Date.now()}`, confirmation: 'CANLI EMİR GÖNDER' }) })
+      const payload = await response.json().catch(() => null) as { detail?: unknown } | null
+      if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Canlı emir gönderilmedi.')
+      setLiveNotice('Canlı emir mevcut güvenlik kapılarından geçirilerek gönderildi.')
+    } catch (error) {
+      setLiveNotice(error instanceof Error ? error.message : 'Canlı emir gönderilmedi.')
+    } finally { setLiveBusy('') }
+  }
+
   const fillFromCurrentAnalysis = async () => {
     setAnalysisFillLoading(true)
     setAnalysisFillError('')
@@ -397,7 +495,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           <div className="masterTradeStatusRow">
             <span className="statusPill online"><Activity /> CONNECTED</span>
             <span className="statusPill demo"><Wallet /> DEMO / TESTNET</span>
-            <span className="statusPill locked"><Lock /> LIVE TRADING LOCKED</span>
           </div>
         </header>
 
@@ -408,7 +505,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           <span className="terminalStatusItem"><small>LAST UPDATE</small> {latestUpdate}</span>
           <span className={`terminalStatusItem dataHealth-${dataHealth.toLowerCase().replaceAll(' ', '-')}`}><small>DATA HEALTH</small> {dataHealth}{marketAgeSeconds !== null ? ` · ${Math.floor(marketAgeSeconds)}s ago` : ''}</span>
           <span className="terminalStatusItem demo">DEMO / TESTNET</span>
-          <span className="terminalStatusItem locked"><Lock /> LIVE TRADING LOCKED</span>
         </div>
 
         <div className="masterTradeOverview">
@@ -623,8 +719,14 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 </button>
                 {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
                 {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
-                <button type="button" className="primaryOrderButton" onClick={addTradeRecord} disabled>DEMO ORDER</button>
-                <div className="lockNotice"><Lock /> LIVE TRADING LOCKED</div>
+                <button type="button" className="primaryOrderButton" onClick={() => { setDemoOrderError(''); setDemoConfirmationChecked(false); setDemoConfirmationOpen(true) }} disabled={demoOrderBusy}>DEMO ORDER</button>
+                <section className="masterTradeLiveControls" aria-label="Master Trade live trading">
+                  <div><KeyRound /><span><b>LIVE TRADING</b><small>{liveVault?.connections.LIVE.configured ? `${liveVault.connections.LIVE.storage} · ${liveVault.connections.LIVE.last_test_ok ? 'VERIFIED' : 'VERIFY REQUIRED'}` : 'API credentials gerekli'}</small></span></div>
+                  <label><span>Live API Key</span><input type="password" autoComplete="new-password" value={liveCredentials.apiKey} onChange={event => setLiveCredentials(current => ({ ...current, apiKey: event.target.value }))} placeholder={liveVault?.connections.LIVE.configured ? 'Kayıtlı anahtar mevcut' : 'Live API Key'} /></label>
+                  <label><span>Live API Secret</span><input type="password" autoComplete="new-password" value={liveCredentials.secretKey} onChange={event => setLiveCredentials(current => ({ ...current, secretKey: event.target.value }))} placeholder={liveVault?.connections.LIVE.configured ? 'Kayıtlı secret görüntülenmez' : 'Live API Secret'} /></label>
+                  <div className="masterTradeLiveActions"><button type="button" onClick={() => void verifyLiveCredentials()} disabled={!!liveBusy || !liveVault?.vault.ready}><Activity /> VERIFY LIVE CONNECTION</button><button type="button" onClick={() => void saveLiveCredentials()} disabled={!!liveBusy || !liveVault?.vault.ready}><Save /> SAVE SECURELY</button><button type="button" onClick={() => void submitLiveOrder()} disabled={!!liveBusy || !liveVault?.connections.LIVE.configured || !liveVault.connections.LIVE.active || !liveVault.connections.LIVE.last_test_ok}><Send /> LIVE ORDER</button></div>
+                  {liveNotice && <small className="masterTradeLiveNotice" role="status">{liveNotice}</small>}
+                </section>
               </div>
             </div>
           </aside>
@@ -905,6 +1007,16 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                     </div>
                   </div>
                 ))}
+
+                {demoConfirmationOpen && <div className="masterTradeConfirmationBackdrop" role="presentation" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>
+                  <section className="masterTradeConfirmation" role="dialog" aria-modal="true" aria-labelledby="master-trade-confirmation-title" onClick={event => event.stopPropagation()}>
+                    <h2 id="master-trade-confirmation-title">Demo order onayı</h2>
+                    <p>Bu demo order'ı gerçekten göndermek istiyor musun?</p>
+                    <label><input type="checkbox" checked={demoConfirmationChecked} onChange={event => setDemoConfirmationChecked(event.target.checked)} /><span>Bu işlemi onaylıyorum</span></label>
+                    {demoOrderError && <div role="alert">{demoOrderError}</div>}
+                    <div><button type="button" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>İPTAL</button><button type="button" disabled={!demoConfirmationChecked || demoOrderBusy} onClick={() => void submitDemoOrder()}>{demoOrderBusy ? 'GÖNDERİLİYOR…' : 'ONAYLA VE GÖNDER'}</button></div>
+                  </section>
+                </div>}
               </div>
             </div>
           </aside>
