@@ -110,7 +110,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [chartHoverIndex, setChartHoverIndex] = useState<number | null>(null)
   const [showChartLevels, setShowChartLevels] = useState(true)
   const [showChartVolume, setShowChartVolume] = useState(true)
-  const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 7, margin: 1000, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
+  const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 2, margin: 50, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
   const [demoConfirmationOpen, setDemoConfirmationOpen] = useState(false)
   const [demoConfirmationChecked, setDemoConfirmationChecked] = useState(false)
   const [demoOrderBusy, setDemoOrderBusy] = useState(false)
@@ -307,8 +307,18 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     tp3: draft.tp3,
   })
 
+  const validateOrderDraft = () => {
+    if (!Number.isFinite(draft.margin) || draft.margin < 5 || draft.margin > 100) return 'Demo marjin 5–100 USDT arasında olmalı.'
+    if (!Number.isFinite(draft.leverage) || draft.leverage < 1 || draft.leverage > 50) return 'Demo kaldıraç 1–50x arasında olmalı.'
+    if (draft.margin * draft.leverage > 200) return 'Demo pozisyon büyüklüğü 200 USDT güvenlik sınırını aşıyor.'
+    if (![draft.entry, draft.stopLoss, draft.tp1, draft.tp2, draft.tp3].every(value => Number.isFinite(value) && value > 0)) return 'Entry, Stop Loss ve TP1–TP3 alanlarını güncel analizden doldurun.'
+    return ''
+  }
+
   const submitDemoOrder = async () => {
     if (!demoConfirmationChecked || demoOrderBusy) return
+    const validationError = validateOrderDraft()
+    if (validationError) { setDemoOrderError(validationError); return }
     setDemoOrderBusy(true)
     setDemoOrderError('')
     try {
@@ -719,7 +729,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 </button>
                 {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
                 {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
-                <button type="button" className="primaryOrderButton" onClick={() => { setDemoOrderError(''); setDemoConfirmationChecked(false); setDemoConfirmationOpen(true) }} disabled={demoOrderBusy}>DEMO ORDER</button>
+                <button type="button" className="primaryOrderButton" onClick={() => { const validationError = validateOrderDraft(); setDemoOrderError(validationError); setDemoConfirmationChecked(false); setDemoConfirmationOpen(true) }} disabled={demoOrderBusy}>DEMO ORDER</button>
                 <section className="masterTradeLiveControls" aria-label="Master Trade live trading">
                   <div><KeyRound /><span><b>LIVE TRADING</b><small>{liveVault?.connections.LIVE.configured ? `${liveVault.connections.LIVE.storage} · ${liveVault.connections.LIVE.last_test_ok ? 'VERIFIED' : 'VERIFY REQUIRED'}` : 'API credentials gerekli'}</small></span></div>
                   <label><span>Live API Key</span><input type="password" autoComplete="new-password" value={liveCredentials.apiKey} onChange={event => setLiveCredentials(current => ({ ...current, apiKey: event.target.value }))} placeholder={liveVault?.connections.LIVE.configured ? 'Kayıtlı anahtar mevcut' : 'Live API Key'} /></label>
@@ -744,7 +754,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="riskMonitorGrid">
               {riskMetrics.map((metric) => <div key={metric.label}><small>{metric.label}</small><strong className={metric.tone}>{metric.value}</strong></div>)}
             </div>
-            <div className="riskMonitorFooter"><span>Open positions</span><strong>{account?.positions ? account.positions.length : '--'} / {account?.limits?.max_open_positions ?? '--'}</strong><span>Live trading</span><strong className="warning">LOCKED</strong></div>
+            <div className="riskMonitorFooter"><span>Open positions</span><strong>{account?.positions ? account.positions.length : '--'} / {account?.limits?.max_open_positions ?? '--'}</strong><span>Live trading</span><strong className="warning">CONTROLLED</strong></div>
           </section>
 
           <section className="masterTradePanel positionsPanel widePanel">

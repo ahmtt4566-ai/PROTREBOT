@@ -825,6 +825,57 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   text-transform: uppercase;
 }
 
+.masterTradeLiveControls {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(91, 226, 173, .22);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(20, 38, 34, .86), rgba(13, 20, 22, .94));
+}
+
+.masterTradeLiveControls > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #70e0b0;
+}
+
+.masterTradeLiveControls > div:first-child svg { width: 17px; height: 17px; }
+.masterTradeLiveControls > div:first-child b,
+.masterTradeLiveControls > div:first-child small { display: block; }
+.masterTradeLiveControls > div:first-child b { color: #e8fff5; font-size: 12px; letter-spacing: .08em; }
+.masterTradeLiveControls > div:first-child small { margin-top: 3px; color: #8fa9a0; font-size: 10px; }
+
+.masterTradeLiveControls label { display: grid; gap: 5px; color: #91aaa2; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.masterTradeLiveControls input { width: 100%; box-sizing: border-box; min-height: 38px; padding: 0 10px; border: 1px solid rgba(150, 190, 176, .22); border-radius: 8px; background: rgba(4, 10, 12, .72); color: #f0fff8; }
+.masterTradeLiveControls input:focus { outline: 2px solid rgba(91, 226, 173, .35); outline-offset: 1px; border-color: #5be2ad; }
+
+.masterTradeLiveActions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.masterTradeLiveActions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 35px; padding: 0 8px; border: 1px solid rgba(91, 226, 173, .32); border-radius: 7px; background: rgba(19, 67, 55, .5); color: #caffea; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.masterTradeLiveActions button:hover:not(:disabled) { background: rgba(35, 111, 86, .68); }
+.masterTradeLiveActions button:disabled { cursor: not-allowed; opacity: .42; }
+.masterTradeLiveActions svg { width: 14px; height: 14px; }
+.masterTradeLiveNotice { color: #a7c7bb; font-size: 11px; line-height: 1.45; }
+
+.masterTradeConfirmationBackdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(2, 7, 9, .78); backdrop-filter: blur(8px); }
+.masterTradeConfirmation { width: min(440px, 100%); padding: 24px; border: 1px solid rgba(91, 226, 173, .34); border-radius: 14px; background: #101a1c; box-shadow: 0 24px 70px rgba(0, 0, 0, .42); color: #effff8; }
+.masterTradeConfirmation h2 { margin: 0; font-size: 20px; }
+.masterTradeConfirmation p { margin: 10px 0 18px; color: #a4bcb4; line-height: 1.5; }
+.masterTradeConfirmation label { display: flex; align-items: center; gap: 9px; color: #d7eee5; font-size: 13px; }
+.masterTradeConfirmation input { accent-color: #5be2ad; }
+.masterTradeConfirmation [role='alert'] { margin-top: 12px; color: #ff9d91; font-size: 12px; line-height: 1.4; }
+.masterTradeConfirmation > div:last-child { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.masterTradeConfirmation button { min-height: 36px; padding: 0 13px; border: 1px solid rgba(145, 180, 169, .28); border-radius: 7px; background: rgba(25, 38, 39, .8); color: #d9eee6; font-size: 11px; font-weight: 800; }
+.masterTradeConfirmation button:last-child { border-color: rgba(91, 226, 173, .5); background: #1b7358; color: #f1fff9; }
+.masterTradeConfirmation button:disabled { cursor: not-allowed; opacity: .4; }
+
+@media (max-width: 560px) {
+  .masterTradeLiveActions { grid-template-columns: 1fr; }
+  .masterTradeConfirmation { padding: 20px; }
+}
+
 .tradeTabs,
 .modeTabs,
 .chartControls,
