@@ -10,46 +10,46 @@ type TradeHistoryRow = {
   id: string
   symbol: string
   side: TradeSide
-  entryPrice: number
-  exitPrice: number
-  quantity: number
-  leverage: number
-  margin: number
-  stopLoss: number
-  tp1: number
-  tp2: number
-  tp3: number
+  entryPrice: number | null
+  exitPrice: number | null
+  quantity: number | null
+  leverage: number | null
+  margin: number | null
+  stopLoss: number | null
+  tp1: number | null
+  tp2: number | null
+  tp3: number | null
   realizedPnl: number
-  pnlPercent: number
-  fees: number
-  funding: number
+  pnlPercent: number | null
+  fees: number | null
+  funding: number | null
   openTime: string
   closeTime: string
-  duration: string
-  closeReason: string
-  source: Source
-  analysisScore: number
-  opportunityScore: number
-  scanCycle: string
+  duration: string | null
+  closeReason: string | null
+  source: string
+  analysisScore: number | null
+  opportunityScore: number | null
+  scanCycle: string | null
 }
 
 type MarketRow = { symbol: string; display: string; price: number; change: number; volume: number; status?: string; contractType?: string; quoteAsset?: string; filters?: unknown[] }
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number }
 type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; adx?: number; atr?: number; support?: number; resistance?: number; radar?: { trap_score?: number; breakout_quality?: number; entry_timing?: string }; volume_ratio?: number; normalized_signal?: string }
+type AccountPlan = { symbol?: string; stop_loss?: string; targets?: string[]; margin_usdt?: number; created_at?: string }
 type AccountPosition = { symbol: string; direction?: TradeSide; quantity?: number; entry_price?: number; mark_price?: number; unrealized_pnl?: number; leverage?: number | null; stop_loss?: number; tp1?: number; age?: string }
 type AccountOrder = { symbol?: string; side?: string; type?: string; price?: number; quantity?: number; status?: string; reduce_only?: boolean }
-type AccountSnapshot = { wallet_balance?: number; available_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number } }
+type AccountSnapshot = { wallet_balance?: number; available_balance?: number; margin_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; plans?: AccountPlan[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number; max_margin_usdt?: number } }
+type PerformanceSnapshot = { total_trades: number; wins: number; losses: number; win_rate: number; total_profit: number; total_loss: number; net_profit: number; average_trade: number; best_trade: number; worst_trade: number; profit_factor: number | null; average_win: number | null; average_loss: number | null; losing_streak: number; max_drawdown: number; history_quality: string }
 type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[]; analysis: Analysis | null; mtf: MtfAnalysis[]; account: AccountSnapshot | null; currentPrice: number | null; priceUpdatedAt: string | null; marketUpdatedAt: string | null; accountUpdatedAt: string | null; marketError: string; accountError: string }
 type LiveConnection = { configured: boolean; active: boolean; fingerprint: string | null; last_test_ok: boolean; last_test_at: string | null; last_error: string | null; storage: string }
 type LiveVaultStatus = { vault: { ready: boolean; reason: string | null }; connections: { LIVE: LiveConnection } }
 
-const STORAGE_KEY = 'protrebot-master-trade-history-v3'
+const fmtNum = (value: number | null | undefined, decimals = 2) =>
+  value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
 
-const fmtNum = (value: number | undefined, decimals = 2) =>
-  value === undefined ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
-
-const fmtCompact = (value: number | undefined) =>
-  value === undefined ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
+const fmtCompact = (value: number | null | undefined) =>
+  value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
 
 const fmtDecisionNumber = (value: number | null | undefined, decimals = 0) =>
   value === null || value === undefined || !Number.isFinite(value) ? '--' : value.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
@@ -80,17 +80,9 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
 }
 
 export default function MasterTrade({ onBack }: { onBack?: () => void }) {
-  const [history, setHistory] = useState<TradeHistoryRow[]>(() => {
-    if (typeof window === 'undefined') return []
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    try {
-      const parsed = JSON.parse(raw) as TradeHistoryRow[]
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  })
+  const [history, setHistory] = useState<TradeHistoryRow[]>([])
+  const [performanceSnapshot, setPerformanceSnapshot] = useState<PerformanceSnapshot | null>(null)
+  const [dailyPerformance, setDailyPerformance] = useState<PerformanceSnapshot | null>(null)
   const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(null)
   const [markets, setMarkets] = useState<MarketRow[]>([])
   const [marketQuery, setMarketQuery] = useState('')
@@ -194,39 +186,46 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     let active = true
     const refreshAccount = async () => {
       try {
-        const response = await fetch(`${API_BASE}/account`, { signal: controller.signal })
-        if (!response.ok) throw new Error('Account data unavailable')
-        const nextAccount = await response.json() as AccountSnapshot
+        const [accountResponse, journalResponse, performanceResponse, dailyResponse] = await Promise.all([
+          fetch(`${API_BASE}/binance-demo/account`, { signal: controller.signal }),
+          fetch(`${API_BASE}/v21/journal?limit=200`, { signal: controller.signal }),
+          fetch(`${API_BASE}/v21/performance?period=all`, { signal: controller.signal }),
+          fetch(`${API_BASE}/v21/performance?period=daily`, { signal: controller.signal }),
+        ])
+        const accountPayload = await accountResponse.json().catch(() => null) as AccountSnapshot & { detail?: unknown }
+        if (!accountResponse.ok) {
+          const detail = typeof accountPayload?.detail === 'string' ? accountPayload.detail : `Account data unavailable (HTTP ${accountResponse.status}).`
+          throw new Error(detail)
+        }
         if (!active) return
-        accountRef.current = nextAccount
-        setSnapshot(current => current ? { ...current, account: nextAccount, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
+        accountRef.current = accountPayload
+        setSnapshot(current => current ? { ...current, account: accountPayload, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
+        if (journalResponse.ok) {
+          const journalPayload = await journalResponse.json() as { items?: Array<Record<string, unknown>> }
+          const rows = (journalPayload.items || []).filter(item => item.verified_realized === true && typeof item.realized_pnl === 'number').map((item, index) => {
+            const direction = String(item.side || item.direction || '').toUpperCase()
+            return {
+              id: String(item.id || `journal-${index}`), symbol: String(item.symbol || '--'), side: direction === 'BUY' || direction === 'LONG' ? 'LONG' : 'SHORT',
+              entryPrice: null, exitPrice: typeof item.price === 'number' ? item.price : null, quantity: typeof item.quantity === 'number' ? item.quantity : null,
+              leverage: null, margin: null, stopLoss: null, tp1: null, tp2: null, tp3: null, realizedPnl: Number(item.realized_pnl), pnlPercent: null,
+              fees: null, funding: null, openTime: String(item.created_at || ''), closeTime: String(item.created_at || ''), duration: null,
+              closeReason: typeof item.reason === 'string' ? item.reason : null, source: String(item.source || 'BINANCE DEMO'), analysisScore: null, opportunityScore: null, scanCycle: null,
+            } satisfies TradeHistoryRow
+          })
+          setHistory(rows)
+        } else setHistory([])
+        if (performanceResponse.ok) setPerformanceSnapshot(await performanceResponse.json() as PerformanceSnapshot)
+        else setPerformanceSnapshot(null)
+        if (dailyResponse.ok) setDailyPerformance(await dailyResponse.json() as PerformanceSnapshot)
+        else setDailyPerformance(null)
       } catch (error) {
-        if (active && !(error instanceof Error && error.name === 'AbortError')) setSnapshot(current => current ? { ...current, accountError: 'ACCOUNT DATA UNAVAILABLE' } : current)
+        if (active && !(error instanceof Error && error.name === 'AbortError')) setSnapshot(current => current ? { ...current, accountError: error instanceof Error ? error.message : 'ACCOUNT DATA UNAVAILABLE' } : current)
       }
     }
     void refreshAccount()
     const timer = window.setInterval(() => void refreshAccount(), 5000)
     return () => { active = false; controller.abort(); window.clearInterval(timer) }
   }, [])
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(history))
-    }
-  }, [history])
-
-  const performance = useMemo(() => {
-    const total = history.length
-    const wins = history.filter((item) => item.realizedPnl > 0).length
-    const losses = history.filter((item) => item.realizedPnl < 0).length
-    const realized = history.reduce((sum, item) => sum + item.realizedPnl, 0)
-    const avgWin = history.filter((item) => item.realizedPnl > 0).reduce((sum, item) => sum + item.realizedPnl, 0) / Math.max(1, wins)
-    const avgLoss = Math.abs(history.filter((item) => item.realizedPnl < 0).reduce((sum, item) => sum + item.realizedPnl, 0) / Math.max(1, losses))
-    const winRate = total ? (wins / total) * 100 : 0
-    const best = history.reduce((best, item) => Math.max(best, item.realizedPnl), 0)
-    const worst = history.reduce((worst, item) => Math.min(worst, item.realizedPnl), 0)
-    return { total, wins, losses, realized, avgWin, avgLoss, winRate, best, worst }
-  }, [history])
 
   const riskPreview = useMemo(() => {
     const entry = Number(draft.entry)
@@ -262,37 +261,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       : `${tradeDecision.direction} bias · ${triggerMonitor.lifecycle.toLowerCase()} · ${triggerMonitor.remainingConditions ?? '--'} conditions remaining`
     setDecisionTimeline(current => [{ time: snapshot.marketUpdatedAt as string, message }, ...current].slice(0, 12))
   }, [snapshot?.marketUpdatedAt, snapshot?.symbol, snapshot?.timeframe, tradeDecision.direction, triggerMonitor.lifecycle, triggerMonitor.remainingConditions])
-
-  const addTradeRecord = () => {
-    const next: TradeHistoryRow = {
-      id: `MT-${Date.now()}`,
-      symbol: draft.market,
-      side: draft.side,
-      entryPrice: Number(draft.entry),
-      exitPrice: Number(draft.tp1) + (draft.side === 'LONG' ? 8 : -8),
-      quantity: Number(draft.quantity),
-      leverage: Number(draft.leverage),
-      margin: Number(draft.margin),
-      stopLoss: Number(draft.stopLoss),
-      tp1: Number(draft.tp1),
-      tp2: Number(draft.tp2),
-      tp3: Number(draft.tp3),
-      realizedPnl: Number((draft.side === 'LONG' ? Number(draft.tp1) - Number(draft.entry) : Number(draft.entry) - Number(draft.tp1)) * Number(draft.quantity)),
-      pnlPercent: Number(((Math.abs(Number(draft.tp1) - Number(draft.entry)) / Number(draft.entry)) * 100).toFixed(2)),
-      fees: 1.4,
-      funding: 0.1,
-      openTime: new Date().toISOString(),
-      closeTime: new Date(Date.now() + 3600000).toISOString(),
-      duration: '1h 00m',
-      closeReason: 'Risk Preview',
-      source: 'MANUAL',
-      analysisScore: 82,
-      opportunityScore: 86,
-      scanCycle: 'Now',
-    }
-    setHistory((current) => [next, ...current].slice(0, 12))
-    setSelectedTrade(next)
-  }
 
   const demoOrderPayload = () => ({
     symbol: draft.market,
@@ -333,7 +301,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           : typeof payload?.detail === 'string' ? payload.detail : payload?.message
         throw new Error(detail || `Demo order gönderilemedi (HTTP ${response.status}).`)
       }
-      addTradeRecord()
       setDemoConfirmationOpen(false)
       setDemoConfirmationChecked(false)
     } catch (error) {
@@ -486,14 +453,18 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     { label: 'BALANCE', value: account?.wallet_balance === undefined ? '--' : `$${fmtCompact(account.wallet_balance)}`, note: account ? 'Demo/Testnet account' : 'DATA UNAVAILABLE', tone: 'default' },
     { label: 'AVAILABLE', value: account?.available_balance === undefined ? '--' : `$${fmtCompact(account.available_balance)}`, note: account ? 'Current margin' : 'DATA UNAVAILABLE', tone: 'default' },
     { label: 'UNREALIZED PNL', value: account?.unrealized_pnl === undefined ? '--' : `${account.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(account.unrealized_pnl)}`, note: account ? 'Account snapshot' : 'DATA UNAVAILABLE', tone: account?.unrealized_pnl && account.unrealized_pnl >= 0 ? 'positive' : 'default' },
-    { label: 'REALIZED PNL', value: '--', note: 'No real trade history loaded', tone: 'default' },
+    { label: 'REALIZED PNL', value: performanceSnapshot ? `${performanceSnapshot.net_profit >= 0 ? '+' : ''}$${fmtCompact(performanceSnapshot.net_profit)}` : '--', note: performanceSnapshot ? 'Verified Demo history' : 'NO TRADE HISTORY', tone: 'default' },
     { label: 'MARGIN USED', value: account?.wallet_balance !== undefined && account.available_balance !== undefined ? `$${fmtCompact(account.wallet_balance - account.available_balance)}` : '--', note: account ? 'Derived from account' : 'DATA UNAVAILABLE', tone: 'default' },
     { label: 'OPEN POSITIONS', value: account?.positions ? String(account.positions.length) : '--', note: account ? 'Demo/Testnet account' : 'DATA UNAVAILABLE', tone: 'default' },
   ]
 
   const performanceTrend: number[] = []
   const openPositions = account?.positions ?? []
-  const openRiskValues = openPositions.map(position => position.entry_price && position.stop_loss && position.quantity ? Math.abs(position.entry_price - position.stop_loss) * position.quantity : null).filter((value): value is number => value !== null)
+  const openRiskValues = openPositions.map(position => {
+    const plan = account?.plans?.find(item => item.symbol === position.symbol)
+    const stopLoss = position.stop_loss ?? (plan?.stop_loss ? Number(plan.stop_loss) : undefined)
+    return position.entry_price && stopLoss && position.quantity ? Math.abs(position.entry_price - stopLoss) * position.quantity : null
+  }).filter((value): value is number => value !== null)
   const openRisk = openRiskValues.length ? openRiskValues.reduce((sum, value) => sum + value, 0) : null
   const usedMargin = account?.wallet_balance !== undefined && account.available_balance !== undefined ? account.wallet_balance - account.available_balance : null
   const latestUpdate = snapshot?.marketUpdatedAt ? new Date(snapshot.marketUpdatedAt).toLocaleTimeString('en-GB') : '--'
@@ -501,12 +472,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const priceAgeSeconds = snapshot?.priceUpdatedAt ? Math.max(0, (Date.now() - new Date(snapshot.priceUpdatedAt).getTime()) / 1000) : null
   const dataHealth = !snapshot ? 'NO DATA' : snapshot.marketError ? 'ERROR' : priceAgeSeconds !== null && priceAgeSeconds <= 8 ? 'LIVE' : 'STALE'
   const riskMetrics = [
-    { label: 'Daily PnL', value: '--', tone: 'muted' },
+    { label: 'Daily PnL', value: dailyPerformance ? `${dailyPerformance.net_profit >= 0 ? '+' : ''}$${fmtCompact(dailyPerformance.net_profit)}` : '--', tone: 'muted' },
     { label: 'Daily Risk', value: '--', tone: 'muted' },
-    { label: 'Limit', value: '--', tone: 'muted' },
+    { label: 'Limit', value: account?.limits?.max_open_positions === undefined ? '--' : `${account.limits.max_open_positions} positions`, tone: 'muted' },
     { label: 'Open Risk', value: openRisk === null ? '--' : `$${fmtCompact(openRisk)}`, tone: 'warning' },
     { label: 'Margin Used', value: usedMargin === null ? '--' : `$${fmtCompact(usedMargin)}`, tone: 'muted' },
-    { label: 'Loss Streak', value: '--', tone: 'muted' },
+    { label: 'Loss Streak', value: dailyPerformance ? String(dailyPerformance.losing_streak) : '--', tone: 'muted' },
   ]
 
   return (
@@ -806,7 +777,11 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {openPositions.length ? openPositions.map((position) => (
+                  {openPositions.length ? openPositions.map((position) => {
+                    const plan = account?.plans?.find(item => item.symbol === position.symbol)
+                    const stopLoss = position.stop_loss ?? (plan?.stop_loss ? Number(plan.stop_loss) : undefined)
+                    const target = plan?.targets?.[0] ? Number(plan.targets[0]) : position.tp1
+                    return (
                     <tr key={position.symbol}>
                       <td><strong>{position.symbol}</strong><span className="positionAge">{position.age || '--'}</span></td>
                       <td><span className={position.direction === 'LONG' ? 'positive' : 'negative'}>{position.direction || '--'}</span></td>
@@ -814,14 +789,15 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td>${fmtNum(position.entry_price)}</td>
                       <td>${fmtNum(position.mark_price)}</td>
                       <td>{position.leverage ? `${position.leverage}x` : '--'}</td>
-                      <td>--</td>
+                      <td>{plan?.margin_usdt === undefined ? '--' : `$${fmtCompact(plan.margin_usdt)}`}</td>
                       <td className={(position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{position.unrealized_pnl === undefined ? '--' : `${position.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(position.unrealized_pnl)}`}</td>
                       <td>--</td>
-                      <td>${fmtNum(position.stop_loss)}</td>
-                      <td>${fmtNum(position.tp1)}</td>
+                      <td>${fmtNum(stopLoss)}</td>
+                      <td>${fmtNum(target)}</td>
                       <td><span className="statusBadge open">OPEN</span></td>
                     </tr>
-                  )) : <tr><td colSpan={12} className="emptyState">{snapshot?.accountError || 'NO OPEN POSITIONS'}</td></tr>}
+                    )
+                  }) : <tr><td colSpan={12} className="emptyState">{snapshot?.accountError || 'NO OPEN POSITIONS'}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -858,7 +834,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                           <td>${fmtNum(order.price)}</td>
                           <td>{fmtNum(order.quantity)}</td>
                           <td><span className="statusBadge open">{order.status || '--'}</span></td>
-                          <td>{order.reduce_only === undefined ? '--' : order.reduce_only ? 'YES' : 'NO'}</td>
+                          <td>{order.reduce_only === undefined ? '--' : order.reduce_only ? 'REDUCE ONLY' : 'NO'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -906,11 +882,11 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td className={trade.side === 'LONG' ? 'positive' : 'negative'}>{trade.side}</td>
                       <td>${fmtNum(trade.entryPrice)}</td>
                       <td>${fmtNum(trade.exitPrice)}</td>
-                      <td className={trade.realizedPnl >= 0 ? 'positive' : 'negative'}>{trade.realizedPnl >= 0 ? '+' : ''}${fmtCompact(trade.realizedPnl)}</td>
-                      <td className={trade.realizedPnl >= 0 ? 'positive' : 'negative'}>{trade.pnlPercent >= 0 ? '+' : ''}{trade.pnlPercent.toFixed(2)}%</td>
-                      <td>{trade.duration}</td>
+                      <td className={trade.realizedPnl > 0 ? 'positive' : trade.realizedPnl < 0 ? 'negative' : 'muted'}>{trade.realizedPnl > 0 ? '+' : ''}${fmtCompact(trade.realizedPnl)}</td>
+                      <td className={trade.pnlPercent === null ? 'muted' : trade.pnlPercent >= 0 ? 'positive' : 'negative'}>{trade.pnlPercent === null ? '--' : `${trade.pnlPercent >= 0 ? '+' : ''}${trade.pnlPercent.toFixed(2)}%`}</td>
+                      <td>{trade.duration || '--'}</td>
                       <td>{trade.source}</td>
-                      <td><span className={`statusBadge ${trade.realizedPnl >= 0 ? 'win' : 'loss'}`}>{trade.realizedPnl >= 0 ? 'WIN' : 'LOSS'}</span></td>
+                      <td><span className={`statusBadge ${trade.realizedPnl > 0 ? 'win' : trade.realizedPnl < 0 ? 'loss' : 'open'}`}>{trade.realizedPnl > 0 ? 'WIN' : trade.realizedPnl < 0 ? 'LOSS' : '--'}</span></td>
                     </tr>
                   )) : <tr><td colSpan={10} className="emptyState">NO TRADE HISTORY</td></tr>}
                 </tbody>
@@ -927,17 +903,17 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </div>
 
             <div className="performanceMetrics">
-              <div><small>Total trades</small><strong>{history.length ? performance.total : '--'}</strong></div>
-              <div><small>Wins</small><strong>{history.length ? performance.wins : '--'}</strong></div>
-              <div><small>Losses</small><strong>{history.length ? performance.losses : '--'}</strong></div>
-              <div><small>Win rate</small><strong>{history.length ? `${performance.winRate.toFixed(1)}%` : '--'}</strong></div>
-              <div><small>Total PnL</small><strong className={performance.realized >= 0 ? 'positive' : 'negative'}>{history.length ? `$${fmtCompact(performance.realized)}` : '--'}</strong></div>
-              <div><small>Avg win</small><strong>{history.length ? `$${fmtCompact(performance.avgWin)}` : '--'}</strong></div>
-              <div><small>Avg loss</small><strong>{history.length ? `$${fmtCompact(performance.avgLoss)}` : '--'}</strong></div>
-              <div><small>Profit factor</small><strong>--</strong></div>
-              <div><small>Best trade</small><strong className="positive">{history.length ? `$${fmtCompact(performance.best)}` : '--'}</strong></div>
-              <div><small>Worst trade</small><strong className={performance.worst < 0 ? 'negative' : 'muted'}>{history.length && performance.worst ? `$${fmtCompact(performance.worst)}` : '--'}</strong></div>
-              <div><small>Max drawdown</small><strong>--</strong></div>
+              <div><small>Total trades</small><strong>{performanceSnapshot?.total_trades ?? '--'}</strong></div>
+              <div><small>Wins</small><strong>{performanceSnapshot?.wins ?? '--'}</strong></div>
+              <div><small>Losses</small><strong>{performanceSnapshot?.losses ?? '--'}</strong></div>
+              <div><small>Win rate</small><strong>{performanceSnapshot ? `${performanceSnapshot.win_rate.toFixed(1)}%` : '--'}</strong></div>
+              <div><small>Total PnL</small><strong className={(performanceSnapshot?.net_profit ?? 0) >= 0 ? 'positive' : 'negative'}>{performanceSnapshot ? `$${fmtCompact(performanceSnapshot.net_profit)}` : '--'}</strong></div>
+              <div><small>Avg win</small><strong>{performanceSnapshot?.average_win === null || performanceSnapshot?.average_win === undefined ? '--' : `$${fmtCompact(performanceSnapshot.average_win)}`}</strong></div>
+              <div><small>Avg loss</small><strong>{performanceSnapshot?.average_loss === null || performanceSnapshot?.average_loss === undefined ? '--' : `$${fmtCompact(performanceSnapshot.average_loss)}`}</strong></div>
+              <div><small>Profit factor</small><strong>{performanceSnapshot?.profit_factor === null || performanceSnapshot?.profit_factor === undefined ? '--' : performanceSnapshot.profit_factor.toFixed(2)}</strong></div>
+              <div><small>Best trade</small><strong className="positive">{performanceSnapshot ? `$${fmtCompact(performanceSnapshot.best_trade)}` : '--'}</strong></div>
+              <div><small>Worst trade</small><strong className={(performanceSnapshot?.worst_trade ?? 0) < 0 ? 'negative' : 'muted'}>{performanceSnapshot ? `$${fmtCompact(performanceSnapshot.worst_trade)}` : '--'}</strong></div>
+              <div><small>Max drawdown</small><strong>{performanceSnapshot ? `$${fmtCompact(performanceSnapshot.max_drawdown)}` : '--'}</strong></div>
             </div>
 
             <div className="miniSparkline" aria-label="Performance trend">
@@ -1008,8 +984,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <div><small>Entry</small><b>${fmtNum(selectedTrade.entryPrice)}</b></div>
               <div><small>Exit</small><b>${fmtNum(selectedTrade.exitPrice)}</b></div>
               <div><small>PnL</small><b className={selectedTrade.realizedPnl >= 0 ? 'positive' : 'negative'}>${fmtCompact(selectedTrade.realizedPnl)}</b></div>
-              <div><small>ROI</small><b>{selectedTrade.pnlPercent.toFixed(2)}%</b></div>
-              <div><small>Leverage</small><b>{selectedTrade.leverage}x</b></div>
+              <div><small>ROI</small><b>{selectedTrade.pnlPercent === null ? '--' : `${selectedTrade.pnlPercent.toFixed(2)}%`}</b></div>
+              <div><small>Leverage</small><b>{selectedTrade.leverage === null ? '--' : `${selectedTrade.leverage}x`}</b></div>
               <div><small>Margin</small><b>${fmtCompact(selectedTrade.margin)}</b></div>
               <div><small>Risk %</small><b>--</b></div>
               <div><small>R / R</small><b>--</b></div>
@@ -1025,10 +1001,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                   ['Signal Generated', selectedTrade.scanCycle],
                   ['Order Submitted', selectedTrade.openTime],
                   ['Entry Filled', selectedTrade.openTime],
-                  ['TP1', String(selectedTrade.tp1)],
-                  ['TP2', String(selectedTrade.tp2)],
-                  ['TP3', String(selectedTrade.tp3)],
-                  ['Closed', selectedTrade.closeReason],
+                  ['TP1', fmtNum(selectedTrade.tp1)],
+                  ['TP2', fmtNum(selectedTrade.tp2)],
+                  ['TP3', fmtNum(selectedTrade.tp3)],
+                  ['Closed', selectedTrade.closeReason || '--'],
                 ].map(([event, detail], index) => (
                   <div key={`${event}-${index}`} className="timelineItem">
                     <span className="timelineDot" />
