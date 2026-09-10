@@ -675,6 +675,18 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   color: var(--terminal-text);
 }
 
+.marketStatsStrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 2px 0 10px; }
+.marketStatsStrip span { display: grid; gap: 4px; min-width: 0; padding: 7px 8px; border: 1px solid var(--terminal-line); border-radius: 7px; background: rgba(9, 16, 23, .72); }
+.marketStatsStrip small { color: var(--terminal-muted); font-size: 8px; letter-spacing: .08em; }
+.marketStatsStrip b { overflow: hidden; color: var(--terminal-text); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.marketStatsStrip b.warning { color: var(--terminal-warning); }
+.chartToolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0 9px; }
+.chartToolbar .chartControls { margin: 0; }
+.chartToolbar .chartControls button, .chartViewControls button { min-height: 30px; padding: 6px 9px; border: 1px solid var(--terminal-line); border-radius: 6px; background: rgba(9, 16, 23, .72); color: var(--terminal-muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; cursor: pointer; }
+.chartToolbar .chartControls button.active, .chartViewControls button.active { border-color: var(--terminal-line-strong); background: rgba(212, 168, 79, .12); color: var(--terminal-warning); }
+.chartViewControls { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.chartViewControls span { overflow: hidden; color: var(--terminal-muted); font-size: 8px; letter-spacing: .05em; text-overflow: ellipsis; white-space: nowrap; }
+
 .delta {
   padding: 7px 10px;
   border-radius: 999px;
@@ -705,7 +717,39 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   width: 100%;
   height: 100%;
   min-height: 310px;
+  cursor: crosshair;
 }
+
+.marketOhlcChart { min-height: 340px; }
+.marketOhlcChart svg { min-height: 340px; }
+.chartGrid line { stroke: rgba(148, 163, 184, .12); stroke-width: 1; }
+.candle line { stroke-width: 1; }
+.candle rect { stroke-width: .7; }
+.candle.bullish line, .candle.bullish rect { stroke: var(--terminal-positive); }
+.candle.bullish rect { fill: rgba(74, 222, 128, .72); }
+.candle.bearish line, .candle.bearish rect { stroke: var(--terminal-negative); }
+.candle.bearish rect { fill: rgba(248, 113, 113, .72); }
+.chartVolume { opacity: .65; }
+.chartVolume.up { fill: var(--terminal-positive); }
+.chartVolume.down { fill: var(--terminal-negative); }
+.chartLevel line { stroke-width: 1; opacity: .8; }
+.chartLevel text { fill: currentColor; font-size: 8px; font-weight: 800; letter-spacing: .04em; }
+.level-entry { color: var(--terminal-warning); }
+.level-entry line { stroke: var(--terminal-warning); }
+.level-stop { color: var(--terminal-negative); }
+.level-stop line { stroke: var(--terminal-negative); }
+.level-tp { color: var(--terminal-positive); }
+.level-tp line { stroke: var(--terminal-positive); }
+.level-support { color: var(--terminal-info); }
+.level-support line { stroke: var(--terminal-info); }
+.level-resistance { color: #d6a75d; }
+.level-resistance line { stroke: #d6a75d; }
+.level-trigger { color: #f0c674; }
+.level-trigger line { stroke: #f0c674; stroke-width: 1.5; }
+.currentPriceLine line { stroke: var(--terminal-warning); stroke-dasharray: 3 3; opacity: .9; }
+.currentPriceLine text { fill: var(--terminal-warning); font-size: 9px; font-weight: 800; }
+.chartCrosshair line { stroke: rgba(226, 232, 240, .42); stroke-dasharray: 3 3; }
+.chartCrosshair circle { fill: var(--terminal-text); stroke: var(--terminal-warning); stroke-width: 1.5; }
 
 .chartEmpty { display: grid; min-height: 310px; place-items: center; color: var(--terminal-muted); font-size: 12px; }
 
@@ -747,6 +791,30 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 .indicatorGrid strong {
   font-size: 14px;
 }
+
+.indicatorTerminalGrid { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 8px; margin-top: 9px; }
+.indicatorTerminalGrid article { min-width: 0; padding: 9px; border: 1px solid var(--terminal-line); border-radius: 9px; background: rgba(9, 16, 23, .72); }
+.indicatorTerminalGrid header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.indicatorTerminalGrid header span { color: var(--terminal-muted); font-size: 8px; letter-spacing: .1em; }
+.indicatorTerminalGrid header b { color: var(--terminal-text); font-size: 11px; }
+.indicatorTerminalGrid small { display: block; margin-top: 7px; color: var(--terminal-muted); font-size: 8px; letter-spacing: .05em; }
+.volumeMeter { display: flex; align-items: end; gap: 2px; height: 38px; margin-top: 7px; }
+.volumeMeter i { flex: 1; min-width: 1px; border-radius: 1px 1px 0 0; }
+.volumeMeter i.up { background: rgba(74, 222, 128, .68); }
+.volumeMeter i.down { background: rgba(248, 113, 113, .68); }
+.indicatorScale { position: relative; display: flex; align-items: end; justify-content: space-between; height: 38px; margin-top: 7px; border-bottom: 1px solid var(--terminal-line); background: linear-gradient(to bottom, transparent 32%, rgba(248, 113, 113, .12) 33%, transparent 34%, transparent 65%, rgba(74, 222, 128, .08) 66%, transparent 67%); }
+.indicatorScale i { position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed var(--terminal-warning); opacity: .65; }
+.indicatorScale em { color: var(--terminal-muted); font-size: 8px; font-style: normal; }
+.macdPulse { height: 38px; margin-top: 7px; border-bottom: 1px solid var(--terminal-line); background: linear-gradient(135deg, transparent 42%, currentColor 43%, currentColor 46%, transparent 47%); opacity: .7; }
+.macdPulse.positive { color: var(--terminal-positive); }
+.macdPulse.negative { color: var(--terminal-negative); }
+.scoreMeters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.scoreMeters > div { display: grid; grid-template-columns: 1fr auto; gap: 5px 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--terminal-line); border-radius: 8px; background: rgba(9, 16, 23, .72); }
+.scoreMeters span { color: var(--terminal-muted); font-size: 8px; letter-spacing: .1em; }
+.scoreMeters b { color: var(--terminal-text); font-size: 11px; }
+.scoreMeters i { grid-column: 1 / -1; display: block; height: 4px; overflow: hidden; border-radius: 4px; background: rgba(148, 163, 184, .14); }
+.scoreMeters em { display: block; height: 100%; border-radius: inherit; background: var(--terminal-warning); }
+.scoreMeters > div:first-child em { background: var(--terminal-positive); }
 
 .tradeTabs,
 .modeTabs,
@@ -3613,6 +3681,18 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .riskMonitorGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .riskMonitorFooter { flex-wrap: wrap; }
   .riskMonitorFooter strong { margin-right: 5px; }
+  .marketStatsStrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .marketStatsStrip span:last-child { grid-column: 1 / -1; }
+  .chartToolbar { align-items: flex-start; flex-direction: column; }
+  .chartToolbar .chartControls { width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+  .chartToolbar .chartControls button { flex: 0 0 auto; min-width: 48px; min-height: 38px; }
+  .chartViewControls { width: 100%; }
+  .chartViewControls button { min-height: 38px; }
+  .chartViewControls span { margin-left: auto; }
+  .marketOhlcChart, .marketOhlcChart svg { min-height: 290px; }
+  .indicatorTerminalGrid { grid-template-columns: 1fr; }
+  .indicatorTerminalGrid article { min-height: 78px; }
+  .scoreMeters { grid-template-columns: 1fr; }
 }
 
 .tradeDecisionPanel {

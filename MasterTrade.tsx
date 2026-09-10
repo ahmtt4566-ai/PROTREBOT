@@ -94,6 +94,9 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [analysisFillLoading, setAnalysisFillLoading] = useState(false)
   const [analysisFillError, setAnalysisFillError] = useState('')
   const [analysisSyncedAt, setAnalysisSyncedAt] = useState('')
+  const [chartHoverIndex, setChartHoverIndex] = useState<number | null>(null)
+  const [showChartLevels, setShowChartLevels] = useState(true)
+  const [showChartVolume, setShowChartVolume] = useState(true)
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 7, margin: 1000, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
   const candles = snapshot?.candles ?? []
   const analysis = snapshot?.analysis ?? null
@@ -309,11 +312,23 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const chartMin = chartValues.length ? Math.min(...chartValues) : 0
   const chartMax = chartValues.length ? Math.max(...chartValues) : 1
   const chartRange = Math.max(chartMax - chartMin, chartMax * 0.001, 1)
-  const chartPath = chartCandles.map((candle, index) => {
-    const x = chartCandles.length > 1 ? (index / (chartCandles.length - 1)) * 760 : 380
-    const y = 270 - ((candle.close - chartMin) / chartRange) * 230
-    return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
-  }).join(' ')
+  const chartHigh = chartCandles.length ? Math.max(...chartCandles.map(candle => candle.high), analysis?.resistance || 0, analysis?.tp3 || 0, analysis?.entry || 0) : 1
+  const chartLow = chartCandles.length ? Math.min(...chartCandles.map(candle => candle.low), analysis?.support || Number.POSITIVE_INFINITY, analysis?.stop_loss || Number.POSITIVE_INFINITY) : 0
+  const chartValueRange = Math.max(chartHigh - chartLow, chartHigh * 0.001, 1)
+  const chartX = (index: number) => chartCandles.length > 1 ? 760 * index / (chartCandles.length - 1) : 380
+  const chartY = (value: number) => 232 - ((value - chartLow) / chartValueRange) * 190
+  const volumeMax = chartCandles.length ? Math.max(...chartCandles.map(candle => candle.volume), 1) : 1
+  const levelLines = [
+    { label: 'ENTRY', value: analysis?.entry, tone: 'entry' },
+    { label: 'SL', value: analysis?.stop_loss, tone: 'stop' },
+    { label: 'TP1', value: analysis?.tp1, tone: 'tp' },
+    { label: 'TP2', value: analysis?.tp2, tone: 'tp' },
+    { label: 'TP3', value: analysis?.tp3, tone: 'tp' },
+    { label: 'SUPPORT', value: analysis?.support, tone: 'support' },
+    { label: 'RESISTANCE', value: analysis?.resistance, tone: 'resistance' },
+    { label: 'TRIGGER', value: triggerMonitor.triggerPrice ?? undefined, tone: 'trigger' },
+  ].filter((line): line is { label: string; value: number; tone: string } => typeof line.value === 'number' && Number.isFinite(line.value))
+  const hoveredCandle = chartHoverIndex === null ? null : chartCandles[chartHoverIndex]
   const selectMarket = (symbol: string) => {
     setDraft(current => ({ ...current, market: symbol, entry: 0, stopLoss: 0, tp1: 0, tp2: 0, tp3: 0 }))
     setMarketQuery('')
@@ -422,11 +437,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 <span className="panelEyebrow">MARKET</span>
                 <h3>{draft.market}</h3>
               </div>
-              <div className="chartControls">
-                {['1m','5m','15m','1h','4h','1d'].map((range) => (
-                  <button key={range} type="button" className={range === interval ? 'active' : ''} onClick={() => setInterval(range)}>{range}</button>
-                ))}
-              </div>
             </div>
 
             <div className="chartPriceSummary">
@@ -437,21 +447,27 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <span className={`delta ${selectedMarket && selectedMarket.change >= 0 ? 'positive' : 'negative'}`}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</span>
             </div>
 
-            <div className="chartCanvas">
-              {dataLoading && !chartPath ? <div className="chartEmpty">LOADING SNAPSHOT</div> : !chartPath ? <div className="chartEmpty">{dataError || 'DATA UNAVAILABLE'}</div> : <svg viewBox="0 0 760 300" preserveAspectRatio="none" aria-label={`${draft.market} ${interval} price chart`}>
-                <defs>
-                  <linearGradient id="masterTradeChartGlow" x1="0" x2="1" y1="0" y2="0">
-                    <stop offset="0%" stopColor="#22c55e" stopOpacity="0.32" />
-                    <stop offset="100%" stopColor="#22c55e" stopOpacity="0.08" />
-                  </linearGradient>
-                </defs>
-                <g opacity="0.18" stroke="#334155" strokeWidth="1">
-                  {[...Array(11)].map((_, index) => (
-                    <line key={`v-${index}`} x1="0" x2="760" y1={30 + index * 24} y2={30 + index * 24} />
-                  ))}
-                </g>
-                <path d={chartPath} fill="none" stroke="#34d399" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                <path d={`${chartPath} L760 300 L0 300 Z`} fill="url(#masterTradeChartGlow)" opacity="0.7" />
+            <div className="marketStatsStrip">
+              <span><small>24H CHANGE</small><b className={selectedMarket && selectedMarket.change < 0 ? 'negative' : 'positive'}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</b></span>
+              <span><small>VOLUME</small><b>{selectedMarket?.volume ? fmtCompact(selectedMarket.volume) : '--'}</b></span>
+              <span><small>HIGH</small><b>{chartCandles.length ? fmtDecisionNumber(Math.max(...chartCandles.map(candle => candle.high)), 6) : '--'}</b></span>
+              <span><small>LOW</small><b>{chartCandles.length ? fmtDecisionNumber(Math.min(...chartCandles.map(candle => candle.low)), 6) : '--'}</b></span>
+              <span><small>DATA HEALTH</small><b className={dataHealth === 'LIVE' ? 'positive' : dataHealth === 'STALE' ? 'warning' : 'negative'}>{dataHealth}</b></span>
+            </div>
+
+            <div className="chartToolbar" aria-label="Market chart controls">
+              <div className="chartControls">{['1m','5m','15m','1h','4h','1d'].map((range) => <button key={range} type="button" className={range === interval ? 'active' : ''} onClick={() => setInterval(range)}>{range.toUpperCase()}</button>)}</div>
+              <div className="chartViewControls"><button type="button" className={showChartLevels ? 'active' : ''} onClick={() => setShowChartLevels(value => !value)}>LEVELS</button><button type="button" className={showChartVolume ? 'active' : ''} onClick={() => setShowChartVolume(value => !value)}>VOLUME</button><span>{hoveredCandle ? new Date(hoveredCandle.time * (hoveredCandle.time < 1_000_000_000_000 ? 1000 : 1)).toLocaleString('en-GB') : 'OHLC / REAL MARKET DATA'}</span></div>
+            </div>
+
+            <div className="chartCanvas marketOhlcChart">
+              {dataLoading && !chartCandles.length ? <div className="chartEmpty">LOADING SNAPSHOT</div> : !chartCandles.length ? <div className="chartEmpty">{dataError || 'DATA UNAVAILABLE'}</div> : <svg viewBox="0 0 760 300" preserveAspectRatio="none" aria-label={`${draft.market} ${interval} candlestick chart`} onMouseLeave={() => setChartHoverIndex(null)} onMouseMove={event => { const box = event.currentTarget.getBoundingClientRect(); const index = Math.round(((event.clientX - box.left) / box.width) * (chartCandles.length - 1)); setChartHoverIndex(Math.max(0, Math.min(chartCandles.length - 1, index))) }}>
+                <g className="chartGrid">{[...Array(7)].map((_, index) => <line key={`h-${index}`} x1="0" x2="760" y1={22 + index * 35} y2={22 + index * 35} />)}{[...Array(9)].map((_, index) => <line key={`v-${index}`} x1={index * 95} x2={index * 95} y1="0" y2="260" />)}</g>
+                {showChartLevels && levelLines.map(line => <g key={`${line.label}-${line.value}`} className={`chartLevel level-${line.tone}`}><line x1="0" x2="760" y1={chartY(line.value)} y2={chartY(line.value)} strokeDasharray={line.tone === 'trigger' ? '5 4' : '2 3'} /><text x="8" y={chartY(line.value) - 4}>{line.label} {fmtDecisionNumber(line.value, 6)}</text></g>)}
+                {chartCandles.map((candle, index) => { const x = chartX(index); const bodyTop = chartY(Math.max(candle.open, candle.close)); const bodyBottom = chartY(Math.min(candle.open, candle.close)); const bodyHeight = Math.max(2, bodyBottom - bodyTop); const bullish = candle.close >= candle.open; const candleWidth = Math.max(2, Math.min(10, 700 / chartCandles.length)); return <g key={`${candle.time}-${index}`} className={bullish ? 'candle bullish' : 'candle bearish'}><line x1={x} x2={x} y1={chartY(candle.high)} y2={chartY(candle.low)} /><rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} /></g> })}
+                {showChartVolume && chartCandles.map((candle, index) => { const x = chartX(index); const height = candle.volume / volumeMax * 28; return <rect key={`vol-${candle.time}`} className={`chartVolume ${candle.close >= candle.open ? 'up' : 'down'}`} x={x - 2} y={273 - height} width="4" height={height} /> })}
+                {snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined && <g className="currentPriceLine"><line x1="0" x2="760" y1={chartY(snapshot.currentPrice)} y2={chartY(snapshot.currentPrice)} /><text x="670" y={chartY(snapshot.currentPrice) - 5}>{fmtDecisionNumber(snapshot.currentPrice, 6)}</text></g>}
+                {chartHoverIndex !== null && <g className="chartCrosshair"><line x1={chartX(chartHoverIndex)} x2={chartX(chartHoverIndex)} y1="0" y2="260" /><circle cx={chartX(chartHoverIndex)} cy={chartY(chartCandles[chartHoverIndex].close)} r="3" /></g>}
               </svg>}
               <div className="chartBadge">{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${snapshot.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 6 })}` : '--'}</div>
             </div>
@@ -465,6 +481,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <article><small>CONFIDENCE</small><strong className="positive">{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</strong></article>
               <article><small>OPPORTUNITY</small><strong className="decisionAccent">{fmtDecisionNumber(tradeDecision.opportunityScore)}</strong></article>
             </div>
+
+            <div className="indicatorTerminalGrid">
+              <article><header><span>VOLUME</span><b>{analysis?.volume_ratio ? `${analysis.volume_ratio}x` : '--'}</b></header><div className="volumeMeter">{chartCandles.slice(-24).map((candle, index) => <i key={`${candle.time}-${index}`} style={{ height: `${Math.max(8, candle.volume / volumeMax * 100)}%` }} className={candle.close >= candle.open ? 'up' : 'down'} />)}</div></article>
+              <article><header><span>RSI</span><b>{analysis?.rsi ?? '--'}</b></header><div className="indicatorScale"><i /><em>30</em><em>50</em><em>70</em></div><small>{analysis?.rsi === undefined ? 'DATA UNAVAILABLE' : analysis.rsi >= 70 ? 'OVERBOUGHT' : analysis.rsi <= 30 ? 'OVERSOLD' : 'HEALTHY RANGE'}</small></article>
+              <article><header><span>MACD</span><b>{analysis?.macd ?? '--'}</b></header><div className={`macdPulse ${analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}`} /><small>{analysis?.macd === undefined ? 'DATA UNAVAILABLE' : analysis.macd >= 0 ? 'BULLISH' : 'BEARISH'}</small></article>
+            </div>
+            <div className="scoreMeters"><div><span>CONFIDENCE</span><b>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</b><i><em style={{ width: `${tradeDecision.confidenceScore ?? 0}%` }} /></i></div><div><span>OPPORTUNITY</span><b>{fmtDecisionNumber(tradeDecision.opportunityScore)}</b><i><em style={{ width: `${tradeDecision.opportunityScore ?? 0}%` }} /></i></div></div>
 
             <section className={`tradeDecisionPanel decision-${tradeDecision.status.toLowerCase().replaceAll(' ', '-')}`} aria-label="Trade decision analysis">
               <header className="tradeDecisionHeader">
