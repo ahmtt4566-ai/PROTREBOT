@@ -289,6 +289,18 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   ]
 
   const performanceTrend = [35, 40, 38, 48, 52, 46, 57, 64, 60, 68, 72, 76]
+  const openPositions = seedPositions
+  const openRisk = openPositions.reduce((sum, position) => sum + Math.abs(position.entry - position.stopLoss) * position.quantity, 0)
+  const usedMargin = openPositions.reduce((sum, position) => sum + position.margin, 0)
+  const latestUpdate = snapshotState.lastUpdated ? new Date(snapshotState.lastUpdated).toLocaleTimeString('en-GB') : '--'
+  const riskMetrics = [
+    { label: 'Daily PnL', value: `${performance.realized >= 0 ? '+' : ''}$${fmtCompact(performance.realized)}`, tone: performance.realized >= 0 ? 'positive' : 'negative' },
+    { label: 'Daily Risk', value: '--', tone: 'muted' },
+    { label: 'Limit', value: '20.0%', tone: 'warning' },
+    { label: 'Open Risk', value: `$${fmtCompact(openRisk)}`, tone: 'warning' },
+    { label: 'Margin Used', value: `$${fmtCompact(usedMargin)}`, tone: 'muted' },
+    { label: 'Loss Streak', value: String(performance.losses), tone: performance.losses ? 'warning' : 'positive' },
+  ]
 
   return (
     <section className="masterTradePage masterTrade">
@@ -310,6 +322,15 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <span className="statusPill locked"><Lock /> LIVE TRADING LOCKED</span>
           </div>
         </header>
+
+        <div className="terminalStatusStrip" aria-label="Master Trade connection status">
+          <span className="terminalStatusItem online"><i /> CONNECTED</span>
+          <span className="terminalStatusItem"><small>WS</small> --</span>
+          <span className="terminalStatusItem"><small>LATENCY</small> --</span>
+          <span className="terminalStatusItem"><small>LAST UPDATE</small> {latestUpdate}</span>
+          <span className="terminalStatusItem demo">DEMO / TESTNET</span>
+          <span className="terminalStatusItem locked"><Lock /> LIVE TRADING LOCKED</span>
+        </div>
 
         <div className="masterTradeOverview">
           {overviewCards.map((card) => (
@@ -443,6 +464,20 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         </div>
 
         <div className="masterTradeDataGrid">
+          <section className="masterTradePanel riskMonitorPanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">RISK MONITOR</span>
+                <h3>Account risk posture</h3>
+              </div>
+              <Gauge className="panelHeaderIcon" />
+            </div>
+            <div className="riskMonitorGrid">
+              {riskMetrics.map((metric) => <div key={metric.label}><small>{metric.label}</small><strong className={metric.tone}>{metric.value}</strong></div>)}
+            </div>
+            <div className="riskMonitorFooter"><span>Open positions</span><strong>{seedPositions.length} / 3</strong><span>Auto Trade</span><strong>--</strong></div>
+          </section>
+
           <section className="masterTradePanel positionsPanel widePanel">
             <div className="panelHeader">
               <div>
@@ -473,7 +508,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 <tbody>
                   {seedPositions.map((position) => (
                     <tr key={position.symbol}>
-                      <td><strong>{position.symbol}</strong></td>
+                      <td><strong>{position.symbol}</strong><span className="positionAge">{position.age}</span></td>
                       <td><span className={position.side === 'LONG' ? 'positive' : 'negative'}>{position.side}</span></td>
                       <td>{fmtNum(position.quantity, 2)}</td>
                       <td>${fmtNum(position.entry)}</td>
@@ -481,7 +516,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td>{position.leverage}x</td>
                       <td>${fmtCompact(position.margin)}</td>
                       <td className={position.pnl >= 0 ? 'positive' : 'negative'}>{position.pnl >= 0 ? '+' : ''}${fmtCompact(position.pnl)}</td>
-                      <td className={position.pnl >= 0 ? 'positive' : 'negative'}>{position.pnlPercent >= 0 ? '+' : ''}{position.pnlPercent.toFixed(2)}%</td>
+                      <td className={position.pnl >= 0 ? 'positive' : 'negative'}><span className="pnlValue">{position.pnlPercent >= 0 ? '+' : ''}{position.pnlPercent.toFixed(2)}%</span><i className="pnlBar"><b style={{ width: `${Math.min(100, Math.abs(position.pnlPercent) * 20)}%` }} /></i></td>
                       <td>${fmtNum(position.stopLoss)}</td>
                       <td>${fmtNum(position.tp1)}</td>
                       <td><span className="statusBadge open">OPEN</span></td>
@@ -509,6 +544,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <th>Side</th>
                       <th>Type</th>
                       <th>Price</th>
+                      <th>Qty</th>
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -519,6 +555,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                         <td className={order.side === 'LONG' ? 'positive' : 'negative'}>{order.side}</td>
                         <td>{order.type}</td>
                         <td>${fmtNum(order.price)}</td>
+                        <td>{fmtNum(order.quantity)}</td>
                         <td><span className={`statusBadge ${order.status === 'Open' ? 'open' : order.status === 'Filled' ? 'filled' : 'cancelled'}`}>{order.status}</span></td>
                       </tr>
                     ))}
@@ -595,7 +632,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <div><small>Total PnL</small><strong className={performance.realized >= 0 ? 'positive' : 'negative'}>${fmtCompact(performance.realized)}</strong></div>
               <div><small>Avg win</small><strong>${fmtCompact(performance.avgWin)}</strong></div>
               <div><small>Avg loss</small><strong>${fmtCompact(performance.avgLoss)}</strong></div>
-              <div><small>Profit factor</small><strong>{performance.total ? '1.74' : '—'}</strong></div>
+              <div><small>Profit factor</small><strong>--</strong></div>
+              <div><small>Best trade</small><strong className="positive">${fmtCompact(performance.best)}</strong></div>
+              <div><small>Worst trade</small><strong className={performance.worst < 0 ? 'negative' : 'muted'}>{performance.worst ? `$${fmtCompact(performance.worst)}` : '--'}</strong></div>
+              <div><small>Max drawdown</small><strong>--</strong></div>
             </div>
 
             <div className="miniSparkline" aria-label="Performance trend">
@@ -621,11 +661,22 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                     <strong>{candidate.symbol}</strong>
                     <small>{candidate.side}</small>
                   </div>
-                  <div className="scannerScore"><span>{candidate.analysis}</span></div>
+                  <div className="scannerScore"><span>{candidate.opportunity}</span><small>OPP</small></div>
                   <small>{candidate.reason}</small>
                 </article>
               ))}
             </div>
+          </section>
+
+          <section className="masterTradePanel activityPanel compactPanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">LIVE ACTIVITY</span>
+                <h3>Event feed</h3>
+              </div>
+              <Activity className="panelHeaderIcon" />
+            </div>
+            <div className="activityEmpty"><i /><strong>Waiting for live events</strong><span>Market, order and risk events appear here when available.</span></div>
           </section>
 
           <section className="masterTradePanel safetyPanel compactPanel">
@@ -667,6 +718,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <div><small>Exit</small><b>${fmtNum(selectedTrade.exitPrice)}</b></div>
               <div><small>PnL</small><b className={selectedTrade.realizedPnl >= 0 ? 'positive' : 'negative'}>${fmtCompact(selectedTrade.realizedPnl)}</b></div>
               <div><small>ROI</small><b>{selectedTrade.pnlPercent.toFixed(2)}%</b></div>
+              <div><small>Leverage</small><b>{selectedTrade.leverage}x</b></div>
+              <div><small>Margin</small><b>${fmtCompact(selectedTrade.margin)}</b></div>
+              <div><small>Risk %</small><b>--</b></div>
+              <div><small>R / R</small><b>--</b></div>
+              <div><small>Opportunity</small><b>{selectedTrade.opportunityScore}</b></div>
+              <div><small>Source</small><b>{selectedTrade.source}</b></div>
+              <div><small>Close reason</small><b>{selectedTrade.closeReason}</b></div>
             </div>
 
             <div className="drawerSection">

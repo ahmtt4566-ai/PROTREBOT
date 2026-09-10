@@ -1085,6 +1085,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   place-items: center;
   background: rgba(2, 6, 10, 0.72);
   z-index: 60;
+  animation: masterTradeBackdropIn 180ms ease both;
 }
 
 .masterTradeDrawer {
@@ -1096,7 +1097,11 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   border-radius: 18px;
   background: rgba(10, 17, 24, 0.98);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.48);
+  animation: masterTradeDrawerIn 220ms ease both;
 }
+
+@keyframes masterTradeBackdropIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes masterTradeDrawerIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
 .masterTradeDrawer header {
   display: flex;
@@ -1225,6 +1230,8 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .chartCanvas svg { min-height: 250px; }
   .watchlistItem { grid-template-columns: 1fr; }
   .watchlistStats { justify-items: start; }
+  .masterTradeDrawerBackdrop { align-items: end; }
+  .masterTradeDrawer { width: 100%; max-height: 88vh; border-radius: 18px 18px 0 0; }
 }
 
 .v26HeaderSignals .locked i { background: var(--warning); }
@@ -1324,6 +1331,8 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .v26MasterTradeButton { transition: none; }
   .v26MasterTradeButton:hover,
   .v26MasterTradeButton:active { transform: none; }
+  .masterTradeDrawerBackdrop,
+  .masterTradeDrawer { animation: none; }
 }
 .demoEventPanel article:nth-child(3n+1) i, .executionEvents article:nth-child(3n+1) i { background: var(--success); }
 .demoEventPanel article:nth-child(3n+2), .executionEvents article:nth-child(3n+2) { border-left-color: var(--warning); }
@@ -3495,4 +3504,68 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 @media (max-width: 900px) {
   .terminalMobileNavHidden { transform: none !important; opacity: 1 !important; pointer-events: auto !important; }
   .v26HeaderActions .v26NotificationButton { display: grid; }
+}
+
+.terminalStatusStrip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 2px;
+}
+
+.terminalStatusItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid var(--terminal-line);
+  border-radius: 8px;
+  background: rgba(9, 16, 23, 0.72);
+  color: var(--terminal-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terminalStatusItem small { color: var(--terminal-muted); font-size: 8px; }
+.terminalStatusItem i { width: 6px; height: 6px; border-radius: 50%; background: var(--terminal-muted); }
+.terminalStatusItem.online { border-color: rgba(74, 222, 128, 0.28); color: var(--terminal-positive); }
+.terminalStatusItem.online i { background: var(--terminal-positive); box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.1); }
+.terminalStatusItem.demo { border-color: rgba(56, 189, 248, 0.24); color: var(--terminal-info); }
+.terminalStatusItem.locked { border-color: rgba(251, 191, 36, 0.26); color: var(--terminal-warning); }
+.terminalStatusItem svg { width: 11px; height: 11px; }
+
+.panelHeaderIcon { width: 17px; height: 17px; color: var(--terminal-warning); }
+
+.riskMonitorPanel { grid-column: 1 / -1; }
+.riskMonitorGrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.riskMonitorGrid > div { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--terminal-line); border-radius: 10px; background: rgba(9, 16, 23, 0.8); }
+.riskMonitorGrid small, .riskMonitorFooter span { color: var(--terminal-muted); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+.riskMonitorGrid strong { font-size: 14px; }
+.riskMonitorGrid strong.warning { color: var(--terminal-warning); }
+.riskMonitorGrid strong.muted, .performanceMetrics strong.muted { color: var(--terminal-muted); }
+.riskMonitorFooter { display: flex; align-items: center; gap: 8px 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--terminal-line); }
+.riskMonitorFooter strong { margin-right: 12px; color: var(--terminal-text); font-size: 12px; }
+
+.positionAge { display: block; margin-top: 3px; color: var(--terminal-muted); font-size: 9px; }
+.pnlValue { display: block; }
+.pnlBar { display: block; width: 62px; height: 3px; margin-top: 5px; overflow: hidden; border-radius: 99px; background: rgba(148, 163, 184, 0.16); }
+.pnlBar b { display: block; height: 100%; border-radius: inherit; background: currentColor; }
+.scannerScore { display: grid; gap: 2px; }
+.scannerScore small { color: var(--terminal-positive); font-size: 8px; letter-spacing: 0.1em; }
+
+.activityEmpty { display: grid; justify-items: start; gap: 7px; min-height: 136px; padding: 16px 12px; border: 1px dashed var(--terminal-line); border-radius: 12px; background: rgba(9, 16, 23, 0.52); }
+.activityEmpty i { width: 8px; height: 8px; border-radius: 50%; background: var(--terminal-muted); box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.08); }
+.activityEmpty strong { color: var(--terminal-text); font-size: 12px; }
+.activityEmpty span { color: var(--terminal-muted); font-size: 11px; line-height: 1.45; }
+
+@media (max-width: 700px) {
+  .terminalStatusStrip { gap: 5px; }
+  .terminalStatusItem { min-height: 26px; padding: 4px 7px; font-size: 8px; }
+  .riskMonitorGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .riskMonitorFooter { flex-wrap: wrap; }
+  .riskMonitorFooter strong { margin-right: 5px; }
 }
