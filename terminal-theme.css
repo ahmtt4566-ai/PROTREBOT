@@ -3578,6 +3578,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .terminalStatusItem.online i { background: var(--terminal-positive); box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.1); }
 .terminalStatusItem.demo { border-color: rgba(56, 189, 248, 0.24); color: var(--terminal-info); }
 .terminalStatusItem.locked { border-color: rgba(251, 191, 36, 0.26); color: var(--terminal-warning); }
+.terminalStatusItem.dataHealth-live { border-color: rgba(74, 222, 128, 0.28); color: var(--terminal-positive); }
+.terminalStatusItem.dataHealth-stale, .terminalStatusItem.dataHealth-error { border-color: rgba(251, 191, 36, 0.3); color: var(--terminal-warning); }
+.terminalStatusItem.dataHealth-no-data { border-color: rgba(148, 163, 184, 0.24); color: var(--terminal-muted); }
 .terminalStatusItem svg { width: 11px; height: 11px; }
 
 .panelHeaderIcon { width: 17px; height: 17px; color: var(--terminal-warning); }
