@@ -1942,6 +1942,97 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   pointer-events: none;
 }
 
+/* Master Trade terminal layout and contained portfolio scrolling. */
+.masterTradeRoute,
+.masterTradeRoute .masterTradePage,
+.masterTradeRoute .masterTradeShell,
+.masterTradeRoute .masterTradeWorkspace,
+.masterTradeRoute .masterTradeDataGrid {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.masterTradeRoute .masterTradeWorkspace {
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.65fr) minmax(300px, 0.9fr);
+  align-items: start;
+}
+
+.masterTradeRoute .chartPanel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.masterTradeRoute .positionsPanel,
+.masterTradeRoute .historyPanel {
+  grid-column: span 2;
+}
+
+.masterTradeRoute .positionsPanel .tableWrap,
+.masterTradeRoute .historyPanel .tableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-color: rgba(212, 168, 79, 0.55) rgba(255, 255, 255, 0.04);
+  scrollbar-width: thin;
+}
+
+.masterTradeRoute .positionsPanel .tableWrap::-webkit-scrollbar,
+.masterTradeRoute .historyPanel .tableWrap::-webkit-scrollbar {
+  height: 7px;
+}
+
+.masterTradeRoute .positionsPanel .tableWrap::-webkit-scrollbar-thumb,
+.masterTradeRoute .historyPanel .tableWrap::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: rgba(212, 168, 79, 0.55);
+}
+
+@media (max-width: 1180px) and (min-width: 701px) {
+  .masterTradeRoute .masterTradeWorkspace {
+    grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
+  }
+
+  .masterTradeRoute .watchlistPanel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1024px) {
+  .masterTradeRoute .masterTradeDataGrid {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
+  }
+
+  .masterTradeRoute .positionsPanel,
+  .masterTradeRoute .historyPanel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .masterTradeRoute .masterTradeWorkspace,
+  .masterTradeRoute .masterTradeDataGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .masterTradeRoute .watchlistPanel,
+  .masterTradeRoute .positionsPanel,
+  .masterTradeRoute .historyPanel {
+    grid-column: auto;
+  }
+
+  .masterTradeRoute .masterTradeShell {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .masterTradeRoute .masterTradeTopbar,
+  .masterTradeRoute .terminalStatusStrip,
+  .masterTradeRoute .masterTradeSafetyBanner {
+    max-width: 100%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .v26MasterTradeButton { transition: none; }
   .v26MasterTradeButton:hover,
