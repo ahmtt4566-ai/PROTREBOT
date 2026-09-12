@@ -21,6 +21,7 @@ HARD_MAX_LEVERAGE = 3
 HARD_MAX_POSITIONS = 5
 HARD_MAX_DAILY_LOSS_USDT = 100.0
 HARD_MAX_DAILY_TRADES = 12
+HARD_MAX_CONSECUTIVE_LOSSES = 10
 
 
 DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
@@ -34,6 +35,7 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "max_positions": 5,
     "daily_loss_limit": 10.0,
     "daily_trade_limit": 3,
+    "consecutive_loss_limit": 3,
     "min_confidence": 86,
     "max_trap_score": 35,
     "max_spread_bps": 8.0,
@@ -95,6 +97,7 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
     base["max_positions"] = _integer(source.get("max_positions"), 5, 1, HARD_MAX_POSITIONS)
     base["daily_loss_limit"] = _number(source.get("daily_loss_limit"), 10, 5, HARD_MAX_DAILY_LOSS_USDT)
     base["daily_trade_limit"] = _integer(source.get("daily_trade_limit"), 3, 1, HARD_MAX_DAILY_TRADES)
+    base["consecutive_loss_limit"] = _integer(source.get("consecutive_loss_limit"), 3, 1, HARD_MAX_CONSECUTIVE_LOSSES)
     base["min_confidence"] = _integer(source.get("min_confidence"), 86, 70, 95)
     base["max_trap_score"] = _integer(source.get("max_trap_score"), 35, 10, 60)
     base["max_spread_bps"] = _number(source.get("max_spread_bps"), 8, 0.5, 25)
@@ -135,11 +138,19 @@ def daily_execution_metrics(events: list[dict[str, Any]], now: datetime | None =
         str(item.get("plan_id")) for item in events
         if item.get("kind") == "LIVE_POSITION_CLOSED_UNVERIFIED" and item.get("plan_id")
     } - verified_plan_ids
+    closed_rows = [item for item in rows if item.get("kind") == "LIVE_POSITION_CLOSED"]
+    consecutive_losses = 0
+    for item in reversed(closed_rows):
+        if float(item.get("realized_pnl") or 0) < 0:
+            consecutive_losses += 1
+        else:
+            break
     return {
         "date": day,
         "entries": len(entries),
         "realized_pnl": round(realized, 6),
         "unverified_closures": len(unverified_plan_ids),
+        "consecutive_losses": consecutive_losses,
         "events": len(rows),
     }
 
@@ -216,6 +227,7 @@ def evaluate_entry_gates(
         GateResult(float(daily.get("realized_pnl", 0)) > -float(settings["daily_loss_limit"]), "daily_loss", "Günlük kayıp kilidi", f"{daily.get('realized_pnl', 0):.2f} USDT"),
         GateResult(float(snapshot.get("unrealized_pnl") or 0) > -float(settings["daily_loss_limit"]), "open_loss", "Açık zarar kilidi", f"{float(snapshot.get('unrealized_pnl') or 0):.2f} USDT"),
         GateResult(int(daily.get("unverified_closures", 0)) == 0, "pnl_verified", "Kesinleşmiş PnL", f"Doğrulanmamış kapanış: {daily.get('unverified_closures', 0)}"),
+        GateResult(int(daily.get("consecutive_losses", 0)) < settings["consecutive_loss_limit"], "consecutive_losses", "Ardışık kayıp kilidi", f"{daily.get('consecutive_losses', 0)} / {settings['consecutive_loss_limit']} kayıp"),
     ]
     failed = [gate for gate in gates if not gate.passed]
     return {

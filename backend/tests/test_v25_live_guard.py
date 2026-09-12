@@ -1,7 +1,9 @@
+import asyncio
 import sys
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).parents[2]
@@ -165,6 +167,60 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("origClientOrderId", EXECUTION_SOURCE)
         self.assertIn("find_order", EXECUTION_SOURCE)
         self.assertNotIn("for attempt in", EXECUTION_SOURCE)
+
+    def test_consecutive_loss_gate_blocks_at_limit_and_resets_after_profit(self):
+        events = [
+            {"kind": "LIVE_POSITION_CLOSED", "realized_pnl": -1, "created_at": "2026-09-12T10:00:00+00:00"},
+            {"kind": "LIVE_POSITION_CLOSED", "realized_pnl": -1, "created_at": "2026-09-12T11:00:00+00:00"},
+            {"kind": "LIVE_POSITION_CLOSED", "realized_pnl": -1, "created_at": "2026-09-12T12:00:00+00:00"},
+        ]
+        metrics = daily_execution_metrics(events, datetime(2026, 9, 12, 13, tzinfo=timezone.utc))
+        self.assertEqual(metrics["consecutive_losses"], 3)
+        policy = sanitize_execution_policy({"consecutive_loss_limit": 3})
+        kwargs = dict(symbol="BTCUSDT", signal={"direction": "LONG", "confidence": 100, "radar": {"trap_score": 1}}, snapshot={"positions": [], "open_orders": [], "hedge_mode": False}, policy=policy, spread_bps=1, armed=True, allowed_symbols=["BTCUSDT"])
+        blocked = evaluate_entry_gates(daily=metrics, **kwargs)
+        self.assertFalse(blocked["passed"])
+        reset_metrics = daily_execution_metrics(events + [{"kind": "LIVE_POSITION_CLOSED", "realized_pnl": 5, "created_at": "2026-09-12T14:00:00+00:00"}], datetime(2026, 9, 12, 15, tzinfo=timezone.utc))
+        self.assertEqual(reset_metrics["consecutive_losses"], 0)
+        self.assertTrue(evaluate_entry_gates(daily=reset_metrics, **kwargs)["passed"])
+
+    def test_v25_recovery_restores_snapshot_and_missing_db_fails_closed(self):
+        from app.v25_execution import restore_v25_state
+
+        class Pool:
+            async def fetchrow(self, query, *args):
+                return {"payload": {"plans": {"plan-a": {"status": "DOLUM BEKLİYOR"}}, "intents": {}}}
+
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=Pool(), v25_execution={"plans": {}, "intents": {}, "policy": {}, "events": [], "recovery_ready": False, "recovery_error": "pending"}))
+        self.assertTrue(asyncio.run(restore_v25_state(application)))
+        self.assertTrue(application.state.v25_execution["recovery_loaded"])
+        self.assertFalse(application.state.v25_execution["recovery_ready"])
+        self.assertIn("plan-a", application.state.v25_execution["plans"])
+        unavailable = SimpleNamespace(state=SimpleNamespace(db_pool=None, v25_execution={"recovery_ready": False, "recovery_error": None}))
+        self.assertFalse(asyncio.run(restore_v25_state(unavailable)))
+        self.assertFalse(unavailable.state.v25_execution["recovery_ready"])
+
+    def test_v25_recovery_failure_and_missing_snapshot_do_not_authorize_entries(self):
+        from app.v25_execution import execute_live_order, restore_v25_state
+        from fastapi import HTTPException
+
+        class MissingPool:
+            async def fetchrow(self, query, *args):
+                return None
+
+        missing = SimpleNamespace(state=SimpleNamespace(db_pool=MissingPool(), v25_execution={"plans": {}, "intents": {}, "policy": {}, "events": [], "recovery_ready": False, "recovery_loaded": False, "recovery_error": None}))
+        self.assertTrue(asyncio.run(restore_v25_state(missing)))
+        self.assertTrue(missing.state.v25_execution["recovery_loaded"])
+        with self.assertRaises(HTTPException):
+            asyncio.run(execute_live_order(missing, SimpleNamespace(), source="V25_AUTO"))
+
+        class FailedPool:
+            async def fetchrow(self, query, *args):
+                raise RuntimeError("database unavailable")
+
+        failed = SimpleNamespace(state=SimpleNamespace(db_pool=FailedPool(), v25_execution={"recovery_ready": False, "recovery_loaded": False, "recovery_error": None}))
+        self.assertFalse(asyncio.run(restore_v25_state(failed)))
+        self.assertFalse(failed.state.v25_execution["recovery_loaded"])
 
     def test_crash_window_persists_full_intent_and_recovers_orphan_plan(self):
         self.assertIn('"spec": serializable_spec', EXECUTION_SOURCE)

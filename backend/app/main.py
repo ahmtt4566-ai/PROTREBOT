@@ -43,7 +43,7 @@ from .v22_commercial import (
     sync_v22_storage,
 )
 from .v24_commerce import router as v24_commerce_router
-from .v25_execution import init_v25_execution, router as v25_execution_router, shutdown_v25_execution
+from .v25_execution import init_v25_execution, restore_v25_state, router as v25_execution_router, shutdown_v25_execution
 from .v27_cloud_ops import (
     init_v27_cloud,
     router as v27_cloud_router,
@@ -528,6 +528,9 @@ async def ensure_infrastructure(application: FastAPI) -> None:
 
     database_ok = application.state.db_pool is not None
     redis_ok = application.state.redis_client is not None
+    if not database_ok and DATABASE_URL and hasattr(application.state, "v25_execution"):
+        application.state.v25_execution["recovery_ready"] = False
+        application.state.v25_execution["recovery_error"] = "PostgreSQL persistence unavailable."
     if PAPER_ENABLED and database_ok and not application.state.paper_schema_ready:
         try:
             await ensure_paper_schema(application)
@@ -555,6 +558,8 @@ async def ensure_infrastructure(application: FastAPI) -> None:
             await persist_paper_snapshot(application)
     if database_ok:
         await sync_v22_storage(application)
+        if hasattr(application.state, "v25_execution") and not application.state.v25_execution.get("recovery_loaded"):
+            await restore_v25_state(application)
         if hasattr(application.state, "exchange_vault"):
             await ensure_exchange_vault(application)
     infrastructure.update({
@@ -4032,7 +4037,14 @@ async def consensus_from_candles(safe_symbol: str, candles_by_interval: dict[str
     intervals = [("15m", 0.20), ("1h", 0.30), ("4h", 0.30), ("1d", 0.20)]
 
     async def inspect(interval: str, weight: float):
-        result = await asyncio.to_thread(analyze, candles_by_interval[interval])
+        candles = candles_by_interval.get(interval, [])
+        closed_candles = candles[:-1] if len(candles) > 1 else []
+        if len(closed_candles) < 2:
+            return {
+                "timeframe": interval, "weight": weight, "direction": "BEKLE",
+                "confidence": 0, "trend": "VERİ YETERSİZ", "radar_level": "VERİ YETERSİZ",
+            }
+        result = await asyncio.to_thread(analyze, closed_candles)
         return {
             "timeframe": interval,
             "weight": weight,

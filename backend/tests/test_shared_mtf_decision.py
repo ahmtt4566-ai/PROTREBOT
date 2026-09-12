@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -19,6 +20,43 @@ class SharedMTFDecisionTests(unittest.TestCase):
         self.assertTrue(result["entry_permission"])
         self.assertFalse(result["blocked_by_short_filter"])
         self.assertEqual(result["verdict"], "GÜÇLÜ ONAY")
+
+    def test_consensus_uses_closed_candles_for_all_timeframes(self):
+        from backend.app.main import consensus_from_candles
+
+        candles = {
+            interval: [{"time": index, "open": 1, "high": 2, "low": 0.5, "close": 1, "volume": 10} for index in range(4)]
+            for interval in ("15m", "1h", "4h", "1d")
+        }
+        observed_lengths = []
+
+        def analyze_stub(rows):
+            observed_lengths.append(len(rows))
+            return {"direction": "LONG", "confidence": 80, "trend": "UP", "radar": {"trap_level": "LOW"}}
+
+        with patch.object(main_module, "analyze", side_effect=analyze_stub):
+            result = asyncio.run(consensus_from_candles("BTCUSDT", candles))
+        self.assertEqual(observed_lengths, [3, 3, 3, 3])
+        self.assertEqual(result["direction"], "LONG")
+
+    def test_consensus_fails_safe_with_insufficient_closed_candles(self):
+        from backend.app.main import consensus_from_candles
+
+        candles = {interval: [{"time": 1}] for interval in ("15m", "1h", "4h", "1d")}
+        result = asyncio.run(consensus_from_candles("BTCUSDT", candles))
+        self.assertFalse(result["entry_permission"])
+        self.assertEqual(result["direction"], "BEKLE")
+
+    def test_forming_candle_changes_do_not_change_consensus(self):
+        from backend.app.main import consensus_from_candles
+
+        base = [{"time": index, "open": 1, "high": 2, "low": 0.5, "close": 1, "volume": 10} for index in range(4)]
+        changed = [*base[:-1], {**base[-1], "close": 999, "high": 1000, "low": 998}]
+        first = {interval: list(base) for interval in ("15m", "1h", "4h", "1d")}
+        second = {interval: list(changed) for interval in ("15m", "1h", "4h", "1d")}
+        signal = {"direction": "LONG", "confidence": 80, "trend": "UP", "radar": {"trap_level": "LOW"}}
+        with patch.object(main_module, "analyze", return_value=signal):
+            self.assertEqual(asyncio.run(consensus_from_candles("BTCUSDT", first)), asyncio.run(consensus_from_candles("BTCUSDT", second)))
 
     def test_short_all_aligned_below_threshold_allowed(self):
         timeframe_results, confidence_15m = self._payload("SHORT", 72.0)

@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -145,6 +146,7 @@ class PolicyUpdate(BaseModel):
     max_positions: int | None = Field(default=None, ge=1, le=5)
     daily_loss_limit: float | None = Field(default=None, ge=5, le=100)
     daily_trade_limit: int | None = Field(default=None, ge=1, le=12)
+    consecutive_loss_limit: int | None = Field(default=None, ge=1, le=10)
     min_confidence: int | None = Field(default=None, ge=70, le=95)
     max_trap_score: int | None = Field(default=None, ge=10, le=60)
     max_spread_bps: float | None = Field(default=None, ge=0.5, le=25)
@@ -218,6 +220,9 @@ def initial_state() -> dict[str, Any]:
         "web_consent": {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None},
         "duplicate_blocks": 0,
         "protection_repairs": 0,
+        "recovery_ready": False,
+        "recovery_loaded": True,
+        "recovery_error": None,
     }
 
 
@@ -252,6 +257,22 @@ def load_state() -> dict[str, Any]:
 
 
 def persist_state(state: dict[str, Any]) -> None:
+    application = state.get("_app")
+    pool = getattr(getattr(application, "state", None), "db_pool", None)
+    if application is not None and pool is not None:
+        tasks = getattr(application.state, "_v25_persistence_tasks", None)
+        if not isinstance(tasks, set):
+            tasks = set()
+            application.state._v25_persistence_tasks = tasks
+        payload = sanitized_state(state)
+        task = asyncio.create_task(_persist_state_snapshot(application, payload))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        return
+    if os.getenv("DATABASE_URL", "").strip():
+        state["recovery_ready"] = False
+        state["recovery_error"] = "PostgreSQL persistence unavailable."
+        return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     payload = sanitized_state(state)
     body = json.dumps(payload, ensure_ascii=False, indent=2)
@@ -263,6 +284,47 @@ def persist_state(state: dict[str, Any]) -> None:
         except OSError:
             pass
     temporary.replace(STATE_PATH)
+
+
+V25_SNAPSHOT_KEY = "v25_live:state"
+
+
+async def _persist_state_snapshot(application: Any, payload: dict[str, Any]) -> None:
+    pool = getattr(application.state, "db_pool", None)
+    if pool is None:
+        return
+    await pool.execute(
+        """
+        INSERT INTO application_state_snapshots (state_key, updated_at, payload)
+        VALUES ($1, NOW(), $2::jsonb)
+        ON CONFLICT (state_key) DO UPDATE
+        SET updated_at = NOW(), payload = EXCLUDED.payload
+        """,
+        V25_SNAPSHOT_KEY,
+        json.dumps(payload, ensure_ascii=False),
+    )
+
+
+async def restore_v25_state(application: Any) -> bool:
+    state = application.state.v25_execution
+    pool = getattr(application.state, "db_pool", None)
+    if pool is None:
+        return False
+    try:
+        row = await pool.fetchrow("SELECT payload FROM application_state_snapshots WHERE state_key = $1", V25_SNAPSHOT_KEY)
+        if row is not None:
+            payload = row["payload"]
+            restored = sanitized_state(payload)
+            state.update(restored)
+        state["_app"] = application
+        state["recovery_loaded"] = True
+        state["recovery_ready"] = False
+        state["recovery_error"] = None
+        return True
+    except Exception:
+        state["recovery_ready"] = False
+        state["recovery_error"] = "PostgreSQL recovery failed."
+        return False
 
 
 def add_event(state: dict[str, Any], kind: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -1257,6 +1319,8 @@ async def execute_live_order(
     allowed_symbols: list[str] | None = None,
 ) -> dict[str, Any]:
     state = application.state.v25_execution
+    if not state.get("recovery_ready", False):
+        raise HTTPException(503, "Canlı durum kurtarma tamamlanmadı; yeni emir gönderilmedi.")
     if source == "V25_AUTO":
         if not auto_session_active(state):
             raise HTTPException(423, "Bir saatlik gözetimli canlı otomasyon oturumu kapalı veya süresi doldu.")
@@ -1458,6 +1522,8 @@ async def reconcile(application: Any) -> None:
     client = client_for(application)
     snapshot = await account_snapshot(client)
     state["snapshot"] = snapshot
+    state["recovery_ready"] = True
+    state["recovery_error"] = None
     state["connected"] = True
     state["connection"].update({"last_checked": now_iso(), "last_error": None, "clock_offset_ms": client.time_offset_ms})
     positions = {item["symbol"]: item for item in snapshot.get("positions", [])}
@@ -1502,6 +1568,13 @@ async def execution_loop(application: Any) -> None:
     backoff = 5
     while True:
         try:
+            recovery_loaded = application.state.v25_execution.get("recovery_loaded", not bool(os.getenv("DATABASE_URL", "").strip()))
+            database_unavailable = bool(os.getenv("DATABASE_URL", "").strip()) and getattr(application.state, "db_pool", None) is None
+            if not recovery_loaded or database_unavailable:
+                application.state.v25_execution["auto"]["last_skip_reason"] = "recovery_unavailable"
+                automation_telemetry("AUTOMATION_SKIP reason=recovery_unavailable", reason="recovery_unavailable")
+                await asyncio.sleep(5)
+                continue
             automation_telemetry("AUTOMATION_LOOP running", reason="loop_running")
             _, secret, fingerprint = live_credentials_status()
             if not fingerprint or len(secret) < 10:
@@ -1532,6 +1605,10 @@ async def execution_loop(application: Any) -> None:
 def init_v25_execution(application: Any) -> None:
     state = load_state()
     state["lock"] = asyncio.Lock()
+    state["_app"] = application
+    state["recovery_loaded"] = not bool(os.getenv("DATABASE_URL", "").strip())
+    state["recovery_ready"] = state["recovery_loaded"]
+    state["recovery_error"] = None if state["recovery_ready"] else "PostgreSQL recovery pending."
     application.state.v25_execution = state
     add_event(state, "V25_START", "V25 Live Guard başladı; canlı giriş ve otomasyon güvenlik için kapalı.")
     application.state.v25_execution_task = asyncio.create_task(execution_loop(application))
@@ -1551,6 +1628,9 @@ async def shutdown_v25_execution(application: Any) -> None:
         task.cancel()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+    persistence_tasks = list(getattr(application.state, "_v25_persistence_tasks", set()))
+    if persistence_tasks:
+        await asyncio.gather(*persistence_tasks, return_exceptions=True)
     if state:
         state["armed_until"] = 0.0
         state["auto"]["enabled"] = False
