@@ -944,7 +944,7 @@ app.add_middleware(
 )
 
 MEMBER_PUBLIC_PATHS = frozenset({
-    "/api/health", "/api/web/access/check", "/api/v22/public", "/api/v22/bootstrap",
+    "/api/health", "/api/health/database", "/api/web/access/check", "/api/v22/public", "/api/v22/bootstrap",
     "/api/v22/auth/login", "/api/v22/auth/register", "/api/v22/auth/verify-email",
     "/api/v22/auth/verification-status", "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
 })

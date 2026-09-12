@@ -24,6 +24,13 @@ class WebSecurityTests(unittest.TestCase):
         )
         self.assertTrue(decision.allowed)
 
+    def test_database_health_is_public_for_host_monitoring(self):
+        decision = evaluate_access(
+            required=True, configured_token="x" * 32, authorization=None,
+            path="/api/health/database", method="GET",
+        )
+        self.assertTrue(decision.allowed)
+
     def test_missing_server_secret_fails_closed(self):
         decision = evaluate_access(
             required=True, configured_token="short", authorization="Bearer anything",
