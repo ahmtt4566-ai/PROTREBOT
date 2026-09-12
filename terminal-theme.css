@@ -1970,11 +1970,19 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 
 .masterTradeRoute .positionsPanel .tableWrap,
 .masterTradeRoute .historyPanel .tableWrap {
+  display: block;
+  min-width: 0;
+  width: 100%;
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-color: rgba(212, 168, 79, 0.55) rgba(255, 255, 255, 0.04);
   scrollbar-width: thin;
+}
+
+.masterTradeRoute .portfolioScrollRegion {
+  isolation: isolate;
+  touch-action: pan-x pan-y;
 }
 
 .masterTradeRoute .positionsPanel .tableWrap::-webkit-scrollbar,

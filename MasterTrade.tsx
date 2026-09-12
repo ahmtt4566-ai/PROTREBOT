@@ -922,7 +922,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <button type="button" className="panelGhostButton">25% · 50% · 75% · 100%</button>
             </div>
 
-            <div className="tableWrap">
+            <div className="tableWrap portfolioScrollRegion">
               <table>
                 <thead>
                   <tr>
