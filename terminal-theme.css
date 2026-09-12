@@ -1960,8 +1960,10 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 
 .masterTradeRoute .masterTradeDataGrid {
   grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: max-content;
   gap: 14px;
   align-items: start;
+  align-content: start;
 }
 
 .masterTradeRoute .riskMonitorPanel,
@@ -2017,11 +2019,6 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 .masterTradeRoute .chartPanel {
   min-width: 0;
   overflow: hidden;
-}
-
-.masterTradeRoute .positionsPanel,
-.masterTradeRoute .historyPanel {
-  grid-column: span 2;
 }
 
 .masterTradeRoute .positionsPanel .tableWrap,
