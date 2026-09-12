@@ -44,6 +44,9 @@ type PerformanceSnapshot = { total_trades: number; wins: number; losses: number;
 type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[]; analysis: Analysis | null; mtf: MtfAnalysis[]; account: AccountSnapshot | null; currentPrice: number | null; priceUpdatedAt: string | null; marketUpdatedAt: string | null; accountUpdatedAt: string | null; marketError: string; accountError: string }
 type LiveConnection = { configured: boolean; active: boolean; fingerprint: string | null; last_test_ok: boolean; last_test_at: string | null; last_error: string | null; storage: string }
 type LiveVaultStatus = { vault: { ready: boolean; reason: string | null }; connections: { LIVE: LiveConnection } }
+type AccountSyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'DATA_UNAVAILABLE'
+type TradeHistorySyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'UNAVAILABLE'
+type CloseLifecycleState = 'IDLE' | 'CLOSING' | 'CLOSED' | 'CLOSE_FAILED' | 'HISTORY_SYNC_FAILED' | 'ACCOUNT_SYNC_FAILED' | 'SYNC_FAILED'
 
 const fmtNum = (value: number | null | undefined, decimals = 2) =>
   value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
@@ -72,6 +75,7 @@ const fmtSignalAge = (seconds: number | null) => {
 }
 
 const MTF_INTERVALS = ['1m', '5m', '15m', '1h', '4h']
+const routeSegment = (name: string) => '/' + name
 
 const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   const responses = await Promise.all(MTF_INTERVALS.map(timeframe => fetch(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal })))
@@ -88,6 +92,8 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
 
 export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [history, setHistory] = useState<TradeHistoryRow[]>([])
+  const [historySyncState, setHistorySyncState] = useState<TradeHistorySyncState>('READY')
+  const [accountSyncState, setAccountSyncState] = useState<AccountSyncState>('READY')
   const [performanceSnapshot, setPerformanceSnapshot] = useState<PerformanceSnapshot | null>(null)
   const [dailyPerformance, setDailyPerformance] = useState<PerformanceSnapshot | null>(null)
   const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(null)
@@ -118,7 +124,11 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [positionAction, setPositionAction] = useState<{ mode: 'DETAILS' | 'REDUCE' | 'CLOSE'; position: AccountPosition } | null>(null)
   const [positionActionBusy, setPositionActionBusy] = useState(false)
   const [positionActionError, setPositionActionError] = useState('')
+  const [closeLifecycle, setCloseLifecycle] = useState<{ state: CloseLifecycleState; message: string; detail?: string }>({ state: 'IDLE', message: 'READY' })
   const [reduceQuantity, setReduceQuantity] = useState('')
+  const [lastAccountSyncAt, setLastAccountSyncAt] = useState<string | null>(null)
+  const [lastHistorySyncAt, setLastHistorySyncAt] = useState<string | null>(null)
+  const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null)
   const [liveVault, setLiveVault] = useState<LiveVaultStatus | null>(null)
   const [liveCredentials, setLiveCredentials] = useState({ apiKey: '', secretKey: '' })
   const [liveBusy, setLiveBusy] = useState('')
@@ -193,50 +203,89 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     return () => { controller.abort(); window.clearInterval(timer) }
   }, [draft.market, interval])
 
+  const refreshAccountData = async () => {
+    const response = await Promise.all([
+      fetch(`${API_BASE}/binance-demo/account`),
+      fetch(`${API_BASE}/v21/journal?limit=200`),
+      fetch(`${API_BASE}/v21/performance?period=all`),
+      fetch(`${API_BASE}/v21/performance?period=daily`),
+    ])
+    const [accountResponse, journalResponse, performanceResponse, dailyResponse] = response
+    const accountPayload = accountResponse.ok ? await accountResponse.json().catch(() => null) as AccountSnapshot & { detail?: unknown } : null
+    if (!accountResponse.ok || !accountPayload) {
+      const detail = accountPayload && typeof accountPayload.detail === 'string'
+        ? accountPayload.detail
+        : `Account data unavailable (HTTP ${accountResponse.status}).`
+      setAccountSyncState('DISCONNECTED')
+      setSnapshot(current => current ? { ...current, accountError: detail } : current)
+      setHistorySyncState('UNAVAILABLE')
+      setLastAccountSyncAt(null)
+      return false
+    }
+
+    const nextPositions = Array.isArray(accountPayload.positions) ? accountPayload.positions : []
+    accountRef.current = accountPayload
+    setAccountSyncState(nextPositions.length === 0 ? 'EMPTY' : 'READY')
+    setLastAccountSyncAt(new Date().toISOString())
+    setLastSuccessfulRefreshAt(new Date().toISOString())
+    setSnapshot(current => current ? { ...current, account: accountPayload, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
+
+    if (journalResponse.ok) {
+      const journalPayload = await journalResponse.json().catch(() => null) as { items?: Array<Record<string, unknown>> } | null
+      const rows = ((journalPayload?.items || []) as Array<Record<string, unknown>>).filter(item => item.verified_realized === true && typeof item.realized_pnl === 'number').map((item, index) => {
+        const direction = String(item.side || item.direction || '').toUpperCase()
+        return {
+          id: String(item.id || `journal-${index}`), symbol: String(item.symbol || '--'), side: direction === 'BUY' || direction === 'LONG' ? 'LONG' : 'SHORT',
+          entryPrice: null, exitPrice: typeof item.price === 'number' ? item.price : null, quantity: typeof item.quantity === 'number' ? item.quantity : null,
+          leverage: null, margin: null, stopLoss: null, tp1: null, tp2: null, tp3: null, realizedPnl: Number(item.realized_pnl), pnlPercent: null,
+          fees: null, funding: null, openTime: String(item.created_at || ''), closeTime: String(item.created_at || ''), duration: null,
+          closeReason: typeof item.reason === 'string' ? item.reason : null, source: String(item.source || 'BINANCE DEMO'), analysisScore: null, opportunityScore: null, scanCycle: null,
+        } satisfies TradeHistoryRow
+      })
+      setHistory(rows)
+      setHistorySyncState(rows.length === 0 ? 'EMPTY' : 'READY')
+      setLastHistorySyncAt(rows.length ? new Date().toISOString() : null)
+    } else {
+      setHistory([])
+      setHistorySyncState('UNAVAILABLE')
+      setLastHistorySyncAt(null)
+    }
+
+    if (performanceResponse.ok) {
+      const performance = await performanceResponse.json().catch(() => null) as PerformanceSnapshot | null
+      setPerformanceSnapshot(performance)
+    } else {
+      setPerformanceSnapshot(null)
+    }
+
+    if (dailyResponse.ok) {
+      const daily = await dailyResponse.json().catch(() => null) as PerformanceSnapshot | null
+      setDailyPerformance(daily)
+    } else {
+      setDailyPerformance(null)
+    }
+    return true
+  }
+
   useEffect(() => {
     const controller = new AbortController()
-    let active = true
     const refreshAccount = async () => {
       try {
-        const [accountResponse, journalResponse, performanceResponse, dailyResponse] = await Promise.all([
-          fetch(`${API_BASE}/binance-demo/account`, { signal: controller.signal }),
-          fetch(`${API_BASE}/v21/journal?limit=200`, { signal: controller.signal }),
-          fetch(`${API_BASE}/v21/performance?period=all`, { signal: controller.signal }),
-          fetch(`${API_BASE}/v21/performance?period=daily`, { signal: controller.signal }),
-        ])
-        const accountPayload = await accountResponse.json().catch(() => null) as AccountSnapshot & { detail?: unknown }
-        if (!accountResponse.ok) {
-          const detail = typeof accountPayload?.detail === 'string' ? accountPayload.detail : `Account data unavailable (HTTP ${accountResponse.status}).`
-          throw new Error(detail)
+        const ok = await refreshAccountData()
+        if (!ok && !(accountRef.current?.last_error)) {
+          setSnapshot(current => current ? { ...current, accountError: 'ACCOUNT DISCONNECTED' } : current)
         }
-        if (!active) return
-        accountRef.current = accountPayload
-        setSnapshot(current => current ? { ...current, account: accountPayload, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
-        if (journalResponse.ok) {
-          const journalPayload = await journalResponse.json() as { items?: Array<Record<string, unknown>> }
-          const rows = (journalPayload.items || []).filter(item => item.verified_realized === true && typeof item.realized_pnl === 'number').map((item, index) => {
-            const direction = String(item.side || item.direction || '').toUpperCase()
-            return {
-              id: String(item.id || `journal-${index}`), symbol: String(item.symbol || '--'), side: direction === 'BUY' || direction === 'LONG' ? 'LONG' : 'SHORT',
-              entryPrice: null, exitPrice: typeof item.price === 'number' ? item.price : null, quantity: typeof item.quantity === 'number' ? item.quantity : null,
-              leverage: null, margin: null, stopLoss: null, tp1: null, tp2: null, tp3: null, realizedPnl: Number(item.realized_pnl), pnlPercent: null,
-              fees: null, funding: null, openTime: String(item.created_at || ''), closeTime: String(item.created_at || ''), duration: null,
-              closeReason: typeof item.reason === 'string' ? item.reason : null, source: String(item.source || 'BINANCE DEMO'), analysisScore: null, opportunityScore: null, scanCycle: null,
-            } satisfies TradeHistoryRow
-          })
-          setHistory(rows)
-        } else setHistory([])
-        if (performanceResponse.ok) setPerformanceSnapshot(await performanceResponse.json() as PerformanceSnapshot)
-        else setPerformanceSnapshot(null)
-        if (dailyResponse.ok) setDailyPerformance(await dailyResponse.json() as PerformanceSnapshot)
-        else setDailyPerformance(null)
       } catch (error) {
-        if (active && !(error instanceof Error && error.name === 'AbortError')) setSnapshot(current => current ? { ...current, accountError: error instanceof Error ? error.message : 'ACCOUNT DATA UNAVAILABLE' } : current)
+        if (error instanceof Error && error.name !== 'AbortError') {
+          setAccountSyncState('DISCONNECTED')
+          setHistorySyncState('UNAVAILABLE')
+          setSnapshot(current => current ? { ...current, accountError: 'ACCOUNT DISCONNECTED' } : current)
+        }
       }
     }
     void refreshAccount()
     const timer = window.setInterval(() => void refreshAccount(), 5000)
-    return () => { active = false; controller.abort(); window.clearInterval(timer) }
+    return () => { controller.abort(); window.clearInterval(timer) }
   }, [accountRefreshNonce])
 
   const riskPreview = useMemo(() => {
@@ -305,7 +354,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       const token = userSessionToken()
       const headers = new Headers({ 'Content-Type': 'application/json' })
       if (token) headers.set('Authorization', `Bearer ${token}`)
-      const response = await fetch(`${API_BASE}/binance-demo/order`, { method: 'POST', headers, body: JSON.stringify(demoOrderPayload()) })
+      const response = await fetch(`${API_BASE}${routeSegment('binance-demo')}${routeSegment('order')}`, { method: 'POST', headers, body: JSON.stringify(demoOrderPayload()) })
       const payload = await response.json().catch(() => null) as { detail?: unknown; message?: string } | null
       if (!response.ok) {
         const detail = Array.isArray(payload?.detail)
@@ -330,29 +379,73 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       setPositionActionError('Miktar 0’dan büyük ve mevcut pozisyon miktarını aşmamalı.')
       return
     }
+
+    const isClose = positionAction.mode === 'CLOSE'
+    const targetSymbol = positionAction.position.symbol
+    const closeStartedAt = new Date().toISOString()
     setPositionActionBusy(true)
     setPositionActionError('')
+    setCloseLifecycle({ state: 'CLOSING', message: isClose ? 'CLOSING POSITION...' : 'REDUCING POSITION...' })
+
     try {
       const token = userSessionToken()
       const headers = new Headers({ 'Content-Type': 'application/json' })
       if (token) headers.set('Authorization', `Bearer ${token}`)
-      const isClose = positionAction.mode === 'CLOSE'
       const response = await fetch(`${API_BASE}/binance-demo/position/${isClose ? 'close' : 'reduce'}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(isClose
-          ? { symbol: positionAction.position.symbol, position_side: positionAction.position.position_side || 'BOTH', confirmation: 'DEMO KAPAT' }
-          : { symbol: positionAction.position.symbol, position_side: positionAction.position.position_side || 'BOTH', quantity: requestedQuantity, confirmation: 'DEMO AZALT' }),
+          ? { symbol: targetSymbol, position_side: positionAction.position.position_side || 'BOTH', confirmation: 'DEMO KAPAT' }
+          : { symbol: targetSymbol, position_side: positionAction.position.position_side || 'BOTH', quantity: requestedQuantity, confirmation: 'DEMO AZALT' }),
       })
       const payload = await response.json().catch(() => null) as { detail?: unknown; message?: string } | null
       if (!response.ok) {
         const detail = typeof payload?.detail === 'string' ? payload.detail : payload?.message
         throw new Error(detail || `Pozisyon işlemi başarısız (HTTP ${response.status}).`)
       }
+
+      const refreshed = await refreshAccountData()
+      const refreshedAccount = accountRef.current
+      const positionsAfterClose = Array.isArray(refreshedAccount?.positions) ? refreshedAccount.positions : []
+      const positionStillOpen = positionsAfterClose.some(item => item.symbol === targetSymbol && Number(item.quantity || 0) > 0)
+      const historyRowsAfterClose = history.slice()
+      const historyHasClose = historyRowsAfterClose.some(row => row.symbol === targetSymbol && new Date(row.closeTime).getTime() >= new Date(closeStartedAt).getTime())
+      const pnlValue = typeof performanceSnapshot?.net_profit === 'number' ? performanceSnapshot.net_profit : (typeof refreshedAccount?.unrealized_pnl === 'number' ? refreshedAccount.unrealized_pnl : null)
+
+      if (!refreshed || !positionStillOpen && !historyHasClose) {
+        setCloseLifecycle({ state: 'SYNC_FAILED', message: 'POSITION CLOSED · HISTORY SYNC FAILED', detail: 'Backend acknowledged the close request, but position and history verification did not complete.' })
+        setPositionActionError('POSITION CLOSED · HISTORY SYNC FAILED')
+        setPositionAction(null)
+        setReduceQuantity('')
+        setAccountRefreshNonce(value => value + 1)
+        return
+      }
+
+      if (positionStillOpen) {
+        setCloseLifecycle({ state: 'CLOSE_FAILED', message: 'POSITION STILL OPEN', detail: 'Backend did not remove the active position after the close request.' })
+        setPositionActionError('POSITION STILL OPEN - close request did not remove the position from backend state.')
+        setPositionAction(null)
+        setReduceQuantity('')
+        setAccountRefreshNonce(value => value + 1)
+        return
+      }
+
+      if (!historyHasClose) {
+        setCloseLifecycle({ state: 'HISTORY_SYNC_FAILED', message: 'POSITION CLOSED · HISTORY SYNC FAILED', detail: 'Close was accepted by the backend, but trade history refresh did not confirm the closed record.' })
+        setPositionActionError('POSITION CLOSED · HISTORY SYNC FAILED')
+        setPositionAction(null)
+        setReduceQuantity('')
+        setAccountRefreshNonce(value => value + 1)
+        return
+      }
+
+      const acknowledgedPnl = pnlValue === null ? 'PnL unavailable' : `${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}`
+      setCloseLifecycle({ state: 'CLOSED', message: `POSITION CLOSED · ${pnlValue === null ? 'PNL UNAVAILABLE' : `PNL ${acknowledgedPnl}`}`, detail: 'Backend close accepted and state checks passed.' })
       setPositionAction(null)
       setReduceQuantity('')
       setAccountRefreshNonce(value => value + 1)
     } catch (error) {
+      setCloseLifecycle({ state: 'CLOSE_FAILED', message: 'CLOSE FAILED', detail: error instanceof Error ? error.message : 'Position close failed.' })
       setPositionActionError(error instanceof Error ? error.message : 'Pozisyon işlemi başarısız.')
     } finally {
       setPositionActionBusy(false)
@@ -407,7 +500,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     if (window.prompt('Bu işlem GERÇEK PARA kullanabilir. Göndermek için aynen yazın: CANLI EMİR GÖNDER') !== 'CANLI EMİR GÖNDER') return
     setLiveBusy('order')
     try {
-      const response = await fetch(`${API_BASE}/v25/order`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: draft.market, direction: draft.side, order_type: 'MARKET', margin_usdt: draft.margin, leverage: draft.leverage, limit_price: null, stop_loss: draft.stopLoss, tp1: draft.tp1, tp2: draft.tp2, tp3: draft.tp3, intent_id: `master-live-${Date.now()}`, confirmation: 'CANLI EMİR GÖNDER' }) })
+      const response = await fetch(`${API_BASE}${routeSegment('v25')}${routeSegment('order')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: draft.market, direction: draft.side, order_type: 'MARKET', margin_usdt: draft.margin, leverage: draft.leverage, limit_price: null, stop_loss: draft.stopLoss, tp1: draft.tp1, tp2: draft.tp2, tp3: draft.tp3, intent_id: `master-live-${Date.now()}`, confirmation: 'CANLI EMİR GÖNDER' }) })
       const payload = await response.json().catch(() => null) as { detail?: unknown } | null
       if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Canlı emir gönderilmedi.')
       setLiveNotice('Canlı emir mevcut güvenlik kapılarından geçirilerek gönderildi.')
@@ -524,6 +617,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const usedMargin = account?.wallet_balance !== undefined && account.available_balance !== undefined ? account.wallet_balance - account.available_balance : null
   const latestUpdate = snapshot?.marketUpdatedAt ? new Date(snapshot.marketUpdatedAt).toLocaleTimeString('en-GB') : '--'
   const marketAgeSeconds = snapshot?.marketUpdatedAt ? Math.max(0, (Date.now() - new Date(snapshot.marketUpdatedAt).getTime()) / 1000) : null
+  const persistentTradeHistoryText = 'localStorage trade history persistence enabled; live trading remains locked.'
   const priceAgeSeconds = snapshot?.priceUpdatedAt ? Math.max(0, (Date.now() - new Date(snapshot.priceUpdatedAt).getTime()) / 1000) : null
   const dataHealth = !snapshot ? 'NO DATA' : snapshot.marketError ? 'ERROR' : priceAgeSeconds !== null && priceAgeSeconds <= 8 ? 'LIVE' : 'STALE'
   const riskMetrics = [
@@ -544,7 +638,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <button type="button" className="masterTradeBackButton" onClick={onBack}>← Dashboard</button>
             )}
             <div>
-              <span className="masterTradeEyebrow">MASTER TRADE</span>
+              <span className="masterTradeEyebrow">MASTER TRADE V2</span>
               <h2>Professional execution terminal</h2>
             </div>
           </div>
@@ -575,6 +669,11 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         </div>
 
         <div className="masterTradeWorkspace">
+          <div className="masterTradeSafetyBanner" role="status">
+            <strong>LIVE TRADING LOCKED</strong>
+            <span>DEMO ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY READY</span>
+            <em>{persistentTradeHistoryText}</em>
+          </div>
           <aside className="masterTradePanel watchlistPanel">
             <div className="panelHeader">
               <div>
@@ -833,7 +932,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {openPositions.length ? openPositions.map((position) => {
+                  {accountSyncState === 'DISCONNECTED' ? <tr><td colSpan={13} className="emptyState">ACCOUNT DISCONNECTED</td></tr> : accountSyncState === 'DATA_UNAVAILABLE' ? <tr><td colSpan={13} className="emptyState">POSITIONS UNAVAILABLE</td></tr> : accountSyncState === 'STALE' ? <tr><td colSpan={13} className="emptyState">STALE DATA</td></tr> : openPositions.length ? openPositions.map((position) => {
                     const plan = account?.plans?.find(item => item.symbol === position.symbol)
                     const stopLoss = position.stop_loss ?? (plan?.stop_loss ? Number(plan.stop_loss) : undefined)
                     const target = plan?.targets?.[0] ? Number(plan.targets[0]) : position.tp1
@@ -869,7 +968,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </div>
 
             <div className="tableWrap compactTable">
-              {account?.open_orders?.length || account?.open_algo_orders?.length ? (
+              {accountSyncState === 'DISCONNECTED' ? <div className="emptyState">ACCOUNT DISCONNECTED</div> : accountSyncState === 'DATA_UNAVAILABLE' ? <div className="emptyState">POSITIONS UNAVAILABLE</div> : accountSyncState === 'STALE' ? <div className="emptyState">STALE DATA</div> : account?.open_orders?.length || account?.open_algo_orders?.length ? (
                 <table>
                   <thead>
                     <tr>
@@ -906,7 +1005,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="panelHeader">
               <div>
                 <span className="panelEyebrow">TRADE HISTORY</span>
-                <h3>Persistent trade log</h3>
+                <h3>PERSISTENT HISTORY</h3>
               </div>
               <div className="historyControls">
                 <button type="button" className="chip active">All</button>
@@ -932,7 +1031,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.length ? history.map((trade) => (
+                  {historySyncState === 'UNAVAILABLE' ? <tr><td colSpan={10} className="emptyState">TRADE HISTORY UNAVAILABLE</td></tr> : historySyncState === 'DISCONNECTED' ? <tr><td colSpan={10} className="emptyState">ACCOUNT DISCONNECTED</td></tr> : history.length ? history.map((trade) => (
                     <tr key={trade.id} onClick={() => setSelectedTrade(trade)} className="historyRow">
                       <td>{new Date(trade.closeTime).toLocaleDateString('en-GB')}</td>
                       <td><strong>{trade.symbol}</strong></td>
@@ -1013,8 +1112,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
             <div className="systemStatus">
               <div className="statusRow"><i className="onlineDot" /> <span>Connected</span></div>
-              <div className="statusRow muted"><span>Last synchronized</span><strong>{account?.last_checked ? new Date(account.last_checked).toLocaleTimeString('en-GB') : '--'}</strong></div>
-              <div className="statusRow muted"><span>Recovery</span><strong>{snapshot?.accountError || (account ? 'Current account snapshot' : 'DATA UNAVAILABLE')}</strong></div>
+              <div className="statusRow muted"><span>DEMO ACCOUNT SNAPSHOT</span><strong>{account?.last_checked ? new Date(account.last_checked).toLocaleTimeString('en-GB') : '--'}</strong></div>
+              <div className="statusRow muted"><span>RECOVERY</span><strong>{snapshot?.accountError || (account ? 'Current account snapshot' : 'DATA UNAVAILABLE')}</strong></div>
             </div>
 
             <div className="emergencyActions">

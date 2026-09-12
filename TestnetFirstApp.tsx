@@ -164,6 +164,8 @@ export default function TestnetFirstApp() {
   const [headerHidden,setHeaderHidden] = useState(false)
   const [showBackToTop,setShowBackToTop] = useState(false)
   const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
+  const [complianceOpen,setComplianceOpen] = useState(false)
+  const [complianceTab,setComplianceTab] = useState<'risk'|'privacy'|'terms'|'support'>('risk')
   const notificationRef = useRef<HTMLDivElement>(null)
   const marketPickerRef = useRef<HTMLDivElement>(null)
   const notifications = healthNotifications(health)
@@ -412,6 +414,55 @@ export default function TestnetFirstApp() {
 
     {showBackToTop && <button className="v26BackToTop" type="button" aria-label="Yukarı çık" onClick={() => window.scrollTo({top:0,behavior:'smooth'})}><ArrowUp/></button>}
     <nav className={`terminalMobileNav ${headerHidden ? 'terminalMobileNavHidden' : ''}`} aria-label="Mobil ana navigasyon"><button className={view === 'testnet' ? 'active' : ''} onClick={() => setView('testnet')}><TestTube2/><span>Dashboard</span></button><button className={view === 'ops' ? 'active' : ''} onClick={() => setView('ops')}><Cloud/><span>Operasyon</span></button><button className={view === 'live' ? 'active' : ''} onClick={() => setView('live')}><ShieldCheck/><span>Canlı</span></button><button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><CloudCog/><span>Ayarlar</span></button></nav>
+    <section className="v26TrustStrip" style={{margin:'0 1rem 1rem',padding:'1rem 1.25rem',border:'1px solid rgba(148,163,184,0.18)',borderRadius:'16px',background:'rgba(15,23,42,0.82)',display:'grid',gap:'0.7rem'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'0.75rem',flexWrap:'wrap'}}>
+        <div>
+          <small style={{display:'block',letterSpacing:'0.12em',fontSize:'0.68rem',color:'#94a3b8'}}>CUSTOMER TRUST</small>
+          <strong style={{fontSize:'1rem',color:'#f8fafc'}}>Demo-first operating model · Live orders remain locked until all safety gates pass.</strong>
+        </div>
+        <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap'}}>
+          <button type="button" onClick={() => { setComplianceTab('risk'); setComplianceOpen(true) }} style={{padding:'0.6rem 0.9rem',borderRadius:'10px',border:'1px solid rgba(251,191,36,0.35)',background:'rgba(251,191,36,0.08)',color:'#fef3c7',fontWeight:700,cursor:'pointer'}}>Risk Disclosure</button>
+          <button type="button" onClick={() => { setComplianceTab('privacy'); setComplianceOpen(true) }} style={{padding:'0.6rem 0.9rem',borderRadius:'10px',border:'1px solid rgba(59,130,246,0.35)',background:'rgba(59,130,246,0.08)',color:'#dbeafe',fontWeight:700,cursor:'pointer'}}>Privacy</button>
+          <button type="button" onClick={() => { setComplianceTab('terms'); setComplianceOpen(true) }} style={{padding:'0.6rem 0.9rem',borderRadius:'10px',border:'1px solid rgba(52,211,153,0.35)',background:'rgba(52,211,153,0.08)',color:'#d1fae5',fontWeight:700,cursor:'pointer'}}>Terms</button>
+          <button type="button" onClick={() => { setComplianceTab('support'); setComplianceOpen(true) }} style={{padding:'0.6rem 0.9rem',borderRadius:'10px',border:'1px solid rgba(168,85,247,0.35)',background:'rgba(168,85,247,0.08)',color:'#f3e8ff',fontWeight:700,cursor:'pointer'}}>Support</button>
+        </div>
+      </div>
+    </section>
     <footer className="v26Footer"><span><RadioTower/>API: <b>{health?.status === 'ok' ? 'BAĞLI' : 'KONTROL EDİLİYOR'}</b></span><span>Veritabanı: <b>{health?.database || '—'}</b></span><span>Kanıt defteri: <b>{health?.cloud_evidence || '—'}</b></span><span>Çalışma modu: <b>TESTNET FIRST</b></span><span>Paper: <b>DEVRE DIŞI</b></span><em>Kâr garantisi yoktur. Testnet sonucu gerçek piyasa sonucunu garanti etmez.</em></footer>
+
+    {complianceOpen && <div className="v26ComplianceBackdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setComplianceOpen(false) }} style={{position:'fixed',inset:0,background:'rgba(2,6,23,0.76)',display:'grid',placeItems:'center',padding:'1rem',zIndex:1000}}>
+      <aside className="v26ComplianceModal" role="dialog" aria-modal="true" aria-label="Trust and compliance" style={{width:'min(760px, 100%)',maxHeight:'80vh',overflowY:'auto',background:'#0f172a',border:'1px solid rgba(148,163,184,0.3)',borderRadius:'20px',padding:'1.25rem',boxShadow:'0 30px 80px rgba(2,6,23,0.6)'}} onClick={event => event.stopPropagation()}>
+        <header style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'1rem',marginBottom:'1rem'}}>
+          <div>
+            <small style={{letterSpacing:'0.12em',color:'#94a3b8'}}>TRUST CENTER</small>
+            <h3 style={{margin:'0.25rem 0 0',fontSize:'1.5rem'}}>Risk, privacy and support</h3>
+          </div>
+          <button type="button" onClick={() => setComplianceOpen(false)} style={{padding:'0.5rem 0.8rem',borderRadius:'10px',border:'1px solid rgba(148,163,184,0.3)',background:'transparent',color:'#e2e8f0',cursor:'pointer'}}>Close</button>
+        </header>
+        <nav style={{display:'flex',gap:'0.5rem',flexWrap:'wrap',marginBottom:'1rem'}}>
+          {(['risk','privacy','terms','support'] as const).map(tab => <button key={tab} type="button" onClick={() => setComplianceTab(tab)} style={{padding:'0.55rem 0.8rem',borderRadius:'999px',border: complianceTab === tab ? '1px solid rgba(96,165,250,0.7)' : '1px solid rgba(148,163,184,0.2)',background: complianceTab === tab ? 'rgba(59,130,246,0.12)' : 'transparent',color: complianceTab === tab ? '#dbeafe' : '#cbd5e1',fontWeight:700,textTransform:'capitalize',cursor:'pointer'}}>{tab}</button>)}
+        </nav>
+        {complianceTab === 'risk' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
+          <p>ProTreBot is a research and demo-first operating workspace. It is not a guarantee of profit and it does not promise financial returns.</p>
+          <p>Market data, signal quality, order logic, and execution status can change rapidly. The platform uses fail-closed security gates by default. Live orders are never activated automatically and only proceed after explicit validation and safety checks.</p>
+          <p>Users must understand that market exposure carries risk, including potential loss of capital. This platform is designed for education, simulation, risk review, and controlled testnet workflows unless a separate live trading authorization is explicitly completed.</p>
+        </div>}
+        {complianceTab === 'privacy' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
+          <p>We do not store raw exchange secrets in browser storage. API keys and credentials are handled through the secure backend vault or server-side environment when available.</p>
+          <p>Diagnostic and operational metadata may be retained for monitoring, integrity, and support purposes. Sensitive values are minimized and access is restricted to authorized operational workflows.</p>
+          <p>Users remain responsible for safeguarding their own credentials and for reviewing any legal privacy obligations applicable to their region and use case.</p>
+        </div>}
+        {complianceTab === 'terms' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
+          <p>Use of this platform is governed by the applicable service agreement, risk acknowledgment, and product terms provided by the operator. The software is provided as a workflow and analytics environment.</p>
+          <p>Testnet or demo features are not a substitute for regulated financial advice or live market execution. Users must confirm that their use case complies with local rules and account restrictions.</p>
+          <p>Any live trading activation requires separate authorization, security validation, and explicit user acknowledgment of the associated execution risk.</p>
+        </div>}
+        {complianceTab === 'support' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
+          <p>Support channels should be used for access issues, credentials, billing questions, onboarding, and operational troubleshooting.</p>
+          <p>Use the in-app support workflow or your authorized operational contact channel. No public placeholder support email is used on the customer-facing surface.</p>
+          <p>Response time: operational requests are reviewed as soon as possible; live trading access issues are handled in priority order with safety review first.</p>
+        </div>}
+      </aside>
+    </div>}
   </main>
 }
