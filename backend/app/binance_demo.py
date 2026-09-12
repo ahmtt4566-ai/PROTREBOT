@@ -1565,6 +1565,25 @@ async def demo_account(request: Request) -> dict[str, Any]:
         return result
     except BinanceDemoError as exc:
         state.update({"connected": False, "last_checked": utc_now(), "last_error": str(exc)[:240]})
+        if exc.http_status == 412 and not credentials_configured(request):
+            empty_result = {
+                **public_status(state),
+                "configured": False,
+                "positions": [],
+                "open_orders": [],
+                "open_algo_orders": [],
+                "plans": list(state.get("plans", {}).values())[-12:],
+                "last_error": str(exc)[:240],
+            }
+            trace_log(
+                "account.empty",
+                request_id,
+                duration_ms=round((time.monotonic() - started) * 1000, 2),
+                success=True,
+                error_type=type(exc).__name__,
+                error_message=safe_trace_error(exc),
+            )
+            return empty_result
         trace_log("account.failed", request_id, duration_ms=round((time.monotonic() - started) * 1000, 2), success=False, error_type=type(exc).__name__, error_message=safe_trace_error(exc))
         raise safe_exchange_error(exc) from exc
 

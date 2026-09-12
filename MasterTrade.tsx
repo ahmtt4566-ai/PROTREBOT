@@ -211,6 +211,16 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       fetch(`${API_BASE}/v21/performance?period=daily`),
     ])
     const [accountResponse, journalResponse, performanceResponse, dailyResponse] = response
+
+    if (accountResponse.status === 412) {
+      setAccountSyncState('DATA_UNAVAILABLE')
+      setHistorySyncState('UNAVAILABLE')
+      setSnapshot(current => current ? { ...current, accountError: 'DEMO ACCOUNT NOT CONFIGURED' } : current)
+      setLastAccountSyncAt(null)
+      setLastHistorySyncAt(null)
+      return false
+    }
+
     const accountPayload = accountResponse.ok ? await accountResponse.json().catch(() => null) as AccountSnapshot & { detail?: unknown } : null
     if (!accountResponse.ok || !accountPayload) {
       const detail = accountPayload && typeof accountPayload.detail === 'string'

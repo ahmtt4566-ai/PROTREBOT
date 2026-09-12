@@ -146,6 +146,48 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn('result["configured"] = credentials_configured(request)', SOURCE_TEXT)
         self.assertNotIn('return {**public_status(state), **snapshot, "plans":', SOURCE_TEXT)
 
+    def test_demo_account_missing_credentials_returns_empty_safe_payload(self):
+        import asyncio
+        from starlette.requests import Request
+
+        async def run_case():
+            from starlette.datastructures import State
+
+            class ServerState:
+                def __init__(self):
+                    self.binance_demo = {"connected": False, "plans": {}, "events": [], "last_error": None}
+                    self.http = None
+
+            class App:
+                def __init__(self):
+                    self.state = ServerState()
+
+            state = State()
+            state.member = None
+            app = App()
+            request = Request({
+                "type": "http",
+                "method": "GET",
+                "path": "/api/binance-demo/account",
+                "headers": [],
+                "query_string": b"",
+                "client": ("testclient", 1234),
+                "server": ("testserver", 80),
+                "scheme": "https",
+                "state": state,
+                "app": app,
+            })
+
+            import importlib
+            module = importlib.import_module("app.binance_demo")
+            result = await module.demo_account(request)
+            self.assertFalse(result["configured"])
+            self.assertEqual(result["positions"], [])
+            self.assertEqual(result["open_orders"], [])
+            self.assertEqual(result["last_error"], "Demo API bağlantısı aktif değil. Programdaki Borsa Bağlantıları bölümünden Testnet anahtarını kaydedip aktifleştirin.")
+
+        asyncio.run(run_case())
+
     def test_analysis_fill_uses_only_directional_plans_and_refreshes_scanner_candidates(self):
         self.assertIn("isCompleteAnalysisPlan(plan)", PRODUCTION_FRONTEND_TEXT)
         self.assertIn("/scanner/candidates", PRODUCTION_FRONTEND_TEXT)
