@@ -1958,6 +1958,38 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   align-items: start;
 }
 
+.masterTradeRoute .masterTradeSafetyBanner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-width: 0;
+  padding: 10px 13px;
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(62, 46, 16, 0.7), rgba(18, 27, 31, 0.78));
+  color: var(--terminal-warning);
+}
+
+.masterTradeRoute .masterTradeSafetyBanner strong {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.masterTradeRoute .masterTradeSafetyBanner span,
+.masterTradeRoute .masterTradeSafetyBanner em {
+  color: var(--terminal-muted);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.04em;
+}
+
+.masterTradeRoute .masterTradeSafetyBanner em {
+  margin-left: auto;
+  text-align: right;
+}
+
 .masterTradeRoute .chartPanel {
   min-width: 0;
   overflow: hidden;
@@ -2038,6 +2070,12 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .masterTradeRoute .terminalStatusStrip,
   .masterTradeRoute .masterTradeSafetyBanner {
     max-width: 100%;
+  }
+
+  .masterTradeRoute .masterTradeSafetyBanner em {
+    flex-basis: 100%;
+    margin-left: 0;
+    text-align: left;
   }
 }
 
