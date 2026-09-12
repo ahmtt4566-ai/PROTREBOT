@@ -40,7 +40,7 @@ from app.binance_demo import (  # noqa: E402
 from app.exchange_connections import SaveCredentialsRequest  # noqa: E402
 from app.v21_demo import state_for as v21_state_for  # noqa: E402
 from app.v22_commercial import BootstrapRequest, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_verification_status  # noqa: E402
-from app.main import health_check_redis, health_item, healthz, run_health_checks  # noqa: E402
+from app.main import database_health, database_health_status, health_check_redis, health_item, healthz, run_health_checks  # noqa: E402
 
 
 MAIN_SOURCE = (BACKEND / "app" / "main.py").read_text(encoding="utf-8")
@@ -80,6 +80,50 @@ class V22CommercialTests(unittest.TestCase):
         self.assertEqual(set(result), {"name", "status", "message", "checked_at", "latency_ms"})
         self.assertEqual(result["status"], "ERROR")
         self.assertNotIn("password", str(result).lower())
+
+    def test_database_health_is_safe_when_unconfigured(self):
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=None))
+        with patch("app.main.DATABASE_URL", ""):
+            result = asyncio.run(database_health_status(application))
+        self.assertEqual(result, {"configured": False, "connected": False, "application_state_snapshots": False})
+        request = SimpleNamespace(app=application)
+        self.assertEqual(asyncio.run(database_health(request)), result)
+
+    def test_database_health_checks_connection_and_snapshot_table(self):
+        class Pool:
+            def __init__(self):
+                self.queries = []
+
+            async def fetchval(self, query, *args):
+                self.queries.append(query)
+                return True
+
+        pool = Pool()
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=pool))
+        with patch("app.main.DATABASE_URL", "postgresql://redacted-test-dsn"):
+            result = asyncio.run(database_health_status(application))
+        self.assertEqual(result, {"configured": True, "connected": True, "application_state_snapshots": True})
+        self.assertNotIn("redacted-test-dsn", str(result))
+        self.assertEqual(len(pool.queries), 2)
+
+    def test_database_health_closes_temporary_pool(self):
+        class TemporaryPool:
+            def __init__(self):
+                self.closed = False
+
+            async def fetchval(self, query, *args):
+                return True
+
+            async def close(self):
+                self.closed = True
+
+        pool = TemporaryPool()
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=None))
+        with patch("app.main.DATABASE_URL", "postgresql://redacted-test-dsn"), patch("app.main.asyncpg.create_pool", new=AsyncMock(return_value=pool)) as create_pool:
+            result = asyncio.run(database_health_status(application))
+        self.assertEqual(result, {"configured": True, "connected": True, "application_state_snapshots": True})
+        create_pool.assert_awaited_once()
+        self.assertTrue(pool.closed)
 
     def test_redis_without_url_is_disabled_not_error(self):
         application = SimpleNamespace(state=SimpleNamespace(redis_client=None))
@@ -391,7 +435,9 @@ class V22CommercialTests(unittest.TestCase):
         render_source = (ROOT / "render.yaml").read_text(encoding="utf-8")
         self.assertIn('"/api/v22/admin/system-health"', source)
         self.assertIn('"/api/v22/admin/system-health/check"', source)
-        self.assertIn('"/healthz"', (BACKEND / "app" / "web_security.py").read_text(encoding="utf-8"))
+        security_source = (BACKEND / "app" / "web_security.py").read_text(encoding="utf-8")
+        self.assertIn('"/healthz"', security_source)
+        self.assertIn('"/api/health/database"', security_source)
         self.assertIn("authenticated_user(request, owner=True)", source)
         self.assertIn("HEALTH_CHECK_INTERVAL_SECONDS = 15 * 60", source)
         self.assertIn('"overall_status": overall_status', source)

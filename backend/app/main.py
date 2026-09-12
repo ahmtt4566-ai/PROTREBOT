@@ -599,6 +599,48 @@ async def health_check_database(application: FastAPI) -> dict:
         return health_item("Database", "ERROR", "Database connection failed.", started)
 
 
+async def database_health_status(application: FastAPI) -> dict[str, bool]:
+    status = {
+        "configured": bool(DATABASE_URL),
+        "connected": False,
+        "application_state_snapshots": False,
+    }
+    if not status["configured"]:
+        return status
+
+    pool = getattr(application.state, "db_pool", None)
+    temporary_pool = False
+    try:
+        if pool is None:
+            pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=1, timeout=3)
+            temporary_pool = True
+        await asyncio.wait_for(pool.fetchval("SELECT 1"), timeout=3)
+        table_exists = await asyncio.wait_for(
+            pool.fetchval(
+                """
+                SELECT EXISTS (
+                  SELECT 1
+                  FROM information_schema.tables
+                  WHERE table_schema = 'public'
+                    AND table_name = 'application_state_snapshots'
+                )
+                """
+            ),
+            timeout=3,
+        )
+        status["connected"] = True
+        status["application_state_snapshots"] = bool(table_exists)
+    except Exception:
+        return status
+    finally:
+        if temporary_pool and pool is not None:
+            try:
+                await asyncio.wait_for(pool.close(), timeout=3)
+            except Exception:
+                pass
+    return status
+
+
 async def health_check_redis(application: FastAPI) -> dict:
     started = time.perf_counter()
     if not REDIS_URL:
@@ -1010,6 +1052,11 @@ async def health():
         "cloud_evidence": app.state.v27_cloud.get("status", "BAŞLIYOR"),
         "web_access": "YÖNETİCİ KİLİTLİ" if WEB_REQUIRE_AUTH else "YEREL MOD",
     }
+
+
+@app.get("/api/health/database")
+async def database_health(request: Request):
+    return await database_health_status(request.app)
 
 
 @app.get("/healthz")
