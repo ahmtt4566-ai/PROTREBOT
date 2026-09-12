@@ -29,7 +29,8 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from pydantic import BaseModel, ConfigDict, Field
 
-from .binance_demo import credentials_configured, public_status as demo_public_status
+from .binance_demo import credentials_configured, public_status as demo_public_status, restore_demo_state_for_user
+from .v21_demo import restore_v21_state_for_user
 from .commercial_core import (
     FeeGuardInput,
     V22_VERSION,
@@ -718,6 +719,8 @@ async def v22_login(payload: LoginRequest, request: Request):
     user["last_activity"] = now_iso()
     save_state(rt["state"])
     await persist_v22_commercial(request.app)
+    await restore_demo_state_for_user(request.app, user["id"])
+    await restore_v21_state_for_user(request.app, user["id"])
     token = issue_token(
         user["id"],
         user["role"],

@@ -268,6 +268,7 @@ def load_state() -> dict[str, Any]:
 
 def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
     return {
+        "schema_version": 1,
         "settings": state["settings"],
         "journal": state["journal"][:JOURNAL_LIMIT],
         "seen_event_ids": state["seen_event_ids"][-800:],
@@ -285,11 +286,91 @@ def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _v21_snapshot_key(user_id: str) -> str:
+    return f"v21_demo:user:{user_id}"
+
+
+def _state_from_payload(payload: dict[str, Any], user_id: str, application: Any | None = None) -> dict[str, Any]:
+    state = initial_state()
+    for key in (
+        "settings", "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
+        "duplicate_submissions", "protection_repairs", "scanner", "automation_trades",
+        "paper_positions", "risk", "notifications",
+    ):
+        if key in payload:
+            state[key] = payload[key]
+    state["settings"] = {**DEFAULT_SETTINGS, **(state["settings"] if isinstance(state.get("settings"), dict) else {})}
+    state["_user_id"] = user_id
+    if application is not None:
+        state["_app"] = application
+    state["auto"]["enabled"] = False
+    state["auto"]["status"] = "OFF"
+    state["auto"]["pause_reason"] = None
+    state["auto"]["started_at"] = None
+    state["auto"]["user_confirmed"] = False
+    state["auto"]["confirmation"] = None
+    state["auto"]["last_decision"] = "Güvenli yeniden başlatma: DEMO OTOMATİK onayı bekleniyor."
+    return state
+
+
+async def _persist_v21_snapshot_db(application: Any, user_id: str, payload: dict[str, Any]) -> None:
+    pool = getattr(application.state, "db_pool", None)
+    if pool is None:
+        return
+    await pool.execute(
+        """
+        INSERT INTO application_state_snapshots (state_key, updated_at, payload)
+        VALUES ($1, NOW(), $2::jsonb)
+        ON CONFLICT (state_key) DO UPDATE
+        SET updated_at = NOW(), payload = EXCLUDED.payload
+        """,
+        _v21_snapshot_key(user_id),
+        json.dumps(payload, ensure_ascii=False),
+    )
+
+
+def _queue_v21_snapshot(state: dict[str, Any], user_id: str, payload: dict[str, Any]) -> bool:
+    application = state.get("_app")
+    pool = getattr(getattr(application, "state", None), "db_pool", None)
+    if application is None or pool is None:
+        return False
+    tasks = getattr(application.state, "_v21_persistence_tasks", None)
+    if not isinstance(tasks, set):
+        tasks = set()
+        application.state._v21_persistence_tasks = tasks
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_persist_v21_snapshot_db(application, user_id, payload))
+        return True
+    task = loop.create_task(_persist_v21_snapshot_db(application, user_id, payload))
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    return True
+
+
 def persist_state(state: dict[str, Any]) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(serializable_state(state), ensure_ascii=False, indent=2)
+    user_id = str(state.get("_user_id") or "").strip()
+    payload = serializable_state(state)
+    if user_id and _queue_v21_snapshot(state, user_id, payload):
+        state["last_saved"] = payload["saved_at"]
+        return
+    if user_id:
+        payload["user_id"] = user_id
+        users = {}
+        try:
+            existing = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            existing = {}
+        if isinstance(existing, dict) and isinstance(existing.get("users"), dict):
+            users = existing["users"]
+        users[user_id] = payload
+        file_payload = {"users": users}
+    else:
+        file_payload = payload
     temporary = STATE_PATH.with_suffix(".tmp")
-    temporary.write_text(payload, encoding="utf-8")
+    temporary.write_text(json.dumps(file_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     if STATE_PATH.exists():
         try:
             BACKUP_PATH.write_bytes(STATE_PATH.read_bytes())
@@ -299,11 +380,82 @@ def persist_state(state: dict[str, Any]) -> None:
     state["last_saved"] = now_iso()
 
 
+def _v21_user_store(application: Any) -> dict[str, dict[str, Any]]:
+    store = getattr(application.state, "_v21_demo_user_state", None)
+    if not isinstance(store, dict):
+        store = {}
+        application.state._v21_demo_user_state = store
+    return store
+
+
 def state_for(request: Request) -> dict[str, Any]:
-    state = getattr(request.app.state, "v21_demo", None)
+    app = request.app
+    request_state = getattr(request, "state", None)
+    user = getattr(request_state, "member", None) or getattr(request_state, "user", None)
+    user_id = str((user or {}).get("id") or "").strip()
+    if user_id:
+        store = _v21_user_store(app)
+        state = store.get(user_id)
+        if state is None:
+            state = initial_state()
+            if getattr(app.state, "db_pool", None) is None:
+                try:
+                    saved = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
+                    if isinstance(saved, dict) and isinstance(saved.get("users"), dict):
+                        entry = saved["users"].get(user_id)
+                        if isinstance(entry, dict):
+                            state = _state_from_payload(entry, user_id, app)
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    pass
+            state["_app"] = app
+            state["_user_id"] = user_id
+            store[user_id] = state
+        state["_user_id"] = user_id
+        state["_app"] = app
+        return state
+    state = getattr(app.state, "v21_demo", None)
     if state is None:
         state = initial_state()
-        request.app.state.v21_demo = state
+        app.state.v21_demo = state
+    return state
+
+
+async def restore_v21_state_for_user(application: Any, user_id: str) -> dict[str, Any] | None:
+    if not user_id:
+        return None
+    pool = getattr(application.state, "db_pool", None)
+    if pool is not None:
+        try:
+            row = await pool.fetchrow(
+                "SELECT payload FROM application_state_snapshots WHERE state_key = $1",
+                _v21_snapshot_key(user_id),
+            )
+        except Exception:
+            return None
+        if row is None:
+            return None
+        payload = row["payload"]
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(payload, dict):
+            return None
+        state = _state_from_payload(payload, user_id, application)
+        _v21_user_store(application)[user_id] = state
+        return state
+    try:
+        payload = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("users"), dict):
+        return None
+    entry = payload["users"].get(user_id)
+    if not isinstance(entry, dict):
+        return None
+    state = _state_from_payload(entry, user_id, application)
+    _v21_user_store(application)[user_id] = state
     return state
 
 
@@ -1627,6 +1779,9 @@ async def shutdown_v21_demo(application: Any) -> None:
         task.cancel()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+    persistence_tasks = list(getattr(application.state, "_v21_persistence_tasks", set()))
+    if persistence_tasks:
+        await asyncio.gather(*persistence_tasks, return_exceptions=True)
     if state:
         state["auto"]["enabled"] = False
         persist_state(state)
@@ -1826,7 +1981,7 @@ async def v21_performance(request: Request, period: Literal["all", "daily", "wee
 async def v21_history(request: Request, symbol: str) -> dict[str, Any]:
     safe_symbol = normalize_symbol(symbol)
     try:
-        client = client_for(request.app)
+        client = client_for(request)
         normal, algos, trades = await asyncio.gather(
             client.signed("GET", "/fapi/v1/allOrders", {"symbol": safe_symbol, "limit": 200}),
             client.signed("GET", "/fapi/v1/allAlgoOrders", {"symbol": safe_symbol, "limit": 200}),

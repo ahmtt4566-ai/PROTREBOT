@@ -63,10 +63,7 @@ FUTURES_MARKET_DATA_API = DEMO_REST_BASE
 LEGACY_PAPER_CONTRACT = 'version="20.2.0"'
 LEGACY_V25_API_CONTRACT = 'version="25.0.0"'
 DEPLOYMENT_PATCH = "28.0.0-in-app-encrypted-exchange-vault"
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://protrebot:protrebot_local_change_me@127.0.0.1:5432/protrebot",
-).strip()
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 WEB_REQUIRE_AUTH = env_flag("PROTREBOT_WEB_REQUIRE_AUTH", default=False)
 WEB_ACCESS_TOKEN = os.getenv("PROTREBOT_WEB_ACCESS_TOKEN", "").strip()
@@ -505,7 +502,7 @@ async def ensure_infrastructure(application: FastAPI) -> None:
             application.state.paper_schema_ready = False
             application.state.market_twin_schema_ready = False
             infrastructure["paper_storage"] = "BEKLENİYOR" if PAPER_ENABLED else "DEVRE DIŞI"
-    if application.state.db_pool is None:
+    if application.state.db_pool is None and DATABASE_URL:
         try:
             application.state.db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2, timeout=3)
             application.state.paper_schema_ready = False
@@ -840,7 +837,8 @@ async def lifespan(app: FastAPI):
             asyncio.create_task(v10_evolution_loop(app)),
             asyncio.create_task(v11_risk_loop(app)),
         ])
-    app.state.runtime_tasks.append(asyncio.create_task(v9_market_twin_loop(app)))
+    if LIVE_CHANNEL_ENABLED:
+        app.state.runtime_tasks.append(asyncio.create_task(v9_market_twin_loop(app)))
     yield
     for task in app.state.runtime_tasks:
         task.cancel()

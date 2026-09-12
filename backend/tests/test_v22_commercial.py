@@ -28,7 +28,17 @@ from app.commercial_core import (  # noqa: E402
     verify_password,
     verify_token,
 )
+from app.binance_demo import (  # noqa: E402
+    CancelOrderRequest,
+    ClosePositionRequest,
+    ReducePositionRequest,
+    demo_cancel_order,
+    demo_close_position,
+    demo_reduce_position,
+    state_for as demo_state_for,
+)
 from app.exchange_connections import SaveCredentialsRequest  # noqa: E402
+from app.v21_demo import state_for as v21_state_for  # noqa: E402
 from app.v22_commercial import BootstrapRequest, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_verification_status  # noqa: E402
 from app.main import health_check_redis, health_item, healthz, run_health_checks  # noqa: E402
 
@@ -156,6 +166,69 @@ class V22CommercialTests(unittest.TestCase):
         self.assertIn("No frontend secret persistence is used for demo credentials.", api_source)
         self.assertIn("loadDemoCredentials", demo_source)
         self.assertIn("clearDemoCredentials(sessionToken)", auth_source)
+
+    def test_demo_and_v21_state_are_user_scoped_not_shared_across_accounts(self):
+        app = SimpleNamespace(state=SimpleNamespace())
+        user_a = {"id": "user-a", "role": "CUSTOMER", "active": True, "email_verified": True, "auth_version": 1}
+        user_b = {"id": "user-b", "role": "CUSTOMER", "active": True, "email_verified": True, "auth_version": 1}
+
+        request_a = SimpleNamespace(app=app, state=SimpleNamespace(member=user_a))
+        request_b = SimpleNamespace(app=app, state=SimpleNamespace(member=user_b))
+
+        demo_a = demo_state_for(request_a)
+        demo_b = demo_state_for(request_b)
+        self.assertIsNot(demo_a, demo_b)
+        demo_a.setdefault("plans", {})["a"] = {"symbol": "BTCUSDT", "status": "OPEN"}
+        self.assertNotIn("a", demo_b.get("plans", {}))
+
+        v21_a = v21_state_for(request_a)
+        v21_b = v21_state_for(request_b)
+        self.assertIsNot(v21_a, v21_b)
+        v21_a.setdefault("journal", []).append({"symbol": "ETHUSDT", "realized_pnl": 12.5})
+        self.assertNotIn("ETHUSDT", [item.get("symbol") for item in v21_b.get("journal", [])])
+
+    def test_demo_resource_ownership_is_enforced_for_other_users(self):
+        app = SimpleNamespace(state=SimpleNamespace())
+        user_a = {"id": "user-a", "role": "CUSTOMER", "active": True, "email_verified": True, "auth_version": 1}
+        user_b = {"id": "user-b", "role": "CUSTOMER", "active": True, "email_verified": True, "auth_version": 1}
+        app.state._binance_demo_user_state = {
+            "user-a": {
+                "plans": {"plan-a": {"id": "plan-a", "symbol": "BTCUSDT", "position_status": "OPEN", "status": "OPEN", "entry_order_id": 101, "position_id": "pos-a"}},
+                "events": [],
+                "connected": False,
+                "armed_until": 0,
+                "last_checked": None,
+                "last_error": None,
+                "lock": asyncio.Lock(),
+            }
+        }
+
+        request_b = SimpleNamespace(app=app, state=SimpleNamespace(member=user_b))
+        with patch("app.binance_demo.client_for", return_value=SimpleNamespace()), patch("app.binance_demo.close_symbol_position", new=AsyncMock(return_value={"orderId": 999})), patch("app.binance_demo.reduce_symbol_position", new=AsyncMock(return_value={"orderId": 998})):
+            with self.assertRaises(HTTPException) as close_ctx:
+                asyncio.run(demo_close_position(request_b, ClosePositionRequest(symbol="BTCUSDT", confirmation="DEMO KAPAT")))
+            self.assertEqual(close_ctx.exception.status_code, 404)
+            with self.assertRaises(HTTPException) as reduce_ctx:
+                asyncio.run(demo_reduce_position(request_b, ReducePositionRequest(symbol="BTCUSDT", quantity=0.1, confirmation="DEMO AZALT")))
+            self.assertEqual(reduce_ctx.exception.status_code, 404)
+            with self.assertRaises(HTTPException) as cancel_ctx:
+                asyncio.run(demo_cancel_order(request_b, CancelOrderRequest(symbol="BTCUSDT", order_id=101)))
+            self.assertEqual(cancel_ctx.exception.status_code, 404)
+
+    def test_demo_state_persists_by_user_and_restores_after_restart(self):
+        app = SimpleNamespace(state=SimpleNamespace())
+        user_a = {"id": "user-a", "role": "CUSTOMER", "active": True, "email_verified": True, "auth_version": 1}
+        request_a = SimpleNamespace(app=app, state=SimpleNamespace(member=user_a))
+
+        state = demo_state_for(request_a)
+        state.setdefault("plans", {})["plan-a"] = {"id": "plan-a", "symbol": "BTCUSDT", "status": "OPEN", "position_status": "OPEN", "position_id": "pos-a"}
+        state["_user_id"] = "user-a"
+
+        from app.binance_demo import persist_runtime, load_runtime
+        persist_runtime(state)
+        reloaded = load_runtime("user-a")
+        self.assertIn("plan-a", reloaded)
+        self.assertEqual(reloaded["plan-a"]["symbol"], "BTCUSDT")
 
     def test_exchange_save_contract_accepts_testnet_and_rejects_demo_or_wrong_confirmation(self):
         valid = SaveCredentialsRequest(mode="TESTNET", api_key="abcdefghijklmnopqrstuvwxyz", secret_key="1234567890abcdef", confirmation="TESTNET KASAYA KAYDET")

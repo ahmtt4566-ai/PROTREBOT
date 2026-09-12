@@ -10,6 +10,7 @@ available while disarmed.
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import hmac
 import json
@@ -506,8 +507,247 @@ def client_for(request: Request) -> BinanceDemoClient:
     return BinanceDemoClient(request.app.state.http, api_key, secret_key)
 
 
+def _demo_user_store(application: Any) -> dict[str, dict[str, Any]]:
+    store = getattr(application.state, "_binance_demo_user_state", None)
+    if not isinstance(store, dict):
+        store = {}
+        application.state._binance_demo_user_state = store
+    return store
+
+
+def _state_application(state: dict[str, Any]) -> Any | None:
+    app = state.get("_app") if isinstance(state, dict) else None
+    return app
+
+
+def _current_user_id(request: Request | None = None, state: dict[str, Any] | None = None) -> str:
+    if state is not None:
+        value = str(state.get("_user_id") or "").strip()
+        if value:
+            return value
+    if request is None:
+        return ""
+    request_state = getattr(request, "state", None)
+    user = getattr(request_state, "member", None) or getattr(request_state, "user", None)
+    return str((user or {}).get("id") or "").strip()
+
+
+async def restore_demo_state_for_user(application: Any, user_id: str) -> dict[str, Any] | None:
+    pool = getattr(application.state, "db_pool", None)
+    if pool is None or not user_id:
+        return None
+    try:
+        row = await pool.fetchrow(
+            "SELECT payload FROM application_state_snapshots WHERE state_key = $1",
+            _db_demo_snapshot_key(user_id),
+        )
+    except Exception:
+        return None
+    if row is None:
+        return None
+    payload = row["payload"]
+    if not isinstance(payload, dict):
+        return None
+    state = {
+        "connected": bool(payload.get("connected")),
+        "armed_until": payload.get("armed_until", 0),
+        "last_checked": payload.get("last_checked"),
+        "last_error": payload.get("last_error"),
+        "events": payload.get("events", []) if isinstance(payload.get("events"), list) else [],
+        "plans": payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {},
+        "reconciliation": payload.get("reconciliation", {}) if isinstance(payload.get("reconciliation"), dict) else {},
+        "lock": asyncio.Lock(),
+        "_user_id": user_id,
+        "_app": application,
+    }
+    store = _demo_user_store(application)
+    store[user_id] = state
+    return state
+
+
+def _default_demo_state(application: Any) -> dict[str, Any]:
+    state = getattr(application.state, "binance_demo", None)
+    if isinstance(state, dict):
+        return state
+    state = {
+        "connected": False,
+        "armed_until": 0,
+        "last_checked": None,
+        "last_error": None,
+        "events": [],
+        "plans": {},
+        "lock": asyncio.Lock(),
+    }
+    application.state.binance_demo = state
+    return state
+
+
+def _db_demo_snapshot_key(user_id: str) -> str:
+    return f"binance_demo:user:{user_id}"
+
+
+def persist_runtime(state: dict[str, Any]) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    user_id = str(state.get("_user_id") or "").strip()
+    payload: Any
+    app = _state_application(state)
+    if user_id and app is not None:
+        pool = getattr(app.state, "db_pool", None)
+        if pool is not None:
+            snapshot = {
+                "user_id": user_id,
+                "plans": state.get("plans", {}),
+                "events": state.get("events", []),
+                "connected": bool(state.get("connected")),
+                "armed_until": state.get("armed_until", 0),
+                "last_checked": state.get("last_checked"),
+                "last_error": state.get("last_error"),
+                "reconciliation": state.get("reconciliation", {}),
+                "saved_at": utc_now(),
+            }
+            try:
+                import asyncio
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    loop.create_task(_persist_demo_snapshot_db(app, user_id, snapshot))
+                    return
+            except RuntimeError:
+                pass
+            try:
+                import asyncio
+                asyncio.run(_persist_demo_snapshot_db(app, user_id, snapshot))
+            except RuntimeError:
+                pass
+            return
+    try:
+        existing = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        existing = {}
+    if not isinstance(existing, dict):
+        existing = {}
+    if user_id:
+        users = existing.get("users") if isinstance(existing.get("users"), dict) else {}
+        users[user_id] = runtime_payload(state)
+        payload = {"users": users}
+    elif isinstance(existing, dict) and "plans" in existing and isinstance(existing.get("plans"), dict):
+        payload = runtime_payload(state)
+    else:
+        payload = runtime_payload(state)
+    temporary = STATE_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(STATE_PATH)
+
+
+async def _persist_demo_snapshot_db(application: Any, user_id: str, payload: dict[str, Any]) -> None:
+    pool = getattr(application.state, "db_pool", None)
+    if pool is None:
+        return
+    try:
+        await pool.execute(
+            """
+            INSERT INTO application_state_snapshots (state_key, updated_at, payload)
+            VALUES ($1, NOW(), $2::jsonb)
+            ON CONFLICT (state_key) DO UPDATE
+            SET updated_at = NOW(), payload = EXCLUDED.payload
+            """,
+            _db_demo_snapshot_key(user_id),
+            json.dumps(payload, ensure_ascii=False),
+        )
+    except Exception:
+        pass
+
+
+def load_runtime(user_id: str | None = None, *, application: Any | None = None) -> dict[str, Any]:
+    if application is not None:
+        pool = getattr(application.state, "db_pool", None)
+        if pool is not None and user_id:
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    raise RuntimeError("async fetch not allowed in sync loader")
+            except RuntimeError:
+                pass
+            try:
+                row = __import__("asyncio").run(pool.fetchrow("SELECT payload FROM application_state_snapshots WHERE state_key = $1", _db_demo_snapshot_key(user_id)))
+            except Exception:
+                row = None
+            if row is not None:
+                payload = row["payload"] if isinstance(row, dict) else row
+                if isinstance(payload, dict):
+                    plans = payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
+                    return {
+                        "connected": bool(payload.get("connected")),
+                        "armed_until": payload.get("armed_until", 0),
+                        "last_checked": payload.get("last_checked"),
+                        "last_error": payload.get("last_error"),
+                        "events": payload.get("events", []) if isinstance(payload.get("events"), list) else [],
+                        "plans": plans,
+                        "reconciliation": payload.get("reconciliation", {}),
+                        "_user_id": user_id,
+                    }
+    try:
+        payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {}
+    if isinstance(payload, dict) and isinstance(payload.get("users"), dict):
+        if user_id:
+            user_state = payload["users"].get(user_id, {})
+            return user_state.get("plans", {}) if isinstance(user_state.get("plans"), dict) else {}
+        return next(iter(payload["users"].values()), {}).get("plans", {}) if payload["users"] else {}
+    return payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
+
+
 def state_for(request: Request) -> dict[str, Any]:
-    return request.app.state.binance_demo
+    app = request.app
+    request_state = getattr(request, "state", None)
+    user = getattr(request_state, "member", None) or getattr(request_state, "user", None)
+    user_id = str((user or {}).get("id") or "").strip()
+    if user_id:
+        store = _demo_user_store(app)
+        state = store.get(user_id)
+        if state is None:
+            persisted = load_runtime(user_id, application=app)
+            base = copy.deepcopy(_default_demo_state(app))
+            state = {
+                **base,
+                "plans": dict(persisted.get("plans", {}) if isinstance(persisted, dict) else {}),
+                "events": list((persisted.get("events", [])) if isinstance(persisted, dict) and isinstance(persisted.get("events"), list) else []),
+                "connected": bool((persisted or {}).get("connected", base.get("connected", False))),
+                "armed_until": (persisted or {}).get("armed_until", base.get("armed_until", 0)),
+                "last_checked": (persisted or {}).get("last_checked"),
+                "last_error": (persisted or {}).get("last_error"),
+                "reconciliation": (persisted or {}).get("reconciliation", {}),
+                "_user_id": user_id,
+                "_app": app,
+            }
+            store[user_id] = state
+        state["_user_id"] = user_id
+        state["_app"] = app
+        return state
+    return _default_demo_state(app)
+
+
+def _has_user_plan_access(state: dict[str, Any], *, symbol: str | None = None, order_id: int | None = None, request: Request | None = None) -> bool:
+    user_id = _current_user_id(request=request, state=state)
+    if not user_id:
+        return True
+    if symbol is not None:
+        for plan in state.get("plans", {}).values():
+            if str(plan.get("symbol") or "").upper() == str(symbol).upper() and str(plan.get("user_id") or plan.get("_user_id") or "").strip() == user_id:
+                return True
+        return False
+    if order_id is not None:
+        for plan in state.get("plans", {}).values():
+            if int(plan.get("entry_order_id") or 0) == int(order_id) and str(plan.get("user_id") or plan.get("_user_id") or "").strip() == user_id:
+                return True
+        return False
+    return True
 
 
 def armed(state: dict[str, Any]) -> bool:
@@ -1009,22 +1249,17 @@ async def build_order_spec(client: BinanceDemoClient, order: DemoOrderRequest) -
 
 
 def runtime_payload(state: dict[str, Any]) -> dict[str, Any]:
-    return {"plans": state.get("plans", {}), "saved_at": utc_now()}
-
-
-def persist_runtime(state: dict[str, Any]) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporary = STATE_PATH.with_suffix(".tmp")
-    temporary.write_text(json.dumps(runtime_payload(state), ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(STATE_PATH)
-
-
-def load_runtime() -> dict[str, Any]:
-    try:
-        payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        return payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return {}
+    return {
+        "plans": state.get("plans", {}),
+        "events": state.get("events", []),
+        "connected": bool(state.get("connected")),
+        "armed_until": state.get("armed_until", 0),
+        "last_checked": state.get("last_checked"),
+        "last_error": state.get("last_error"),
+        "reconciliation": state.get("reconciliation", {}),
+        "saved_at": utc_now(),
+        "user_id": str(state.get("_user_id") or ""),
+    }
 
 
 def new_client_id(kind: str) -> str:
@@ -1645,7 +1880,7 @@ async def demo_order(request: Request, body: DemoOrderRequest) -> dict[str, Any]
 
 async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source: str = "MANUAL", request: Request | None = None) -> dict[str, Any]:
     """Submit one hard-capped Demo order for the manual or V21 automation path."""
-    state = application.state.binance_demo
+    state = state_for(request) if request is not None else application.state.binance_demo
     request_id = request_correlation_id(request)
     total_started = time.monotonic()
     trace_log("start", request_id, symbol=body.symbol, side="BUY" if body.direction == "LONG" else "SELL")
@@ -1690,6 +1925,7 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             plan = {
                 "id": plan_id,
                 "position_id": plan_id,
+                "user_id": _current_user_id(request=request, state=state),
                 "symbol": spec["symbol"],
                 "direction": spec["direction"],
                 "order_type": spec["order_type"],
@@ -1804,8 +2040,12 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
 async def demo_cancel_order(request: Request, body: CancelOrderRequest) -> dict[str, Any]:
     try:
         symbol = normalize_symbol(body.symbol)
+        state = state_for(request)
+        if not _has_user_plan_access(state, order_id=body.order_id, request=request):
+            raise HTTPException(404, "Bu emir sizde değil veya bulunamadı")
         result = await client_for(request).signed("DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": body.order_id})
-        add_event(state_for(request), "EMİR İPTAL", f"{symbol} Demo emri iptal edildi.")
+        add_event(state, "EMİR İPTAL", f"{symbol} Demo emri iptal edildi.")
+        persist_runtime(state)
         return {"ok": True, "symbol": symbol, "order_id": result.get("orderId", body.order_id)}
     except BinanceDemoError as exc:
         raise safe_exchange_error(exc) from exc
@@ -1836,12 +2076,14 @@ async def demo_close_position(request: Request, body: ClosePositionRequest) -> d
     try:
         symbol = normalize_symbol(body.symbol)
         state = state_for(request)
+        if not _has_user_plan_access(state, symbol=symbol, request=request):
+            raise HTTPException(404, "Bu pozisyon sizde değil veya bulunamadı")
         client = client_for(request)
         result = await close_symbol_position(client, symbol, body.position_side)
         if result is None:
             raise BinanceDemoError("Bu paritede açık Demo pozisyonu yok.", http_status=404)
         for plan in state.get("plans", {}).values():
-            if plan.get("symbol") == symbol and plan.get("position_status") == "OPEN":
+            if str(plan.get("symbol") or "").upper() == symbol and str(plan.get("user_id") or plan.get("_user_id") or "").strip() == _current_user_id(request=request, state=state) and plan.get("position_status") == "OPEN":
                 await cleanup_closed_plan(client, plan)
                 plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "tp3_status": "FILLED", "closed_at": utc_now()})
         add_event(state, "POZİSYON KAPATILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle kapatıldı.")
@@ -1857,10 +2099,14 @@ async def demo_reduce_position(request: Request, body: ReducePositionRequest) ->
         raise HTTPException(422, "Pozisyonu azaltmak için DEMO AZALT yazın.")
     try:
         symbol = normalize_symbol(body.symbol)
+        state = state_for(request)
+        if not _has_user_plan_access(state, symbol=symbol, request=request):
+            raise HTTPException(404, "Bu pozisyon sizde değil veya bulunamadı")
         result = await reduce_symbol_position(client_for(request), symbol, Decimal(str(body.quantity)), body.position_side)
         if result is None:
             raise BinanceDemoError("Bu paritede açık Demo pozisyonu yok.", http_status=404)
-        add_event(state_for(request), "POZİSYON AZALTILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle azaltıldı.")
+        add_event(state, "POZİSYON AZALTILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle azaltıldı.")
+        persist_runtime(state)
         return {"ok": True, "symbol": symbol, "order_id": result.get("orderId")}
     except BinanceDemoError as exc:
         raise safe_exchange_error(exc) from exc
