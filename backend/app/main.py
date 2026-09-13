@@ -263,6 +263,7 @@ def canonical_historical_decision(
     """Evaluate one deterministic decision from candles strictly before decision_time."""
     intervals = required_intervals
     closed: dict[str, list[dict]] = {}
+    latest_closed_timestamps: dict[str, int] = {}
     for interval in intervals:
         rows = candles_by_timeframe.get(interval, [])
         if not isinstance(rows, list):
@@ -281,7 +282,10 @@ def canonical_historical_decision(
                 return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "INVALID_CANDLE_DATA", "reasons": [f"{interval}: invalid OHLCV"]}
             if high < max(open_price, close) or low > min(open_price, close) or high < low or volume < 0:
                 return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "INVALID_CANDLE_DATA", "reasons": [f"{interval}: invalid OHLCV"]}
-            if timestamp >= int(decision_time):
+            interval_seconds = INTERVAL_SECONDS.get(interval)
+            if interval_seconds is None:
+                return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "UNSUPPORTED_TIMEFRAME", "reasons": [interval]}
+            if timestamp + interval_seconds > int(decision_time):
                 continue
             if timestamps and timestamp <= timestamps[-1]:
                 return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "NON_CHRONOLOGICAL_CANDLES", "reasons": [f"{interval}: timestamps not strictly increasing"]}
@@ -291,6 +295,7 @@ def canonical_historical_decision(
         if len(valid_rows) < minimum:
             return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": valid_rows[-1]["time"] if valid_rows else None, "entry_eligible": False, "reason": "INSUFFICIENT_CLOSED_CANDLES", "reasons": [f"{interval}: {len(valid_rows)}/{minimum} closed candles"]}
         closed[interval] = valid_rows
+        latest_closed_timestamps[interval] = valid_rows[-1]["time"]
 
     analysis = analyze(closed["15m"])
     quality_ok = (
@@ -329,6 +334,8 @@ def canonical_historical_decision(
         "decision": "BUY" if entry_eligible and analysis["direction"] == "LONG" else "SELL" if entry_eligible and analysis["direction"] == "SHORT" else "WAIT",
         "symbol": symbol,
         "signal_timestamp": closed["15m"][-1]["time"],
+        "decision_time": int(decision_time),
+        "latest_closed_timestamps": latest_closed_timestamps,
         "analysis": analysis,
         "regime": analysis.get("trend"),
         "mtf": mtf,
@@ -3900,7 +3907,8 @@ async def smart_scan(limit: int = Query(18, ge=6, le=30), interval: str = "15m")
     async def inspect(market: dict):
         try:
             async with semaphore:
-                result = analyze(await fetch_candles(market["symbol"], interval, 260))
+                candles = await fetch_candles(market["symbol"], interval, 260)
+                result = analyze(candles[:-1] if len(candles) > 1 else [])
                 mtf = await multi_timeframe_consensus(market["symbol"])
             confidence = float(result["confidence"])
             volume_ratio = float(result["volume_ratio"])
@@ -4220,10 +4228,12 @@ async def market_guard(symbol: str) -> dict:
             fetch_candles(safe_symbol, "15m", 260),
             fetch_candles("BTCUSDT", "15m", 260),
         )
-    selected = analyze(selected_candles)
-    btc = analyze(btc_candles)
+    selected_closed = selected_candles[:-1] if len(selected_candles) > 1 else []
+    btc_closed = btc_candles[:-1] if len(btc_candles) > 1 else []
+    selected = analyze(selected_closed)
+    btc = analyze(btc_closed)
     btc_atr_pct = round((btc["atr"] / btc["entry"]) * 100, 2) if btc["entry"] else 0.0
-    last_candle_move_pct = round(abs((btc_candles[-1]["close"] / btc_candles[-2]["close"] - 1) * 100), 2)
+    last_candle_move_pct = round(abs((btc_closed[-1]["close"] / btc_closed[-2]["close"] - 1) * 100), 2) if len(btc_closed) > 1 else 0.0
     direction_conflict = (
         selected["direction"] in {"LONG", "SHORT"}
         and btc["direction"] in {"LONG", "SHORT"}

@@ -1311,6 +1311,29 @@ async def live_candles(client: BinanceLiveClient, symbol: str, interval: str, li
     return candles, last_open_time
 
 
+async def canonical_live_decision(application: Any, client: BinanceLiveClient, symbol: str, interval: str, primary_candles: list[dict[str, float]] | None = None) -> dict[str, Any]:
+    """Run the side-effect-free canonical decision before live account gates."""
+    from .main import canonical_historical_decision
+
+    if interval != "15m":
+        return {"decision": "WAIT", "symbol": symbol, "entry_eligible": False, "reason": "CANONICAL_BASE_INTERVAL_REQUIRES_15M"}
+
+    frames: dict[str, list[dict[str, float]]] = {interval: primary_candles} if primary_candles is not None else {}
+    for timeframe in (interval, "1h", "4h"):
+        if timeframe not in frames:
+            frames[timeframe], _ = await live_candles(client, symbol, timeframe)
+    fifteen = frames.get("15m", frames.get(interval, []))
+    if len(fifteen) < 2:
+        return {"decision": "WAIT", "symbol": symbol, "entry_eligible": False, "reason": "INSUFFICIENT_CLOSED_CANDLES"}
+    decision_time = int(fifteen[-1]["time"])
+    return canonical_historical_decision(
+        symbol,
+        frames,
+        decision_time,
+        required_intervals=("15m", "1h", "4h"),
+    )
+
+
 async def execute_live_order(
     application: Any,
     body: LiveOrderRequest,
@@ -1441,12 +1464,13 @@ async def automatic_cycle(application: Any) -> None:
             if len(candles) < 220:
                 continue
             analyzed_symbols.append(symbol)
-            signal = analyze(candles[:-1])
+            canonical = await canonical_live_decision(application, client, symbol, state["policy"]["interval"], candles)
+            signal = canonical.get("analysis") or {}
             intent_id = f"auto-{symbol}-{state['policy']['interval']}-{candle_id}"
             if intent_id in state["intents"]:
                 state["duplicate_blocks"] += 1
                 continue
-            if str(signal.get("direction") or "").upper() not in {"LONG", "SHORT"}:
+            if canonical.get("decision") not in {"BUY", "SELL"} or not canonical.get("entry_eligible"):
                 continue
             signals.append({"candidate": candidate, "signal": signal, "intent_id": intent_id})
         signals.sort(key=lambda item: (float(item["candidate"].get("opportunity_score") or 0), int(item["signal"].get("confidence") or 0)), reverse=True)

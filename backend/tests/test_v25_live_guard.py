@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 
 ROOT = Path(__file__).parents[2]
@@ -221,6 +222,28 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         failed = SimpleNamespace(state=SimpleNamespace(db_pool=FailedPool(), v25_execution={"recovery_ready": False, "recovery_loaded": False, "recovery_error": None}))
         self.assertFalse(asyncio.run(restore_v25_state(failed)))
         self.assertFalse(failed.state.v25_execution["recovery_loaded"])
+
+    def test_live_decision_adapter_uses_canonical_closed_candle_contract(self):
+        from app.v25_execution import canonical_live_decision
+
+        candles = [{"time": index * 900, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 1} for index in range(220)]
+        app = SimpleNamespace(state=SimpleNamespace())
+        from app import main as app_main
+        with patch("app.v25_execution.live_candles", new=AsyncMock(side_effect=[(candles, 1), (candles, 1)])), patch.object(app_main, "canonical_historical_decision", return_value={"decision": "WAIT"}) as canonical:
+            import asyncio
+            result = asyncio.run(canonical_live_decision(app, object(), "BTCUSDT", "15m", candles))
+        self.assertEqual(result["decision"], "WAIT")
+        canonical.assert_called_once()
+
+    def test_live_decision_adapter_fails_closed_for_non_15m_policy_intervals(self):
+        from app.v25_execution import canonical_live_decision
+        import asyncio
+
+        app = SimpleNamespace(state=SimpleNamespace())
+        for interval in ("1m", "5m", "1h", "4h"):
+            result = asyncio.run(canonical_live_decision(app, object(), "BTCUSDT", interval, []))
+            self.assertEqual(result["decision"], "WAIT")
+            self.assertFalse(result["entry_eligible"])
 
     def test_crash_window_persists_full_intent_and_recovers_orphan_plan(self):
         self.assertIn('"spec": serializable_spec', EXECUTION_SOURCE)

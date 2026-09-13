@@ -96,14 +96,15 @@ class MultiSymbolScannerTests(unittest.TestCase):
                 patch("app.v25_execution.live_daily_metrics", return_value={"entries": 0, "realized_pnl": 0, "unverified_closures": 0}), \
                 patch("app.v25_execution.scan_market_candidates", new=AsyncMock(return_value=candidates)), \
                 patch("app.v25_execution.live_candles", new=AsyncMock(side_effect=[(candles, index) for index in range(3)])) as candle_fetch, \
-                patch("app.v25_execution.analyze", side_effect=[
-                    {"direction": "BEKLE", "confidence": 10},
-                    {"direction": "LONG", "confidence": 80},
-                    {"direction": "SHORT", "confidence": 79},
-                ]), \
+                patch("app.v25_execution.canonical_live_decision", new=AsyncMock(side_effect=[
+                    {"decision": "WAIT", "entry_eligible": False},
+                    {"decision": "BUY", "entry_eligible": True, "analysis": {"direction": "LONG", "confidence": 80}},
+                    {"decision": "SELL", "entry_eligible": True, "analysis": {"direction": "SHORT", "confidence": 79}},
+                ])) as canonical, \
                 patch("app.v25_execution.persist_state"):
             asyncio.run(automatic_cycle(application))
         self.assertEqual([call.args[1] for call in candle_fetch.await_args_list], ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+        self.assertEqual(canonical.await_count, 3)
         self.assertEqual(state["auto"]["last_scan_stats"]["deep_analysis_symbols"], ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
 
     def test_scanner_respects_multiple_policy_symbols(self):

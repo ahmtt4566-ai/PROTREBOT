@@ -10,6 +10,45 @@ class SharedMTFDecisionTests(unittest.TestCase):
     def _historical_candles(self, count=221):
         return [{"time": index * 900, "open": 100 + index * 0.02, "high": 101 + index * 0.02, "low": 99 + index * 0.02, "close": 100.5 + index * 0.02, "volume": 1000.0} for index in range(count)]
 
+    def _aligned_frames(self, decision_time=10_000_000):
+        durations = {"15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+        frames = {}
+        for interval, duration in durations.items():
+            count = 220 if interval == "15m" else 50
+            rows = [{"time": decision_time - (count - index) * duration, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for index in range(count)]
+            forming_time = decision_time if interval == "15m" else decision_time - 900
+            rows.append({"time": forming_time, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000})
+            frames[interval] = rows
+        return frames, decision_time
+
+    def test_higher_timeframe_forming_candles_are_ignored(self):
+        for interval in ("1h", "4h", "1d"):
+            frames, decision_time = self._aligned_frames()
+            changed = {name: list(rows) for name, rows in frames.items()}
+            changed[interval][-1] = {**changed[interval][-1], "close": 9999, "high": 10000, "low": 100}
+
+            def analyze_stub(rows):
+                direction = "SHORT" if any(row["close"] > 5000 for row in rows) else "LONG"
+                return {"direction": direction, "confidence": 80, "trend": direction, "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"}, "entry": 100, "stop_loss": 99, "tp1": 102}
+
+            with patch.object(main_module, "analyze", side_effect=analyze_stub):
+                first = canonical_historical_decision("BTCUSDT", frames, decision_time)
+                second = canonical_historical_decision("BTCUSDT", changed, decision_time)
+            self.assertEqual(first["decision"], second["decision"], interval)
+
+    def test_higher_timeframe_close_boundary_is_included(self):
+        frames, decision_time = self._aligned_frames()
+        observed = []
+
+        def analyze_stub(rows):
+            observed.append(rows[-1]["time"])
+            return {"direction": "LONG", "confidence": 80, "trend": "LONG", "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"}, "entry": 100, "stop_loss": 99, "tp1": 102}
+
+        with patch.object(main_module, "analyze", side_effect=analyze_stub):
+            result = canonical_historical_decision("BTCUSDT", frames, decision_time)
+        self.assertEqual(result["latest_closed_timestamps"]["1h"], decision_time - 3600)
+        self.assertIn(decision_time - 3600, observed)
+
     def test_canonical_decision_uses_closed_candles_only(self):
         candles = self._historical_candles()
         decision_time = candles[-1]["time"]
