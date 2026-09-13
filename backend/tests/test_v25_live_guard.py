@@ -235,6 +235,79 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertEqual(result["decision"], "WAIT")
         canonical.assert_called_once()
 
+    def _v25_alignment_frames(self, decision_time: int, *, one_hour_close: bool = False, four_hour_close: bool = False):
+        def row(timestamp, close=100.0):
+            return {"time": timestamp, "open": 100.0, "high": max(101.0, close), "low": min(99.0, close), "close": close, "volume": 1000.0}
+
+        primary = [row(decision_time - (220 - index) * 900) for index in range(221)]
+        one_hour_open = decision_time - (3600 if one_hour_close else 900)
+        four_hour_open = decision_time - (14400 if four_hour_close else 7200)
+        one_hour = [row(one_hour_open - (50 - index) * 3600) for index in range(50)] + [row(one_hour_open)]
+        four_hour = [row(four_hour_open - (50 - index) * 14400) for index in range(50)] + [row(four_hour_open)]
+        return primary, one_hour, four_hour
+
+    def test_v25_adapter_ignores_forming_one_hour_candle(self):
+        from app.v25_execution import canonical_live_decision
+        from app import main as app_main
+
+        decision_time = 10 * 3600 + 15 * 60
+        primary, one_hour, four_hour = self._v25_alignment_frames(decision_time)
+        changed_one_hour = [*one_hour[:-1], {**one_hour[-1], "close": 9999.0, "high": 10000.0, "low": 100.0}]
+        analysis = {"direction": "LONG", "confidence": 80, "trend": "LONG", "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"}, "entry": 100, "stop_loss": 99, "tp1": 102}
+        async def candles(client, symbol, interval, limit=260):
+            return ({"15m": primary, "1h": one_hour, "4h": four_hour}[interval], 1)
+        with patch.object(app_main, "analyze", return_value=analysis), patch("app.v25_execution.live_candles", new=candles):
+            first = asyncio.run(canonical_live_decision(SimpleNamespace(state=SimpleNamespace()), object(), "BTCUSDT", "15m", primary))
+        async def changed_candles(client, symbol, interval, limit=260):
+            return ({"15m": primary, "1h": changed_one_hour if interval == "1h" else one_hour, "4h": four_hour}[interval], 1)
+        with patch.object(app_main, "analyze", return_value=analysis), patch("app.v25_execution.live_candles", new=changed_candles):
+            second = asyncio.run(canonical_live_decision(SimpleNamespace(state=SimpleNamespace()), object(), "BTCUSDT", "15m", primary))
+        self.assertEqual(first, second)
+
+    def test_v25_adapter_accepts_exact_one_hour_close_boundary(self):
+        from app.v25_execution import canonical_live_decision
+        from app import main as app_main
+
+        decision_time = 11 * 3600
+        primary, one_hour, four_hour = self._v25_alignment_frames(decision_time, one_hour_close=True)
+        analysis = {"direction": "LONG", "confidence": 80, "trend": "LONG", "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"}, "entry": 100, "stop_loss": 99, "tp1": 102}
+        async def candles(client, symbol, interval, limit=260):
+            return ({"1h": one_hour, "4h": four_hour}[interval], 1)
+        with patch.object(app_main, "analyze", return_value=analysis), patch("app.v25_execution.live_candles", new=candles):
+            result = asyncio.run(canonical_live_decision(SimpleNamespace(state=SimpleNamespace()), object(), "BTCUSDT", "15m", primary))
+        self.assertEqual(result["latest_closed_timestamps"]["1h"], one_hour[-1]["time"])
+
+    def test_v25_adapter_ignores_forming_four_hour_candle(self):
+        from app.v25_execution import canonical_live_decision
+        from app import main as app_main
+
+        decision_time = 10 * 3600 + 15 * 60
+        primary, one_hour, four_hour = self._v25_alignment_frames(decision_time)
+        changed_four_hour = [*four_hour[:-1], {**four_hour[-1], "close": 9999.0, "high": 10000.0, "low": 100.0}]
+        analysis = {"direction": "LONG", "confidence": 80, "trend": "LONG", "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"}, "entry": 100, "stop_loss": 99, "tp1": 102}
+        async def candles(client, symbol, interval, limit=260):
+            return ({"1h": one_hour, "4h": four_hour}[interval], 1)
+        with patch.object(app_main, "analyze", return_value=analysis), patch("app.v25_execution.live_candles", new=candles):
+            first = asyncio.run(canonical_live_decision(SimpleNamespace(state=SimpleNamespace()), object(), "BTCUSDT", "15m", primary))
+        async def changed_candles(client, symbol, interval, limit=260):
+            return ({"1h": one_hour, "4h": changed_four_hour if interval == "4h" else four_hour}[interval], 1)
+        with patch.object(app_main, "analyze", return_value=analysis), patch("app.v25_execution.live_candles", new=changed_candles):
+            second = asyncio.run(canonical_live_decision(SimpleNamespace(state=SimpleNamespace()), object(), "BTCUSDT", "15m", primary))
+        self.assertEqual(first, second)
+
+    def test_v25_adapter_accepts_exact_four_hour_close_boundary(self):
+        from app.v25_execution import canonical_live_decision
+        from app import main as app_main
+
+        decision_time = 12 * 3600
+        primary, one_hour, four_hour = self._v25_alignment_frames(decision_time, four_hour_close=True)
+        analysis = {"direction": "LONG", "confidence": 80, "trend": "LONG", "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"}, "entry": 100, "stop_loss": 99, "tp1": 102}
+        async def candles(client, symbol, interval, limit=260):
+            return ({"1h": one_hour, "4h": four_hour}[interval], 1)
+        with patch.object(app_main, "analyze", return_value=analysis), patch("app.v25_execution.live_candles", new=candles):
+            result = asyncio.run(canonical_live_decision(SimpleNamespace(state=SimpleNamespace()), object(), "BTCUSDT", "15m", primary))
+        self.assertEqual(result["latest_closed_timestamps"]["4h"], four_hour[-1]["time"])
+
     def test_live_decision_adapter_fails_closed_for_non_15m_policy_intervals(self):
         from app.v25_execution import canonical_live_decision
         import asyncio
