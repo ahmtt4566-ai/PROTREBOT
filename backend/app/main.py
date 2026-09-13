@@ -5,7 +5,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 import asyncpg
@@ -49,6 +49,7 @@ from .v27_cloud_ops import (
     router as v27_cloud_router,
     shutdown_v27_cloud,
 )
+from .execution_core import evaluate_entry_gates, risk_sized_order
 from .paper_autonomy import (
     PAPER_AUTONOMY_VERSION,
     autonomy_policy,
@@ -247,6 +248,95 @@ def shared_mtf_decision(
         "short_permission": short_permission,
         "blocked_by_short_filter": blocked_by_short_filter,
         "higher_timeframe_confirmation": higher_timeframe_confirmation,
+    }
+
+
+def canonical_historical_decision(
+    symbol: str,
+    candles_by_timeframe: dict[str, list[dict]],
+    decision_time: int,
+    *,
+    required_intervals: tuple[str, ...] = ("15m", "1h", "4h", "1d"),
+    policy: dict[str, Any] | None = None,
+    account_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Evaluate one deterministic decision from candles strictly before decision_time."""
+    intervals = required_intervals
+    closed: dict[str, list[dict]] = {}
+    for interval in intervals:
+        rows = candles_by_timeframe.get(interval, [])
+        if not isinstance(rows, list):
+            return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "INVALID_CANDLE_DATA", "reasons": [f"{interval}: invalid candles"]}
+        timestamps = []
+        valid_rows = []
+        for row in rows:
+            try:
+                timestamp = int(row["time"])
+                open_price = float(row["open"])
+                high = float(row["high"])
+                low = float(row["low"])
+                close = float(row["close"])
+                volume = float(row["volume"])
+            except (KeyError, TypeError, ValueError):
+                return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "INVALID_CANDLE_DATA", "reasons": [f"{interval}: invalid OHLCV"]}
+            if high < max(open_price, close) or low > min(open_price, close) or high < low or volume < 0:
+                return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "INVALID_CANDLE_DATA", "reasons": [f"{interval}: invalid OHLCV"]}
+            if timestamp >= int(decision_time):
+                continue
+            if timestamps and timestamp <= timestamps[-1]:
+                return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "NON_CHRONOLOGICAL_CANDLES", "reasons": [f"{interval}: timestamps not strictly increasing"]}
+            timestamps.append(timestamp)
+            valid_rows.append({"time": timestamp, "open": open_price, "high": high, "low": low, "close": close, "volume": volume})
+        minimum = 220 if interval == "15m" else 50
+        if len(valid_rows) < minimum:
+            return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": valid_rows[-1]["time"] if valid_rows else None, "entry_eligible": False, "reason": "INSUFFICIENT_CLOSED_CANDLES", "reasons": [f"{interval}: {len(valid_rows)}/{minimum} closed candles"]}
+        closed[interval] = valid_rows
+
+    analysis = analyze(closed["15m"])
+    quality_ok = (
+        analysis["direction"] in {"LONG", "SHORT"}
+        and analysis["confidence"] >= 78
+        and analysis["radar"]["trap_score"] <= 35
+        and analysis["radar"]["breakout_quality"] >= 55
+    )
+    if all(interval in closed for interval in ("1h", "4h")):
+        mtf = shared_mtf_decision(
+            symbol=symbol,
+            entry_direction=analysis["direction"],
+            confidence_15m=float(analysis["confidence"]),
+            timeframe_results={
+                interval: {"direction": analyze(closed[interval])["direction"], "confidence": analyze(closed[interval])["confidence"]}
+                for interval in ("1h", "4h")
+            },
+        )
+        entry_eligible = quality_ok and mtf["entry_permission"]
+    else:
+        mtf = {"direction": analysis["direction"], "entry_permission": quality_ok, "alignment": analysis["confidence"], "verdict": "SINGLE_TIMEFRAME"}
+        entry_eligible = quality_ok
+    risk = None
+    if policy is not None and analysis["direction"] in {"LONG", "SHORT"}:
+        risk = risk_sized_order(analysis["entry"], analysis["stop_loss"], policy)
+    gate = None
+    if account_context is not None and policy is not None:
+        gate = evaluate_entry_gates(
+            symbol=symbol, signal=analysis, snapshot=account_context.get("snapshot", {}),
+            policy=policy, daily=account_context.get("daily", {}),
+            spread_bps=float(account_context.get("spread_bps", 0)),
+            armed=bool(account_context.get("armed", True)), allowed_symbols=account_context.get("allowed_symbols"),
+        )
+        entry_eligible = entry_eligible and bool(gate["passed"])
+    return {
+        "decision": "BUY" if entry_eligible and analysis["direction"] == "LONG" else "SELL" if entry_eligible and analysis["direction"] == "SHORT" else "WAIT",
+        "symbol": symbol,
+        "signal_timestamp": closed["15m"][-1]["time"],
+        "analysis": analysis,
+        "regime": analysis.get("trend"),
+        "mtf": mtf,
+        "entry_eligible": entry_eligible,
+        "reason": "READY" if entry_eligible else "QUALITY_OR_MTF_GATE",
+        "reasons": [] if entry_eligible else ["QUALITY_OR_MTF_GATE"],
+        "risk": risk,
+        "gate": gate,
     }
 
 
@@ -1381,13 +1471,17 @@ def simulate_strategy(
     index = max(warmup, start_index or warmup)
     terminal = min(len(candles) - horizon, end_index if end_index is not None else len(candles) - horizon)
     while index < terminal and (mtf or len(results) < max_results):
-        setup = analyze(candles[index - warmup:index + 1])
-        valid = (
-            setup["direction"] in {"LONG", "SHORT"}
-            and setup["confidence"] >= 78
-            and setup["radar"]["trap_score"] <= 35
-            and setup["radar"]["breakout_quality"] >= 55
+        decision_time = int(candles[index]["time"]) + 15 * 60
+        historical_frames = {"15m": candles[index - warmup:index + 1]}
+        required_intervals = ("15m",)
+        if mtf:
+            historical_frames.update({"1h": mtf_candles.get("1h", []), "4h": mtf_candles.get("4h", [])})
+            required_intervals = ("15m", "1h", "4h")
+        canonical = canonical_historical_decision(
+            symbol or "", historical_frames, decision_time, required_intervals=required_intervals
         )
+        setup = canonical.get("analysis", {})
+        valid = bool(canonical.get("entry_eligible"))
         if not valid:
             index += step
             continue

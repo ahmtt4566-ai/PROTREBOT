@@ -3,10 +3,29 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from backend.app import main as main_module
-from backend.app.main import shared_mtf_decision
+from backend.app.main import canonical_historical_decision, shared_mtf_decision
 
 
 class SharedMTFDecisionTests(unittest.TestCase):
+    def _historical_candles(self, count=221):
+        return [{"time": index * 900, "open": 100 + index * 0.02, "high": 101 + index * 0.02, "low": 99 + index * 0.02, "close": 100.5 + index * 0.02, "volume": 1000.0} for index in range(count)]
+
+    def test_canonical_decision_uses_closed_candles_only(self):
+        candles = self._historical_candles()
+        decision_time = candles[-1]["time"]
+        changed_forming = [*candles[:-1], {**candles[-1], "close": 10_000, "high": 10_100, "low": 100}]
+        first = canonical_historical_decision("BTCUSDT", {"15m": candles}, decision_time, required_intervals=("15m",))
+        second = canonical_historical_decision("BTCUSDT", {"15m": changed_forming}, decision_time, required_intervals=("15m",))
+        self.assertEqual(first, second)
+        self.assertEqual(first["signal_timestamp"], candles[-2]["time"])
+
+    def test_canonical_decision_returns_wait_for_insufficient_or_invalid_data(self):
+        candles = self._historical_candles(20)
+        result = canonical_historical_decision("BTCUSDT", {"15m": candles}, candles[-1]["time"], required_intervals=("15m",))
+        self.assertEqual(result["decision"], "WAIT")
+        malformed = [*self._historical_candles(), {"time": 5, "open": 1, "high": 2, "low": 0, "close": 1, "volume": 1}]
+        result = canonical_historical_decision("BTCUSDT", {"15m": malformed}, malformed[-1]["time"] + 1, required_intervals=("15m",))
+        self.assertEqual(result["decision"], "WAIT")
     def _payload(self, entry_direction, confidence_15m, one_h=None, four_h=None):
         return {
             "1h": {"direction": one_h if one_h is not None else entry_direction, "confidence": 80.0},
@@ -132,11 +151,11 @@ class SharedMTFDecisionTests(unittest.TestCase):
         }
         mtf_1h = []
         mtf_4h = []
-        for i in range(200):
-            ts = i * 3600
+        for i in range(500):
+            ts = (i - 300) * 3600
             mtf_1h.append({"time": ts, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0})
-        for i in range(200):
-            ts = i * 14400
+        for i in range(1000):
+            ts = (i - 300) * 14400
             mtf_4h.append({"time": ts, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1000.0})
 
         with patch.object(main_module, "analyze", return_value=base_signal), patch.object(main_module, "shared_mtf_decision", wraps=main_module.shared_mtf_decision) as mocked:
