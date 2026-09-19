@@ -1310,7 +1310,7 @@ def return_correlation(left: list[dict[str, float]], right: list[dict[str, float
 
 
 async def automatic_cycle(application: Any, *, request: Request | None = None) -> None:
-    state = application.state.v21_demo
+    state = state_for(request) if request is not None else application.state.v21_demo
     settings = state["settings"]
     auto = state["auto"]
     auto.update({"rejection_gate": None, "rejection_reason": None, "last_error": None})
