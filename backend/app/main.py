@@ -5617,6 +5617,45 @@ def build_paper_position(
     }
 
 
+def update_paper_mae_mfe(position: dict, current_price: float) -> None:
+    """Paper gözlem watermark'larını mevcut fiyat güncellemesiyle ilerletir.
+
+    Observational-only: yalnızca su işareti alanlarını günceller; entry/exit,
+    stop/TP veya PnL hesaplamasını hiçbir şekilde etkilemez.
+    """
+    entry = float(position["entry_price"])
+    current = float(current_price)
+    position["max_high_since_entry"] = max(float(position.get("max_high_since_entry", entry)), current)
+    position["min_low_since_entry"] = min(float(position.get("min_low_since_entry", entry)), current)
+
+
+def finalize_paper_trade_diagnostics(position: dict) -> None:
+    """Kapanan Paper kaydına yalnızca gözlemsel MAE/MFE alanlarını ekler.
+
+    Observational-only (backtest_execution.py ile aynı formüller): exit_reason
+    veya realized_pnl'i değiştirmez; yalnızca teşhis alanları ekler.
+    """
+    entry = float(position["entry_price"])
+    max_high = float(position.get("max_high_since_entry", entry))
+    min_low = float(position.get("min_low_since_entry", entry))
+    if str(position.get("direction") or "").upper() == "LONG":
+        mfe_price = max_high - entry
+        mae_price = entry - min_low
+    else:
+        mfe_price = entry - min_low
+        mae_price = max_high - entry
+    risk_distance = abs(entry - float(position.get("initial_stop_loss", position["stop_loss"])))
+    position["mfe_price"] = mfe_price
+    position["mae_price"] = mae_price
+    position["mfe_r"] = mfe_price / risk_distance if risk_distance > 0 else None
+    position["mae_r"] = mae_price / risk_distance if risk_distance > 0 else None
+    position["exit_consistency_warning"] = (
+        "STOP_WITH_POSITIVE_PNL"
+        if str(position.get("status") or "") == "STOP" and float(position.get("realized_pnl") or 0.0) > 0
+        else None
+    )
+
+
 def demo_paper_trade_plan(analysis: dict, live_price: float) -> dict:
     """Güncel fiyata göre küçük ve geçerli bir Paper eğitim planı üretir."""
     price = max(float(live_price), 0.00000001)
@@ -5854,6 +5893,7 @@ async def refresh_paper_positions() -> None:
                 (str(item.get("kind") or ""), str(item.get("created_at") or ""))
                 for item in stored.get("lifecycle_events", [])
             }
+            update_paper_mae_mfe(stored, float(current_price))
             outcome = advance_v20_position(stored, float(current_price))
             if outcome["realized_delta"]:
                 paper["balance"] += float(outcome["realized_delta"])
@@ -5868,6 +5908,7 @@ async def refresh_paper_positions() -> None:
                 activity_events.append((event_kind, event_message, str(stored.get("symbol") or "")))
                 changed = True
             if outcome["closed"]:
+                finalize_paper_trade_diagnostics(stored)
                 register_paper_result(paper, float(stored.get("realized_pnl") or 0.0))
                 paper["trades"].insert(0, stored.copy())
                 changed = True
@@ -6951,6 +6992,7 @@ async def paper_close(position_id: int):
         total_pnl = float(position.get("partial_realized_pnl") or 0.0) + net_pnl
         total_fee = float(position.get("fee") or 0.0) + fee
         closed_at = datetime.now(timezone.utc).isoformat()
+        update_paper_mae_mfe(position, float(price))
         lifecycle = position.setdefault("lifecycle_events", [])
         lifecycle.insert(0, {"kind": "MANUEL", "price": round(price, 10), "quantity": round(float(position["quantity"]), 12), "net_pnl": round(net_pnl, 8), "created_at": closed_at})
         position.update({
@@ -6958,6 +7000,7 @@ async def paper_close(position_id: int):
             "partial_realized_pnl": total_pnl, "fee": total_fee, "status": "MANUEL",
             "quantity": 0.0, "amount": 0.0, "closed_at": closed_at,
         })
+        finalize_paper_trade_diagnostics(position)
         paper["balance"] += net_pnl
         register_paper_result(paper, total_pnl)
         paper["trades"].insert(0, position.copy())

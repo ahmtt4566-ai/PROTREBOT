@@ -31,6 +31,8 @@ CORE = load_functions(
     "v20_target_plan",
     "paper_grid_levels",
     "paper_limit_triggered",
+    "update_paper_mae_mfe",
+    "finalize_paper_trade_diagnostics",
     "advance_v20_position",
     "paper_lifecycle_event_message",
     "v20_max_drawdown",
@@ -125,6 +127,36 @@ class V20UnifiedTests(unittest.TestCase):
         self.assertEqual(position["status"], "STOP")
         self.assertLess(position["realized_pnl"], 0)
         self.assertGreater(position["fee"], 0)
+
+    def test_long_paper_mae_mfe_uses_running_watermarks(self):
+        position = open_position("LONG")
+        CORE["update_paper_mae_mfe"](position, 102.0)
+        CORE["update_paper_mae_mfe"](position, 99.5)
+        position.update({"status": "TP3", "realized_pnl": 1.0})
+        CORE["finalize_paper_trade_diagnostics"](position)
+        self.assertEqual(position["mfe_price"], 2.0)
+        self.assertEqual(position["mae_price"], 0.5)
+        self.assertEqual(position["mfe_r"], 2.0)
+        self.assertEqual(position["mae_r"], 0.5)
+
+    def test_short_paper_mae_mfe_uses_running_watermarks(self):
+        position = open_position("SHORT")
+        CORE["update_paper_mae_mfe"](position, 98.0)
+        CORE["update_paper_mae_mfe"](position, 101.5)
+        position.update({"status": "TP3", "realized_pnl": 1.0})
+        CORE["finalize_paper_trade_diagnostics"](position)
+        self.assertEqual(position["mfe_price"], 2.0)
+        self.assertEqual(position["mae_price"], 1.5)
+        self.assertEqual(position["mfe_r"], 2.0)
+        self.assertEqual(position["mae_r"], 1.5)
+
+    def test_paper_stop_positive_pnl_warning_is_observational(self):
+        position = open_position("LONG")
+        position.update({"status": "STOP", "realized_pnl": 0.5})
+        CORE["finalize_paper_trade_diagnostics"](position)
+        self.assertEqual(position["status"], "STOP")
+        self.assertEqual(position["realized_pnl"], 0.5)
+        self.assertEqual(position["exit_consistency_warning"], "STOP_WITH_POSITIVE_PNL")
 
     def test_expired_position_closes_remaining_quantity(self):
         position = open_position("LONG")
