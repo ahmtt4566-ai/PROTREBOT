@@ -1521,6 +1521,49 @@ async def scanner_loop(application: Any) -> None:
         await asyncio.sleep(SCAN_INTERVAL_SECONDS)
 
 
+AUTOMATION_TASK_NAME = "v21_automation_loop"
+
+
+def _automation_task_done(application: Any, task: asyncio.Task[Any]) -> None:
+    if task.cancelled():
+        return
+    try:
+        error = task.exception()
+    except Exception as exc:
+        error = exc
+    if error is None:
+        return
+    state = getattr(application.state, "v21_demo", None)
+    if not isinstance(state, dict):
+        return
+    message = f"V21 automation loop beklenmedik şekilde durdu: {error}"
+    state["auto"].update({"last_error": str(error)[:220], "last_decision": message})
+    record_event(state, "AUTO_LOOP_CRASH", message, source="SYSTEM")
+    persist_state(state)
+
+
+def ensure_automation_task(application: Any) -> asyncio.Task[Any]:
+    tasks = getattr(application.state, "v21_tasks", None)
+    if not isinstance(tasks, list):
+        tasks = []
+        application.state.v21_tasks = tasks
+    tracked = getattr(application.state, "v21_automation_task", None)
+    candidates = [tracked] if tracked is not None else []
+    candidates.extend(
+        candidate for candidate in tasks
+        if candidate not in candidates and candidate.get_name() == AUTOMATION_TASK_NAME
+    )
+    task = next((candidate for candidate in candidates if not candidate.done()), None)
+    if task is not None:
+        application.state.v21_automation_task = task
+        return task
+    task = asyncio.create_task(automation_loop(application), name=AUTOMATION_TASK_NAME)
+    tasks.append(task)
+    application.state.v21_automation_task = task
+    task.add_done_callback(lambda completed: _automation_task_done(application, completed))
+    return task
+
+
 def backtest_engine(candles: list[dict[str, float]], settings: dict[str, Any]) -> dict[str, Any]:
     if len(candles) < 260:
         raise HTTPException(422, "Backtest için en az 260 mum gerekiyor.")
@@ -1768,9 +1811,9 @@ def init_v21_demo(application: Any) -> None:
     application.state.v21_tasks = [
         asyncio.create_task(reconciliation_loop(application)),
         asyncio.create_task(user_stream_loop(application)),
-        asyncio.create_task(automation_loop(application)),
         asyncio.create_task(scanner_loop(application)),
     ]
+    ensure_automation_task(application)
 
 
 async def shutdown_v21_demo(application: Any) -> None:
@@ -1948,6 +1991,7 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
     record_event(state, "AUTO_START", "V21 kontrollü otomasyon kullanıcı onayıyla açıldı.", source="USER")
     emit_notification(state, "AUTO_STARTED", "Demo Auto Trade başlatıldı.", event_id=f"{today()}-auto-start-{int(time.time())}")
     persist_state(state)
+    ensure_automation_task(request.app)
     await automatic_cycle(request.app, request=request)
     return summary_payload(state)
 
