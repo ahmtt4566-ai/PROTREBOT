@@ -72,6 +72,9 @@ class SimulatedPosition:
     entry_spread: Decimal
     entry_slippage: Decimal
     funding: Decimal = Decimal("0")
+    # Observational-only running water marks; never read by open/close decision logic.
+    max_high_since_entry: Decimal = Decimal("0")
+    min_low_since_entry: Decimal = Decimal("0")
 
 
 @dataclass
@@ -97,6 +100,12 @@ class SimulatedTrade:
     net_pnl: Decimal
     return_pct: Decimal
     duration_seconds: int
+    # Observational-only forensic fields (Phase 2/3): never consumed by decision/execution logic.
+    mfe_price: Decimal = Decimal("0")
+    mae_price: Decimal = Decimal("0")
+    mfe_r: Decimal | None = None
+    mae_r: Decimal | None = None
+    exit_consistency_warning: str | None = None
 
 
 class HistoricalExecutionSimulator:
@@ -149,6 +158,34 @@ class HistoricalExecutionSimulator:
     def _reject(self, timestamp: int, reason: str) -> None:
         self.rejections.append({"timestamp": timestamp, "reason": reason})
 
+    @staticmethod
+    def _mfe_mae(position: "SimulatedPosition") -> tuple[Decimal, Decimal]:
+        """Observational-only: derives MFE/MAE from the running high/low water marks. Never used by decision/execution logic."""
+        if position.side == "LONG":
+            return (
+                position.max_high_since_entry - position.entry_fill_price,
+                position.entry_fill_price - position.min_low_since_entry,
+            )
+        return (
+            position.entry_fill_price - position.min_low_since_entry,
+            position.max_high_since_entry - position.entry_fill_price,
+        )
+
+    @staticmethod
+    def _normalize_to_r(price_value: Decimal, position: "SimulatedPosition") -> Decimal | None:
+        """Observational-only: reuses the already-stored stop distance; invents no new risk formula."""
+        stop_distance = abs(position.entry_fill_price - position.stop_loss)
+        if stop_distance <= 0:
+            return None
+        return price_value / stop_distance
+
+    @staticmethod
+    def _exit_consistency_warning(exit_reason: str, net_pnl: Decimal) -> str | None:
+        """Observational-only forensic flag; never changes exit_reason or net_pnl."""
+        if exit_reason == "STOP" and net_pnl > 0:
+            return "STOP_WITH_POSITIVE_PNL"
+        return None
+
     def open_from_decision(self, decision: dict[str, Any], candle: dict[str, Any], next_candle: dict[str, Any]) -> bool:
         if self.position is not None or decision.get("decision") not in {"BUY", "SELL"}:
             return False
@@ -171,12 +208,15 @@ class HistoricalExecutionSimulator:
             return False
         fee = notional * self._decimal(self.config.fee_bps()) / Decimal("10000")
         self._sequence += 1
+        entry_high = self._decimal(next_candle.get("high", next_candle["open"]))
+        entry_low = self._decimal(next_candle.get("low", next_candle["open"]))
         self.position = SimulatedPosition(
             order_id=f"BT-{self._sequence:08d}", symbol=str(decision["symbol"]), side=side,
             requested_quantity=quantity, filled_quantity=quantity, entry_requested_price=requested,
             entry_fill_price=fill, entry_timestamp=int(next_candle["time"]), signal_timestamp=int(decision["signal_timestamp"]),
             stop_loss=self._decimal(analysis["stop_loss"]), take_profit=self._decimal(analysis["tp1"]), notional=notional,
             entry_fee=fee, entry_spread=spread * quantity, entry_slippage=slippage * quantity,
+            max_high_since_entry=entry_high, min_low_since_entry=entry_low,
         )
         return True
 
@@ -185,6 +225,10 @@ class HistoricalExecutionSimulator:
         if position is None:
             return None
         high, low = self._decimal(candle["high"]), self._decimal(candle["low"])
+        if high > position.max_high_since_entry:
+            position.max_high_since_entry = high
+        if low < position.min_low_since_entry:
+            position.min_low_since_entry = low
         stop_hit = low <= position.stop_loss if position.side == "LONG" else high >= position.stop_loss
         target_hit = high >= position.take_profit if position.side == "LONG" else low <= position.take_profit
         if stop_hit and target_hit:
@@ -205,6 +249,7 @@ class HistoricalExecutionSimulator:
         slippage_cost = position.entry_slippage + slippage * position.filled_quantity
         fees = position.entry_fee + exit_fee
         net = gross - fees - funding
+        mfe_price, mae_price = self._mfe_mae(position)
         trade = SimulatedTrade(
             trade_id=position.order_id, order_id=position.order_id, symbol=position.symbol, side=position.side,
             entry_timestamp=position.entry_timestamp, signal_timestamp=position.signal_timestamp,
@@ -214,6 +259,9 @@ class HistoricalExecutionSimulator:
             spread_cost=spread_cost, slippage_cost=slippage_cost, funding_cost=funding, net_pnl=net,
             return_pct=net / max(position.notional, Decimal("0.000000000001")) * 100,
             duration_seconds=max(0, int(candle["time"]) - position.entry_timestamp),
+            mfe_price=mfe_price, mae_price=mae_price,
+            mfe_r=self._normalize_to_r(mfe_price, position), mae_r=self._normalize_to_r(mae_price, position),
+            exit_consistency_warning=self._exit_consistency_warning(reason, net),
         )
         self.trades.append(trade)
         self._record_equity(int(candle["time"]), net)
@@ -224,6 +272,13 @@ class HistoricalExecutionSimulator:
         position = self.position
         if position is None:
             return None
+        candle_close = candle.get("close")
+        high = self._decimal(candle.get("high", candle_close))
+        low = self._decimal(candle.get("low", candle_close))
+        if high > position.max_high_since_entry:
+            position.max_high_since_entry = high
+        if low < position.min_low_since_entry:
+            position.min_low_since_entry = low
         requested = self._price(self._decimal(requested if requested is not None else candle["close"]), buy=position.side == "SHORT")
         fill, spread, slippage = self._fill(requested, position.side, is_entry=False)
         gross = (fill - position.entry_fill_price) * position.filled_quantity if position.side == "LONG" else (position.entry_fill_price - fill) * position.filled_quantity
@@ -233,6 +288,7 @@ class HistoricalExecutionSimulator:
         slippage_cost = position.entry_slippage + slippage * position.filled_quantity
         fees = position.entry_fee + exit_fee
         net = gross - fees - funding
+        mfe_price, mae_price = self._mfe_mae(position)
         trade = SimulatedTrade(
             trade_id=position.order_id, order_id=position.order_id, symbol=position.symbol, side=position.side,
             entry_timestamp=position.entry_timestamp, signal_timestamp=position.signal_timestamp,
@@ -242,6 +298,9 @@ class HistoricalExecutionSimulator:
             spread_cost=spread_cost, slippage_cost=slippage_cost, funding_cost=funding, net_pnl=net,
             return_pct=net / max(position.notional, Decimal("0.000000000001")) * 100,
             duration_seconds=max(0, int(candle["time"]) - position.entry_timestamp),
+            mfe_price=mfe_price, mae_price=mae_price,
+            mfe_r=self._normalize_to_r(mfe_price, position), mae_r=self._normalize_to_r(mae_price, position),
+            exit_consistency_warning=self._exit_consistency_warning("TIMEOUT", net),
         )
         self.trades.append(trade)
         self._record_equity(int(candle["time"]), net)

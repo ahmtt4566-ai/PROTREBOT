@@ -110,6 +110,35 @@ class BacktestExecutionTests(unittest.TestCase):
         self.assertEqual(result["number_of_trades"], 0)
         self.assertTrue(result["data_quality"]["valid"])
 
+    def test_long_mfe_mae_reflect_running_high_low_water_marks(self):
+        sim = HistoricalExecutionSimulator(ExecutionConfig(spread_bps=0, slippage_bps=0, funding_bps_per_8h=0))
+        sim.open_from_decision(self.decision(), {"time": 900}, {"time": 1800, "open": 100})
+        # Intermediate candle: stays inside stop(99)/tp(103), only extends the water marks.
+        self.assertIsNone(sim.close_on_candle({"time": 2700, "open": 100, "high": 102, "low": 99.5, "close": 101}))
+        trade = sim.close_on_candle({"time": 3600, "open": 102, "high": 106, "low": 101, "close": 104})
+        self.assertEqual(trade.exit_reason, "TAKE_PROFIT")
+        self.assertEqual(trade.mfe_price, Decimal("6"))
+        self.assertEqual(trade.mae_price, Decimal("0.5"))
+        self.assertEqual(trade.mfe_r, Decimal("6"))
+        self.assertEqual(trade.mae_r, Decimal("0.5"))
+
+    def test_short_mfe_mae_reflect_running_high_low_water_marks(self):
+        sim = HistoricalExecutionSimulator(ExecutionConfig(spread_bps=0, slippage_bps=0, funding_bps_per_8h=0))
+        sim.open_from_decision(self.decision(side="SELL"), {"time": 900}, {"time": 1800, "open": 100})
+        # Intermediate candle: stays inside stop(101)/tp(97), only extends the water marks.
+        self.assertIsNone(sim.close_on_candle({"time": 2700, "open": 100, "high": 100.5, "low": 98.5, "close": 99}))
+        trade = sim.close_on_candle({"time": 3600, "open": 98, "high": 99, "low": 96, "close": 97.5})
+        self.assertEqual(trade.exit_reason, "TAKE_PROFIT")
+        self.assertEqual(trade.mfe_price, Decimal("4"))
+        self.assertEqual(trade.mae_price, Decimal("0.5"))
+        self.assertEqual(trade.mfe_r, Decimal("4"))
+        self.assertEqual(trade.mae_r, Decimal("0.5"))
+
+    def test_stop_with_positive_pnl_forensic_flag_is_observational_only(self):
+        self.assertEqual(HistoricalExecutionSimulator._exit_consistency_warning("STOP", Decimal("0.5")), "STOP_WITH_POSITIVE_PNL")
+        self.assertIsNone(HistoricalExecutionSimulator._exit_consistency_warning("STOP", Decimal("-0.5")))
+        self.assertIsNone(HistoricalExecutionSimulator._exit_consistency_warning("TAKE_PROFIT", Decimal("0.5")))
+
 
 if __name__ == "__main__":
     unittest.main()
