@@ -1994,7 +1994,19 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
     emit_notification(state, "AUTO_STARTED", "Demo Auto Trade başlatıldı.", event_id=f"{today()}-auto-start-{int(time.time())}")
     persist_state(state)
     ensure_automation_task(request.app)
-    await automatic_cycle(request.app, request=request)
+    try:
+        await automatic_cycle(request.app, request=request)
+    except Exception as exc:
+        error = str(exc)[:220]
+        state["auto"].update({
+            "enabled": False,
+            "status": "OFF",
+            "last_error": error,
+            "last_decision": "İlk Demo taraması hata verdi; otomasyon güvenli olarak kapatıldı.",
+        })
+        state["scanner"].update({"scan_status": "HATA", "last_error": error, "active": False, "running": False})
+        record_event(state, "AUTO_START_ERROR", f"İlk Demo taraması başarısız: {error}", source="SYSTEM")
+        persist_state(state)
     return summary_payload(state)
 
 
