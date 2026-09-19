@@ -51,6 +51,7 @@ from .binance_demo import (
     reconcile_demo_plans,
     round_tick,
     safe_exchange_error,
+    state_for as demo_state_for,
     symbol_rules,
     validate_entry_risk,
 )
@@ -1919,10 +1920,12 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
         _set_rejection(state, "CONFIRMATION", "Otomasyonu açmak için DEMO OTOMATİK yazın.")
         persist_state(state)
         raise HTTPException(422, "Otomasyonu açmak için DEMO OTOMATİK yazın.")
-    if not armed(request.app.state.binance_demo):
+    demo_state = demo_state_for(request)
+    if not armed(demo_state):
         _set_rejection(state, "DEMO_ARM", "Önce İşlem Masası'ndaki 10 dakikalık DEMO emir kilidini açın.")
         persist_state(state)
         raise HTTPException(423, "Önce İşlem Masası'ndaki 10 dakikalık DEMO emir kilidini açın.")
+    request.app.state.binance_demo["armed_until"] = demo_state["armed_until"]
     if not credentials_configured(request):
         _set_rejection(state, "DEMO_CREDENTIALS", "Binance Futures Demo anahtarları ayarlı değil.")
         persist_state(state)
