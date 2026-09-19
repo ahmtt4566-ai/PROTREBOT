@@ -1968,7 +1968,9 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
         _set_rejection(state, "DEMO_ARM", "Önce İşlem Masası'ndaki 10 dakikalık DEMO emir kilidini açın.")
         persist_state(state)
         raise HTTPException(423, "Önce İşlem Masası'ndaki 10 dakikalık DEMO emir kilidini açın.")
-    request.app.state.binance_demo["armed_until"] = demo_state["armed_until"]
+    armed_until = demo_state.get("armed_until")
+    if armed_until is not None:
+        request.app.state.binance_demo["armed_until"] = armed_until
     if not credentials_configured(request):
         _set_rejection(state, "DEMO_CREDENTIALS", "Binance Futures Demo anahtarları ayarlı değil.")
         persist_state(state)
