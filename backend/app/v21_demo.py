@@ -846,6 +846,7 @@ async def scan_demo_universe(client: BinanceDemoClient, occupied: set[str], sett
                 "confidence": confidence, "entry": decision["entry"], "stop_loss": decision["stop_loss"],
                 "tp1": decision["tp1"], "tp2": decision["tp2"], "tp3": decision["tp3"],
                 "volatility_pct": round(volatility, 3), "risk_reward": decision["risk_reward"],
+                "volume_ratio": decision["volume_ratio"],
                 "trend": decision["trend"], "momentum": decision["momentum"],
                 "mtf_trend": mtf_trend, "macd_confirmation": macd_confirmation, "rsi": decision["rsi"],
                 "mtf_aligned": mtf_aligned, "max_volatility_pct": float(settings["max_volatility_pct"]),
