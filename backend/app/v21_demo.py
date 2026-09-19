@@ -889,13 +889,17 @@ async def auto_trade_market_universe(application: Any) -> list[dict[str, Any]]:
 
 GATE_REJECTION_KEYS = (
     "direction_rejected", "status_rejected", "analysis_score_rejected",
-    "opportunity_score_rejected", "data_freshness_rejected", "mtf_rejected",
+    "opportunity_score_rejected", "freshness_rejected", "mtf_rejected",
     "liquidity_rejected", "sl_tp_rejected", "other_rejected",
 )
 
 
-def _new_gate_rejections() -> dict[str, int]:
-    return {key: 0 for key in GATE_REJECTION_KEYS}
+def _new_gate_rejections(scanner_total: int = 0) -> dict[str, int]:
+    return {
+        "scanner_total": int(scanner_total),
+        **{key: 0 for key in GATE_REJECTION_KEYS},
+        "final_tradeable_count": 0,
+    }
 
 
 def _record_gate_rejection(diagnostics: dict[str, int] | None, key: str) -> None:
@@ -943,10 +947,10 @@ def candidate_is_tradeable(
         _record_gate_rejection(diagnostics, "other_rejected")
         return False
     if candidate.get("data_health") is False:
-        _record_gate_rejection(diagnostics, "data_freshness_rejected")
+        _record_gate_rejection(diagnostics, "freshness_rejected")
         return False
     if int(candidate.get("signal_age_seconds") or 0) > MAX_SIGNAL_AGE_SECONDS:
-        _record_gate_rejection(diagnostics, "data_freshness_rejected")
+        _record_gate_rejection(diagnostics, "freshness_rejected")
         return False
     if "risk_reward" in candidate and float(candidate.get("risk_reward") or 0) <= 0:
         _record_gate_rejection(diagnostics, "other_rejected")
@@ -1006,6 +1010,8 @@ def select_auto_candidates(
         selected.append(candidate)
         if len(selected) >= min(MAX_OPEN_POSITIONS, max(0, int(limit))):
             break
+    if diagnostics is not None:
+        diagnostics["final_tradeable_count"] = len(selected)
     return selected
 
 
@@ -1433,7 +1439,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
             state["scanner"].update({"active": True, "last_stage": "DOLU", "selected_symbols": []})
             persist_state(state)
             return
-    gate_rejections = _new_gate_rejections()
+    gate_rejections = _new_gate_rejections(scanner_total=len(ranked))
     top_candidates = select_auto_candidates(ranked, settings, occupied, available_slots, gate_rejections)
     if not top_candidates:
         disallowed = next((candidate for candidate in ranked if allowed_symbols is not None and normalize_symbol(candidate.get("symbol", "")) not in allowed_symbols), None)
@@ -1530,9 +1536,14 @@ async def run_scanner_cycle(application: Any) -> None:
         occupied = {item["symbol"] for item in snapshot.get("positions", []) + snapshot.get("open_orders", [])}
         ranked = await scan_demo_universe(client, occupied, settings)
         threshold = float(settings.get("min_score_threshold", 70))
-        gate_rejections = _new_gate_rejections()
-        filtered = [candidate for candidate in ranked if candidate.get("score", 0) >= threshold and candidate_is_tradeable(candidate, settings, gate_rejections)]
+        gate_rejections = _new_gate_rejections(scanner_total=len(ranked))
+        filtered = []
+        for candidate in ranked:
+            tradeable = candidate_is_tradeable(candidate, settings, gate_rejections)
+            if candidate.get("score", 0) >= threshold and tradeable:
+                filtered.append(candidate)
         top_candidates = filtered[:3]
+        gate_rejections["final_tradeable_count"] = len(top_candidates)
         selected_symbols = {item["symbol"] for item in top_candidates}
         for candidate in ranked:
             if candidate["symbol"] in selected_symbols:

@@ -47,7 +47,7 @@ class AutoTradeBotTests(unittest.TestCase):
             "status_rejected": self.candidate(status="WATCH"),
             "analysis_score_rejected": self.candidate(score=74, analysis_score=74),
             "opportunity_score_rejected": self.candidate(opportunity=69),
-            "data_freshness_rejected": self.candidate(data_health=False),
+            "freshness_rejected": self.candidate(data_health=False),
             "mtf_rejected": self.candidate(opportunity_breakdown={"liquidity_quality": 80, "mtf_confirmation": 49}),
             "liquidity_rejected": self.candidate(opportunity_breakdown={"liquidity_quality": 49, "mtf_confirmation": 80}),
             "sl_tp_rejected": self.candidate(stop_loss=101),
@@ -67,10 +67,12 @@ class AutoTradeBotTests(unittest.TestCase):
             self.candidate(85, 85, symbol="BADRISKUSDT", risk_reward=0),
         ]
         without_diagnostics = v21_demo.select_auto_candidates(candidates, v21_demo.DEFAULT_SETTINGS, set(), limit=3)
-        diagnostics = {key: 0 for key in v21_demo.GATE_REJECTION_KEYS}
+        diagnostics = v21_demo._new_gate_rejections(scanner_total=len(candidates))
         with_diagnostics = v21_demo.select_auto_candidates(candidates, v21_demo.DEFAULT_SETTINGS, set(), limit=3, diagnostics=diagnostics)
 
         self.assertEqual([item["symbol"] for item in with_diagnostics], [item["symbol"] for item in without_diagnostics])
+        self.assertEqual(diagnostics["scanner_total"], 3)
+        self.assertEqual(diagnostics["final_tradeable_count"], 1)
         self.assertEqual(diagnostics["opportunity_score_rejected"], 1)
         self.assertEqual(diagnostics["other_rejected"], 1)
 
