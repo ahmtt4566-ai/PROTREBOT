@@ -19,6 +19,12 @@ ROOT_FRONTEND_CSS = Path(__file__).parents[2] / "binance-demo.css"
 
 
 class V21ScannerDashboardTests(unittest.TestCase):
+    def test_invalid_allowed_symbols_do_not_abort_universe_selection(self):
+        settings = v21_demo.initial_state()["settings"]
+        settings["allowed_symbols"] = ["BTC/USDT", "BTCUSDT PERPETUAL", "ETHUSDT"]
+
+        self.assertEqual(v21_demo._effective_allowed_symbols(settings), {"BTCUSDT", "ETHUSDT"})
+
     def test_auto_trade_dashboard_mount_is_visible_outside_legacy_wrapper(self):
         source = ROOT_FRONTEND.read_text(encoding="utf-8")
         css = ROOT_FRONTEND_CSS.read_text(encoding="utf-8")

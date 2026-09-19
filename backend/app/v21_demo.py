@@ -602,7 +602,14 @@ async def demo_candles(client: BinanceDemoClient, symbol: str, interval: str, li
 
 def _effective_allowed_symbols(settings: dict[str, Any]) -> set[str] | None:
     configured = settings.get("_auto_universe") or settings.get("allowed_symbols") or []
-    normalized = {normalize_symbol(value) for value in configured if value}
+    normalized: set[str] = set()
+    for value in configured:
+        if not value:
+            continue
+        try:
+            normalized.add(normalize_symbol(str(value)))
+        except BinanceDemoError:
+            continue
     if not normalized or normalized == AUTO_TRADE_SYMBOL_SET:
         return None
     return normalized
