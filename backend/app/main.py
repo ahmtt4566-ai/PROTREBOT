@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import math
 import os
 import time
@@ -58,6 +59,8 @@ from .paper_autonomy import (
     rank_paper_candidates,
 )
 from .web_security import PUBLIC_PATHS, bearer_token, cors_origins, env_flag, evaluate_access, is_allowed_cors_origin
+
+logger = logging.getLogger(__name__)
 
 BINANCE_API = "https://api.binance.com"
 FUTURES_MARKET_DATA_API = DEMO_REST_BASE
@@ -941,16 +944,41 @@ async def restore_health_snapshot(application: FastAPI) -> None:
         return
 
 
+def build_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(30, connect=10, read=30, write=10, pool=30),
+        limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=30),
+        trust_env=False,
+    )
+
+
+async def ensure_http_client(application: FastAPI) -> httpx.AsyncClient:
+    current_loop = asyncio.get_running_loop()
+    client = getattr(application.state, "http", None)
+    if client is None:
+        client = build_http_client()
+        application.state.http = client
+        application.state.http_loop = current_loop
+        return client
+    bound_loop = getattr(application.state, "http_loop", None)
+    if bound_loop is not None and bound_loop is not current_loop:
+        try:
+            await client.aclose()
+        except Exception as exc:
+            logger.warning("Failed to close stale HTTP client before rebuild: %s", exc)
+        client = build_http_client()
+        application.state.http = client
+        application.state.http_loop = current_loop
+    return application.state.http
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Exchange signatures and API-key traffic must not silently inherit an
     # unrelated system proxy. This also avoids optional SOCKS dependencies
     # preventing the local API from starting.
-    app.state.http = httpx.AsyncClient(
-        timeout=httpx.Timeout(30, connect=10, read=30, write=10, pool=30),
-        limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=30),
-        trust_env=False,
-    )
+    app.state.http = build_http_client()
+    app.state.http_loop = asyncio.get_running_loop()
     app.state.db_pool = None
     app.state.redis_client = None
     app.state.paper_schema_ready = False
@@ -1299,6 +1327,7 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
 
 async def market_data_request(application: FastAPI, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
     """Retry only transient public market-data failures; preserve final error mapping."""
+    application.state.http = await ensure_http_client(application)
     last_error: httpx.HTTPError | None = None
     for attempt in range(3):
         try:
@@ -1353,6 +1382,7 @@ async def historical_fetch_candles(symbol: str, interval: str, total_limit: int 
     previous_oldest: int | None = None
     max_retries = 3
     while len(collected) < total_limit:
+        app.state.http = await ensure_http_client(app)
         params = {"symbol": safe_symbol, "interval": interval, "limit": min(1000, total_limit - len(collected))}
         if end_time_ms is not None:
             params["endTime"] = end_time_ms

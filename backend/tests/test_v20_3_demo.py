@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import hashlib
 import hmac
 import json
@@ -219,6 +220,76 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn("0.5 * (2 ** attempt)", MAIN_TEXT)
         self.assertIn("market_data_request(app, \"/fapi/v1/ticker/24hr\")", MAIN_TEXT)
         self.assertIn("market_data_request(\n            app,\n            \"/fapi/v1/klines\"", MAIN_TEXT)
+
+    def test_http_client_is_rebound_when_stale_loop_is_detected(self):
+        from app.main import ensure_http_client
+
+        class FakeClient:
+            def __init__(self):
+                self.closed = False
+
+            async def aclose(self):
+                self.closed = True
+
+        stale_loop = asyncio.new_event_loop()
+        stale_client = FakeClient()
+        app_like = type("AppLike", (), {"state": type("State", (), {})()})()
+        app_like.state.http = stale_client
+        app_like.state.http_loop = stale_loop
+
+        async def run_case():
+            client = await ensure_http_client(app_like)
+            self.assertIsNot(client, stale_client)
+            self.assertTrue(stale_client.closed)
+            self.assertIs(client, app_like.state.http)
+            self.assertIs(app_like.state.http_loop, asyncio.get_running_loop())
+
+        asyncio.run(run_case())
+        stale_loop.close()
+
+    def test_http_client_is_reused_when_loop_is_unchanged(self):
+        from app.main import ensure_http_client
+
+        class FakeClient:
+            def __init__(self):
+                self.close_calls = 0
+
+            async def aclose(self):
+                self.close_calls += 1
+
+        app_like = type("AppLike", (), {"state": type("State", (), {})()})()
+
+        async def run_case():
+            app_like.state.http = FakeClient()
+            app_like.state.http_loop = asyncio.get_running_loop()
+            existing = app_like.state.http
+            client = await ensure_http_client(app_like)
+            self.assertIs(client, existing)
+            self.assertEqual(existing.close_calls, 0)
+
+        asyncio.run(run_case())
+
+    def test_http_client_rebuild_logs_warning_when_close_fails(self):
+        from app import main as main_module
+        from app.main import ensure_http_client
+
+        class FakeClient:
+            async def aclose(self):
+                raise RuntimeError("boom")
+
+        stale_loop = asyncio.new_event_loop()
+        stale_client = FakeClient()
+        app_like = type("AppLike", (), {"state": type("State", (), {})()})()
+        app_like.state.http = stale_client
+        app_like.state.http_loop = stale_loop
+
+        async def run_case():
+            with self.assertLogs(main_module.logger, level="WARNING"):
+                client = await ensure_http_client(app_like)
+            self.assertIsNot(client, stale_client)
+
+        asyncio.run(run_case())
+        stale_loop.close()
 
     def test_connector_is_hard_locked_to_official_demo_hosts(self):
         self.assertIn('DEMO_REST_BASE = "https://demo-fapi.binance.com"', SOURCE_TEXT)
