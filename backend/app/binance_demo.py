@@ -1033,7 +1033,9 @@ async def _account_snapshot(client: BinanceDemoClient, request_id: str | None = 
         algo_orders = await snapshot_request(client, "/fapi/v1/openAlgoOrders", correlation_id)
     except BinanceDemoError:
         algo_orders = []
-    hedge_mode = await snapshot_request(client, "/fapi/v1/positionSide/dual", correlation_id)
+    hedge_payload = await snapshot_request(client, "/fapi/v1/positionSide/dual", correlation_id)
+    hedge_value = hedge_payload.get("dualSidePosition", hedge_payload.get("dualPosition", False))
+    hedge_mode = hedge_value is True or str(hedge_value).lower() == "true"
     try:
         configurations = await snapshot_request(client, "/fapi/v1/symbolConfig", correlation_id)
     except BinanceDemoError:
