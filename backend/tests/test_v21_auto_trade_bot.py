@@ -40,6 +40,40 @@ class AutoTradeBotTests(unittest.TestCase):
     def test_high_analysis_score_with_bad_risk_reward_is_not_tradeable(self):
         self.assertFalse(v21_demo.candidate_is_tradeable(self.candidate(90, 85, risk_reward=0), v21_demo.DEFAULT_SETTINGS))
 
+    def test_candidate_gate_diagnostics_count_first_rejection_reason(self):
+        diagnostics = {key: 0 for key in v21_demo.GATE_REJECTION_KEYS}
+        cases = {
+            "direction_rejected": self.candidate(direction="NEUTRAL"),
+            "status_rejected": self.candidate(status="WATCH"),
+            "analysis_score_rejected": self.candidate(score=74, analysis_score=74),
+            "opportunity_score_rejected": self.candidate(opportunity=69),
+            "data_freshness_rejected": self.candidate(data_health=False),
+            "mtf_rejected": self.candidate(opportunity_breakdown={"liquidity_quality": 80, "mtf_confirmation": 49}),
+            "liquidity_rejected": self.candidate(opportunity_breakdown={"liquidity_quality": 49, "mtf_confirmation": 80}),
+            "sl_tp_rejected": self.candidate(stop_loss=101),
+            "other_rejected": self.candidate(risk_reward=0),
+        }
+
+        for expected_reason, candidate in cases.items():
+            self.assertFalse(v21_demo.candidate_is_tradeable(candidate, v21_demo.DEFAULT_SETTINGS, diagnostics))
+            self.assertEqual(diagnostics[expected_reason], 1)
+
+        self.assertEqual(sum(diagnostics.values()), len(cases))
+
+    def test_selection_with_diagnostics_has_same_result(self):
+        candidates = [
+            self.candidate(95, 95, symbol="GOODUSDT"),
+            self.candidate(90, 65, symbol="LOWOPPUSDT"),
+            self.candidate(85, 85, symbol="BADRISKUSDT", risk_reward=0),
+        ]
+        without_diagnostics = v21_demo.select_auto_candidates(candidates, v21_demo.DEFAULT_SETTINGS, set(), limit=3)
+        diagnostics = {key: 0 for key in v21_demo.GATE_REJECTION_KEYS}
+        with_diagnostics = v21_demo.select_auto_candidates(candidates, v21_demo.DEFAULT_SETTINGS, set(), limit=3, diagnostics=diagnostics)
+
+        self.assertEqual([item["symbol"] for item in with_diagnostics], [item["symbol"] for item in without_diagnostics])
+        self.assertEqual(diagnostics["opportunity_score_rejected"], 1)
+        self.assertEqual(diagnostics["other_rejected"], 1)
+
     def test_mtf_confirmation_improves_opportunity_ranking(self):
         weak = self.candidate(90, 0, opportunity_breakdown={"liquidity_quality": 80, "mtf_confirmation": 25})
         strong = self.candidate(90, 0, opportunity_breakdown={"liquidity_quality": 80, "mtf_confirmation": 100})

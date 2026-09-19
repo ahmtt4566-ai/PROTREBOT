@@ -186,6 +186,7 @@ def initial_state() -> dict[str, Any]:
             "scan_duration_ms": 0, "last_scan_at": None, "next_scan_at": None,
             "last_scan": None, "next_scan": None, "top_candidates": [], "all_candidates": [],
             "selected_symbols": [], "last_stage": "BEKLEMEDE", "eligible_count": 0,
+            "gate_rejections": {},
             "last_error": None,
         },
         "automation_trades": [],
@@ -251,6 +252,7 @@ def load_state() -> dict[str, Any]:
     base["auto"]["last_decision"] = "Güvenli yeniden başlatma: DEMO OTOMATİK onayı bekleniyor."
     base["scanner"].setdefault("all_candidates", [])
     base["scanner"].setdefault("top_candidates", [])
+    base["scanner"].setdefault("gate_rejections", {})
     base["scanner"]["active"] = False
     base["scanner"]["running"] = False
     base["scanner"]["scan_status"] = "BEKLEMEDE"
@@ -885,41 +887,84 @@ async def auto_trade_market_universe(application: Any) -> list[dict[str, Any]]:
     return sorted(markets, key=lambda item: item["volume"], reverse=True)
 
 
-def candidate_is_tradeable(candidate: dict[str, Any], settings: dict[str, Any]) -> bool:
+GATE_REJECTION_KEYS = (
+    "direction_rejected", "status_rejected", "analysis_score_rejected",
+    "opportunity_score_rejected", "data_freshness_rejected", "mtf_rejected",
+    "liquidity_rejected", "sl_tp_rejected", "other_rejected",
+)
+
+
+def _new_gate_rejections() -> dict[str, int]:
+    return {key: 0 for key in GATE_REJECTION_KEYS}
+
+
+def _record_gate_rejection(diagnostics: dict[str, int] | None, key: str) -> None:
+    if diagnostics is not None:
+        diagnostics[key] = int(diagnostics.get(key, 0)) + 1
+
+
+def candidate_is_tradeable(
+    candidate: dict[str, Any],
+    settings: dict[str, Any],
+    diagnostics: dict[str, int] | None = None,
+) -> bool:
     symbol = str(candidate.get("symbol") or "").upper()
     direction = str(candidate.get("direction") or "NEUTRAL").upper()
     allowed_symbols = _effective_allowed_symbols(settings)
     if allowed_symbols is not None and symbol not in allowed_symbols:
+        _record_gate_rejection(diagnostics, "other_rejected")
         return False
     analysis_score = float(candidate.get("analysis_score", candidate.get("score", 0)) or 0)
     opportunity_score = float(candidate.get("opportunity_score", analysis_score) or analysis_score)
     decision_status = str(candidate.get("decision_status") or _decision_status(analysis_score))
     breakdown = candidate.get("opportunity_breakdown") or {}
-    if direction not in {"LONG", "SHORT"} or candidate.get("status") != "SELECTED":
+    if direction not in {"LONG", "SHORT"}:
+        _record_gate_rejection(diagnostics, "direction_rejected")
         return False
-    if analysis_score < 75 or opportunity_score < 70:
+    if candidate.get("status") != "SELECTED":
+        _record_gate_rejection(diagnostics, "status_rejected")
         return False
-    if float(breakdown.get("liquidity_quality", 100) or 0) < 50 or float(breakdown.get("mtf_confirmation", 100) or 0) < 50:
+    if analysis_score < 75:
+        _record_gate_rejection(diagnostics, "analysis_score_rejected")
+        return False
+    if opportunity_score < 70:
+        _record_gate_rejection(diagnostics, "opportunity_score_rejected")
+        return False
+    if float(breakdown.get("mtf_confirmation", 100) or 0) < 50:
+        _record_gate_rejection(diagnostics, "mtf_rejected")
+        return False
+    if float(breakdown.get("liquidity_quality", 100) or 0) < 50:
+        _record_gate_rejection(diagnostics, "liquidity_rejected")
         return False
     if direction == "LONG" and not settings.get("allow_long", True):
+        _record_gate_rejection(diagnostics, "other_rejected")
         return False
     if direction == "SHORT" and not settings.get("allow_short", True):
+        _record_gate_rejection(diagnostics, "other_rejected")
         return False
     if candidate.get("data_health") is False:
+        _record_gate_rejection(diagnostics, "data_freshness_rejected")
         return False
     if int(candidate.get("signal_age_seconds") or 0) > MAX_SIGNAL_AGE_SECONDS:
+        _record_gate_rejection(diagnostics, "data_freshness_rejected")
         return False
     if "risk_reward" in candidate and float(candidate.get("risk_reward") or 0) <= 0:
+        _record_gate_rejection(diagnostics, "other_rejected")
         return False
     try:
         entry = float(candidate["entry"])
         stop = float(candidate["stop_loss"])
         targets = [float(candidate[key]) for key in ("tp1", "tp2", "tp3")]
     except (KeyError, TypeError, ValueError):
+        _record_gate_rejection(diagnostics, "sl_tp_rejected")
         return False
     if min(entry, stop, *targets) <= 0:
+        _record_gate_rejection(diagnostics, "sl_tp_rejected")
         return False
-    return (stop < entry < targets[0] < targets[1] < targets[2]) if direction == "LONG" else (targets[2] < targets[1] < targets[0] < entry < stop)
+    valid_levels = (stop < entry < targets[0] < targets[1] < targets[2]) if direction == "LONG" else (targets[2] < targets[1] < targets[0] < entry < stop)
+    if not valid_levels:
+        _record_gate_rejection(diagnostics, "sl_tp_rejected")
+    return valid_levels
 
 
 def automatic_risk_block(state: dict[str, Any]) -> tuple[str, str] | None:
@@ -936,14 +981,26 @@ def automatic_risk_block(state: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def select_auto_candidates(ranked: list[dict[str, Any]], settings: dict[str, Any], occupied: set[str], limit: int = MAX_OPEN_POSITIONS) -> list[dict[str, Any]]:
+def select_auto_candidates(
+    ranked: list[dict[str, Any]],
+    settings: dict[str, Any],
+    occupied: set[str],
+    limit: int = MAX_OPEN_POSITIONS,
+    diagnostics: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
     allowed_symbols = _effective_allowed_symbols(settings)
     selected: list[dict[str, Any]] = []
     seen: set[str] = set()
     ordered = sorted(ranked, key=lambda item: float(item.get("opportunity_score", item.get("score", 0)) or 0), reverse=True)
     for candidate in ordered:
         symbol = normalize_symbol(str(candidate.get("symbol") or ""))
-        if symbol in occupied or symbol in seen or (allowed_symbols is not None and symbol not in allowed_symbols) or not candidate_is_tradeable(candidate, settings):
+        if symbol in occupied or symbol in seen:
+            _record_gate_rejection(diagnostics, "other_rejected")
+            continue
+        if allowed_symbols is not None and symbol not in allowed_symbols:
+            _record_gate_rejection(diagnostics, "other_rejected")
+            continue
+        if not candidate_is_tradeable(candidate, settings, diagnostics):
             continue
         seen.add(symbol)
         selected.append(candidate)
@@ -1376,13 +1433,15 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
             state["scanner"].update({"active": True, "last_stage": "DOLU", "selected_symbols": []})
             persist_state(state)
             return
-    top_candidates = select_auto_candidates(ranked, settings, occupied, available_slots)
+    gate_rejections = _new_gate_rejections()
+    top_candidates = select_auto_candidates(ranked, settings, occupied, available_slots, gate_rejections)
     if not top_candidates:
         disallowed = next((candidate for candidate in ranked if allowed_symbols is not None and normalize_symbol(candidate.get("symbol", "")) not in allowed_symbols), None)
         if disallowed:
             _set_rejection(state, "ALLOWED_SYMBOLS", f"{disallowed.get('symbol', 'Aday')} izinli pariteler dışında; emir açılmadı.")
     scanner = state["scanner"]
     _apply_scan_completion_state(scanner, settings, ranked, top_candidates, eligible_count=len(ranked))
+    scanner["gate_rejections"] = gate_rejections
     selected: list[str] = []
     cooldowns = auto.setdefault("cooldown_until", {})
     for index, candidate in enumerate(top_candidates[:available_slots]):
@@ -1471,7 +1530,8 @@ async def run_scanner_cycle(application: Any) -> None:
         occupied = {item["symbol"] for item in snapshot.get("positions", []) + snapshot.get("open_orders", [])}
         ranked = await scan_demo_universe(client, occupied, settings)
         threshold = float(settings.get("min_score_threshold", 70))
-        filtered = [candidate for candidate in ranked if candidate.get("score", 0) >= threshold and candidate_is_tradeable(candidate, settings)]
+        gate_rejections = _new_gate_rejections()
+        filtered = [candidate for candidate in ranked if candidate.get("score", 0) >= threshold and candidate_is_tradeable(candidate, settings, gate_rejections)]
         top_candidates = filtered[:3]
         selected_symbols = {item["symbol"] for item in top_candidates}
         for candidate in ranked:
@@ -1480,6 +1540,7 @@ async def run_scanner_cycle(application: Any) -> None:
             elif candidate.get("status") != "REJECTED":
                 candidate["status"] = "WATCH"
         _apply_scan_completion_state(scanner, settings, ranked, top_candidates, eligible_count=len(filtered))
+        scanner["gate_rejections"] = gate_rejections
         state["auto"]["last_scan"] = now_iso()
         persist_state(state)
     except asyncio.CancelledError:
