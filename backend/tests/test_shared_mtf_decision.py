@@ -1,6 +1,15 @@
 import asyncio
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
+repo_root = Path(__file__).resolve().parents[2]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+backend_root = Path(__file__).resolve().parents[1]
+if str(backend_root) not in sys.path:
+    sys.path.insert(0, str(backend_root))
 
 from backend.app import main as main_module
 from backend.app.main import canonical_historical_decision, shared_mtf_decision
@@ -65,6 +74,150 @@ class SharedMTFDecisionTests(unittest.TestCase):
         malformed = [*self._historical_candles(), {"time": 5, "open": 1, "high": 2, "low": 0, "close": 1, "volume": 1}]
         result = canonical_historical_decision("BTCUSDT", {"15m": malformed}, malformed[-1]["time"] + 1, required_intervals=("15m",))
         self.assertEqual(result["decision"], "WAIT")
+
+    def test_canonical_decision_with_valid_stop_distance_allows_entry(self):
+        frames, decision_time = self._aligned_frames()
+        signal = {
+            "direction": "LONG", "confidence": 85, "trend": "LONG",
+            "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"},
+            "entry": 100.0, "stop_loss": 98.0, "tp1": 104.0,  # 2.0% stop distance <= 2.5% max
+        }
+        policy = {"max_stop_distance_pct": 2.5, "max_loss_per_trade": 3.0, "max_margin_per_trade": 25.0, "max_leverage": 2}
+        with patch.object(main_module, "analyze", return_value=signal):
+            result = canonical_historical_decision("BTCUSDT", frames, decision_time, policy=policy)
+        self.assertEqual(result["decision"], "BUY")
+        self.assertTrue(result["entry_eligible"])
+        self.assertEqual(result["reason"], "READY")
+        self.assertIsNotNone(result["risk"])
+        self.assertAlmostEqual(result["risk"]["stop_distance_pct"], 2.0)
+
+    def test_canonical_decision_default_thresholds_remain_78_and_55(self):
+        frames, decision_time = self._aligned_frames()
+        signal = {
+            "direction": "LONG", "confidence": 78.0, "trend": "LONG",
+            "radar": {"trap_score": 10, "breakout_quality": 55.0, "trap_level": "LOW"},
+            "entry": 100.0, "stop_loss": 97.5, "tp1": 105.0,
+        }
+        with patch.object(main_module, "analyze", return_value=signal):
+            result = canonical_historical_decision("BTCUSDT", frames, decision_time)
+        self.assertTrue(result["entry_eligible"])
+        self.assertEqual(result["decision"], "BUY")
+
+    def test_canonical_decision_fails_closed_when_higher_timeframes_are_still_warming_up(self):
+        primary = [{
+            "time": idx * 900,
+            "open": 100.0 + idx * 0.05,
+            "high": 101.0 + idx * 0.05,
+            "low": 99.0 + idx * 0.05,
+            "close": 100.5 + idx * 0.05,
+            "volume": 1000.0,
+        } for idx in range(220)]
+        decision_time = primary[-1]["time"] + 900
+        one_h = [{
+            "time": idx * 3600,
+            "open": 100.0 + idx * 0.10,
+            "high": 101.0 + idx * 0.10,
+            "low": 99.0 + idx * 0.10,
+            "close": 100.5 + idx * 0.10,
+            "volume": 5000.0,
+        } for idx in range(49)]
+        four_h = [{
+            "time": idx * 14400,
+            "open": 100.0 + idx * 0.15,
+            "high": 101.0 + idx * 0.15,
+            "low": 99.0 + idx * 0.15,
+            "close": 100.5 + idx * 0.15,
+            "volume": 20000.0,
+        } for idx in range(12)]
+        frames = {"15m": primary, "1h": one_h, "4h": four_h, "1d": [{"time": 0, "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 50000}]}
+        signal = {
+            "direction": "LONG", "confidence": 85.0, "trend": "LONG",
+            "radar": {"trap_score": 10, "breakout_quality": 80.0, "trap_level": "LOW"},
+            "entry": 100.0, "stop_loss": 97.5, "tp1": 105.0,
+        }
+        with patch.object(main_module, "analyze", return_value=signal):
+            result = canonical_historical_decision("BTCUSDT", frames, decision_time)
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertFalse(result["entry_eligible"])
+        self.assertEqual(result["reason"], "INSUFFICIENT_CLOSED_CANDLES")
+        self.assertIn("1h: 49/50 closed candles", result["reasons"][0])
+
+    def test_canonical_decision_threshold_override_uses_candidate_values(self):
+        frames, decision_time = self._aligned_frames()
+        signal = {
+            "direction": "LONG", "confidence": 80.0, "trend": "LONG",
+            "radar": {"trap_score": 10, "breakout_quality": 58.0, "trap_level": "LOW"},
+            "entry": 100.0, "stop_loss": 97.5, "tp1": 105.0,
+        }
+        with patch.object(main_module, "analyze", return_value=signal):
+            baseline = canonical_historical_decision("BTCUSDT", frames, decision_time, historical_policy_override={"confidence_threshold": 78, "breakout_quality_threshold": 55})
+            strict = canonical_historical_decision("BTCUSDT", frames, decision_time, historical_policy_override={"confidence_threshold": 82, "breakout_quality_threshold": 60})
+        self.assertTrue(baseline["entry_eligible"])
+        self.assertFalse(strict["entry_eligible"])
+
+    def test_historical_policy_override_rejects_unsafe_keys(self):
+        frames, decision_time = self._aligned_frames()
+        signal = {
+            "direction": "LONG", "confidence": 80.0, "trend": "LONG",
+            "radar": {"trap_score": 10, "breakout_quality": 58.0, "trap_level": "LOW"},
+            "entry": 100.0, "stop_loss": 97.5, "tp1": 105.0,
+        }
+        with patch.object(main_module, "analyze", return_value=signal):
+            with self.assertRaises(ValueError):
+                canonical_historical_decision(
+                    "BTCUSDT",
+                    frames,
+                    decision_time,
+                    historical_policy_override={"confidence_threshold": 80, "breakout_quality_threshold": 55, "max_stop_distance_pct": 5.0},
+                )
+
+    def test_canonical_decision_with_excessive_stop_distance_rejects_without_raising(self):
+        frames, decision_time = self._aligned_frames()
+        signal = {
+            "direction": "LONG", "confidence": 85, "trend": "LONG",
+            "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"},
+            "entry": 100.0, "stop_loss": 97.0, "tp1": 106.0,  # 3.0% stop distance > 2.5% max
+        }
+        policy = {"max_stop_distance_pct": 2.5, "max_loss_per_trade": 3.0, "max_margin_per_trade": 25.0, "max_leverage": 2}
+        with patch.object(main_module, "analyze", return_value=signal):
+            result = canonical_historical_decision("BTCUSDT", frames, decision_time, policy=policy)
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertFalse(result["entry_eligible"])
+        self.assertEqual(result["reason"], "RISK_GATE_REJECTED")
+        self.assertIn("Stop mesafesi %3.00", result["reasons"][0])
+        self.assertIsNone(result["risk"])
+
+    def test_canonical_decision_flags_entry_equal_stop_as_invariant_violation(self):
+        frames, decision_time = self._aligned_frames()
+        signal = {
+            "direction": "LONG", "confidence": 85, "trend": "LONG",
+            "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"},
+            "entry": 100.0, "stop_loss": 100.0, "tp1": 106.0,
+        }
+        policy = {"max_stop_distance_pct": 2.5, "max_loss_per_trade": 3.0, "max_margin_per_trade": 25.0, "max_leverage": 2}
+        with patch.object(main_module, "analyze", return_value=signal):
+            result = canonical_historical_decision("BTCUSDT", frames, decision_time, policy=policy)
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertFalse(result["entry_eligible"])
+        self.assertIn("ANALYSIS_INVARIANT_VIOLATION", result["reasons"])
+        self.assertNotEqual(result["reason"], "RISK_GATE_REJECTED")
+        self.assertIsNone(result["risk"])
+
+    def test_canonical_decision_flags_non_positive_entry_or_stop_as_invariant_violation(self):
+        frames, decision_time = self._aligned_frames()
+        policy = {"max_stop_distance_pct": 2.5, "max_loss_per_trade": 3.0, "max_margin_per_trade": 25.0, "max_leverage": 2}
+        for entry, stop in ((0.0, 97.5), (100.0, 0.0), (-5.0, 97.5)):
+            signal = {
+                "direction": "LONG", "confidence": 85, "trend": "LONG",
+                "radar": {"trap_score": 10, "breakout_quality": 80, "trap_level": "LOW"},
+                "entry": entry, "stop_loss": stop, "tp1": 106.0,
+            }
+            with patch.object(main_module, "analyze", return_value=signal):
+                result = canonical_historical_decision("BTCUSDT", frames, decision_time, policy=policy)
+            self.assertEqual(result["decision"], "WAIT", (entry, stop))
+            self.assertFalse(result["entry_eligible"], (entry, stop))
+            self.assertIn("ANALYSIS_INVARIANT_VIOLATION", result["reasons"], (entry, stop))
+
     def _payload(self, entry_direction, confidence_15m, one_h=None, four_h=None):
         return {
             "1h": {"direction": one_h if one_h is not None else entry_direction, "confidence": 80.0},

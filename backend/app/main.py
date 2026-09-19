@@ -5,7 +5,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 import httpx
 import asyncpg
@@ -251,6 +251,27 @@ def shared_mtf_decision(
     }
 
 
+HISTORICAL_POLICY_DEFAULT = {"confidence_threshold": 78, "breakout_quality_threshold": 50}
+ALLOWED_HISTORICAL_POLICY_KEYS = set(HISTORICAL_POLICY_DEFAULT)
+
+
+def _resolve_historical_policy_override(
+    historical_policy_override: Mapping[str, Any] | None,
+) -> dict[str, int]:
+    effective = dict(HISTORICAL_POLICY_DEFAULT)
+    if historical_policy_override is None:
+        return effective
+    if not isinstance(historical_policy_override, Mapping):
+        raise TypeError("historical_policy_override must be a mapping")
+    unknown = sorted(set(historical_policy_override) - ALLOWED_HISTORICAL_POLICY_KEYS)
+    if unknown:
+        raise ValueError(f"Unsupported historical policy override keys: {unknown}")
+    for key in ALLOWED_HISTORICAL_POLICY_KEYS:
+        if key in historical_policy_override:
+            effective[key] = int(historical_policy_override[key])
+    return effective
+
+
 def canonical_historical_decision(
     symbol: str,
     candles_by_timeframe: dict[str, list[dict]],
@@ -259,8 +280,10 @@ def canonical_historical_decision(
     required_intervals: tuple[str, ...] = ("15m", "1h", "4h", "1d"),
     policy: dict[str, Any] | None = None,
     account_context: dict[str, Any] | None = None,
+    historical_policy_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate one deterministic decision from candles strictly before decision_time."""
+    effective_policy = _resolve_historical_policy_override(historical_policy_override)
     intervals = required_intervals
     closed: dict[str, list[dict]] = {}
     latest_closed_timestamps: dict[str, int] = {}
@@ -295,16 +318,17 @@ def canonical_historical_decision(
         if len(valid_rows) < minimum:
             return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": valid_rows[-1]["time"] if valid_rows else None, "entry_eligible": False, "reason": "INSUFFICIENT_CLOSED_CANDLES", "reasons": [f"{interval}: {len(valid_rows)}/{minimum} closed candles"]}
         closed[interval] = valid_rows
-        latest_closed_timestamps[interval] = valid_rows[-1]["time"]
+        latest_closed_timestamps[interval] = valid_rows[-1]["time"] if valid_rows else None
 
     analysis = analyze(closed["15m"])
     quality_ok = (
         analysis["direction"] in {"LONG", "SHORT"}
-        and analysis["confidence"] >= 78
+        and analysis["confidence"] >= effective_policy["confidence_threshold"]
         and analysis["radar"]["trap_score"] <= 35
-        and analysis["radar"]["breakout_quality"] >= 55
+        and analysis["radar"]["breakout_quality"] >= effective_policy["breakout_quality_threshold"]
     )
-    if all(interval in closed for interval in ("1h", "4h")):
+    higher_timeframes_ready = all(len(closed.get(interval, [])) >= 50 for interval in ("1h", "4h"))
+    if higher_timeframes_ready:
         mtf = shared_mtf_decision(
             symbol=symbol,
             entry_direction=analysis["direction"],
@@ -319,9 +343,23 @@ def canonical_historical_decision(
         mtf = {"direction": analysis["direction"], "entry_permission": quality_ok, "alignment": analysis["confidence"], "verdict": "SINGLE_TIMEFRAME"}
         entry_eligible = quality_ok
     risk = None
+    risk_reasons: list[str] = []
     if policy is not None and analysis["direction"] in {"LONG", "SHORT"}:
-        risk = risk_sized_order(analysis["entry"], analysis["stop_loss"], policy)
+        entry_price, stop_price = analysis["entry"], analysis["stop_loss"]
+        if entry_price <= 0 or stop_price <= 0 or entry_price == stop_price:
+            # Degenerate entry/stop indicates an analysis/data invariant violation, not a policy rejection.
+            risk = None
+            entry_eligible = False
+            risk_reasons.append("ANALYSIS_INVARIANT_VIOLATION")
+        else:
+            try:
+                risk = risk_sized_order(entry_price, stop_price, policy)
+            except ValueError as exc:
+                risk = None
+                entry_eligible = False
+                risk_reasons.append(str(exc))
     gate = None
+    gate_reasons: list[str] = []
     if account_context is not None and policy is not None:
         gate = evaluate_entry_gates(
             symbol=symbol, signal=analysis, snapshot=account_context.get("snapshot", {}),
@@ -329,7 +367,26 @@ def canonical_historical_decision(
             spread_bps=float(account_context.get("spread_bps", 0)),
             armed=bool(account_context.get("armed", True)), allowed_symbols=account_context.get("allowed_symbols"),
         )
-        entry_eligible = entry_eligible and bool(gate["passed"])
+        if not bool(gate["passed"]):
+            entry_eligible = False
+            gate_reasons.append(gate.get("reason", "ACCOUNT_GATE_FAILED"))
+    reasons: list[str] = []
+    if not quality_ok or not mtf.get("entry_permission", False):
+        reasons.append("QUALITY_OR_MTF_GATE")
+    if risk_reasons:
+        reasons.extend(risk_reasons)
+    if gate_reasons:
+        reasons.extend(gate_reasons)
+    if entry_eligible:
+        reason = "READY"
+    elif "ANALYSIS_INVARIANT_VIOLATION" in risk_reasons and (quality_ok and mtf.get("entry_permission", False)):
+        reason = "ANALYSIS_INVARIANT_VIOLATION"
+    elif risk_reasons and (quality_ok and mtf.get("entry_permission", False)):
+        reason = "RISK_GATE_REJECTED"
+    elif gate_reasons and (quality_ok and mtf.get("entry_permission", False)):
+        reason = "ACCOUNT_GATE_FAILED"
+    else:
+        reason = "QUALITY_OR_MTF_GATE"
     return {
         "decision": "BUY" if entry_eligible and analysis["direction"] == "LONG" else "SELL" if entry_eligible and analysis["direction"] == "SHORT" else "WAIT",
         "symbol": symbol,
@@ -340,8 +397,8 @@ def canonical_historical_decision(
         "regime": analysis.get("trend"),
         "mtf": mtf,
         "entry_eligible": entry_eligible,
-        "reason": "READY" if entry_eligible else "QUALITY_OR_MTF_GATE",
-        "reasons": [] if entry_eligible else ["QUALITY_OR_MTF_GATE"],
+        "reason": reason,
+        "reasons": reasons,
         "risk": risk,
         "gate": gate,
     }
@@ -1373,10 +1430,10 @@ async def candle_close_gate(symbol: str, interval: str = "15m") -> dict:
     )
     entry_allowed = (
         same_direction
-        and current["confidence"] >= 78
+        and current["confidence"] >= HISTORICAL_POLICY_DEFAULT["confidence_threshold"]
         and previous["confidence"] >= 70
         and current["radar"]["trap_score"] <= 35
-        and current["radar"]["breakout_quality"] >= 55
+        and current["radar"]["breakout_quality"] >= HISTORICAL_POLICY_DEFAULT["breakout_quality_threshold"]
     )
     if entry_allowed:
         status, reason = "KAPANIŞ ONAYLI", "İki kapanmış mum aynı yönü ve kalite filtresini doğruluyor."
