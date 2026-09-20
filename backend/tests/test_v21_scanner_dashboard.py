@@ -388,11 +388,23 @@ class V21ScannerDashboardTests(unittest.TestCase):
         state["scanner"]["selected_symbols"] = ["BTCUSDT"]
         state["scanner"]["scan_duration_ms"] = 1250
         state["automation_trades"] = [{"symbol": "BTCUSDT", "scanner_rank": 1}]
+        state["snapshot"] = {"positions": [{"symbol": "BTCUSDT"}], "open_orders": []}
+        state["reconciliation"] = {"reconciled_active_positions": 1, "internal_active_plans": 0}
         payload = v21_demo.summary_payload(state)
         self.assertEqual(payload["scanner"]["scan_interval_seconds"], 900)
         self.assertEqual(payload["scanner"]["selected_count"], 1)
         self.assertEqual(payload["scanner"]["scan_duration_seconds"], 1.25)
         self.assertEqual(payload["automation_trades"][0]["scanner_rank"], 1)
+        self.assertEqual(payload["account"]["reconciled_active_positions"], 1)
+
+    def test_state_serialization_preserves_snapshot_and_reconciliation(self):
+        state = v21_demo.initial_state()
+        state["snapshot"] = {"positions": [{"symbol": "BTCUSDT"}], "open_orders": []}
+        state["reconciliation"] = {"actual_exchange_open_positions": 1, "internal_active_plans": 0, "reconciled_active_positions": 1}
+        payload = v21_demo.serializable_state(state)
+        restored = v21_demo._state_from_payload(payload, "user-a")
+        self.assertEqual(restored["snapshot"], state["snapshot"])
+        self.assertEqual(restored["reconciliation"], state["reconciliation"])
 
     def test_concurrent_manual_scans_are_serialized(self):
         state = v21_demo.initial_state()

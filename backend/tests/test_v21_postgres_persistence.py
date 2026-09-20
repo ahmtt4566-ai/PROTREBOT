@@ -44,6 +44,8 @@ class V21PostgresPersistenceTests(unittest.TestCase):
             state["settings"]["max_positions"] = 2
             state["journal"].append({"symbol": "BTCUSDT", "realized_pnl": 3.5, "verified_realized": True})
             state["paper_positions"].append({"id": "position-a", "symbol": "BTCUSDT", "status": "PAPER_OPEN"})
+            state["snapshot"] = {"positions": [{"symbol": "BTCUSDT"}], "open_orders": []}
+            state["reconciliation"] = {"actual_exchange_open_positions": 1, "internal_active_plans": 0, "reconciled_active_positions": 1}
 
             persist_state(state)
             await asyncio.gather(*list(application.state._v21_persistence_tasks))
@@ -58,6 +60,8 @@ class V21PostgresPersistenceTests(unittest.TestCase):
             self.assertEqual(restored["settings"]["max_positions"], 2)
             self.assertEqual(restored["journal"], state["journal"])
             self.assertEqual(restored["paper_positions"], state["paper_positions"])
+            self.assertEqual(restored["snapshot"], state["snapshot"])
+            self.assertEqual(restored["reconciliation"], state["reconciliation"])
             self.assertIsNone(await restore_v21_state_for_user(restarted, f"other-{user_id}"))
         finally:
             await connection.execute("DELETE FROM application_state_snapshots WHERE state_key = $1", key)

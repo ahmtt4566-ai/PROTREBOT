@@ -199,6 +199,7 @@ def initial_state() -> dict[str, Any]:
             "last_sync": None, "reconnect_count": 0, "error_count": 0, "last_error": None,
         },
         "snapshot": None,
+        "reconciliation": {},
         "backtest": None,
         "drills": {"RECONNECT": None, "EMERGENCY": None, "PROTECTION": None},
         "duplicate_blocks": 0,
@@ -288,6 +289,8 @@ def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
         "scanner": state.get("scanner", {}),
         "automation_trades": state.get("automation_trades", [])[:100],
         "paper_positions": state.get("paper_positions", []),
+        "snapshot": state.get("snapshot"),
+        "reconciliation": state.get("reconciliation", {}),
         "saved_at": now_iso(),
     }
 
@@ -301,10 +304,14 @@ def _state_from_payload(payload: dict[str, Any], user_id: str, application: Any 
     for key in (
         "settings", "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades",
-        "paper_positions", "risk", "notifications",
+        "paper_positions", "risk", "notifications", "snapshot", "reconciliation",
     ):
         if key in payload:
             state[key] = payload[key]
+    if not isinstance(state.get("snapshot"), (dict, type(None))):
+        state["snapshot"] = None
+    if not isinstance(state.get("reconciliation"), dict):
+        state["reconciliation"] = {}
     state["settings"] = {**DEFAULT_SETTINGS, **(state["settings"] if isinstance(state.get("settings"), dict) else {})}
     state["_user_id"] = user_id
     if application is not None:
@@ -1538,6 +1545,7 @@ async def reconciliation_loop(application: Any) -> None:
                     snapshot = await account_snapshot(client)
                     state["snapshot"] = snapshot
                     plan_reconciliation = reconcile_demo_plans(demo_state, snapshot)
+                    state["reconciliation"] = dict(demo_state.get("reconciliation") or plan_reconciliation)
                     state["stream"]["last_sync"] = now_iso()
                     demo_state.update({"connected": True, "last_checked": now_iso(), "last_error": None})
                     changed = reconcile_positions(state, previous.get(user_id), snapshot)
