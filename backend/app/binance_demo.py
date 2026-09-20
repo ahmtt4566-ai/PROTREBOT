@@ -1909,6 +1909,9 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             v21_state = getattr(application.state, "v21_demo", {})
             if source == "MANUAL":
                 adjust_manual_spec_to_risk(spec, policy)
+            else:
+                spec["risk_per_trade"] = entry_risk(spec)
+                spec["risk_adjusted"] = False
             validate_entry_risk(
                 snapshot, body, spec, policy,
                 daily_realized_pnl=verified_realized_pnl(v21_state),
@@ -1920,6 +1923,9 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             spec = await traced_stage("second_build_order_spec", request_id, build_order_spec(client, body), client=client)
             if source == "MANUAL":
                 adjust_manual_spec_to_risk(spec, policy)
+            else:
+                spec["risk_per_trade"] = entry_risk(spec)
+                spec["risk_adjusted"] = False
             snapshot = await traced_stage("second_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
             validate_entry_risk(
                 snapshot, body, spec, policy,
