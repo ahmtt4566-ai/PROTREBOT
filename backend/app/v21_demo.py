@@ -625,14 +625,16 @@ def dynamic_auto_universe(exchange_info: Any, tickers: Any, settings: dict[str, 
     eligible: list[tuple[str, float]] = []
     rows = exchange_info.get("symbols", []) if isinstance(exchange_info, dict) else []
     for item in rows if isinstance(rows, list) else []:
-        symbol = str(item.get("symbol") or "")
+        try:
+            symbol = normalize_symbol(str(item.get("symbol") or ""))
+        except BinanceDemoError:
+            continue
         base_asset = str(item.get("baseAsset") or "").upper()
         if (
             item.get("status") != "TRADING"
             or item.get("contractType") != "PERPETUAL"
             or item.get("quoteAsset") != "USDT"
             or base_asset in BLOCKED_AUTO_BASE_ASSETS
-            or not symbol.endswith("USDT")
             or (configured is not None and symbol not in configured)
         ):
             continue

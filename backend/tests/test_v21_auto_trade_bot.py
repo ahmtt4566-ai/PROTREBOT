@@ -119,6 +119,18 @@ class AutoTradeBotTests(unittest.TestCase):
         self.assertNotIn("BADUSDT", result)
         self.assertNotIn("BADUSD", result)
 
+    def test_dynamic_universe_skips_symbols_rejected_by_demo_normalizer(self):
+        symbols = [
+            {"symbol": "VALIDUSDT", "baseAsset": "VALID", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT"},
+            {"symbol": "THIS_SYMBOL_NAME_IS_TOO_LONG_USDT", "baseAsset": "TOOLONG", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT"},
+        ]
+        tickers = [
+            {"symbol": "VALIDUSDT", "quoteVolume": "1000000"},
+            {"symbol": "THIS_SYMBOL_NAME_IS_TOO_LONG_USDT", "quoteVolume": "2000000"},
+        ]
+        result = v21_demo.dynamic_auto_universe({"symbols": symbols}, tickers, v21_demo.DEFAULT_SETTINGS)
+        self.assertEqual(result, ["VALIDUSDT"])
+
     def test_default_universe_ignores_legacy_fixed_24_coin_allowlist(self):
         symbols = []
         tickers = []
