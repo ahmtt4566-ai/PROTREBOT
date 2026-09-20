@@ -212,7 +212,8 @@ async def ensure_schema(pool: Any) -> None:
 
 
 def session_id(request: Request) -> str:
-    authorization = str(request.headers.get("authorization") or "").strip()
+    headers = getattr(request, "headers", {})
+    authorization = str(headers.get("authorization") or "").strip()
     return hashlib.sha256(authorization.encode("utf-8")).hexdigest() if authorization else ""
 
 

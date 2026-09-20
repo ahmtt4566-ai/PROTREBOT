@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import time
 import uuid
@@ -59,6 +60,7 @@ from .local_storage import DATA_DIR, migrate_legacy_files
 
 
 router = APIRouter(prefix="/api/v21", tags=["V21 Demo Complete"])
+logger = logging.getLogger(__name__)
 migrate_legacy_files(("v21_demo_state.json", "v21_demo_state.backup.json"))
 STATE_PATH = DATA_DIR / "v21_demo_state.json"
 BACKUP_PATH = DATA_DIR / "v21_demo_state.backup.json"
@@ -1395,6 +1397,12 @@ async def reconciliation_loop(application: Any) -> None:
                         persist_runtime(demo_state)
                 except BinanceDemoError as exc:
                     state["stream"]["last_error"] = str(exc)[:220]
+                    if user_id and demo_state.get("plans"):
+                        logger.warning(
+                            "User Demo plan context is currently unmanaged: user_id=%s error=%s",
+                            user_id,
+                            str(exc)[:220],
+                        )
         except asyncio.CancelledError:
             raise
         except Exception as exc:

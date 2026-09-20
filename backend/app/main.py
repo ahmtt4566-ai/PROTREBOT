@@ -22,18 +22,22 @@ from .analysis import analyze
 from .exchange_connections import (
     clear_vault_cache,
     ensure_exchange_vault,
+    ensure_session_cache,
     init_exchange_connections,
     router as exchange_connections_router,
+    session_credentials_for_request,
+    session_id,
 )
 from .binance_demo import (
     DEMO_REST_BASE,
     armed as demo_armed,
     credentials_configured as demo_credentials_configured,
     init_binance_demo,
+    restore_demo_state_for_user,
     router as binance_demo_router,
     shutdown_binance_demo,
 )
-from .v21_demo import init_v21_demo, router as v21_demo_router, shutdown_v21_demo
+from .v21_demo import init_v21_demo, restore_v21_state_for_user, router as v21_demo_router, shutdown_v21_demo
 from .v22_commercial import (
     authenticated_user,
     ensure_commercial_schema,
@@ -75,6 +79,8 @@ PRODUCTION_WEB_ORIGIN = "https://frontend-nu-two-18.vercel.app"
 WEB_CORS_ORIGINS = list(dict.fromkeys([
     *cors_origins(os.getenv("PROTREBOT_CORS_ORIGINS"), fallback=[]),
     PRODUCTION_WEB_ORIGIN,
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
     "http://127.0.0.1:4173",
     "http://localhost:4173",
 ]))
@@ -1132,6 +1138,47 @@ MEMBER_PUBLIC_PATHS = frozenset({
 })
 
 
+async def hydrate_authenticated_user_state(request: Request) -> None:
+    member = getattr(request.state, "member", None)
+    user_id = str((member or {}).get("id") or "").strip()
+    if not user_id:
+        return
+
+    try:
+        await ensure_session_cache(request)
+    except Exception as exc:
+        logger.warning(
+            "User Demo credential context hydration failed; plans remain unmanaged: user_id=%s error=%s",
+            user_id,
+            str(exc)[:220],
+        )
+    current_session_id = session_id(request)
+
+    demo_store = getattr(request.app.state, "_binance_demo_user_state", {})
+    demo_state = demo_store.get(user_id) if isinstance(demo_store, dict) else None
+    if not isinstance(demo_state, dict):
+        demo_state = await restore_demo_state_for_user(request.app, user_id)
+    if isinstance(demo_state, dict):
+        demo_state["_user_id"] = user_id
+        demo_state["_session_id"] = current_session_id
+        if demo_state.get("plans"):
+            api_key, secret_key = session_credentials_for_request(request, "TESTNET")
+            if not api_key or not secret_key:
+                logger.warning(
+                    "User Demo plan context is currently unmanaged: user_id=%s session_id=%s credential context unavailable",
+                    user_id,
+                    current_session_id,
+                )
+
+    v21_store = getattr(request.app.state, "_v21_demo_user_state", {})
+    v21_state = v21_store.get(user_id) if isinstance(v21_store, dict) else None
+    if not isinstance(v21_state, dict):
+        v21_state = await restore_v21_state_for_user(request.app, user_id)
+    if isinstance(v21_state, dict):
+        v21_state["_user_id"] = user_id
+        v21_state["_session_id"] = current_session_id
+
+
 def apply_cors_headers(request, response):
     origin = request.headers.get("origin")
     if is_allowed_cors_origin(origin, WEB_CORS_ORIGINS):
@@ -1166,6 +1213,7 @@ async def owner_preview_gate(request, call_next):
             request.state.member = authenticated_user(request)
         except HTTPException as exc:
             return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
+        await hydrate_authenticated_user_state(request)
     request.state.web_owner_authenticated = bool(
         owner_access_authenticated
     )
