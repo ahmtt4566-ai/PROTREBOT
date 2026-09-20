@@ -1741,6 +1741,156 @@ def _symbol_matches(value: Any, expected: str) -> bool:
         return False
 
 
+def _direct_position_identity_match(plan: dict[str, Any], position: dict[str, Any]) -> bool:
+    identity_keys = ("exchange_position_id", "position_identity", "position_id")
+    for key in identity_keys:
+        plan_identity = str(plan.get(key) or "").strip()
+        position_identity = str(position.get(key) or "").strip()
+        if plan_identity and position_identity and plan_identity == position_identity:
+            return True
+    return False
+
+
+def _protection_classification(
+    plan: dict[str, Any],
+    snapshot: dict[str, Any],
+) -> tuple[str, list[int], list[int]]:
+    if snapshot.get("open_algo_orders_available") is not True:
+        return "UNKNOWN", [], []
+    protection_ids = _plan_protection_ids(plan)
+    if not protection_ids:
+        return "UNKNOWN", [], []
+    exchange_ids: set[int] = set()
+    for order in snapshot.get("open_algo_orders", []):
+        try:
+            algo_id = int(order.get("algo_id"))
+        except (TypeError, ValueError):
+            return "UNKNOWN", [], []
+        if algo_id > 0:
+            exchange_ids.add(algo_id)
+    matched_ids = sorted(protection_ids & exchange_ids)
+    unmatched_ids = sorted(protection_ids - exchange_ids)
+    if unmatched_ids:
+        return "UNKNOWN", matched_ids, unmatched_ids
+    return "MATCHED", matched_ids, unmatched_ids
+
+
+def classify_demo_ownership(
+    snapshot: dict[str, Any],
+    demo_state: dict[str, Any],
+    v21_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Classify Demo ownership without changing state or contacting the exchange."""
+    plans = demo_state.get("plans", {})
+    plans = plans if isinstance(plans, dict) else {}
+    active_plans = [plan for plan in plans.values() if isinstance(plan, dict) and _plan_is_active(plan)]
+    positions = [
+        position for position in snapshot.get("positions", [])
+        if isinstance(position, dict) and str(position.get("symbol") or "").strip()
+    ]
+    position_rows: list[dict[str, Any]] = []
+    used_plan_ids: set[str] = set()
+    used_position_indexes: set[int] = set()
+
+    for plan in active_plans:
+        plan_id = str(plan.get("id") or "").strip()
+        matching_indexes = [
+            index for index, position in enumerate(positions)
+            if index not in used_position_indexes
+            and _symbol_matches(position.get("symbol"), normalize_symbol(str(plan.get("symbol") or "")))
+            and _direct_position_identity_match(plan, position)
+        ]
+        if matching_indexes:
+            position_index = matching_indexes[0]
+            position = positions[position_index]
+            used_plan_ids.add(plan_id)
+            used_position_indexes.add(position_index)
+            protection_status, matched_ids, unmatched_ids = _protection_classification(plan, snapshot)
+            classification = (
+                "PROTECTION_UNKNOWN"
+                if protection_status == "UNKNOWN"
+                else "PLAN_AND_EXCHANGE_MATCHED"
+            )
+            position_rows.append({
+                "classification": classification,
+                "symbol": normalize_symbol(str(plan.get("symbol") or "")),
+                "plan_id": plan_id or None,
+                "position_index": position_index,
+                "protection_status": protection_status,
+                "matched_algo_ids": matched_ids,
+                "unmatched_algo_ids": unmatched_ids,
+            })
+            continue
+
+        same_symbol_position = next(
+            (
+                (index, position) for index, position in enumerate(positions)
+                if index not in used_position_indexes
+                and _symbol_matches(position.get("symbol"), normalize_symbol(str(plan.get("symbol") or "")))
+            ),
+            None,
+        )
+        if same_symbol_position is None:
+            classification = "PLAN_ONLY"
+            position_index = None
+        else:
+            classification = "PROTECTION_UNKNOWN"
+            position_index = same_symbol_position[0]
+        position_rows.append({
+            "classification": classification,
+            "symbol": normalize_symbol(str(plan.get("symbol") or "")),
+            "plan_id": plan_id or None,
+            "position_index": position_index,
+            "protection_status": "NOT_APPLICABLE" if classification == "PLAN_ONLY" else "UNKNOWN",
+            "matched_algo_ids": [],
+            "unmatched_algo_ids": [],
+        })
+        if plan_id:
+            used_plan_ids.add(plan_id)
+
+    for index, position in enumerate(positions):
+        if index in used_position_indexes:
+            continue
+        symbol = normalize_symbol(str(position.get("symbol") or ""))
+        position_rows.append({
+            "classification": "EXCHANGE_ONLY",
+            "symbol": symbol,
+            "plan_id": None,
+            "position_index": index,
+            "protection_status": "NOT_APPLICABLE",
+            "matched_algo_ids": [],
+            "unmatched_algo_ids": [],
+        })
+
+    automation_rows: list[dict[str, Any]] = []
+    automation_trades = (v21_state or {}).get("automation_trades", [])
+    terminal_statuses = {
+        "KAPANDI", "CLOSED", "İPTAL", "CANCELLED", "CANCELED",
+        "EXPIRED", "FINISHED", "REJECTED",
+    }
+    for index, trade in enumerate(automation_trades if isinstance(automation_trades, list) else []):
+        if not isinstance(trade, dict):
+            continue
+        status = str(trade.get("status") or "").strip().upper()
+        if status in terminal_statuses:
+            continue
+        trade_plan_id = str(trade.get("plan_id") or "").strip()
+        trade_symbol = str(trade.get("symbol") or "").strip()
+        has_plan = any(str(plan.get("id") or "").strip() == trade_plan_id for plan in active_plans) if trade_plan_id else False
+        has_position = any(_symbol_matches(position.get("symbol"), normalize_symbol(trade_symbol)) for position in positions) if trade_symbol else False
+        automation_rows.append({
+            "classification": "STALE_AUTOMATION_RECORD" if not has_plan and not has_position else "ASSOCIATED_AUTOMATION_RECORD",
+            "trade_index": index,
+            "plan_id": trade_plan_id or None,
+            "symbol": normalize_symbol(trade_symbol) if trade_symbol else None,
+        })
+
+    return {
+        "position_plan": position_rows,
+        "automation": automation_rows,
+    }
+
+
 def stale_protection_entry_reason(
     snapshot: dict[str, Any],
     state: dict[str, Any],
