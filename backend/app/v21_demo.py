@@ -1486,6 +1486,11 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
         except BinanceDemoError as exc:
             _set_rejection(state, "DEMO_EXECUTION", f"{symbol}: Demo emir reddi · {exc}")
             continue
+        except HTTPException as exc:
+            if exc.status_code not in {409, 422}:
+                raise
+            _set_rejection(state, "DEMO_EXECUTION", f"{symbol}: Demo emir reddi · {exc.detail}")
+            continue
         selected.append(symbol)
         cooldowns[symbol] = time.time() + SCAN_INTERVAL_SECONDS
         plan = result.get("plan", {}) if isinstance(result, dict) else {}

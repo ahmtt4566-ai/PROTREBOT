@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
+
 BACKEND = Path(__file__).parents[1]
 sys.path.insert(0, str(BACKEND))
 
@@ -258,6 +260,27 @@ class V21ScannerDashboardTests(unittest.TestCase):
             asyncio.run(v21_demo.automatic_cycle(app))
         order.assert_awaited_once()
         self.assertEqual(order.await_args.args[1].symbol, "BTCUSDT")
+
+    def test_execution_rejection_continues_to_next_top_candidate(self):
+        first = {"symbol": "STGUSDT", "direction": "LONG", "status": "SELECTED", "entry": 100.0,
+                 "stop_loss": 99.0, "tp1": 101.0, "tp2": 102.0, "tp3": 103.0, "score": 99,
+                 "opportunity_score": 99, "confidence": "HIGH", "reasons": []}
+        second = {**first, "symbol": "USUALUSDT", "score": 98, "opportunity_score": 98}
+        state, app, _ = self._automation_app(first)
+        state["settings"]["allowed_symbols"] = ["STGUSDT", "USUALUSDT"]
+        result = {"plan": {"entry_price": 100.0, "targets": [101.0, 102.0, 103.0], "stop_loss": 99.0,
+                            "margin_usdt": 5.0, "leverage": 2, "status": "AÇIK"}}
+        order = AsyncMock(side_effect=[HTTPException(409, "Stop Loss riski işlem başı maksimum zarar limitini aşıyor."), result])
+        with patch.object(v21_demo, "armed", return_value=True), \
+                patch.object(v21_demo, "client_for", return_value=object()), \
+                patch.object(v21_demo, "account_snapshot", new=AsyncMock(return_value={"positions": [], "open_orders": []})), \
+                patch.object(v21_demo, "scan_demo_universe", new=AsyncMock(return_value=[first, second])), \
+                patch.object(v21_demo, "execute_demo_order", new=order), \
+                patch.object(v21_demo, "persist_state"):
+            asyncio.run(v21_demo.automatic_cycle(app))
+        self.assertEqual(order.await_count, 2)
+        self.assertEqual(order.await_args_list[1].args[1].symbol, "USUALUSDT")
+        self.assertEqual(state["scanner"]["selected_symbols"], ["USUALUSDT"])
 
     def test_demo_smoke_test_creates_local_paper_position_without_exchange_order(self):
         state = v21_demo.initial_state()
