@@ -42,6 +42,7 @@ MAX_NOTIONAL_USDT = Decimal("200")
 MAX_OPEN_POSITIONS = 3
 ARM_SECONDS = 10 * 60
 CLIENT_PREFIX = "PTB_"
+_PROTECTION_INSTALL_LOCKS: dict[str, asyncio.Lock] = {}
 logger = logging.getLogger(__name__)
 DEMO_SNAPSHOT_LOCK = asyncio.Lock()
 DEMO_CLOCK_LOCK = asyncio.Lock()
@@ -1337,6 +1338,19 @@ def new_client_id(kind: str) -> str:
     return f"{CLIENT_PREFIX}{kind}_{uuid.uuid4().hex[:18]}"
 
 
+def _protection_lock_key(plan: dict[str, Any]) -> str:
+    return f"{plan.get('user_id') or ''}:{plan.get('id') or id(plan)}"
+
+
+def _protection_install_lock(plan: dict[str, Any]) -> asyncio.Lock:
+    key = _protection_lock_key(plan)
+    lock = _PROTECTION_INSTALL_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _PROTECTION_INSTALL_LOCKS[key] = lock
+    return lock
+
+
 async def find_order_by_client_id(client: BinanceDemoClient, symbol: str, client_id: str) -> dict[str, Any] | None:
     try:
         result = await client.signed("GET", "/fapi/v1/order", {"symbol": symbol, "origClientOrderId": client_id})
@@ -1590,13 +1604,17 @@ async def post_algo(client: BinanceDemoClient, params: dict[str, Any]) -> dict[s
         result = await client.signed("POST", "/fapi/v1/algoOrder", params)
         return result if isinstance(result, dict) else {}
     except BinanceDemoError as exc:
-        if not exc.unknown_execution:
+        if not exc.unknown_execution and "duplicate" not in str(exc).lower():
             raise
         open_algos = response_rows(
             await client.signed("GET", "/fapi/v1/openAlgoOrders", {"symbol": params["symbol"]})
         )
         recovered = next(
-            (item for item in open_algos if item.get("clientAlgoId") == params.get("clientAlgoId")),
+            (
+                item for item in open_algos
+                if str(item.get("symbol")) == str(params["symbol"])
+                and item.get("clientAlgoId") == params.get("clientAlgoId")
+            ),
             None,
         )
         if recovered is None:
@@ -1605,6 +1623,16 @@ async def post_algo(client: BinanceDemoClient, params: dict[str, Any]) -> dict[s
 
 
 async def install_protection(client: BinanceDemoClient, state: dict[str, Any], plan: dict[str, Any], *, request_id: str | None = None) -> None:
+    lock = _protection_install_lock(plan)
+    if lock.locked():
+        return
+    async with lock:
+        if plan.get("protection_ids"):
+            return
+        await _install_protection(client, state, plan, request_id=request_id)
+
+
+async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], plan: dict[str, Any], *, request_id: str | None = None) -> None:
     symbol = plan["symbol"]
     correlation_id = request_id or f"local-{uuid.uuid4().hex[:16]}"
     if plan.get("stop_protection_cancelled"):
@@ -1638,50 +1666,26 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
         "closePosition": "true",
         "clientAlgoId": stop_client_id,
     }
-    protection_ids: list[int] = []
+    protection_ids: list[int] = plan.setdefault("protection_ids", [])
     stop_started = time.monotonic()
     trace_log("protection.SL.start", correlation_id)
     try:
         stop_result = await post_algo(client, stop_params)
         if stop_result.get("algoId"):
             stop_algo_id = int(stop_result["algoId"])
-            protection_ids.append(stop_algo_id)
+            if stop_algo_id not in protection_ids:
+                protection_ids.append(stop_algo_id)
             plan["stop_algo_id"] = stop_algo_id
         else:
             raise BinanceDemoError("Binance Demo Stop koruma kimliği doğrulanamadı.", http_status=409)
         trace_log("protection.SL.end", correlation_id, duration_ms=round((time.monotonic() - stop_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
     except BinanceDemoError as exc:
         trace_log("protection.SL.end", correlation_id, duration_ms=round((time.monotonic() - stop_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
-        plan["status"] = "CRITICAL / UNPROTECTED"
-        plan["protection_status"] = "CRITICAL / UNPROTECTED"
-        plan["recovery_attempts"] = int(plan.get("recovery_attempts", 0)) + 1
-        plan["last_error"] = str(exc)
-        add_event(state, "ACİL KORUMA", f"{symbol} Stop kurulamadı; Demo pozisyon güvenlik için kapatılıyor.")
-        try:
-            await cancel_entry_if_open(client, plan)
-        except BinanceDemoError as cancel_exc:
-            plan["last_error"] = f"Stop: {exc}; Entry iptali: {cancel_exc}"
-        try:
-            await close_symbol_position(client, symbol)
-        except BinanceDemoError as close_exc:
-            plan["last_error"] = f"Stop: {exc}; Kapatma: {close_exc}"
-        try:
-            confirmation = response_rows(await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol}))
-            still_open = any(position_amount(item.get("positionAmt")) != 0 for item in confirmation)
-        except BinanceDemoError as verify_exc:
-            plan["last_error"] = f"{plan.get('last_error', str(exc))}; Durum doğrulama: {verify_exc}"
-            plan["position_status"] = "OPEN"
-            persist_runtime(state)
-            raise
-        if still_open:
-            plan["position_status"] = "OPEN"
-            persist_runtime(state)
-            raise BinanceDemoError(f"{symbol} CRITICAL / UNPROTECTED; güvenli kapatma doğrulanamadı.", http_status=409)
-        plan["position_status"] = "CLOSED"
-        plan["status"] = "GÜVENLİK İÇİN KAPATILDI"
-        plan["protection_status"] = "CLOSED_AFTER_PROTECTION_FAILURE"
-        persist_runtime(state)
-        raise BinanceDemoError(f"{symbol} Stop kurulamadı; pozisyon güvenli biçimde kapatıldı.", http_status=409)
+        await _abort_protection_installation(
+            client, state, plan, exc,
+            f"{symbol} Stop kurulamadı; Demo pozisyon güvenlik için kapatılıyor.",
+            f"{symbol} Stop kurulamadı; pozisyon güvenli biçimde kapatıldı.",
+        )
 
     step = Decimal(str(plan["step"]))
     min_qty = Decimal(str(plan["min_qty"]))
@@ -1706,11 +1710,17 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
                 trace_log(f"protection.TP{index}.start", correlation_id)
                 result = await post_algo(client, params)
                 if result.get("algoId"):
-                    protection_ids.append(int(result["algoId"]))
+                    algo_id = int(result["algoId"])
+                    if algo_id not in protection_ids:
+                        protection_ids.append(algo_id)
                 trace_log(f"protection.TP{index}.end", correlation_id, duration_ms=round((time.monotonic() - target_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
             except BinanceDemoError as exc:
                 trace_log(f"protection.TP{index}.end", correlation_id, duration_ms=round((time.monotonic() - target_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
-                monitoring_targets.append(f"TP{index}")
+                await _abort_protection_installation(
+                    client, state, plan, exc,
+                    f"{symbol} TP{index} kurulamadı; Demo pozisyon güvenlik için kapatılıyor.",
+                    f"{symbol} TP{index} kurulamadı; pozisyon güvenli biçimde kapatıldı.",
+                )
     else:
         monitoring_targets.extend(["TP1", "TP2"])
 
@@ -1726,11 +1736,17 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
             "clientAlgoId": tp3_client_id,
         })
         if tp3_result.get("algoId"):
-            protection_ids.append(int(tp3_result["algoId"]))
+            algo_id = int(tp3_result["algoId"])
+            if algo_id not in protection_ids:
+                protection_ids.append(algo_id)
         trace_log("protection.TP3.end", correlation_id, duration_ms=round((time.monotonic() - tp3_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
     except BinanceDemoError as exc:
         trace_log("protection.TP3.end", correlation_id, duration_ms=round((time.monotonic() - tp3_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
-        monitoring_targets.append("TP3")
+        await _abort_protection_installation(
+            client, state, plan, exc,
+            f"{symbol} TP3 kurulamadı; Demo pozisyon güvenlik için kapatılıyor.",
+            f"{symbol} TP3 kurulamadı; pozisyon güvenli biçimde kapatıldı.",
+        )
 
     plan["protection_ids"] = protection_ids
     plan["monitoring_targets"] = monitoring_targets
@@ -1741,12 +1757,56 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
 
 
 async def cleanup_closed_plan(client: BinanceDemoClient, plan: dict[str, Any]) -> None:
-    for algo_id in plan.get("protection_ids", []):
+    remaining_ids: list[int] = []
+    for algo_id in list(plan.get("protection_ids", [])):
         try:
             await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": plan["symbol"], "algoId": algo_id})
         except BinanceDemoError as exc:
             if exc.exchange_code not in {-2011, -2013}:
-                continue
+                remaining_ids.append(algo_id)
+    plan["protection_ids"] = remaining_ids
+
+
+async def _abort_protection_installation(
+    client: BinanceDemoClient,
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    error: BinanceDemoError,
+    event_message: str,
+    close_message: str,
+) -> None:
+    symbol = plan["symbol"]
+    plan["status"] = "CRITICAL / UNPROTECTED"
+    plan["protection_status"] = "CRITICAL / UNPROTECTED"
+    plan["recovery_attempts"] = int(plan.get("recovery_attempts", 0)) + 1
+    plan["last_error"] = str(error)
+    add_event(state, "ACİL KORUMA", event_message)
+    await cleanup_closed_plan(client, plan)
+    try:
+        await cancel_entry_if_open(client, plan)
+    except BinanceDemoError as cancel_exc:
+        plan["last_error"] = f"Stop: {error}; Entry iptali: {cancel_exc}"
+    try:
+        await close_symbol_position(client, symbol)
+    except BinanceDemoError as close_exc:
+        plan["last_error"] = f"Stop: {error}; Kapatma: {close_exc}"
+    try:
+        confirmation = response_rows(await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol}))
+        still_open = any(position_amount(item.get("positionAmt")) != 0 for item in confirmation)
+    except BinanceDemoError as verify_exc:
+        plan["last_error"] = f"{plan.get('last_error', str(error))}; Durum doğrulama: {verify_exc}"
+        plan["position_status"] = "OPEN"
+        persist_runtime(state)
+        raise
+    if still_open:
+        plan["position_status"] = "OPEN"
+        persist_runtime(state)
+        raise BinanceDemoError(f"{symbol} CRITICAL / UNPROTECTED; güvenli kapatma doğrulanamadı.", http_status=409)
+    plan["position_status"] = "CLOSED"
+    plan["status"] = "GÜVENLİK İÇİN KAPATILDI"
+    plan["protection_status"] = "CLOSED_AFTER_PROTECTION_FAILURE"
+    persist_runtime(state)
+    raise BinanceDemoError(close_message, http_status=409)
 
 
 async def protection_loop(application: Any) -> None:
