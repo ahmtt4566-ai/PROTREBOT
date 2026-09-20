@@ -110,7 +110,7 @@ class MultiSymbolDemoAutoTests(unittest.TestCase):
     def test_testnet_client_used_for_all_symbols(self):
         source = (BACKEND / "app" / "v21_demo.py").read_text(encoding="utf-8")
         self.assertIn("market_client_for(application)", source)
-        self.assertIn("execute_demo_order(application, body, source=\"AUTO_SCANNER\")", source)
+        self.assertIn("execute_demo_order(application, body, source=\"AUTO_SCANNER\", request=request)", source)
         self.assertIn("DEMO_REST_BASE", source)
 
 

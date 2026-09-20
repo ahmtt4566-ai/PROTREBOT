@@ -240,6 +240,25 @@ class V21ScannerDashboardTests(unittest.TestCase):
         self.assertEqual(order.await_args.kwargs["source"], "AUTO_SCANNER")
         self.assertEqual(state["auto"]["rejection_reason"], None)
 
+    def test_invalid_top_candidate_is_skipped_for_next_allowed_candidate(self):
+        invalid = {"symbol": "AKEUSDT", "direction": "LONG", "status": "SELECTED", "entry": 100.0,
+                   "stop_loss": 99.0, "tp1": 101.0, "tp2": 102.0, "tp3": 103.0, "score": 99,
+                   "opportunity_score": 99, "confidence": "HIGH", "reasons": []}
+        valid = {**invalid, "symbol": "BTCUSDT", "score": 95, "opportunity_score": 95}
+        state, app, _ = self._automation_app(invalid)
+        result = {"plan": {"entry_price": 100.0, "targets": [101.0, 102.0, 103.0], "stop_loss": 99.0,
+                            "margin_usdt": 5.0, "leverage": 2, "status": "AÇIK"}}
+        with patch.object(v21_demo, "armed", return_value=True), \
+                patch.object(v21_demo, "client_for", return_value=object()), \
+                patch.object(v21_demo, "account_snapshot", new=AsyncMock(return_value={"positions": [], "open_orders": []})), \
+                patch.object(v21_demo, "scan_demo_universe", new=AsyncMock(return_value=[invalid, valid])), \
+                patch.object(v21_demo, "execute_demo_order", new=AsyncMock(return_value=result)) as order, \
+                patch.object(v21_demo, "persist_state"):
+            state["settings"]["allowed_symbols"] = ["BTCUSDT"]
+            asyncio.run(v21_demo.automatic_cycle(app))
+        order.assert_awaited_once()
+        self.assertEqual(order.await_args.args[1].symbol, "BTCUSDT")
+
     def test_demo_smoke_test_creates_local_paper_position_without_exchange_order(self):
         state = v21_demo.initial_state()
         state["auto"].update({"enabled": True, "user_confirmed": True})

@@ -192,6 +192,7 @@ class DemoSessionSecurityTests(unittest.TestCase):
             headers={"authorization": "Bearer demo-session-token"},
             state=SimpleNamespace(member={"id": "user-1", "role": "OWNER"}),
         )
+        application.state._v21_demo_user_state = {"user-1": application.state.v21_demo}
         client_for_mock.return_value = object()
         account_snapshot_mock.return_value = {"wallet_balance": 1000.0, "available_balance": 1000.0, "positions": [], "open_orders": [], "hedge_mode": False}
         scan_demo_universe_mock.return_value = []

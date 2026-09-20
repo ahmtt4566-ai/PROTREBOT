@@ -1900,7 +1900,12 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             if reconciliation["changed"]:
                 persist_runtime(state)
             spec = await traced_stage("build_order_spec", request_id, build_order_spec(client, body), client=client)
-            policy = getattr(application.state, "v21_demo", {}).get("settings", {})
+            if request is not None:
+                from .v21_demo import state_for as v21_state_for
+
+                policy = v21_state_for(request).get("settings", {})
+            else:
+                policy = getattr(application.state, "v21_demo", {}).get("settings", {})
             v21_state = getattr(application.state, "v21_demo", {})
             if source == "MANUAL":
                 adjust_manual_spec_to_risk(spec, policy)
