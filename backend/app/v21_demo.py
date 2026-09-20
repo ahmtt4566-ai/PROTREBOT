@@ -1480,7 +1480,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
             tp2=candidate["tp2"], tp3=candidate["tp3"],
         )
         try:
-            result = await execute_demo_order(application, body, source="AUTO_SCANNER")
+            result = await execute_demo_order(application, body, source="AUTO_SCANNER", request=request)
         except BinanceDemoError as exc:
             _set_rejection(state, "DEMO_EXECUTION", f"{symbol}: Demo emir reddi · {exc}")
             continue
