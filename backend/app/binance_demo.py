@@ -1865,7 +1865,7 @@ def classify_demo_ownership(
     automation_rows: list[dict[str, Any]] = []
     automation_trades = (v21_state or {}).get("automation_trades", [])
     terminal_statuses = {
-        "KAPANDI", "CLOSED", "İPTAL", "CANCELLED", "CANCELED",
+        "KAPANDI", "CLOSED", "İPTAL", "GÜVENLİK İÇİN KAPATILDI", "CANCELLED", "CANCELED",
         "EXPIRED", "FINISHED", "REJECTED",
     }
     for index, trade in enumerate(automation_trades if isinstance(automation_trades, list) else []):

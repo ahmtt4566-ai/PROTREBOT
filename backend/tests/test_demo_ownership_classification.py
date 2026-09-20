@@ -251,3 +251,57 @@ def test_classifier_output_is_deterministic():
     second = classify(plan, positions, algo_orders=algos, trades=trades)
 
     assert first == second
+
+
+def test_authenticated_production_shape_classifies_only_stale_active_automation():
+    symbols = [
+        "EPICUSDT", "SAGAUSDT", "IOSTUSDT", "AVAAIUSDT", "NAORISUSDT",
+        "ENAUSDT", "INJUSDT", "KASUSDT", "BRUSDT",
+    ]
+    algo_orders = [
+        {
+            "symbol": symbol,
+            "algo_id": 1000000212000000 + index,
+            "client_algo_id": f"PTB_TP{index % 2 + 1}_synthetic{index}",
+            "type": "TAKE_PROFIT_MARKET",
+            "status": "NEW",
+        }
+        for index, symbol in enumerate(
+            ["EPICUSDT", "EPICUSDT", "SAGAUSDT", "IOSTUSDT", "IOSTUSDT", "AVAAIUSDT",
+             "NAORISUSDT", "NAORISUSDT", "ENAUSDT", "INJUSDT", "INJUSDT", "KASUSDT",
+             "KASUSDT", "BRUSDT", "BRUSDT"]
+        )
+    ]
+    trades = [
+        {"plan_id": f"plan-{index}", "symbol": symbol, "status": "OPEN"}
+        for index, symbol in enumerate(symbols[:4])
+    ] + [
+        {"plan_id": "plan-4", "symbol": "NAORISUSDT", "status": "GÜVENLİK İÇİN KAPATILDI"},
+        {"plan_id": "plan-5", "symbol": "ENAUSDT", "status": "GÜVENLİK İÇİN KAPATILDI"},
+    ] + [
+        {"plan_id": None, "symbol": symbol, "status": "OPEN"}
+        for symbol in symbols[6:]
+    ]
+    snapshot = {
+        "positions": [],
+        "open_algo_orders": algo_orders,
+        "open_algo_orders_available": True,
+    }
+    demo_state = {"plans": {}}
+    v21_state = {"automation_trades": trades}
+
+    result = binance_demo.classify_demo_ownership(snapshot, demo_state, v21_state)
+
+    assert len(snapshot["open_algo_orders"]) == 15
+    assert result["position_plan"] == []
+    assert all(
+        row["classification"] not in {
+            "PLAN_AND_EXCHANGE_MATCHED", "PLAN_ONLY", "EXCHANGE_ONLY",
+        }
+        for row in result["position_plan"]
+    )
+    assert [row["symbol"] for row in result["automation"]] == symbols[:4] + symbols[6:]
+    assert len(result["automation"]) == 7
+    assert all(row["classification"] == "STALE_AUTOMATION_RECORD" for row in result["automation"])
+    assert "NAORISUSDT" not in {row["symbol"] for row in result["automation"]}
+    assert "ENAUSDT" not in {row["symbol"] for row in result["automation"]}
