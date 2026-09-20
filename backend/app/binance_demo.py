@@ -817,6 +817,40 @@ def position_risk_summary(payload: Any) -> dict[str, Any]:
     }
 
 
+def _sync_v21_automation_trade(state: dict[str, Any], plan: dict[str, Any]) -> None:
+    """Keep the V21 activity record aligned with the exchange-owned plan."""
+    application = _state_application(state)
+    if application is None:
+        return
+    user_id = str(state.get("_user_id") or "").strip()
+    if user_id:
+        v21_store = getattr(application.state, "_v21_demo_user_state", {})
+        v21_state = v21_store.get(user_id) if isinstance(v21_store, dict) else None
+    else:
+        v21_state = getattr(application.state, "v21_demo", None)
+    if not isinstance(v21_state, dict):
+        return
+    trades = v21_state.get("automation_trades", [])
+    if not isinstance(trades, list):
+        return
+    plan_id = str(plan.get("id") or plan.get("position_id") or "")
+    candidates = [
+        trade for trade in trades
+        if plan_id and str(trade.get("plan_id") or "") == plan_id
+    ]
+    if not candidates:
+        candidates = [
+            trade for trade in trades
+            if str(trade.get("symbol") or "").upper() == str(plan.get("symbol") or "").upper()
+            and str(trade.get("status") or "").upper() not in {"KAPANDI", "CLOSED", "İPTAL"}
+        ][:1]
+    for trade in candidates:
+        trade["status"] = plan.get("status", trade.get("status"))
+        trade["position_status"] = plan.get("position_status")
+        if plan.get("closed_at"):
+            trade["closed_at"] = plan["closed_at"]
+
+
 def reconcile_demo_plans(state: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
     """Make durable plans follow the exchange position snapshot, never vice versa."""
     actual_positions = [
@@ -835,6 +869,8 @@ def reconcile_demo_plans(state: dict[str, Any], snapshot: dict[str, Any]) -> dic
         actual = actual_by_symbol.get(str(plan.get("symbol") or ""))
         if actual is None:
             plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "tp3_status": "FILLED", "closed_at": plan.get("closed_at") or utc_now(), "last_reconciled": utc_now()})
+            if "_sync_v21_automation_trade" in globals():
+                _sync_v21_automation_trade(state, plan)
             stale_removed += 1
             changed = True
             continue
@@ -842,6 +878,8 @@ def reconcile_demo_plans(state: dict[str, Any], snapshot: dict[str, Any]) -> dic
         before = (plan.get("remaining_quantity"), plan.get("position_status"))
         update_position_lifecycle(plan, amount)
         plan["last_reconciled"] = utc_now()
+        if "_sync_v21_automation_trade" in globals():
+            _sync_v21_automation_trade(state, plan)
         changed = changed or before != (plan.get("remaining_quantity"), plan.get("position_status"))
     state["reconciliation"] = {
         "actual_exchange_open_positions": int(snapshot.get("actual_exchange_open_positions", len(actual_positions))),

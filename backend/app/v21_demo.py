@@ -1499,6 +1499,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
         confidence_label = candidate.get("confidence", "LOW")
         entry_price = float(plan.get("entry_price", candidate.get("entry", 0)))
         state.setdefault("automation_trades", []).insert(0, {
+            "plan_id": plan.get("id"),
             "symbol": symbol, "side": direction, "scanner_rank": scanner_rank,
             "scanner_score": scanner_score, "confidence": confidence_label,
             "entry_time": now_iso(), "entry_price": entry_price,
