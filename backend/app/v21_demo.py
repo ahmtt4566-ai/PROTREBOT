@@ -1047,12 +1047,19 @@ def safe_rotation_symbols(snapshot: dict[str, Any], desired_symbols: set[str], p
     return safe
 
 
-async def rotate_safe_demo_positions(application: Any, snapshot: dict[str, Any], desired_symbols: set[str]) -> int:
-    state = application.state.binance_demo
+async def rotate_safe_demo_positions(
+    application: Any,
+    snapshot: dict[str, Any],
+    desired_symbols: set[str],
+    *,
+    demo_state: dict[str, Any] | None = None,
+    v21_state: dict[str, Any] | None = None,
+) -> int:
+    state = demo_state or application.state.binance_demo
     symbols = safe_rotation_symbols(snapshot, desired_symbols, state.get("plans", {}))
     if not symbols:
         return 0
-    client = client_for(application)
+    client = client_for_state(application, state)
     rotated = 0
     for symbol in symbols:
         if await close_symbol_position(client, symbol) is None:
@@ -1061,7 +1068,7 @@ async def rotate_safe_demo_positions(application: Any, snapshot: dict[str, Any],
             if plan.get("symbol") == symbol and plan.get("source") == "AUTO_SCANNER":
                 plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": utc_now(), "close_reason": "SAFE_ROTATION"})
         rotated += 1
-        emit_notification(application.state.v21_demo, "ROTATION", f"{symbol} güvenli rotasyonla kapatıldı; mevcut korumalar önceliklendirildi.", event_id=f"{today()}-rotation-{symbol}-{int(time.time() // SCAN_INTERVAL_SECONDS)}")
+        emit_notification(v21_state or application.state.v21_demo, "ROTATION", f"{symbol} güvenli rotasyonla kapatıldı; mevcut korumalar önceliklendirildi.", event_id=f"{today()}-rotation-{symbol}-{int(time.time() // SCAN_INTERVAL_SECONDS)}")
     if rotated:
         persist_runtime(state)
     return rotated
@@ -1356,15 +1363,30 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
 
 
 def _background_contexts(application: Any) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
-    contexts = [("", application.state.binance_demo, application.state.v21_demo)]
+    global_demo_state = application.state.binance_demo
+    global_v21_state = application.state.v21_demo
+    global_is_user_specific = bool(
+        str(global_demo_state.get("_user_id") or "").strip()
+        or str(global_v21_state.get("_user_id") or "").strip()
+    )
+    contexts: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    if not global_is_user_specific:
+        contexts.append(("", global_demo_state, global_v21_state))
     demo_store = getattr(application.state, "_binance_demo_user_state", {})
     v21_store = getattr(application.state, "_v21_demo_user_state", {})
     user_ids = set(demo_store) | set(v21_store)
-    for user_id in user_ids:
-        demo_state = demo_store.get(user_id)
+    seen_user_ids: set[str] = set()
+    for raw_user_id in user_ids:
+        user_id = str(raw_user_id).strip()
+        if not user_id or user_id in seen_user_ids:
+            continue
+        seen_user_ids.add(user_id)
+        demo_state = demo_store.get(raw_user_id)
+        if not isinstance(demo_state, dict):
+            demo_state = demo_store.get(user_id)
         if not isinstance(demo_state, dict):
             continue
-        v21_state = v21_store.get(user_id)
+        v21_state = v21_store.get(raw_user_id) or v21_store.get(user_id)
         if not isinstance(v21_state, dict):
             v21_state = initial_state()
             v21_state.update({"_user_id": user_id, "_app": application})
@@ -1430,8 +1452,15 @@ def return_correlation(left: list[dict[str, float]], right: list[dict[str, float
     return numerator / denominator if denominator else 0.0
 
 
-async def automatic_cycle(application: Any, *, request: Request | None = None) -> None:
-    state = state_for(request) if request is not None else application.state.v21_demo
+async def _automatic_cycle_impl(
+    application: Any,
+    *,
+    request: Request | None = None,
+    user_id: str = "",
+    demo_state: dict[str, Any],
+    v21_state: dict[str, Any],
+) -> None:
+    state = v21_state
     settings = state["settings"]
     auto = state["auto"]
     auto.update({"rejection_gate": None, "rejection_reason": None, "last_error": None})
@@ -1440,7 +1469,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
         return
     auto["cycles"] += 1
     auto["last_scan"] = now_iso()
-    if not armed(application.state.binance_demo):
+    if not armed(demo_state):
         _set_rejection(state, "DEMO_ARM", "10 dakikalık DEMO emir kilidi kapalı; otomasyon bekliyor.")
         return
     if not in_schedule(settings):
@@ -1458,7 +1487,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
         _set_rejection(state, "DAILY_LOSS_LIMIT", "Günlük Demo zarar limiti aktif; yeni giriş kilitli.")
         auto["enabled"] = False
         return
-    client = client_for(request if request is not None else application)
+    client = client_for(request) if request is not None else client_for_state(application, demo_state) if user_id else client_for(application)
     snapshot = await account_snapshot(client)
     refresh_daily_risk_state(state, float(snapshot.get("wallet_balance") or snapshot.get("available_balance") or 0))
     if state["auto"].get("status") == "PAUSED":
@@ -1479,7 +1508,7 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
     }
     desired_symbols = set(sorted(desired_symbols, key=lambda symbol: next((float(item.get("opportunity_score", item.get("score", 0)) or 0) for item in ranked if item.get("symbol") == symbol), 0), reverse=True)[:MAX_OPEN_POSITIONS])
     if available_slots <= 0:
-        rotated = await rotate_safe_demo_positions(application, snapshot, desired_symbols)
+        rotated = await rotate_safe_demo_positions(application, snapshot, desired_symbols, demo_state=demo_state, v21_state=state)
         if rotated:
             snapshot = await account_snapshot(client)
             occupied = {item["symbol"] for item in snapshot["positions"] + snapshot["open_orders"]}
@@ -1530,7 +1559,14 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
             tp2=candidate["tp2"], tp3=candidate["tp3"],
         )
         try:
-            result = await execute_demo_order(application, body, source="AUTO_SCANNER", request=request)
+            result = await execute_demo_order(
+                application,
+                body,
+                source="AUTO_SCANNER",
+                request=request,
+                demo_state=demo_state,
+                v21_state=state,
+            )
         except BinanceDemoError as exc:
             _set_rejection(state, "DEMO_EXECUTION", f"{symbol}: Demo emir reddi · {exc}")
             continue
@@ -1569,6 +1605,49 @@ async def automatic_cycle(application: Any, *, request: Request | None = None) -
     if selected or not auto.get("rejection_reason"):
         auto["last_decision"] = f"100 coin tarandı; {len(selected)} yeni Demo pozisyonu açıldı; en iyi 3: {', '.join(item['symbol'] for item in top_candidates) or 'yok'}."
     persist_state(state)
+
+
+async def automatic_cycle(
+    application: Any,
+    *,
+    request: Request | None = None,
+    user_id: str | None = None,
+    demo_state: dict[str, Any] | None = None,
+    v21_state: dict[str, Any] | None = None,
+) -> None:
+    if request is not None:
+        selected_v21_state = v21_state or state_for(request)
+        selected_demo_state = demo_state or demo_state_for(request)
+    elif demo_state is not None and v21_state is not None:
+        selected_demo_state = demo_state
+        selected_v21_state = v21_state
+    else:
+        selected_demo_state = getattr(application.state, "binance_demo", {})
+        selected_v21_state = application.state.v21_demo
+    selected_user_id = str(user_id or selected_v21_state.get("_user_id") or selected_demo_state.get("_user_id") or "").strip()
+    demo_user_id = str(selected_demo_state.get("_user_id") or "").strip()
+    v21_user_id = str(selected_v21_state.get("_user_id") or "").strip()
+    if selected_user_id and (demo_user_id != selected_user_id or v21_user_id != selected_user_id):
+        raise BinanceDemoError("Otomasyon kullanıcı context'i eşleşmiyor; işlem atlandı.", http_status=409)
+    locks = getattr(application.state, "_v21_automation_locks", None)
+    if not isinstance(locks, dict):
+        locks = {}
+        application.state._v21_automation_locks = locks
+    lock_key = selected_user_id or "__global__"
+    lock = locks.get(lock_key)
+    if lock is None:
+        lock = asyncio.Lock()
+        locks[lock_key] = lock
+    if lock.locked():
+        return
+    async with lock:
+        await _automatic_cycle_impl(
+            application,
+            request=request,
+            user_id=selected_user_id,
+            demo_state=selected_demo_state,
+            v21_state=selected_v21_state,
+        )
 
 
 async def run_scanner_cycle(application: Any) -> None:
@@ -1624,25 +1703,40 @@ async def run_scanner_cycle(application: Any) -> None:
 
 
 async def automation_loop(application: Any) -> None:
-    state = application.state.v21_demo
     while True:
         try:
-            auto = state["auto"]
-            if auto.get("enabled") and auto.get("user_confirmed") and not auto.get("busy"):
-                auto["busy"] = True
+            contexts = _background_contexts(application)
+            for user_id, demo_state, v21_state in contexts:
                 try:
-                    await automatic_cycle(application)
-                    auto["last_error"] = None
-                finally:
-                    auto["busy"] = False
-            elif auto.get("enabled") and not auto.get("user_confirmed"):
-                auto["enabled"] = False
-                auto["last_decision"] = "Güvenli bekleme: kullanıcı onayı silinmiş, otomasyon kapandı."
+                    auto = v21_state["auto"]
+                    if auto.get("enabled") and auto.get("user_confirmed") and not auto.get("busy"):
+                        auto["busy"] = True
+                        try:
+                            await automatic_cycle(
+                                application,
+                                user_id=user_id,
+                                demo_state=demo_state,
+                                v21_state=v21_state,
+                            )
+                            auto["last_error"] = None
+                        finally:
+                            auto["busy"] = False
+                    elif auto.get("enabled") and not auto.get("user_confirmed"):
+                        auto["enabled"] = False
+                        auto["last_decision"] = "Güvenli bekleme: kullanıcı onayı silinmiş, otomasyon kapandı."
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    v21_state.setdefault("auto", {}).update({
+                        "last_error": str(exc)[:220],
+                        "last_decision": "Otomasyon hatası; bu kullanıcı context'i güvenli beklemeye alındı.",
+                    })
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            state["auto"].update({"last_error": str(exc)[:220], "last_decision": "Otomasyon hatası; güvenli bekleme ve yeniden deneme."})
-        await asyncio.sleep(max(15, int(state["settings"]["scan_seconds"])))
+            global_state = application.state.v21_demo
+            global_state["auto"].update({"last_error": str(exc)[:220], "last_decision": "Otomasyon hatası; güvenli bekleme ve yeniden deneme."})
+        await asyncio.sleep(max(15, int(application.state.v21_demo["settings"]["scan_seconds"])))
 
 
 async def scanner_loop(application: Any) -> None:

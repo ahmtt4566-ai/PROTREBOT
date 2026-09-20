@@ -517,7 +517,12 @@ def client_for_state(application: Any, state: dict[str, Any]) -> BinanceDemoClie
             from .exchange_connections import _SESSION_CACHE, _SESSION_META
 
             cache_key = (session_key, "TESTNET")
-            if not session_key or not _SESSION_META.get(cache_key, {}).get("active"):
+            session_meta = _SESSION_META.get(cache_key, {})
+            if (
+                not session_key
+                or not session_meta.get("active")
+                or str(session_meta.get("user_id") or "").strip() != user_id
+            ):
                 raise BinanceDemoError(
                     "Kullanıcı Demo API oturumu aktif değil; arka plan işlemi atlandı.",
                     http_status=412,
@@ -530,6 +535,36 @@ def client_for_state(application: Any, state: dict[str, Any]) -> BinanceDemoClie
         return BinanceDemoClient(application.state.http, api_key, secret_key)
     api_key, secret_key = load_demo_credentials()
     return BinanceDemoClient(application.state.http, api_key, secret_key)
+
+
+def _request_user_id(request: Request | None) -> str:
+    if request is None:
+        return ""
+    request_state = getattr(request, "state", None)
+    user = getattr(request_state, "member", None) or getattr(request_state, "user", None)
+    return str((user or {}).get("id") or "").strip()
+
+
+def _validate_execution_context(
+    request: Request | None,
+    demo_state: dict[str, Any],
+    v21_state: dict[str, Any] | None,
+) -> None:
+    request_user_id = _request_user_id(request)
+    demo_user_id = str(demo_state.get("_user_id") or "").strip()
+    v21_user_id = str((v21_state or {}).get("_user_id") or "").strip()
+    expected_user_id = request_user_id or demo_user_id or v21_user_id
+    if not expected_user_id:
+        return
+    if (
+        not request_user_id and not demo_user_id
+        or not demo_user_id
+        or not v21_user_id
+        or request_user_id not in {"", expected_user_id}
+        or demo_user_id != expected_user_id
+        or v21_user_id != expected_user_id
+    ):
+        raise BinanceDemoError("Demo execution context kullanıcı eşleşmesi başarısız; işlem atlandı.", http_status=409)
 
 
 def _demo_user_store(application: Any) -> dict[str, dict[str, Any]]:
@@ -2031,9 +2066,23 @@ async def demo_order(request: Request, body: DemoOrderRequest) -> dict[str, Any]
     return await execute_demo_order(request.app, body, source="MANUAL", request=request)
 
 
-async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source: str = "MANUAL", request: Request | None = None) -> dict[str, Any]:
+async def execute_demo_order(
+    application: Any,
+    body: DemoOrderRequest,
+    *,
+    source: str = "MANUAL",
+    request: Request | None = None,
+    demo_state: dict[str, Any] | None = None,
+    v21_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Submit one hard-capped Demo order for the manual or V21 automation path."""
-    state = state_for(request) if request is not None else application.state.binance_demo
+    state = demo_state if demo_state is not None else (state_for(request) if request is not None else application.state.binance_demo)
+    resolved_v21_state = v21_state
+    if resolved_v21_state is None and request is not None:
+        from .v21_demo import state_for as v21_state_for
+
+        resolved_v21_state = v21_state_for(request)
+    _validate_execution_context(request, state, resolved_v21_state)
     request_id = request_correlation_id(request)
     total_started = time.monotonic()
     trace_log("start", request_id, symbol=body.symbol, side="BUY" if body.direction == "LONG" else "SELL")
@@ -2041,7 +2090,11 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
         raise HTTPException(423, "Demo emir kilidi kapalı veya süresi doldu; önce 10 dakikalık kilidi açın.")
     async with traced_lock(state["lock"], request_id, "state"):
         try:
-            client = client_for(request) if request is not None else BinanceDemoClient(application.state.http, *load_demo_credentials())
+            client = client_for(request) if request is not None else (
+                client_for_state(application, state)
+                if str(state.get("_user_id") or "").strip()
+                else BinanceDemoClient(application.state.http, *load_demo_credentials())
+            )
             client.trace_request_id = request_id
             await traced_stage("ensure_one_way_position_mode", request_id, ensure_one_way_position_mode(client), client=client)
             snapshot = await traced_stage("first_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
@@ -2051,13 +2104,11 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             if reconciliation["changed"]:
                 persist_runtime(state)
             spec = await traced_stage("build_order_spec", request_id, build_order_spec(client, body), client=client)
-            if request is not None:
-                from .v21_demo import state_for as v21_state_for
-
-                policy = v21_state_for(request).get("settings", {})
+            if resolved_v21_state is not None:
+                policy = resolved_v21_state.get("settings", {})
             else:
                 policy = getattr(application.state, "v21_demo", {}).get("settings", {})
-            v21_state = getattr(application.state, "v21_demo", {})
+            risk_state = resolved_v21_state or getattr(application.state, "v21_demo", {})
             if source == "MANUAL":
                 adjust_manual_spec_to_risk(spec, policy)
             else:
@@ -2065,8 +2116,8 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
                 spec["risk_adjusted"] = False
             validate_entry_risk(
                 snapshot, body, spec, policy,
-                daily_realized_pnl=verified_realized_pnl(v21_state),
-                paper_positions=v21_state.get("paper_positions", []),
+                daily_realized_pnl=verified_realized_pnl(risk_state),
+                paper_positions=risk_state.get("paper_positions", []),
                 use_auto_universe=source != "MANUAL",
             )
             await traced_stage("set_isolated_margin", request_id, set_isolated_margin(client, spec["symbol"]), client=client)
@@ -2080,8 +2131,8 @@ async def execute_demo_order(application: Any, body: DemoOrderRequest, *, source
             snapshot = await traced_stage("second_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
             validate_entry_risk(
                 snapshot, body, spec, policy,
-                daily_realized_pnl=verified_realized_pnl(v21_state),
-                paper_positions=v21_state.get("paper_positions", []),
+                daily_realized_pnl=verified_realized_pnl(risk_state),
+                paper_positions=risk_state.get("paper_positions", []),
                 use_auto_universe=source != "MANUAL",
             )
             plan_id = uuid.uuid4().hex[:12]

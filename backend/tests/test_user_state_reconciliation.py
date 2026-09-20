@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -154,8 +155,8 @@ class UserStateReconciliationTests(unittest.TestCase):
             ("session-a", "TESTNET"): ("api-a-1234567890", "secret-a-1234567890"),
             ("session-b", "TESTNET"): ("api-b-1234567890", "secret-b-1234567890"),
         }, clear=True), patch.dict(exchange_connections._SESSION_META, {
-            ("session-a", "TESTNET"): {"active": True},
-            ("session-b", "TESTNET"): {"active": True},
+            ("session-a", "TESTNET"): {"active": True, "user_id": "user-a"},
+            ("session-b", "TESTNET"): {"active": True, "user_id": "user-b"},
         }, clear=True):
             client_a = binance_demo.client_for_state(self.application, state_a)
             client_b = binance_demo.client_for_state(self.application, state_b)
@@ -163,6 +164,205 @@ class UserStateReconciliationTests(unittest.TestCase):
         self.assertEqual(client_a.api_key, "api-a-1234567890")
         self.assertEqual(client_b.api_key, "api-b-1234567890")
         self.assertNotEqual(client_a.api_key, client_b.api_key)
+
+    def test_request_and_demo_state_mismatch_rejects_before_binance(self):
+        demo_b = self.user_demo_state("user-b", "session-b", self.plan("user-b"))
+        v21_a = self.user_v21_state("user-a")
+        request_a = SimpleNamespace(app=self.application, state=SimpleNamespace(member={"id": "user-a"}))
+        body = SimpleNamespace(symbol="BRUSDT", direction="LONG")
+
+        with patch.object(binance_demo, "client_for") as request_client, patch.object(binance_demo, "client_for_state") as state_client:
+            with self.assertRaises(binance_demo.BinanceDemoError):
+                asyncio.run(binance_demo.execute_demo_order(
+                    self.application,
+                    body,
+                    source="AUTO_SCANNER",
+                    request=request_a,
+                    demo_state=demo_b,
+                    v21_state=v21_a,
+                ))
+
+        request_client.assert_not_called()
+        state_client.assert_not_called()
+        self.assertEqual(demo_b["plans"], {"plan-user-b": demo_b["plans"]["plan-user-b"]})
+        self.assertEqual(v21_a["automation_trades"], [])
+
+    def test_demo_and_v21_state_mismatch_rejects_before_execution(self):
+        demo_a = self.user_demo_state("user-a", "session-a", self.plan("user-a"))
+        v21_b = self.user_v21_state("user-b")
+        body = SimpleNamespace(symbol="BRUSDT", direction="LONG")
+
+        with patch.object(binance_demo, "client_for_state") as state_client:
+            with self.assertRaises(binance_demo.BinanceDemoError):
+                asyncio.run(binance_demo.execute_demo_order(
+                    self.application,
+                    body,
+                    source="AUTO_SCANNER",
+                    demo_state=demo_a,
+                    v21_state=v21_b,
+                ))
+
+        state_client.assert_not_called()
+        self.assertEqual(v21_b["automation_trades"], [])
+
+    def test_session_credential_ownership_mismatch_fails_closed(self):
+        state = self.user_demo_state("user-a", "session-a", self.plan("user-a"))
+        from app import exchange_connections
+
+        with patch.dict(exchange_connections._SESSION_CACHE, {
+            ("session-a", "TESTNET"): ("api-b-1234567890", "secret-b-1234567890"),
+        }, clear=True), patch.dict(exchange_connections._SESSION_META, {
+            ("session-a", "TESTNET"): {"active": True, "user_id": "user-b"},
+        }, clear=True), patch.object(binance_demo, "BinanceDemoClient") as client_type:
+            with self.assertRaises(binance_demo.BinanceDemoError):
+                binance_demo.client_for_state(self.application, state)
+
+        client_type.assert_not_called()
+
+    def test_user_specific_global_states_are_not_emitted_as_global_context(self):
+        global_demo = {"_user_id": "user-a", "plans": {}}
+        global_v21 = v21_demo.initial_state()
+        global_v21["_user_id"] = "user-a"
+        user_demo = self.user_demo_state("user-a", "session-a", self.plan("user-a"))
+        user_v21 = self.user_v21_state("user-a")
+        self.application.state.binance_demo = global_demo
+        self.application.state.v21_demo = global_v21
+        self.application.state._binance_demo_user_state["user-a"] = user_demo
+        self.application.state._v21_demo_user_state["user-a"] = user_v21
+
+        contexts = v21_demo._background_contexts(self.application)
+
+        self.assertEqual([user_id for user_id, _, _ in contexts], ["user-a"])
+        self.assertIs(contexts[0][1], user_demo)
+        self.assertIs(contexts[0][2], user_v21)
+
+    def test_true_global_context_remains_available(self):
+        self.application.state.binance_demo = {"plans": {}}
+        self.application.state.v21_demo = v21_demo.initial_state()
+
+        contexts = v21_demo._background_contexts(self.application)
+
+        self.assertEqual(len(contexts), 1)
+        self.assertEqual(contexts[0][0], "")
+        self.assertIs(contexts[0][1], self.application.state.binance_demo)
+        self.assertIs(contexts[0][2], self.application.state.v21_demo)
+
+    def test_automation_loop_dispatches_each_context_pair_once(self):
+        self.application.state.v21_demo = v21_demo.initial_state()
+        demo_a = self.user_demo_state("user-a", "session-a", self.plan("user-a"))
+        demo_b = self.user_demo_state("user-b", "session-b", self.plan("user-b", symbol="KASUSDT"))
+        v21_a = self.user_v21_state("user-a")
+        v21_b = self.user_v21_state("user-b")
+        for state in (v21_a, v21_b):
+            state["auto"].update({"enabled": True, "user_confirmed": True})
+        self.application.state._binance_demo_user_state.update({"user-a": demo_a, "user-b": demo_b})
+        self.application.state._v21_demo_user_state.update({"user-a": v21_a, "user-b": v21_b})
+        calls = []
+
+        async def capture(*args, **kwargs):
+            calls.append((kwargs["user_id"], kwargs["demo_state"], kwargs["v21_state"]))
+
+        async def stop_loop(_delay):
+            raise asyncio.CancelledError
+
+        with patch.object(v21_demo, "automatic_cycle", new=capture), patch.object(v21_demo.asyncio, "sleep", side_effect=stop_loop):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v21_demo.automation_loop(self.application))
+
+        self.assertEqual({user_id for user_id, _, _ in calls}, {"user-a", "user-b"})
+        self.assertEqual({id(demo) for _, demo, _ in calls}, {id(demo_a), id(demo_b)})
+        self.assertEqual({id(state) for _, _, state in calls}, {id(v21_a), id(v21_b)})
+
+    def test_failed_user_context_does_not_abort_other_contexts(self):
+        self.application.state.v21_demo = v21_demo.initial_state()
+        demo_a = self.user_demo_state("user-a", "session-a", self.plan("user-a"))
+        demo_b = self.user_demo_state("user-b", "session-b", self.plan("user-b", symbol="KASUSDT"))
+        v21_a = self.user_v21_state("user-a")
+        v21_b = self.user_v21_state("user-b")
+        for state in (v21_a, v21_b):
+            state["auto"].update({"enabled": True, "user_confirmed": True})
+        self.application.state._binance_demo_user_state.update({"user-a": demo_a, "user-b": demo_b})
+        self.application.state._v21_demo_user_state.update({"user-a": v21_a, "user-b": v21_b})
+        calls = []
+
+        async def capture(*args, **kwargs):
+            calls.append(kwargs["user_id"])
+            if kwargs["user_id"] == "user-a":
+                raise binance_demo.BinanceDemoError("missing user session")
+
+        async def stop_loop(_delay):
+            raise asyncio.CancelledError
+
+        with patch.object(v21_demo, "automatic_cycle", new=capture), patch.object(v21_demo.asyncio, "sleep", side_effect=stop_loop):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v21_demo.automation_loop(self.application))
+
+        self.assertEqual(set(calls), {"user-a", "user-b"})
+        self.assertIn("missing user session", v21_a["auto"]["last_error"])
+
+    def test_user_context_cycle_does_not_use_global_client_or_state(self):
+        demo_state = self.user_demo_state("user-a", "missing-session", self.plan("user-a"))
+        v21_state = self.user_v21_state("user-a")
+        v21_state["auto"].update({"enabled": True, "user_confirmed": True})
+        demo_state["armed_until"] = time.time() + 60
+        self.application.state.binance_demo["armed_until"] = time.time() + 60
+        with patch.object(v21_demo, "client_for_state", side_effect=binance_demo.BinanceDemoError("missing user session")) as client_mock, \
+                patch.object(v21_demo, "client_for") as global_client_mock, \
+                patch.object(v21_demo, "execute_demo_order", new=AsyncMock()) as order_mock:
+            with self.assertRaises(binance_demo.BinanceDemoError):
+                asyncio.run(v21_demo.automatic_cycle(
+                    self.application,
+                    user_id="user-a",
+                    demo_state=demo_state,
+                    v21_state=v21_state,
+                ))
+
+        client_mock.assert_called_once_with(self.application, demo_state)
+        global_client_mock.assert_not_called()
+        order_mock.assert_not_awaited()
+        self.assertEqual(self.application.state.binance_demo.get("plans"), {})
+        self.assertEqual(self.application.state.v21_demo.get("automation_trades", []), [])
+
+    def test_automatic_cycle_passes_same_context_to_execution(self):
+        demo_state = self.user_demo_state("user-a", "session-a", self.plan("user-a"))
+        v21_state = self.user_v21_state("user-a")
+        v21_state["auto"].update({"enabled": True, "user_confirmed": True})
+        candidate = {
+            "symbol": "BRUSDT", "direction": "LONG", "status": "SELECTED", "entry": 100,
+            "stop_loss": 99, "tp1": 101, "tp2": 102, "tp3": 103, "score": 95,
+            "opportunity_score": 95, "confidence": "HIGH", "reasons": [],
+        }
+        result = {"plan": {"id": "plan-user-a", "entry_price": 100, "targets": [101, 102, 103], "stop_loss": 99, "margin_usdt": 5, "leverage": 2, "status": "OPEN"}}
+        self.application.state._binance_demo_user_state["user-a"] = demo_state
+        self.application.state._v21_demo_user_state["user-a"] = v21_state
+        with patch.object(v21_demo, "armed", return_value=True), \
+                patch.object(v21_demo, "client_for_state", return_value=object()), \
+                patch.object(v21_demo, "account_snapshot", new=AsyncMock(return_value={"positions": [], "open_orders": []})), \
+                patch.object(v21_demo, "scan_demo_universe", new=AsyncMock(return_value=[candidate])), \
+                patch.object(v21_demo, "execute_demo_order", new=AsyncMock(return_value=result)) as order_mock, \
+                patch.object(v21_demo, "persist_state"):
+            asyncio.run(v21_demo.automatic_cycle(
+                self.application,
+                user_id="user-a",
+                demo_state=demo_state,
+                v21_state=v21_state,
+            ))
+
+        self.assertIs(order_mock.await_args.kwargs["demo_state"], demo_state)
+        self.assertIs(order_mock.await_args.kwargs["v21_state"], v21_state)
+        self.assertEqual(v21_state["automation_trades"][0]["plan_id"], result["plan"]["id"])
+
+    def test_background_contexts_deduplicate_string_equivalent_user_ids(self):
+        demo_state = self.user_demo_state("1", "session-1", self.plan("1"))
+        v21_state = self.user_v21_state("1")
+        self.application.state._binance_demo_user_state = {1: demo_state, "1": demo_state}
+        self.application.state._v21_demo_user_state = {1: v21_state, "1": v21_state}
+
+        contexts = [context for context in v21_demo._background_contexts(self.application) if context[0] == "1"]
+
+        self.assertEqual(len(contexts), 1)
+        self.assertIs(contexts[0][1], demo_state)
+        self.assertIs(contexts[0][2], v21_state)
 
     def test_missing_user_credentials_fail_closed_without_global_fallback(self):
         state = self.user_demo_state("user-a", "missing-session", self.plan("user-a"))

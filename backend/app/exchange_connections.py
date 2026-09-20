@@ -275,7 +275,7 @@ async def ensure_session_cache(request: Request) -> None:
         return
     await ensure_schema(pool)
     rows = await pool.fetch(
-        "SELECT mode, encrypted_payload, fingerprint, active, last_test_ok, last_test_at, last_error, account_summary, updated_at FROM protrebot_exchange_session_vault WHERE session_id = $1 AND user_id = $2",
+        "SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active, last_test_ok, last_test_at, last_error, account_summary, updated_at FROM protrebot_exchange_session_vault WHERE session_id = $1 AND user_id = $2",
         sid, user["id"],
     )
     for row in rows:
@@ -297,6 +297,7 @@ def _row_meta(row: Any) -> dict[str, Any]:
     tested_at = row.get("last_test_at") if hasattr(row, "get") else None
     updated_at = row.get("updated_at") if hasattr(row, "get") else None
     return {
+        "user_id": str(row.get("user_id") or "").strip(),
         "configured": True,
         "active": bool(row.get("active")),
         "fingerprint": str(row.get("fingerprint") or ""),
@@ -581,6 +582,7 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
     )
     _SESSION_CACHE[(sid, mode)] = (api_key, secret_key)
     _SESSION_META[(sid, mode)] = {
+        "user_id": str(user["id"]),
         "configured": True,
         "active": True,
         "fingerprint": fingerprint,
