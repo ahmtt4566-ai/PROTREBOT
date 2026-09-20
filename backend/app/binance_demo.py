@@ -1149,10 +1149,12 @@ async def _account_snapshot(client: BinanceDemoClient, request_id: str | None = 
     account = await snapshot_request(client, "/fapi/v3/account", correlation_id)
     positions = await snapshot_request(client, "/fapi/v3/positionRisk", correlation_id)
     orders = await snapshot_request(client, "/fapi/v1/openOrders", correlation_id)
+    open_algo_orders_available = True
     try:
         algo_orders = await snapshot_request(client, "/fapi/v1/openAlgoOrders", correlation_id)
     except BinanceDemoError:
         algo_orders = []
+        open_algo_orders_available = False
     hedge_payload = await snapshot_request(client, "/fapi/v1/positionSide/dual", correlation_id)
     hedge_value = hedge_payload.get("dualSidePosition", hedge_payload.get("dualPosition", False))
     hedge_mode = hedge_value is True or str(hedge_value).lower() == "true"
@@ -1233,6 +1235,7 @@ async def _account_snapshot(client: BinanceDemoClient, request_id: str | None = 
         "positions": open_positions,
         "open_orders": open_orders,
         "open_algo_orders": open_algos,
+        "open_algo_orders_available": open_algo_orders_available,
         "hedge_mode": hedge_mode,
         **position_risk,
     }
@@ -1563,6 +1566,121 @@ def duplicate_entry_reason(snapshot: dict[str, Any], symbol: str) -> str | None:
         order_id = order.get("orderId") or order.get("order_id")
         suffix = f" (emir: {order_id})" if order_id else ""
         return f"{symbol} için zaten açık normal emir var{suffix}; önce emri iptal edin veya başka parite seçin."
+    return None
+
+
+def _plan_is_active(plan: dict[str, Any]) -> bool:
+    terminal_statuses = {"KAPANDI", "İPTAL", "CLOSED", "CANCELLED"}
+    status = str(plan.get("status") or "").strip().upper()
+    position_status = str(plan.get("position_status") or "").strip().upper()
+    return status not in terminal_statuses and position_status != "CLOSED"
+
+
+def _plan_protection_ids(plan: dict[str, Any]) -> set[int] | None:
+    raw_ids = plan.get("protection_ids")
+    if not isinstance(raw_ids, (list, tuple, set)):
+        return None
+    protection_ids: set[int] = set()
+    for raw_id in raw_ids:
+        try:
+            algo_id = int(raw_id)
+        except (TypeError, ValueError):
+            return None
+        if algo_id <= 0:
+            return None
+        protection_ids.add(algo_id)
+    return protection_ids
+
+
+def _symbol_matches(value: Any, expected: str) -> bool:
+    raw_symbol = str(value or "")
+    if not raw_symbol:
+        return False
+    try:
+        return normalize_symbol(raw_symbol) == expected
+    except BinanceDemoError:
+        return False
+
+
+def stale_protection_entry_reason(
+    snapshot: dict[str, Any],
+    state: dict[str, Any],
+    symbol: str,
+) -> str | None:
+    """Return a fail-closed reason for same-symbol entry conflicts."""
+    normalized_symbol = normalize_symbol(symbol)
+    if snapshot.get("open_algo_orders_available") is not True:
+        return (
+            f"Entry blocked: Binance algo-order snapshot unavailable; "
+            f"entry fail-closed for {normalized_symbol}."
+        )
+
+    if any(_symbol_matches(item.get("symbol"), normalized_symbol)
+           for item in snapshot.get("positions", [])):
+        return f"Entry blocked: active position already exists for {normalized_symbol}."
+
+    if any(_symbol_matches(item.get("symbol"), normalized_symbol)
+           for item in snapshot.get("open_orders", [])):
+        return f"Entry blocked: active normal order already exists for {normalized_symbol}."
+
+    plans = state.get("plans")
+    if plans is None:
+        plans = {}
+    if not isinstance(plans, dict):
+        return f"Entry blocked: protection ownership could not be verified for {normalized_symbol}."
+
+    plan_rows: list[tuple[str, dict[str, Any], set[int] | None]] = []
+    protection_references: dict[int, list[str]] = {}
+    for plan_key, plan in plans.items():
+        if not isinstance(plan, dict):
+            return f"Entry blocked: protection ownership could not be verified for {normalized_symbol}."
+        plan_id = str(plan.get("id") or plan_key)
+        protection_ids = _plan_protection_ids(plan)
+        plan_rows.append((plan_id, plan, protection_ids))
+        if protection_ids is None:
+            continue
+        for algo_id in protection_ids:
+            protection_references.setdefault(algo_id, []).append(plan_id)
+
+    duplicate_ids = {algo_id for algo_id, references in protection_references.items() if len(references) > 1}
+    terminal_algo_statuses = {"CANCELED", "CANCELLED", "EXPIRED", "FINISHED", "REJECTED"}
+    active_algos = []
+    for algo in snapshot.get("open_algo_orders", []):
+        if not str(algo.get("symbol") or ""):
+            return f"Entry blocked: protection ownership could not be verified for {normalized_symbol}."
+        if not _symbol_matches(algo.get("symbol"), normalized_symbol):
+            continue
+        status = str(algo.get("status") or "").strip().upper()
+        if status not in terminal_algo_statuses:
+            active_algos.append(algo)
+
+    for algo in active_algos:
+        try:
+            algo_id = int(algo.get("algo_id"))
+        except (TypeError, ValueError):
+            return f"Entry blocked: protection ownership could not be verified for {normalized_symbol}."
+        if algo_id <= 0:
+            return f"Entry blocked: protection ownership could not be verified for {normalized_symbol}."
+        references = protection_references.get(algo_id, [])
+        if algo_id in duplicate_ids:
+            return f"Entry blocked: protection ownership is ambiguous for {normalized_symbol}."
+        if len(references) != 1:
+            return f"Entry blocked: active protection/algo order detected for {normalized_symbol}."
+        matching_plan = next((plan for plan_id, plan, _ in plan_rows if plan_id == references[0]), None)
+        if matching_plan is None:
+            return f"Entry blocked: protection ownership could not be verified for {normalized_symbol}."
+        if not _symbol_matches(matching_plan.get("symbol"), normalized_symbol):
+            return f"Entry blocked: protection ownership could not be verified for {normalized_symbol}."
+        if not _plan_is_active(matching_plan):
+            return f"Entry blocked: active protection belongs to a closed plan for {normalized_symbol}."
+        return f"Entry blocked: active protection/algo order detected for {normalized_symbol}."
+
+    for _, plan, _ in plan_rows:
+        if not _symbol_matches(plan.get("symbol"), normalized_symbol):
+            continue
+        if _plan_is_active(plan):
+            return f"Entry blocked: active internal plan already exists for {normalized_symbol}."
+
     return None
 
 
@@ -2113,6 +2231,9 @@ async def execute_demo_order(
             reconciliation = reconcile_demo_plans(state, snapshot)
             if reconciliation["changed"]:
                 persist_runtime(state)
+            stale_reason = stale_protection_entry_reason(snapshot, state, symbol)
+            if stale_reason:
+                raise BinanceDemoError(stale_reason, http_status=409)
             spec = await traced_stage("build_order_spec", request_id, build_order_spec(client, body), client=client)
             if resolved_v21_state is not None:
                 policy = resolved_v21_state.get("settings", {})
@@ -2139,6 +2260,9 @@ async def execute_demo_order(
                 spec["risk_per_trade"] = entry_risk(spec)
                 spec["risk_adjusted"] = False
             snapshot = await traced_stage("second_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
+            stale_reason = stale_protection_entry_reason(snapshot, state, body.symbol)
+            if stale_reason:
+                raise BinanceDemoError(stale_reason, http_status=409)
             validate_entry_risk(
                 snapshot, body, spec, policy,
                 daily_realized_pnl=verified_realized_pnl(risk_state),
