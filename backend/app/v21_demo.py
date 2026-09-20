@@ -398,6 +398,12 @@ def state_for(request: Request) -> dict[str, Any]:
     user_id = str((user or {}).get("id") or "").strip()
     if user_id:
         store = _v21_user_store(app)
+        try:
+            from .exchange_connections import session_id
+
+            request_session_id = session_id(request)
+        except (ImportError, RuntimeError, ValueError):
+            request_session_id = ""
         state = store.get(user_id)
         if state is None:
             state = initial_state()
@@ -412,8 +418,10 @@ def state_for(request: Request) -> dict[str, Any]:
                     pass
             state["_app"] = app
             state["_user_id"] = user_id
+            state["_session_id"] = request_session_id
             store[user_id] = state
         state["_user_id"] = user_id
+        state["_session_id"] = request_session_id or state.get("_session_id", "")
         state["_app"] = app
         return state
     state = getattr(app.state, "v21_demo", None)
@@ -574,6 +582,12 @@ def client_for(request_or_application: Any) -> BinanceDemoClient:
 
     api_key, secret_key = load_demo_credentials()
     return BinanceDemoClient(application.state.http, api_key, secret_key)
+
+
+def client_for_state(application: Any, state: dict[str, Any]) -> BinanceDemoClient:
+    from .binance_demo import client_for_state as demo_client_for_state
+
+    return demo_client_for_state(application, state)
 
 
 def market_client_for(application: Any) -> BinanceDemoClient:
@@ -1203,25 +1217,31 @@ async def user_stream_loop(application: Any) -> None:
                     pass
 
 
-def active_plan(application: Any, symbol: str) -> dict[str, Any] | None:
-    plans = application.state.binance_demo.get("plans", {})
+def active_plan(application: Any, symbol: str, demo_state: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    state = demo_state or application.state.binance_demo
+    user_id = str(state.get("_user_id") or "").strip()
+    plans = state.get("plans", {})
     candidates = [
         plan for plan in plans.values()
-        if plan.get("symbol") == symbol and not plan.get("stop_protection_cancelled") and plan.get("status") not in {"KAPANDI", "İPTAL", "GÜVENLİK İÇİN KAPATILDI", "ACİL DURDURULDU", "KORUMA İPTAL"}
+        if plan.get("symbol") == symbol
+        and (not user_id or str(plan.get("user_id") or "").strip() == user_id)
+        and not plan.get("stop_protection_cancelled")
+        and plan.get("status") not in {"KAPANDI", "İPTAL", "GÜVENLİK İÇİN KAPATILDI", "ACİL DURDURULDU", "KORUMA İPTAL"}
     ]
     return candidates[-1] if candidates else None
 
 
-async def ensure_stop_protection(application: Any, snapshot: dict[str, Any]) -> bool:
-    state = application.state.v21_demo
-    client = client_for(application)
+async def ensure_stop_protection(application: Any, snapshot: dict[str, Any], *, demo_state: dict[str, Any] | None = None, v21_state: dict[str, Any] | None = None, client: BinanceDemoClient | None = None) -> bool:
+    state = v21_state or application.state.v21_demo
+    demo_state = demo_state or application.state.binance_demo
+    client = client or client_for_state(application, demo_state)
     algo_by_symbol: dict[str, list[dict[str, Any]]] = {}
     for order in snapshot.get("open_algo_orders", []):
         algo_by_symbol.setdefault(str(order.get("symbol")), []).append(order)
     changed = False
     for position in snapshot.get("positions", []):
         symbol = str(position.get("symbol"))
-        plan = active_plan(application, symbol)
+        plan = active_plan(application, symbol, demo_state)
         if not plan:
             continue
         stops = [order for order in algo_by_symbol.get(symbol, []) if str(order.get("type", "")).upper() == "STOP_MARKET"]
@@ -1265,20 +1285,21 @@ async def ensure_stop_protection(application: Any, snapshot: dict[str, Any]) -> 
         record_event(state, "PROTECTION_REPAIRED", f"{symbol} eksik Stop koruması Demo hesabında yeniden kuruldu.", symbol=symbol, source="RISK_ENGINE")
         changed = True
     if changed:
-        persist_runtime(application.state.binance_demo)
+        persist_runtime(demo_state)
     return changed
 
 
-async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any]) -> bool:
-    state = application.state.v21_demo
+async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, demo_state: dict[str, Any] | None = None, v21_state: dict[str, Any] | None = None, client: BinanceDemoClient | None = None) -> bool:
+    state = v21_state or application.state.v21_demo
+    demo_state = demo_state or application.state.binance_demo
     settings = state["settings"]
     if not settings["breakeven_enabled"] and not settings["trailing_enabled"]:
         return False
-    client = client_for(application)
+    client = client or client_for_state(application, demo_state)
     changed = False
     for position in snapshot.get("positions", []):
         symbol = str(position.get("symbol"))
-        plan = active_plan(application, symbol)
+        plan = active_plan(application, symbol, demo_state)
         if not plan or time.time() - float(plan.get("last_dynamic_update_epoch", 0)) < 30:
             continue
         entry = float(position.get("entry_price") or 0)
@@ -1328,38 +1349,57 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any]) -> b
         record_event(state, "DYNAMIC_STOP", f"{symbol} {label} Stop {decimal_text(desired_decimal)} seviyesine iyileştirildi.", symbol=symbol, price=desired, source="RISK_ENGINE")
         changed = True
     if changed:
-        persist_runtime(application.state.binance_demo)
+        persist_runtime(demo_state)
     return changed
 
 
+def _background_contexts(application: Any) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
+    contexts = [("", application.state.binance_demo, application.state.v21_demo)]
+    demo_store = getattr(application.state, "_binance_demo_user_state", {})
+    v21_store = getattr(application.state, "_v21_demo_user_state", {})
+    user_ids = set(demo_store) | set(v21_store)
+    for user_id in user_ids:
+        demo_state = demo_store.get(user_id)
+        if not isinstance(demo_state, dict):
+            continue
+        v21_state = v21_store.get(user_id)
+        if not isinstance(v21_state, dict):
+            v21_state = initial_state()
+            v21_state.update({"_user_id": user_id, "_app": application})
+        contexts.append((str(user_id), demo_state, v21_state))
+    return contexts
+
+
 async def reconciliation_loop(application: Any) -> None:
-    state = application.state.v21_demo
-    previous: dict[str, Any] | None = None
+    previous: dict[str, dict[str, Any] | None] = {}
     while True:
         try:
-            if not credentials_configured():
-                await asyncio.sleep(4)
-                continue
-            snapshot = await account_snapshot(client_for(application))
-            state["snapshot"] = snapshot
-            plan_reconciliation = reconcile_demo_plans(application.state.binance_demo, snapshot)
-            state["stream"]["last_sync"] = now_iso()
-            application.state.binance_demo.update({"connected": True, "last_checked": now_iso(), "last_error": None})
-            changed = reconcile_positions(state, previous, snapshot)
-            previous = snapshot
-            try:
-                changed |= await ensure_stop_protection(application, snapshot)
-                changed |= await improve_dynamic_stops(application, snapshot)
-            except BinanceDemoError as exc:
-                state["stream"]["last_error"] = str(exc)[:220]
-            if changed or plan_reconciliation["changed"]:
-                persist_state(state)
-                persist_runtime(application.state.binance_demo)
+            for user_id, demo_state, state in _background_contexts(application):
+                if user_id and not demo_state.get("plans"):
+                    continue
+                if not user_id and not credentials_configured():
+                    continue
+                try:
+                    client = client_for_state(application, demo_state)
+                    snapshot = await account_snapshot(client)
+                    state["snapshot"] = snapshot
+                    plan_reconciliation = reconcile_demo_plans(demo_state, snapshot)
+                    state["stream"]["last_sync"] = now_iso()
+                    demo_state.update({"connected": True, "last_checked": now_iso(), "last_error": None})
+                    changed = reconcile_positions(state, previous.get(user_id), snapshot)
+                    previous[user_id] = snapshot
+                    changed |= await ensure_stop_protection(application, snapshot, demo_state=demo_state, v21_state=state, client=client)
+                    changed |= await improve_dynamic_stops(application, snapshot, demo_state=demo_state, v21_state=state, client=client)
+                    if changed or plan_reconciliation["changed"]:
+                        persist_state(state)
+                        persist_runtime(demo_state)
+                except BinanceDemoError as exc:
+                    state["stream"]["last_error"] = str(exc)[:220]
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             application.state.binance_demo["connected"] = False
-            state["stream"].update({"status": "REST YENİDEN DENİYOR", "last_error": str(exc)[:220]})
+            application.state.v21_demo["stream"].update({"status": "REST YENİDEN DENİYOR", "last_error": str(exc)[:220]})
         await asyncio.sleep(3)
 
 

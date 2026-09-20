@@ -507,6 +507,29 @@ def client_for(request: Request) -> BinanceDemoClient:
     return BinanceDemoClient(request.app.state.http, api_key, secret_key)
 
 
+def client_for_state(application: Any, state: dict[str, Any]) -> BinanceDemoClient:
+    user_id = str(state.get("_user_id") or "").strip()
+    if user_id:
+        session_key = str(state.get("_session_id") or "").strip()
+        try:
+            from .exchange_connections import _SESSION_CACHE, _SESSION_META
+
+            cache_key = (session_key, "TESTNET")
+            if not session_key or not _SESSION_META.get(cache_key, {}).get("active"):
+                raise BinanceDemoError(
+                    "Kullanıcı Demo API oturumu aktif değil; arka plan işlemi atlandı.",
+                    http_status=412,
+                )
+            api_key, secret_key = _SESSION_CACHE.get(cache_key, ("", ""))
+        except (ImportError, RuntimeError, ValueError) as exc:
+            raise BinanceDemoError("Kullanıcı Demo API credential bağlamı okunamadı.", http_status=412) from exc
+        if not api_key or not secret_key:
+            raise BinanceDemoError("Kullanıcı Demo API credential bağlamı eksik.", http_status=412)
+        return BinanceDemoClient(application.state.http, api_key, secret_key)
+    api_key, secret_key = load_demo_credentials()
+    return BinanceDemoClient(application.state.http, api_key, secret_key)
+
+
 def _demo_user_store(application: Any) -> dict[str, dict[str, Any]]:
     store = getattr(application.state, "_binance_demo_user_state", None)
     if not isinstance(store, dict):
@@ -710,6 +733,12 @@ def state_for(request: Request) -> dict[str, Any]:
     user_id = str((user or {}).get("id") or "").strip()
     if user_id:
         store = _demo_user_store(app)
+        try:
+            from .exchange_connections import session_id
+
+            request_session_id = session_id(request)
+        except (ImportError, RuntimeError, ValueError):
+            request_session_id = ""
         state = store.get(user_id)
         if state is None:
             persisted = load_runtime(user_id, application=app)
@@ -724,10 +753,12 @@ def state_for(request: Request) -> dict[str, Any]:
                 "last_error": (persisted or {}).get("last_error"),
                 "reconciliation": (persisted or {}).get("reconciliation", {}),
                 "_user_id": user_id,
+                "_session_id": request_session_id,
                 "_app": app,
             }
             store[user_id] = state
         state["_user_id"] = user_id
+        state["_session_id"] = request_session_id or state.get("_session_id", "")
         state["_app"] = app
         return state
     return _default_demo_state(app)
@@ -1721,52 +1752,56 @@ async def cleanup_closed_plan(client: BinanceDemoClient, plan: dict[str, Any]) -
 async def protection_loop(application: Any) -> None:
     while True:
         await asyncio.sleep(2)
-        state = application.state.binance_demo
-        if not credentials_configured() or not state.get("plans"):
-            continue
-        try:
-            api_key, secret_key = load_demo_credentials()
-            client = BinanceDemoClient(application.state.http, api_key, secret_key)
-            await recover_pending_entry_intents(client, state)
-            changed = False
-            for plan in list(state["plans"].values()):
-                if plan.get("status") in {"KAPANDI", "İPTAL", "GÜVENLİK İÇİN KAPATILDI"}:
-                    continue
-                rows = response_rows(
-                    await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": plan["symbol"]})
-                )
-                active_position = next((row for row in rows if Decimal(str(row.get("positionAmt", "0"))) != 0), None)
-                if active_position is not None and plan.get("stop_protection_cancelled"):
-                    continue
-                if active_position is not None:
-                    lifecycle_before = (
-                        plan.get("remaining_quantity"), plan.get("position_status"),
-                        plan.get("tp1_status"), plan.get("tp2_status"), plan.get("tp3_status"),
+        states = [("", application.state.binance_demo)] + list(_demo_user_store(application).items())
+        for user_id, state in states:
+            if not state.get("plans"):
+                continue
+            if not user_id and not credentials_configured():
+                continue
+            try:
+                client = client_for_state(application, state)
+                await recover_pending_entry_intents(client, state)
+                changed = False
+                for plan in list(state["plans"].values()):
+                    if plan.get("status") in {"KAPANDI", "İPTAL", "GÜVENLİK İÇİN KAPATILDI"}:
+                        continue
+                    rows = response_rows(
+                        await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": plan["symbol"]})
                     )
-                    update_position_lifecycle(plan, Decimal(str(active_position["positionAmt"])))
-                    lifecycle_after = (
-                        plan.get("remaining_quantity"), plan.get("position_status"),
-                        plan.get("tp1_status"), plan.get("tp2_status"), plan.get("tp3_status"),
-                    )
-                    changed = changed or lifecycle_before != lifecycle_after
-                if active_position is not None and not plan.get("protection_ids"):
-                    await install_protection(client, state, plan)
-                    changed = True
-                elif active_position is None and plan.get("position_status") == "OPEN":
-                    await cleanup_closed_plan(client, plan)
-                    plan["status"] = "KAPANDI"
-                    plan["position_status"] = "CLOSED"
-                    plan["remaining_quantity"] = "0"
-                    plan["tp3_status"] = "FILLED"
-                    plan["closed_at"] = utc_now()
-                    add_event(state, "POZİSYON KAPANDI", f"{plan['symbol']} Demo pozisyonu kapandı; kalan bot emirleri temizlendi.")
-                    changed = True
-            if changed:
-                persist_runtime(state)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            state["last_error"] = str(exc)[:240]
+                    active_position = next((row for row in rows if Decimal(str(row.get("positionAmt", "0"))) != 0), None)
+                    if active_position is not None and plan.get("stop_protection_cancelled"):
+                        continue
+                    if active_position is not None:
+                        lifecycle_before = (
+                            plan.get("remaining_quantity"), plan.get("position_status"),
+                            plan.get("tp1_status"), plan.get("tp2_status"), plan.get("tp3_status"),
+                        )
+                        update_position_lifecycle(plan, Decimal(str(active_position["positionAmt"])))
+                        lifecycle_after = (
+                            plan.get("remaining_quantity"), plan.get("position_status"),
+                            plan.get("tp1_status"), plan.get("tp2_status"), plan.get("tp3_status"),
+                        )
+                        changed = changed or lifecycle_before != lifecycle_after
+                    if active_position is not None and not plan.get("protection_ids"):
+                        await install_protection(client, state, plan)
+                        changed = True
+                    elif active_position is None and plan.get("position_status") == "OPEN":
+                        await cleanup_closed_plan(client, plan)
+                        plan["status"] = "KAPANDI"
+                        plan["position_status"] = "CLOSED"
+                        plan["remaining_quantity"] = "0"
+                        plan["tp3_status"] = "FILLED"
+                        plan["closed_at"] = utc_now()
+                        add_event(state, "POZİSYON KAPANDI", f"{plan['symbol']} Demo pozisyonu kapandı; kalan bot emirleri temizlendi.")
+                        changed = True
+                if changed:
+                    persist_runtime(state)
+            except BinanceDemoError as exc:
+                state["last_error"] = str(exc)[:240]
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                state["last_error"] = str(exc)[:240]
 
 
 def init_binance_demo(application: Any) -> None:
