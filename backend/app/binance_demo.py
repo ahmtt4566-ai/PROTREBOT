@@ -1546,6 +1546,59 @@ def update_position_lifecycle(plan: dict[str, Any], amount: Decimal) -> None:
         plan["tp2_status"] = "FILLED"
 
 
+def inspect_protection_state(
+    snapshot: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    """Inspect configured TP quantities without changing local or exchange state."""
+    available = snapshot.get("open_algo_orders_available") is True
+    result: dict[str, Any] = {
+        "available": available,
+        "quantity_inconsistent": False,
+        "diagnostic": None,
+        "inconsistencies": [],
+    }
+    if not available:
+        result["diagnostic"] = "Binance algo-order snapshot unavailable."
+        return result
+
+    plans = state.get("plans", {})
+    if not isinstance(plans, dict):
+        return result
+
+    for plan_key, plan in plans.items():
+        if not isinstance(plan, dict):
+            continue
+        try:
+            tp1_quantity = Decimal(str(plan["tp1_quantity"]))
+            tp2_quantity = Decimal(str(plan["tp2_quantity"]))
+            remaining_quantity = Decimal(str(plan["remaining_quantity"]))
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            continue
+        if tp1_quantity + tp2_quantity <= remaining_quantity:
+            continue
+
+        plan_id = str(plan.get("id") or plan_key)
+        result["quantity_inconsistent"] = True
+        result["inconsistencies"].append({
+            "plan_id": plan_id,
+            "tp1_quantity": str(tp1_quantity),
+            "tp2_quantity": str(tp2_quantity),
+            "remaining_quantity": str(remaining_quantity),
+        })
+        logger.info(
+            "[PROTECTION_STATE] quantity_inconsistent plan_id=%s tp1_quantity=%s tp2_quantity=%s remaining_quantity=%s",
+            plan_id,
+            tp1_quantity,
+            tp2_quantity,
+            remaining_quantity,
+        )
+
+    if result["quantity_inconsistent"]:
+        result["diagnostic"] = "Configured TP quantities exceed remaining quantity."
+    return result
+
+
 def mark_cancelled_protection(plans: dict[str, Any], symbol: str, algo_id: int) -> dict[str, Any] | None:
     for plan in plans.values():
         if plan.get("symbol") != symbol or int(plan.get("stop_algo_id") or 0) != algo_id:
