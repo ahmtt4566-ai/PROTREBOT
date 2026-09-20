@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -181,11 +182,146 @@ class UserStateReconciliationTests(unittest.TestCase):
                     demo_state=demo_b,
                     v21_state=v21_a,
                 ))
-
         request_client.assert_not_called()
         state_client.assert_not_called()
         self.assertEqual(demo_b["plans"], {"plan-user-b": demo_b["plans"]["plan-user-b"]})
         self.assertEqual(v21_a["automation_trades"], [])
+
+    def test_tp1_fill_promotes_long_stop_to_entry_without_crossing_mark(self):
+        plan = self.plan(stop_loss="90", entry_price="100")
+        plan["tp1_status"] = "FILLED"
+        plan["tp1_fill_confirmed"] = True
+        demo_state = self.user_demo_state("user-a", "session-a", plan)
+        self.application.state._binance_demo_user_state["user-a"] = demo_state
+        v21_state = self.user_v21_state("user-a")
+        v21_state["settings"].update({"breakeven_enabled": False, "trailing_enabled": False})
+        self.application.state._v21_demo_user_state["user-a"] = v21_state
+        client = SimpleNamespace(signed=AsyncMock(return_value={}))
+
+        async def rules(_client, _symbol):
+            return {"tick": Decimal("0.1")}
+
+        with patch.object(v21_demo, "symbol_rules", new=rules), \
+                patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 202})), \
+                patch.object(v21_demo, "persist_runtime"), \
+                patch.object(v21_demo, "record_event"):
+            changed = asyncio.run(v21_demo.improve_dynamic_stops(
+                self.application,
+                {"positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": "110", "direction": "LONG"}]},
+                demo_state=demo_state,
+                v21_state=v21_state,
+                client=client,
+            ))
+
+        self.assertTrue(changed)
+        self.assertEqual(plan["stop_loss"], "100")
+        self.assertEqual(plan["stop_algo_id"], 202)
+
+    def test_tp1_fill_preserves_better_short_stop_and_no_fill_does_not_change(self):
+        for tp1_status, stop_loss, expected_stop, expected_changed in (
+            (None, "95", "95", False),
+            ("FILLED", "95", "95", False),
+            ("FILLED", "110", "100", True),
+        ):
+            plan = self.plan(stop_loss=stop_loss, entry_price="100")
+            plan.update({"direction": "SHORT", "stop_loss": stop_loss})
+            if tp1_status:
+                plan["tp1_status"] = tp1_status
+                plan["tp1_fill_confirmed"] = True
+            demo_state = self.user_demo_state("user-a", "session-a", plan)
+            self.application.state._binance_demo_user_state["user-a"] = demo_state
+            v21_state = self.user_v21_state("user-a")
+            v21_state["settings"].update({"breakeven_enabled": False, "trailing_enabled": False})
+            client = SimpleNamespace(signed=AsyncMock(return_value={}))
+
+            async def rules(_client, _symbol):
+                return {"tick": Decimal("0.1")}
+
+            with patch.object(v21_demo, "symbol_rules", new=rules), \
+                    patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 202})), \
+                    patch.object(v21_demo, "persist_runtime"), \
+                    patch.object(v21_demo, "record_event"):
+                changed = asyncio.run(v21_demo.improve_dynamic_stops(
+                    self.application,
+                    {"positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": "90", "direction": "SHORT"}]},
+                    demo_state=demo_state,
+                    v21_state=v21_state,
+                    client=client,
+                ))
+
+            self.assertEqual(changed, expected_changed)
+            self.assertEqual(plan["stop_loss"], expected_stop)
+
+    def test_concurrent_tp1_promotions_create_one_stop_and_retain_old_id_on_delete_failure(self):
+        async def run_case(delete_fails):
+            plan = self.plan(stop_loss="90", entry_price="100")
+            plan.update({"tp1_fill_confirmed": True, "protection_ids": [101], "stop_algo_id": 101})
+            demo_state = self.user_demo_state("user-a", "session-a", plan)
+            v21_state = self.user_v21_state("user-a")
+            v21_state["settings"].update({"breakeven_enabled": False, "trailing_enabled": False})
+            client = SimpleNamespace(signed=AsyncMock())
+            if delete_fails:
+                client.signed.side_effect = binance_demo.BinanceDemoError("delete failed")
+            post = AsyncMock(return_value={"algoId": 202})
+
+            async def rules(_client, _symbol):
+                return {"tick": Decimal("0.1")}
+
+            snapshot = {
+                "positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": "110", "direction": "LONG"}],
+                "open_algo_orders": [{"symbol": "BRUSDT", "type": "STOP_MARKET", "algo_id": 101, "trigger_price": "90"}],
+            }
+            with patch.object(v21_demo, "symbol_rules", new=rules), \
+                    patch.object(v21_demo, "post_algo", new=post), \
+                    patch.object(v21_demo, "persist_runtime"), \
+                    patch.object(v21_demo, "record_event"):
+                results = await asyncio.gather(*(
+                    v21_demo.improve_dynamic_stops(self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client),
+                    v21_demo.improve_dynamic_stops(self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client),
+                ))
+            return plan, post, client, results
+
+        plan, post, client, results = asyncio.run(run_case(False))
+        self.assertEqual(post.await_count, 1)
+        self.assertEqual(sum(results), 1)
+        self.assertEqual(plan["stop_algo_id"], 202)
+        self.assertEqual(client.signed.await_count, 1)
+
+        plan, post, client, _results = asyncio.run(run_case(True))
+        self.assertEqual(post.await_count, 1)
+        self.assertEqual(plan["stop_algo_id"], 202)
+        self.assertEqual(set(plan["protection_ids"]), {101, 202})
+
+    def test_better_active_stop_is_reused_for_long_and_short(self):
+        async def run_case(direction, plan_stop, mark, existing_stop, expected_posts):
+            plan = self.plan(stop_loss=plan_stop, entry_price="100")
+            plan.update({"direction": direction, "stop_loss": plan_stop, "tp1_fill_confirmed": True, "stop_algo_id": 101, "protection_ids": [101]})
+            demo_state = self.user_demo_state("user-a", "session-a", plan)
+            v21_state = self.user_v21_state("user-a")
+            v21_state["settings"].update({"breakeven_enabled": False, "trailing_enabled": False})
+            client = SimpleNamespace(signed=AsyncMock(return_value={}))
+            post = AsyncMock(return_value={"algoId": 202})
+
+            async def rules(_client, _symbol):
+                return {"tick": Decimal("0.1")}
+
+            snapshot = {
+                "positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": str(mark), "direction": direction}],
+                "open_algo_orders": [{"symbol": "BRUSDT", "type": "STOP_MARKET", "algo_id": 303, "trigger_price": str(existing_stop)}],
+            }
+            with patch.object(v21_demo, "symbol_rules", new=rules), \
+                    patch.object(v21_demo, "post_algo", new=post), \
+                    patch.object(v21_demo, "persist_runtime"), \
+                    patch.object(v21_demo, "record_event"):
+                await v21_demo.improve_dynamic_stops(self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client)
+            self.assertEqual(post.await_count, expected_posts)
+
+        asyncio.run(run_case("LONG", "90", 110, 105, 0))
+        asyncio.run(run_case("LONG", "90", 110, 100, 0))
+        asyncio.run(run_case("LONG", "90", 110, 95, 1))
+        asyncio.run(run_case("SHORT", "110", 90, 95, 0))
+        asyncio.run(run_case("SHORT", "110", 90, 100, 0))
+        asyncio.run(run_case("SHORT", "110", 90, 105, 1))
 
     def test_demo_and_v21_state_mismatch_rejects_before_execution(self):
         demo_a = self.user_demo_state("user-a", "session-a", self.plan("user-a"))

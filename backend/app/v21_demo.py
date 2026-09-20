@@ -47,6 +47,7 @@ from .binance_demo import (
     normalize_symbol,
     persist_runtime,
     post_algo,
+    protection_lock,
     position_amount,
     response_rows,
     reconcile_demo_plans,
@@ -1137,7 +1138,7 @@ def reconcile_positions(state: dict[str, Any], previous: dict[str, Any] | None, 
     return changed
 
 
-def process_stream_event(state: dict[str, Any], payload: dict[str, Any]) -> bool:
+def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_state: dict[str, Any] | None = None) -> bool:
     event_type = str(payload.get("e") or "")
     event_time = payload.get("T", payload.get("E", 0))
     state["stream"].update({"last_event": now_iso(), "status": "CANLI", "transport": "USER STREAM"})
@@ -1146,7 +1147,21 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any]) -> bool
         symbol = str(order.get("s") or "")
         status = str(order.get("X") or "")
         execution = str(order.get("x") or "")
-        order_id = order.get("i", order.get("c", ""))
+        order_id = str(order.get("i") or "")
+        client_order_id = str(order.get("c") or "")
+        if demo_state is not None and execution.upper() == "TRADE" and order_id:
+            for plan in demo_state.get("plans", {}).values():
+                if plan.get("symbol") != symbol:
+                    continue
+                matches_tp1 = order_id == str(plan.get("tp1_actual_order_id") or "")
+                matches_tp1 = matches_tp1 or client_order_id == str(plan.get("tp1_actual_client_order_id") or "")
+                if matches_tp1:
+                    plan["tp1_status"] = "FILLED"
+                    plan["tp1_fill_confirmed"] = True
+                    plan["tp1_execution_pending"] = False
+                    plan["tp1_filled_at"] = now_iso()
+                    persist_runtime(demo_state)
+                    break
         realized = float(order.get("rp") or 0)
         kind = "FILL" if execution == "TRADE" else "ORDER_UPDATE"
         return record_event(
@@ -1154,7 +1169,7 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any]) -> bool
             status=status, side=order.get("S"), price=float(order.get("ap") or order.get("L") or order.get("p") or 0),
             quantity=float(order.get("z") or order.get("l") or order.get("q") or 0),
             realized_pnl=realized, reason=str(order.get("er") or "") or None,
-            event_id=f"order-{event_time}-{order_id}-{execution}-{status}", source="USER_STREAM",
+            event_id=f"order-{event_time}-{order_id or client_order_id}-{execution}-{status}", source="USER_STREAM",
             reduce_only=bool(order.get("R", False)), verified_realized=execution == "TRADE" and bool(order.get("R", False)),
         ) is not None
     if event_type == "ALGO_UPDATE":
@@ -1162,6 +1177,23 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any]) -> bool
         order = order if isinstance(order, dict) else {}
         symbol = str(order.get("s") or order.get("symbol") or "")
         status = str(order.get("X") or order.get("algoStatus") or order.get("status") or "UPDATE")
+        algo_id = str(order.get("aid") or order.get("algoId") or "")
+        client_algo_id = str(order.get("ca") or order.get("clientAlgoId") or "")
+        actual_order_id = str(order.get("ai") or order.get("actualOrderId") or "")
+        actual_client_order_id = str(order.get("ac") or order.get("actualClientAlgoId") or "")
+        if demo_state is not None and status.upper() in {"TRIGGERED", "FILLED", "EXECUTED"}:
+            for plan in demo_state.get("plans", {}).values():
+                if plan.get("symbol") != symbol:
+                    continue
+                if client_algo_id == str(plan.get("tp1_client_id") or "") or algo_id == str(plan.get("tp1_algo_id") or ""):
+                    if actual_order_id:
+                        plan["tp1_actual_order_id"] = actual_order_id
+                        plan["tp1_execution_pending"] = True
+                    if actual_client_order_id:
+                        plan["tp1_actual_client_order_id"] = actual_client_order_id
+                        plan["tp1_execution_pending"] = True
+                    persist_runtime(demo_state)
+                    break
         return record_event(
             state, "ALGO_UPDATE", f"{symbol} koşullu koruma · {status}", symbol=symbol or None,
             status=status, price=float(order.get("sp") or order.get("triggerPrice") or 0),
@@ -1173,57 +1205,119 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any]) -> bool
     return False
 
 
-async def user_stream_loop(application: Any) -> None:
-    state = application.state.v21_demo
-    while True:
-        listen_key = ""
-        try:
-            if not credentials_configured():
-                state["stream"].update({"status": "ANAHTAR BEKLİYOR", "transport": "REST EŞLEŞTİRME"})
-                await asyncio.sleep(5)
-                continue
-            client = client_for(application)
-            response = await client.api_key_request("POST", "/fapi/v1/listenKey")
-            listen_key = str((response or {}).get("listenKey") or "")
-            if not listen_key:
-                raise BinanceDemoError("Demo kullanıcı akışı anahtarı alınamadı.")
-            state["stream"].update({"status": "BAĞLANIYOR", "transport": "USER STREAM", "last_error": None})
-            url = f"{DEMO_WS_BASE}/ws/{listen_key}"
-            async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5) as socket:
-                state["stream"].update({"status": "CANLI", "transport": "USER STREAM", "last_event": now_iso()})
-                record_event(state, "STREAM_CONNECTED", "Binance Futures Demo kullanıcı akışı bağlandı.", source="USER_STREAM")
-                last_keepalive = time.monotonic()
-                while True:
-                    try:
-                        raw = await asyncio.wait_for(socket.recv(), timeout=30)
-                        payload = json.loads(raw)
-                        if isinstance(payload, dict) and process_stream_event(state, payload):
-                            persist_state(state)
-                        if isinstance(payload, dict) and payload.get("e") == "listenKeyExpired":
-                            break
-                    except asyncio.TimeoutError:
-                        pass
-                    if time.monotonic() - last_keepalive >= 45 * 60:
-                        await client.api_key_request("PUT", "/fapi/v1/listenKey")
-                        last_keepalive = time.monotonic()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            state["stream"]["error_count"] += 1
-            state["stream"]["reconnect_count"] += 1
-            state["stream"].update({
-                "status": "YENİDEN BAĞLANIYOR", "transport": "REST EŞLEŞTİRME",
-                "last_error": str(exc)[:220],
-            })
-            record_event(state, "STREAM_RECONNECT", "Canlı Demo akışı kesildi; REST eşleştirme açık ve yeniden bağlantı deneniyor.", source="SYSTEM")
-            persist_state(state)
-            await asyncio.sleep(min(30, 2 + state["stream"]["reconnect_count"]))
-        finally:
-            if listen_key and not asyncio.current_task().cancelling():
+async def _user_stream_context(application: Any, user_id: str, session_id: str) -> None:
+    listen_key = ""
+    demo_store = getattr(application.state, "_binance_demo_user_state", {})
+    v21_store = getattr(application.state, "_v21_demo_user_state", {})
+    demo_state = demo_store.get(user_id)
+    state = v21_store.get(user_id)
+    if not isinstance(demo_state, dict) or not isinstance(state, dict):
+        return
+    if str(demo_state.get("_session_id") or "") != session_id or str(state.get("_session_id") or "") != session_id:
+        return
+    client = client_for_state(application, demo_state)
+    try:
+        response = await client.api_key_request("POST", "/fapi/v1/listenKey")
+        listen_key = str((response or {}).get("listenKey") or "")
+        if not listen_key:
+            raise BinanceDemoError("Binance Demo kullanıcı akışı anahtarı alınamadı.")
+        state["stream"].update({"status": "BAĞLANIYOR", "transport": "USER STREAM", "last_error": None})
+        url = f"{DEMO_WS_BASE}/ws/{listen_key}"
+        async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5) as socket:
+            state["stream"].update({"status": "CANLI", "transport": "USER STREAM", "last_event": now_iso()})
+            record_event(state, "STREAM_CONNECTED", "Binance Futures Demo kullanıcı akışı bağlandı.", source="USER_STREAM")
+            last_keepalive = time.monotonic()
+            while True:
                 try:
-                    await client_for(application).api_key_request("DELETE", "/fapi/v1/listenKey")
-                except Exception:
+                    raw = await asyncio.wait_for(socket.recv(), timeout=30)
+                    payload = json.loads(raw)
+                    if not _stream_context_owned(application, user_id, session_id, demo_state, state):
+                        logger.warning("Ignoring Demo user-stream event after ownership changed: user_id=%s session_id=%s", user_id, session_id)
+                        continue
+                    if isinstance(payload, dict) and process_stream_event(state, payload, demo_state):
+                        persist_state(state)
+                    if isinstance(payload, dict) and payload.get("e") == "listenKeyExpired":
+                        break
+                except asyncio.TimeoutError:
                     pass
+                if time.monotonic() - last_keepalive >= 45 * 60:
+                    await client.api_key_request("PUT", "/fapi/v1/listenKey")
+                    last_keepalive = time.monotonic()
+    finally:
+        if listen_key and not asyncio.current_task().cancelling():
+            try:
+                await client.api_key_request("DELETE", "/fapi/v1/listenKey")
+            except Exception:
+                pass
+
+
+def _stream_context_owned(
+    application: Any,
+    user_id: str,
+    session_id: str,
+    demo_state: dict[str, Any],
+    state: dict[str, Any],
+) -> bool:
+    if str(demo_state.get("_user_id") or "") != user_id or str(demo_state.get("_session_id") or "") != session_id:
+        return False
+    if str(state.get("_user_id") or "") != user_id or str(state.get("_session_id") or "") != session_id:
+        return False
+    try:
+        from .exchange_connections import _SESSION_META
+
+        meta = _SESSION_META.get((session_id, "TESTNET"), {})
+    except (ImportError, AttributeError):
+        return False
+    return bool(meta.get("active")) and str(meta.get("user_id") or "") == user_id
+
+
+def _user_stream_contexts(application: Any) -> set[tuple[str, str]]:
+    demo_store = getattr(application.state, "_binance_demo_user_state", {})
+    v21_store = getattr(application.state, "_v21_demo_user_state", {})
+    contexts: set[tuple[str, str]] = set()
+    if not isinstance(demo_store, dict) or not isinstance(v21_store, dict):
+        return contexts
+    for user_id, demo_state in demo_store.items():
+        state = v21_store.get(user_id)
+        session_id = str(demo_state.get("_session_id") or "") if isinstance(demo_state, dict) else ""
+        if session_id and isinstance(state, dict) and str(state.get("_session_id") or "") == session_id:
+            contexts.add((str(user_id), session_id))
+    return contexts
+
+
+async def user_stream_loop(application: Any) -> None:
+    tasks: dict[tuple[str, str], asyncio.Task[Any]] = {}
+    try:
+        while True:
+            demo_store = getattr(application.state, "_binance_demo_user_state", {})
+            v21_store = getattr(application.state, "_v21_demo_user_state", {})
+            contexts = _user_stream_contexts(application)
+            for context in contexts - tasks.keys():
+                tasks[context] = asyncio.create_task(_user_stream_context(application, *context))
+            for context in set(tasks) - contexts:
+                tasks.pop(context).cancel()
+            finished = [context for context, task in tasks.items() if task.done()]
+            for context in finished:
+                task = tasks.pop(context)
+                try:
+                    task.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    user_id, _session_id = context
+                    state = v21_store.get(user_id) if isinstance(v21_store, dict) else None
+                    if isinstance(state, dict):
+                        state["stream"]["error_count"] += 1
+                        state["stream"]["reconnect_count"] += 1
+                        state["stream"]["last_error"] = str(exc)[:220]
+                        persist_state(state)
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        for task in tasks.values():
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+        raise
 
 
 def active_plan(application: Any, symbol: str, demo_state: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -1302,7 +1396,9 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
     state = v21_state or application.state.v21_demo
     demo_state = demo_state or application.state.binance_demo
     settings = state["settings"]
-    if not settings["breakeven_enabled"] and not settings["trailing_enabled"]:
+    if not settings["breakeven_enabled"] and not settings["trailing_enabled"] and not any(
+        plan.get("tp1_fill_confirmed") is True for plan in demo_state.get("plans", {}).values()
+    ):
         return False
     client = client or client_for_state(application, demo_state)
     changed = False
@@ -1322,6 +1418,9 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
         r_multiple = (mark - entry) / risk if direction == "LONG" else (entry - mark) / risk
         desired = current_stop
         label = ""
+        if plan.get("tp1_fill_confirmed") is True:
+            desired = max(desired, entry) if direction == "LONG" else min(desired, entry)
+            label = "TP1 KORUMA"
         if settings["breakeven_enabled"] and r_multiple >= float(settings["breakeven_trigger_r"]):
             desired = max(desired, entry) if direction == "LONG" else min(desired, entry)
             label = "BAŞABAŞ"
@@ -1337,24 +1436,55 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
         valid_side = desired < mark if direction == "LONG" else desired > mark
         if not label or not improves or not valid_side:
             continue
-        result = await post_algo(client, {
-            "algoType": "CONDITIONAL", "symbol": symbol,
-            "side": "SELL" if direction == "LONG" else "BUY", "type": "STOP_MARKET",
-            "triggerPrice": decimal_text(desired_decimal), "closePosition": "true",
-            "workingType": "MARK_PRICE", "priceProtect": "TRUE", "clientAlgoId": new_client_id("DYNAMICSL"),
-        })
-        new_id = int(result.get("algoId", 0)) or None
-        old_id = plan.get("stop_algo_id")
-        if new_id:
-            plan["stop_algo_id"] = new_id
-            plan.setdefault("protection_ids", []).append(new_id)
-        plan["stop_loss"] = decimal_text(desired_decimal)
-        plan["last_dynamic_update_epoch"] = time.time()
-        if old_id:
+        active_stops = [
+            order for order in snapshot.get("open_algo_orders", [])
+            if str(order.get("symbol")) == symbol and str(order.get("type", "")).upper() == "STOP_MARKET"
+        ]
+        stop_levels = []
+        for order in active_stops:
+            raw_trigger = order.get("trigger_price") or order.get("triggerPrice")
             try:
-                await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": symbol, "algoId": old_id})
-            except BinanceDemoError:
-                pass
+                trigger = float(raw_trigger)
+            except (TypeError, ValueError):
+                continue
+            if trigger > 0:
+                stop_levels.append((trigger, order))
+        if active_stops and len(stop_levels) != len(active_stops):
+            continue
+        protective = [
+            item for item in stop_levels
+            if (item[0] >= desired if direction == "LONG" else item[0] <= desired)
+        ]
+        if protective:
+            best_trigger, best_order = max(protective, key=lambda item: item[0]) if direction == "LONG" else min(protective, key=lambda item: item[0])
+            plan["stop_algo_id"] = int(best_order.get("algo_id") or best_order.get("algoId") or 0) or plan.get("stop_algo_id")
+            plan["stop_loss"] = decimal_text(Decimal(str(best_trigger)))
+            changed = True
+            continue
+        async with protection_lock(plan):
+            current_stop = float(plan.get("stop_loss") or 0)
+            still_improves = desired > current_stop + float(rules["tick"]) if direction == "LONG" else desired < current_stop - float(rules["tick"])
+            if not still_improves:
+                continue
+            result = await post_algo(client, {
+                "algoType": "CONDITIONAL", "symbol": symbol,
+                "side": "SELL" if direction == "LONG" else "BUY", "type": "STOP_MARKET",
+                "triggerPrice": decimal_text(desired_decimal), "closePosition": "true",
+                "workingType": "MARK_PRICE", "priceProtect": "TRUE", "clientAlgoId": new_client_id("DYNAMICSL"),
+            })
+            new_id = int(result.get("algoId", 0)) or None
+            old_id = plan.get("stop_algo_id")
+            if new_id:
+                plan["stop_algo_id"] = new_id
+                if new_id not in plan.setdefault("protection_ids", []):
+                    plan["protection_ids"].append(new_id)
+            plan["stop_loss"] = decimal_text(desired_decimal)
+            plan["last_dynamic_update_epoch"] = time.time()
+            if old_id and old_id != new_id:
+                try:
+                    await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": symbol, "algoId": old_id})
+                except BinanceDemoError:
+                    pass
         record_event(state, "DYNAMIC_STOP", f"{symbol} {label} Stop {decimal_text(desired_decimal)} seviyesine iyileştirildi.", symbol=symbol, price=desired, source="RISK_ENGINE")
         changed = True
     if changed:

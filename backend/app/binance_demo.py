@@ -1401,6 +1401,10 @@ def _protection_install_lock(plan: dict[str, Any]) -> asyncio.Lock:
     return lock
 
 
+def protection_lock(plan: dict[str, Any]) -> asyncio.Lock:
+    return _protection_install_lock(plan)
+
+
 async def find_order_by_client_id(client: BinanceDemoClient, symbol: str, client_id: str) -> dict[str, Any] | None:
     try:
         result = await client.signed("GET", "/fapi/v1/order", {"symbol": symbol, "origClientOrderId": client_id})
@@ -1531,10 +1535,12 @@ def update_position_lifecycle(plan: dict[str, Any], amount: Decimal) -> None:
             plan["tp3_status"] = "FILLED"
         return
     reduction = (initial - remaining) / initial
-    if reduction >= Decimal("0.60"):
-        plan["tp2_status"] = "FILLED"
-    elif reduction >= Decimal("0.30"):
+    tp1_quantity = Decimal(str(plan.get("tp1_quantity") or (initial * Decimal("0.30"))))
+    tp2_quantity = Decimal(str(plan.get("tp2_quantity") or (initial * Decimal("0.30"))))
+    if initial > 0 and reduction * initial >= tp1_quantity:
         plan["tp1_status"] = "FILLED"
+    if initial > 0 and reduction * initial >= tp1_quantity + tp2_quantity:
+        plan["tp2_status"] = "FILLED"
 
 
 def mark_cancelled_protection(plans: dict[str, Any], symbol: str, algo_id: int) -> dict[str, Any] | None:
@@ -1741,6 +1747,9 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
     min_qty = Decimal(str(plan["min_qty"]))
     total_qty = abs(amount)
     partial_qty = floor_step(total_qty * Decimal("0.30"), step)
+    plan.setdefault("tp1_quantity", decimal_text(partial_qty))
+    plan.setdefault("tp2_quantity", decimal_text(partial_qty))
+    update_position_lifecycle(plan, amount)
     targets = plan["targets"]
     monitoring_targets: list[str] = []
     if partial_qty >= min_qty:
@@ -1761,6 +1770,7 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
                 result = await post_algo(client, params)
                 if result.get("algoId"):
                     algo_id = int(result["algoId"])
+                    plan[f"tp{index}_algo_id"] = algo_id
                     if algo_id not in protection_ids:
                         protection_ids.append(algo_id)
                 trace_log(f"protection.TP{index}.end", correlation_id, duration_ms=round((time.monotonic() - target_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))

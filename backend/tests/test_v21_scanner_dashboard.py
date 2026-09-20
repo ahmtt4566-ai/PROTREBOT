@@ -126,6 +126,72 @@ class V21ScannerDashboardTests(unittest.TestCase):
         self.assertEqual(len(verified), 1)
         self.assertEqual(v21_demo.daily_metrics(state)["realized_pnl"], 2.5)
 
+    def test_tp1_trigger_requires_matching_trade_execution(self):
+        state = v21_demo.initial_state()
+        demo_state = {"plans": {"plan-a": {
+            "id": "plan-a", "symbol": "BTCUSDT", "tp1_client_id": "TP1_client",
+            "tp1_algo_id": 55,
+        }}}
+        triggered = {"e": "ALGO_UPDATE", "T": 124, "o": {
+            "s": "BTCUSDT", "ca": "TP1_client", "aid": 55, "X": "TRIGGERED", "ai": 700,
+        }}
+        with patch.object(v21_demo, "persist_runtime"):
+            self.assertTrue(v21_demo.process_stream_event(state, triggered, demo_state))
+        self.assertFalse(demo_state["plans"]["plan-a"].get("tp1_fill_confirmed", False))
+        self.assertEqual(demo_state["plans"]["plan-a"]["tp1_actual_order_id"], "700")
+
+        fill = {"e": "ORDER_TRADE_UPDATE", "T": 125, "o": {
+            "s": "BTCUSDT", "X": "FILLED", "x": "TRADE", "i": 700, "S": "SELL", "R": True,
+        }}
+        with patch.object(v21_demo, "persist_runtime"):
+            self.assertTrue(v21_demo.process_stream_event(state, fill, demo_state))
+            self.assertFalse(v21_demo.process_stream_event(state, fill, demo_state))
+        self.assertTrue(demo_state["plans"]["plan-a"]["tp1_fill_confirmed"])
+
+    def test_tp1_fill_only_updates_the_explicit_demo_state(self):
+        state = v21_demo.initial_state()
+        demo_a = {"plans": {"plan-a": {"symbol": "BTCUSDT", "tp1_client_id": "A", "tp1_algo_id": 11}}}
+        demo_b = {"plans": {"plan-b": {"symbol": "BTCUSDT", "tp1_client_id": "B", "tp1_algo_id": 22}}}
+        algo = {"e": "ALGO_UPDATE", "T": 126, "o": {"s": "BTCUSDT", "ca": "A", "aid": 11, "X": "TRIGGERED", "ai": 701}}
+        fill = {"e": "ORDER_TRADE_UPDATE", "T": 127, "o": {"s": "BTCUSDT", "x": "TRADE", "i": 701, "R": True}}
+        with patch.object(v21_demo, "persist_runtime"):
+            v21_demo.process_stream_event(state, algo, demo_a)
+            v21_demo.process_stream_event(state, fill, demo_a)
+        self.assertTrue(demo_a["plans"]["plan-a"]["tp1_fill_confirmed"])
+        self.assertNotIn("tp1_fill_confirmed", demo_b["plans"]["plan-b"])
+
+    def test_user_stream_contexts_are_session_bound_and_fail_closed(self):
+        application = SimpleNamespace(state=SimpleNamespace(
+            _binance_demo_user_state={
+                "user-a": {"_user_id": "user-a", "_session_id": "session-a"},
+                "user-b": {"_user_id": "user-b", "_session_id": "session-b"},
+                "user-c": {"_user_id": "user-c"},
+            },
+            _v21_demo_user_state={
+                "user-a": {"_user_id": "user-a", "_session_id": "session-a"},
+                "user-b": {"_user_id": "user-b", "_session_id": "session-other"},
+            },
+        ))
+        self.assertEqual(v21_demo._user_stream_contexts(application), {("user-a", "session-a")})
+
+    def test_stream_event_ownership_is_rechecked_at_event_time(self):
+        from app import exchange_connections
+
+        application = SimpleNamespace(state=SimpleNamespace())
+        demo_state = {"_user_id": "user-a", "_session_id": "session-a", "plans": {}}
+        state = {"_user_id": "user-a", "_session_id": "session-a", "stream": {}}
+        with patch.dict(exchange_connections._SESSION_META, {
+            ("session-a", "TESTNET"): {"active": True, "user_id": "user-a"},
+        }, clear=True):
+            self.assertTrue(v21_demo._stream_context_owned(application, "user-a", "session-a", demo_state, state))
+            exchange_connections._SESSION_META[("session-a", "TESTNET")]["active"] = False
+            self.assertFalse(v21_demo._stream_context_owned(application, "user-a", "session-a", demo_state, state))
+            exchange_connections._SESSION_META[("session-a", "TESTNET")].update({"active": True, "user_id": "user-b"})
+            self.assertFalse(v21_demo._stream_context_owned(application, "user-a", "session-a", demo_state, state))
+            exchange_connections._SESSION_META[("session-a", "TESTNET")].update({"active": True, "user_id": "user-a"})
+            demo_state["_session_id"] = "session-b"
+            self.assertFalse(v21_demo._stream_context_owned(application, "user-a", "session-a", demo_state, state))
+
     def test_missing_position_never_records_last_unrealized_pnl(self):
         state = v21_demo.initial_state()
         previous = {"positions": [{"symbol": "BTCUSDT", "direction": "LONG", "mark_price": 100, "quantity": 1, "unrealized_pnl": -40}]}
