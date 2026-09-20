@@ -157,6 +157,7 @@ export default function TestnetFirstApp() {
   const [analysisProgress,setAnalysisProgress] = useState(0)
   const [health,setHealth] = useState<Health|null>(null)
   const [loading,setLoading] = useState(false)
+  const [marketError,setMarketError] = useState(false)
   const [credentials,setCredentials] = useState({demoApiKey:'',demoSecretKey:'',liveApiKey:'',liveSecretKey:''})
   const [demoVerification,setDemoVerification] = useState({busy:false,kind:'info',message:''})
   const [connectionStatus,setConnectionStatus] = useState<ConnectionStatus|null>(null)
@@ -215,13 +216,26 @@ export default function TestnetFirstApp() {
 
   const refresh = async () => {
     setLoading(true)
+    setMarketError(false)
     try {
-      const [marketResponse,healthResponse] = await Promise.all([
+      const [marketResult,healthResult] = await Promise.allSettled([
         fetch(`${API_BASE}/markets?limit=100`),
         fetch(`${API_BASE}/health`),
       ])
-      if (marketResponse.ok) setMarkets(await marketResponse.json() as Market[])
-      if (healthResponse.ok) setHealth(await healthResponse.json() as Health)
+      if (marketResult.status === 'fulfilled' && marketResult.value.ok) {
+        try {
+          const payload = await marketResult.value.json() as Market[]
+          if (Array.isArray(payload)) setMarkets(payload)
+          else setMarketError(true)
+        } catch {
+          setMarketError(true)
+        }
+      } else {
+        setMarketError(true)
+      }
+      if (healthResult.status === 'fulfilled' && healthResult.value.ok) {
+        try { setHealth(await healthResult.value.json() as Health) } catch {}
+      }
     } finally {setLoading(false)}
   }
 
@@ -338,7 +352,7 @@ export default function TestnetFirstApp() {
       <div className="v26HeaderActions">
         <button className="v26MasterTradeButton" onClick={() => navigate('master-trade')}><ShieldCheck/><span><b>MASTER TRADE</b></span></button>
         <button className="v26SubscriptionBadge" onClick={() => navigate('billing')}><Sparkles/> PLANS &amp; BILLING</button>
-        <button className="v26Refresh" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'YENİLENİYOR' : 'YENİLE'}</button>
+        <button className="v26Refresh" aria-label="Piyasa verisini yenile" title="Piyasa verisini yenile" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'YENİLENİYOR' : 'YENİLE'}</button>
         <button className="mobileMenuButton" type="button" aria-label={mobileMenuOpen ? 'Menüyü kapat' : 'Menüyü aç'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? <X/> : <Menu/>}</button>
         <div className="v26Notifications" ref={notificationRef}>
           <button className="v26NotificationButton" type="button" aria-label="Notifications" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}><Bell/></button>
@@ -374,6 +388,7 @@ export default function TestnetFirstApp() {
           </div>}
         </div>
         <div className="v26Intervals">{['1m','5m','15m','1h','4h'].map(item => <button key={item} className={interval === item ? 'active' : ''} onClick={() => setInterval(item)}>{item}</button>)}</div>
+        {marketError && <div className="v26MarketError" role="alert"><span>Market verisi yüklenemedi.</span><button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'YENİLENİYOR…' : 'TEKRAR DENE'}</button></div>}
       </section>
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Testnet merkezi hazırlanıyor…</div>}>
         <BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis} onAnalysisProgress={setAnalysisProgress}/>}/>
