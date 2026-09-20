@@ -406,6 +406,73 @@ class V21ScannerDashboardTests(unittest.TestCase):
         self.assertEqual(restored["snapshot"], state["snapshot"])
         self.assertEqual(restored["reconciliation"], state["reconciliation"])
 
+    def test_reconciliation_loop_syncs_exchange_positions_without_plans(self):
+        demo_state = {"_user_id": "user-a", "plans": {}, "reconciliation": {}}
+        v21_state = v21_demo.initial_state()
+        v21_state.update({"_user_id": "user-a", "_app": SimpleNamespace()})
+        application = SimpleNamespace(state=SimpleNamespace(
+            binance_demo={"plans": {}},
+            v21_demo=v21_state,
+            _binance_demo_user_state={"user-a": demo_state},
+            _v21_demo_user_state={"user-a": v21_state},
+        ))
+        snapshot = {"positions": [{"symbol": "BTCUSDT", "quantity": 1}], "open_orders": [], "open_algo_orders": []}
+        sleep_calls = 0
+
+        async def stop_after_first_iteration(_seconds):
+            nonlocal sleep_calls
+            sleep_calls += 1
+            raise asyncio.CancelledError()
+
+        with patch.object(v21_demo, "client_for_state", return_value=object()), \
+                patch.object(v21_demo, "account_snapshot", new=AsyncMock(return_value=snapshot)), \
+                patch.object(v21_demo, "ensure_stop_protection", new=AsyncMock()) as ensure_protection, \
+                patch.object(v21_demo, "improve_dynamic_stops", new=AsyncMock()) as improve_stops, \
+                patch.object(v21_demo, "persist_state") as persist, \
+                patch.object(v21_demo, "persist_runtime") as persist_runtime, \
+                patch.object(v21_demo.asyncio, "sleep", new=stop_after_first_iteration):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v21_demo.reconciliation_loop(application))
+
+        self.assertEqual(v21_state["reconciliation"]["actual_exchange_open_positions"], 1)
+        self.assertEqual(v21_state["reconciliation"]["internal_active_plans"], 0)
+        self.assertEqual(v21_state["reconciliation"]["reconciled_active_positions"], 1)
+        ensure_protection.assert_not_awaited()
+        improve_stops.assert_not_awaited()
+        persist.assert_called_once_with(v21_state)
+        persist_runtime.assert_called_once_with(demo_state)
+        self.assertEqual(sleep_calls, 1)
+
+    def test_reconciliation_loop_keeps_protection_path_for_existing_plans(self):
+        plan = {"symbol": "BTCUSDT", "status": "OPEN", "position_status": "OPEN", "remaining_quantity": "1"}
+        demo_state = {"_user_id": "user-a", "plans": {"plan-a": plan}, "reconciliation": {}}
+        v21_state = v21_demo.initial_state()
+        v21_state.update({"_user_id": "user-a", "_app": SimpleNamespace()})
+        application = SimpleNamespace(state=SimpleNamespace(
+            binance_demo={"plans": {}},
+            v21_demo=v21_state,
+            _binance_demo_user_state={"user-a": demo_state},
+            _v21_demo_user_state={"user-a": v21_state},
+        ))
+        snapshot = {"positions": [{"symbol": "BTCUSDT", "quantity": 1}], "open_orders": [], "open_algo_orders": []}
+
+        async def stop_after_first_iteration(_seconds):
+            raise asyncio.CancelledError()
+
+        with patch.object(v21_demo, "client_for_state", return_value=object()), \
+                patch.object(v21_demo, "account_snapshot", new=AsyncMock(return_value=snapshot)), \
+                patch.object(v21_demo, "reconcile_positions", return_value=False), \
+                patch.object(v21_demo, "ensure_stop_protection", new=AsyncMock(return_value=False)) as ensure_protection, \
+                patch.object(v21_demo, "improve_dynamic_stops", new=AsyncMock(return_value=False)) as improve_stops, \
+                patch.object(v21_demo, "persist_state"), \
+                patch.object(v21_demo, "persist_runtime"), \
+                patch.object(v21_demo.asyncio, "sleep", new=stop_after_first_iteration):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v21_demo.reconciliation_loop(application))
+
+        ensure_protection.assert_awaited_once()
+        improve_stops.assert_awaited_once()
+
     def test_concurrent_manual_scans_are_serialized(self):
         state = v21_demo.initial_state()
         app = SimpleNamespace(state=SimpleNamespace(v21_demo=state))

@@ -1536,23 +1536,27 @@ async def reconciliation_loop(application: Any) -> None:
     while True:
         try:
             for user_id, demo_state, state in _background_contexts(application):
-                if user_id and not demo_state.get("plans"):
-                    continue
                 if not user_id and not credentials_configured():
                     continue
                 try:
+                    has_demo_plans = bool(demo_state.get("plans"))
                     client = client_for_state(application, demo_state)
                     snapshot = await account_snapshot(client)
                     state["snapshot"] = snapshot
+                    previous_reconciliation = state.get("reconciliation")
                     plan_reconciliation = reconcile_demo_plans(demo_state, snapshot)
                     state["reconciliation"] = dict(demo_state.get("reconciliation") or plan_reconciliation)
                     state["stream"]["last_sync"] = now_iso()
                     demo_state.update({"connected": True, "last_checked": now_iso(), "last_error": None})
-                    changed = reconcile_positions(state, previous.get(user_id), snapshot)
+                    changed = False
+                    if has_demo_plans:
+                        changed = reconcile_positions(state, previous.get(user_id), snapshot)
                     previous[user_id] = snapshot
-                    changed |= await ensure_stop_protection(application, snapshot, demo_state=demo_state, v21_state=state, client=client)
-                    changed |= await improve_dynamic_stops(application, snapshot, demo_state=demo_state, v21_state=state, client=client)
-                    if changed or plan_reconciliation["changed"]:
+                    if has_demo_plans:
+                        changed |= await ensure_stop_protection(application, snapshot, demo_state=demo_state, v21_state=state, client=client)
+                        changed |= await improve_dynamic_stops(application, snapshot, demo_state=demo_state, v21_state=state, client=client)
+                    reconciliation_changed = previous_reconciliation != state["reconciliation"]
+                    if changed or plan_reconciliation["changed"] or reconciliation_changed:
                         persist_state(state)
                         persist_runtime(demo_state)
                 except BinanceDemoError as exc:
