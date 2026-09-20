@@ -1480,9 +1480,6 @@ async def _automatic_cycle_impl(
         _set_rejection(state, *risk_block)
         return
     daily = daily_metrics(state)
-    if daily["auto_entries"] >= settings["daily_trade_limit"]:
-        _set_rejection(state, "DAILY_TRADE_LIMIT", "Günlük Demo işlem limiti doldu.")
-        return
     if daily["realized_pnl"] <= -float(settings["daily_loss_limit"]):
         _set_rejection(state, "DAILY_LOSS_LIMIT", "Günlük Demo zarar limiti aktif; yeni giriş kilitli.")
         auto["enabled"] = False
@@ -2152,10 +2149,6 @@ async def v21_demo_smoke_test(request: Request) -> dict[str, Any]:
         persist_state(state)
         raise HTTPException(409, state["auto"]["rejection_reason"])
     daily = daily_metrics(state)
-    if daily["auto_entries"] >= state["settings"]["daily_trade_limit"]:
-        _set_rejection(state, "DAILY_TRADE_LIMIT", "Günlük Demo işlem limiti doldu; smoke işlemi açılmadı.")
-        persist_state(state)
-        raise HTTPException(409, state["auto"]["rejection_reason"])
     if daily["realized_pnl"] <= -float(state["settings"]["daily_loss_limit"]):
         _set_rejection(state, "DAILY_LOSS_LIMIT", "Günlük Demo zarar limiti aktif; smoke işlemi açılmadı.")
         persist_state(state)
