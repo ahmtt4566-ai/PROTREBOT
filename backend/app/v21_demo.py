@@ -55,6 +55,8 @@ from .binance_demo import (
     safe_exchange_error,
     state_for as demo_state_for,
     symbol_rules,
+    _owned_protection_orders,
+    _plan_protection_ids,
     validate_entry_risk,
 )
 from .local_storage import DATA_DIR, migrate_legacy_files
@@ -1345,18 +1347,20 @@ async def ensure_stop_protection(application: Any, snapshot: dict[str, Any], *, 
     state = v21_state or application.state.v21_demo
     demo_state = demo_state or application.state.binance_demo
     client = client or client_for_state(application, demo_state)
-    algo_by_symbol: dict[str, list[dict[str, Any]]] = {}
-    for order in snapshot.get("open_algo_orders", []):
-        algo_by_symbol.setdefault(str(order.get("symbol")), []).append(order)
     changed = False
     for position in snapshot.get("positions", []):
         symbol = str(position.get("symbol"))
         plan = active_plan(application, symbol, demo_state)
         if not plan:
             continue
-        stops = [order for order in algo_by_symbol.get(symbol, []) if str(order.get("type", "")).upper() == "STOP_MARKET"]
-        if stops:
+        owned_stops = [
+            order for order in _owned_protection_orders(plan, snapshot)
+            if str(order.get("type", "")).upper() == "STOP_MARKET"
+        ]
+        if owned_stops:
             continue
+        if _plan_protection_ids(plan) is None:
+            plan["protection_ids"] = []
         params = {
             "algoType": "CONDITIONAL", "symbol": symbol,
             "side": "SELL" if position.get("direction") == "LONG" else "BUY",

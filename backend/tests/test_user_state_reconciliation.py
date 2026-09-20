@@ -627,6 +627,50 @@ class UserStateReconciliationTests(unittest.TestCase):
         post_mock.assert_not_awaited()
         client.signed.assert_not_awaited()
 
+    def test_unknown_same_symbol_stop_does_not_suppress_repair(self):
+        plan = self.plan(stop_loss="90", entry_price="100")
+        plan["protection_ids"] = [101]
+        demo_state = self.user_demo_state("user-a", "session-a", plan)
+        v21_state = self.user_v21_state("user-a")
+        client = SimpleNamespace(signed=AsyncMock(), public_get=AsyncMock())
+        snapshot = {
+            "positions": [{"symbol": "BRUSDT", "direction": "LONG", "entry_price": "100", "mark_price": "105"}],
+            "open_algo_orders": [{"symbol": "BRUSDT", "type": "STOP_MARKET", "algoId": 999}],
+        }
+
+        with patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 303})) as repair_mock, \
+                patch.object(v21_demo, "persist_runtime"):
+            changed = asyncio.run(v21_demo.ensure_stop_protection(
+                self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client,
+            ))
+
+        self.assertTrue(changed)
+        repair_mock.assert_awaited_once()
+        client.signed.assert_not_awaited()
+        self.assertEqual(plan["protection_ids"], [101, 303])
+
+    def test_owned_and_unknown_stops_only_use_owned_id(self):
+        plan = self.plan(stop_loss="90", entry_price="100")
+        demo_state = self.user_demo_state("user-a", "session-a", plan)
+        v21_state = self.user_v21_state("user-a")
+        client = SimpleNamespace(signed=AsyncMock(), public_get=AsyncMock())
+        snapshot = {
+            "positions": [{"symbol": "BRUSDT", "direction": "LONG", "entry_price": "100", "mark_price": "105"}],
+            "open_algo_orders": [
+                {"symbol": "BRUSDT", "type": "STOP_MARKET", "algoId": 101},
+                {"symbol": "BRUSDT", "type": "STOP_MARKET", "algoId": 999},
+            ],
+        }
+
+        with patch.object(v21_demo, "post_algo", new=AsyncMock()) as post_mock:
+            changed = asyncio.run(v21_demo.ensure_stop_protection(
+                self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client,
+            ))
+
+        self.assertFalse(changed)
+        post_mock.assert_not_awaited()
+        client.signed.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

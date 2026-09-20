@@ -1738,6 +1738,28 @@ def _plan_protection_ids(plan: dict[str, Any]) -> set[int] | None:
     return protection_ids
 
 
+def _owned_protection_orders(plan: dict[str, Any], snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    protection_ids = _plan_protection_ids(plan)
+    if not protection_ids:
+        return []
+    try:
+        expected_symbol = normalize_symbol(str(plan.get("symbol") or ""))
+    except BinanceDemoError:
+        return []
+    owned: list[dict[str, Any]] = []
+    for order in snapshot.get("open_algo_orders", []):
+        if not isinstance(order, dict) or not _symbol_matches(order.get("symbol"), expected_symbol):
+            continue
+        raw_algo_id = order.get("algo_id", order.get("algoId"))
+        try:
+            algo_id = int(raw_algo_id)
+        except (TypeError, ValueError):
+            continue
+        if algo_id in protection_ids:
+            owned.append(order)
+    return owned
+
+
 def _symbol_matches(value: Any, expected: str) -> bool:
     raw_symbol = str(value or "")
     if not raw_symbol:
@@ -2266,8 +2288,10 @@ async def install_protection(client: BinanceDemoClient, state: dict[str, Any], p
     if lock.locked():
         return
     async with lock:
-        if plan.get("protection_ids"):
+        if _plan_protection_ids(plan):
             return
+        if plan.get("protection_ids") is not None:
+            plan["protection_ids"] = []
         await _install_protection(client, state, plan, request_id=request_id)
 
 

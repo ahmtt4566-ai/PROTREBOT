@@ -74,6 +74,16 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan["position_status"], "OPEN")
         self.assertEqual(plan["protection_ids"], [101, 102, 103, 104])
 
+    async def test_malformed_truthy_protection_ids_do_not_skip_install(self):
+        plan = self.plan()
+        plan["protection_ids"] = ["not-an-id"]
+        state = {"plans": {plan["id"]: plan}}
+
+        with patch.object(binance_demo, "_install_protection", new=AsyncMock()) as install_mock:
+            await binance_demo.install_protection(None, state, plan)
+
+        install_mock.assert_awaited_once()
+
     async def test_different_plans_install_independently(self):
         first_plan = self.plan("plan-a", "BTCUSDT")
         second_plan = self.plan("plan-b", "ETHUSDT")
