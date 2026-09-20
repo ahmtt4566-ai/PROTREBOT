@@ -592,37 +592,103 @@ def _current_user_id(request: Request | None = None, state: dict[str, Any] | Non
     return str((user or {}).get("id") or "").strip()
 
 
+def _is_valid_demo_payload(payload: Any) -> bool:
+    return isinstance(payload, dict) and isinstance(payload.get("plans"), dict)
+
+
 async def restore_demo_state_for_user(application: Any, user_id: str) -> dict[str, Any] | None:
     pool = getattr(application.state, "db_pool", None)
-    if pool is None or not user_id:
+    if not user_id:
         return None
+    if pool is None:
+        file_state = _load_file_demo_state(user_id)
+        if file_state is not None:
+            return _store_restored_demo_state(application, user_id, file_state, "file_fallback", "restored", "available")
+        return _store_restored_demo_state(application, user_id, {}, "unknown", "restore_failed", "persistence_suppressed")
     try:
         row = await pool.fetchrow(
             "SELECT payload FROM application_state_snapshots WHERE state_key = $1",
             _db_demo_snapshot_key(user_id),
         )
     except Exception:
-        return None
+        file_state = _load_file_demo_state(user_id)
+        if file_state is not None:
+            return _store_restored_demo_state(application, user_id, file_state, "file_fallback", "restored", "available")
+        return _store_restored_demo_state(application, user_id, {}, "unknown", "restore_failed", "persistence_suppressed")
     if row is None:
-        return None
+        return _store_restored_demo_state(application, user_id, {}, "postgres", "no_snapshot", "initialized_empty")
     payload = row["payload"]
-    if not isinstance(payload, dict):
-        return None
+    if not _is_valid_demo_payload(payload):
+        return _store_restored_demo_state(application, user_id, {}, "postgres", "restore_failed", "persistence_suppressed")
+    return _store_restored_demo_state(application, user_id, payload, "postgres", "restored", "available")
+
+
+def _restore_diagnostic(origin: str, status: str, plan_count: int, persistence_action: str) -> dict[str, Any]:
+    return {
+        "restore_origin": origin,
+        "restore_status": status,
+        "plan_count": plan_count,
+        "persistence_action": persistence_action,
+    }
+
+
+def _state_from_demo_payload(
+    payload: dict[str, Any],
+    user_id: str,
+    application: Any,
+    origin: str,
+    status: str,
+    persistence_action: str,
+) -> dict[str, Any]:
+    plans = payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
     state = {
         "connected": bool(payload.get("connected")),
         "armed_until": payload.get("armed_until", 0),
         "last_checked": payload.get("last_checked"),
         "last_error": payload.get("last_error"),
         "events": payload.get("events", []) if isinstance(payload.get("events"), list) else [],
-        "plans": payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {},
+        "plans": plans,
         "reconciliation": payload.get("reconciliation", {}) if isinstance(payload.get("reconciliation"), dict) else {},
         "lock": asyncio.Lock(),
         "_user_id": user_id,
         "_app": application,
+        "_restore_origin": origin,
+        "_restore_status": status,
+        "_restore_diagnostic": _restore_diagnostic(origin, status, len(plans), persistence_action),
+        "_persistence_blocked": status == "restore_failed",
     }
-    store = _demo_user_store(application)
-    store[user_id] = state
+    logger.info(
+        "Demo restore diagnostic restore_origin=%s restore_status=%s plan_count=%d persistence_action=%s",
+        origin,
+        status,
+        len(plans),
+        persistence_action,
+    )
     return state
+
+
+def _store_restored_demo_state(
+    application: Any,
+    user_id: str,
+    payload: dict[str, Any],
+    origin: str,
+    status: str,
+    persistence_action: str,
+) -> dict[str, Any]:
+    state = _state_from_demo_payload(payload, user_id, application, origin, status, persistence_action)
+    _demo_user_store(application)[user_id] = state
+    return state
+
+
+def _load_file_demo_state(user_id: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("users"), dict):
+        return None
+    user_state = payload["users"].get(user_id)
+    return user_state if isinstance(user_state, dict) and isinstance(user_state.get("plans"), dict) else None
 
 
 def _default_demo_state(application: Any) -> dict[str, Any]:
@@ -647,6 +713,8 @@ def _db_demo_snapshot_key(user_id: str) -> str:
 
 
 def persist_runtime(state: dict[str, Any]) -> None:
+    if state.get("_persistence_blocked") or state.get("_restore_status") == "restore_failed":
+        return
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     user_id = str(state.get("_user_id") or "").strip()
     payload: Any
@@ -736,21 +804,21 @@ def load_runtime(user_id: str | None = None, *, application: Any | None = None) 
             try:
                 row = __import__("asyncio").run(pool.fetchrow("SELECT payload FROM application_state_snapshots WHERE state_key = $1", _db_demo_snapshot_key(user_id)))
             except Exception:
-                row = None
+                file_state = _load_file_demo_state(user_id)
+                if file_state is not None:
+                    return _state_from_demo_payload(file_state, user_id, application, "file_fallback", "restored", "available")
+                return _state_from_demo_payload({}, user_id, application, "unknown", "restore_failed", "persistence_suppressed")
             if row is not None:
                 payload = row["payload"] if isinstance(row, dict) else row
-                if isinstance(payload, dict):
-                    plans = payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
-                    return {
-                        "connected": bool(payload.get("connected")),
-                        "armed_until": payload.get("armed_until", 0),
-                        "last_checked": payload.get("last_checked"),
-                        "last_error": payload.get("last_error"),
-                        "events": payload.get("events", []) if isinstance(payload.get("events"), list) else [],
-                        "plans": plans,
-                        "reconciliation": payload.get("reconciliation", {}),
-                        "_user_id": user_id,
-                    }
+                if _is_valid_demo_payload(payload):
+                    return _state_from_demo_payload(payload, user_id, application, "postgres", "restored", "available")
+                return _state_from_demo_payload({}, user_id, application, "postgres", "restore_failed", "persistence_suppressed")
+            return _state_from_demo_payload({}, user_id, application, "postgres", "no_snapshot", "initialized_empty")
+        if user_id:
+            file_state = _load_file_demo_state(user_id)
+            if file_state is not None:
+                return _state_from_demo_payload(file_state, user_id, application, "file_fallback", "restored", "available")
+            return _state_from_demo_payload({}, user_id, application, "unknown", "restore_failed", "persistence_suppressed")
     try:
         payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -769,6 +837,9 @@ def load_runtime(user_id: str | None = None, *, application: Any | None = None) 
                 "plans": user_state.get("plans", {}) if isinstance(user_state.get("plans"), dict) else {},
                 "reconciliation": user_state.get("reconciliation", {}),
                 "_user_id": user_id,
+                "_restore_origin": "file_fallback",
+                "_restore_status": "restored",
+                "_restore_diagnostic": _restore_diagnostic("file_fallback", "restored", len(user_state.get("plans", {})), "available"),
             }
         return next(iter(payload["users"].values()), {}).get("plans", {}) if payload["users"] else {}
     return payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
@@ -791,19 +862,23 @@ def state_for(request: Request) -> dict[str, Any]:
         if state is None:
             persisted = load_runtime(user_id, application=app)
             base = copy.deepcopy(_default_demo_state(app))
+            restore_failed = isinstance(persisted, dict) and persisted.get("_restore_status") == "restore_failed"
             state = {
                 **base,
-                "plans": dict(persisted.get("plans", {}) if isinstance(persisted, dict) else {}),
-                "events": list((persisted.get("events", [])) if isinstance(persisted, dict) and isinstance(persisted.get("events"), list) else []),
-                "connected": bool((persisted or {}).get("connected", base.get("connected", False))),
-                "armed_until": (persisted or {}).get("armed_until", base.get("armed_until", 0)),
-                "last_checked": (persisted or {}).get("last_checked"),
-                "last_error": (persisted or {}).get("last_error"),
-                "reconciliation": (persisted or {}).get("reconciliation", {}),
+                "plans": dict(base.get("plans", {}) if restore_failed else (persisted.get("plans", {}) if isinstance(persisted, dict) else {})),
+                "events": list(base.get("events", []) if restore_failed else ((persisted.get("events", [])) if isinstance(persisted, dict) and isinstance(persisted.get("events"), list) else [])),
+                "connected": bool(base.get("connected", False) if restore_failed else (persisted or {}).get("connected", base.get("connected", False))),
+                "armed_until": base.get("armed_until", 0) if restore_failed else (persisted or {}).get("armed_until", base.get("armed_until", 0)),
+                "last_checked": base.get("last_checked") if restore_failed else (persisted or {}).get("last_checked"),
+                "last_error": base.get("last_error") if restore_failed else (persisted or {}).get("last_error"),
+                "reconciliation": base.get("reconciliation", {}) if restore_failed else (persisted or {}).get("reconciliation", {}),
                 "_user_id": user_id,
                 "_session_id": request_session_id,
                 "_app": app,
             }
+            for key in ("_restore_origin", "_restore_status", "_restore_diagnostic", "_persistence_blocked"):
+                if isinstance(persisted, dict) and key in persisted:
+                    state[key] = persisted[key]
             store[user_id] = state
         state["_user_id"] = user_id
         state["_session_id"] = request_session_id or state.get("_session_id", "")

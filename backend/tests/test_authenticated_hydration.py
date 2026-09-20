@@ -83,6 +83,52 @@ class AuthenticatedHydrationTests(unittest.TestCase):
         self.assertNotIn("_session_id", self.demo_payload)
         self.assertEqual(restored["plans"][self.plan["id"]]["initial_stop_loss"], "90")
 
+    def test_valid_empty_postgres_snapshot_restores_as_empty_state(self):
+        self.pool.fetchrow = AsyncMock(return_value={"payload": {**self.demo_payload, "plans": {}}})
+
+        restored = asyncio.run(binance_demo.restore_demo_state_for_user(self.application, "user-a"))
+
+        self.assertEqual(restored["plans"], {})
+        self.assertEqual(restored["_restore_origin"], "postgres")
+        self.assertEqual(restored["_restore_status"], "restored")
+        self.assertFalse(restored["_persistence_blocked"])
+        self.assertEqual(restored["_restore_diagnostic"]["plan_count"], 0)
+
+    def test_confirmed_missing_postgres_snapshot_initializes_empty_state(self):
+        self.pool.fetchrow = AsyncMock(return_value=None)
+
+        restored = asyncio.run(binance_demo.restore_demo_state_for_user(self.application, "user-a"))
+
+        self.assertEqual(restored["plans"], {})
+        self.assertEqual(restored["_restore_origin"], "postgres")
+        self.assertEqual(restored["_restore_status"], "no_snapshot")
+        self.assertFalse(restored["_persistence_blocked"])
+        self.assertEqual(restored["_restore_diagnostic"]["persistence_action"], "initialized_empty")
+
+    def test_restore_exception_marks_restore_failed(self):
+        self.pool.fetchrow = AsyncMock(side_effect=RuntimeError("database unavailable"))
+
+        restored = asyncio.run(binance_demo.restore_demo_state_for_user(self.application, "user-a"))
+
+        self.assertEqual(restored["plans"], {})
+        self.assertEqual(restored["_restore_status"], "restore_failed")
+        self.assertTrue(restored["_persistence_blocked"])
+        self.assertEqual(restored["_restore_diagnostic"]["persistence_action"], "persistence_suppressed")
+
+    def test_restore_failed_suppresses_empty_state_persistence(self):
+        self.pool.fetchrow = AsyncMock(side_effect=RuntimeError("database unavailable"))
+        restored = asyncio.run(binance_demo.restore_demo_state_for_user(self.application, "user-a"))
+
+        with tempfile.TemporaryDirectory() as data_dir, patch.object(
+            binance_demo, "STATE_PATH", Path(data_dir) / "binance_demo_runtime.json"
+        ):
+            binance_demo.persist_runtime(restored)
+            self.assertFalse(binance_demo.STATE_PATH.exists())
+
+        self.pool.execute = AsyncMock()
+        self.assertTrue(restored["_persistence_blocked"])
+        self.pool.execute.assert_not_called()
+
     def test_authenticated_request_hydrates_once_and_binds_current_session(self):
         current_session = session_id(self.request)
         with patch.object(main, "ensure_session_cache", new=AsyncMock()), \
@@ -135,8 +181,21 @@ class AuthenticatedHydrationTests(unittest.TestCase):
         self.assertEqual(loaded["plans"][self.plan["id"]], self.plan)
         self.assertTrue(loaded["connected"])
         self.assertEqual(loaded["_user_id"], "user-a")
+        self.assertEqual(loaded["_restore_origin"], "file_fallback")
+        self.assertEqual(loaded["_restore_status"], "restored")
         self.assertIn(self.plan["id"], restored["plans"])
         self.assertFalse(not restored["plans"])
+
+    def test_failed_restore_cannot_overwrite_existing_persisted_state(self):
+        self.pool.fetchrow = AsyncMock(side_effect=RuntimeError("database unavailable"))
+        self.pool.execute = AsyncMock()
+        restored = asyncio.run(binance_demo.restore_demo_state_for_user(self.application, "user-a"))
+
+        binance_demo.persist_runtime(restored)
+
+        self.assertEqual(restored["plans"], {})
+        self.assertEqual(restored["_restore_status"], "restore_failed")
+        self.pool.execute.assert_not_called()
 
     def test_missing_credentials_keeps_plan_state_only_and_warns(self):
         with patch.object(main, "ensure_session_cache", new=AsyncMock()), \
