@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -100,6 +101,42 @@ class AuthenticatedHydrationTests(unittest.TestCase):
         self.assertEqual(v21_state["_user_id"], "user-a")
         self.assertEqual(v21_state["_session_id"], current_session)
         self.assertEqual(self.pool.fetchrow.await_count, 2)
+
+    def test_file_fallback_returns_full_state_and_preserves_plans(self):
+        with tempfile.TemporaryDirectory() as data_dir, patch.object(
+            binance_demo, "STATE_PATH", Path(data_dir) / "binance_demo_runtime.json"
+        ):
+            binance_demo.STATE_PATH.write_text(json.dumps({
+                "users": {
+                    "user-a": {
+                        "connected": True,
+                        "armed_until": 123,
+                        "last_checked": "2026-09-20T00:00:00+00:00",
+                        "last_error": None,
+                        "events": [],
+                        "plans": {self.plan["id"]: self.plan},
+                        "reconciliation": {"internal_active_plans": 1},
+                    }
+                }
+            }), encoding="utf-8")
+            application = SimpleNamespace(state=SimpleNamespace(
+                db_pool=None,
+                binance_demo={"plans": {}},
+                _binance_demo_user_state={},
+            ))
+            request = SimpleNamespace(
+                app=application,
+                state=SimpleNamespace(member={"id": "user-a"}),
+            )
+
+            loaded = binance_demo.load_runtime("user-a", application=application)
+            restored = binance_demo.state_for(request)
+
+        self.assertEqual(loaded["plans"][self.plan["id"]], self.plan)
+        self.assertTrue(loaded["connected"])
+        self.assertEqual(loaded["_user_id"], "user-a")
+        self.assertIn(self.plan["id"], restored["plans"])
+        self.assertFalse(not restored["plans"])
 
     def test_missing_credentials_keeps_plan_state_only_and_warns(self):
         with patch.object(main, "ensure_session_cache", new=AsyncMock()), \

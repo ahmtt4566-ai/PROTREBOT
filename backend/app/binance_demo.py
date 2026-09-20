@@ -758,7 +758,18 @@ def load_runtime(user_id: str | None = None, *, application: Any | None = None) 
     if isinstance(payload, dict) and isinstance(payload.get("users"), dict):
         if user_id:
             user_state = payload["users"].get(user_id, {})
-            return user_state.get("plans", {}) if isinstance(user_state.get("plans"), dict) else {}
+            if not isinstance(user_state, dict):
+                return {}
+            return {
+                "connected": bool(user_state.get("connected")),
+                "armed_until": user_state.get("armed_until", 0),
+                "last_checked": user_state.get("last_checked"),
+                "last_error": user_state.get("last_error"),
+                "events": user_state.get("events", []) if isinstance(user_state.get("events"), list) else [],
+                "plans": user_state.get("plans", {}) if isinstance(user_state.get("plans"), dict) else {},
+                "reconciliation": user_state.get("reconciliation", {}),
+                "_user_id": user_id,
+            }
         return next(iter(payload["users"].values()), {}).get("plans", {}) if payload["users"] else {}
     return payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
 
