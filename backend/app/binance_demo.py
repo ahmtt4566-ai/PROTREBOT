@@ -1721,9 +1721,16 @@ def _plan_protection_ids(plan: dict[str, Any]) -> set[int] | None:
         return None
     protection_ids: set[int] = set()
     for raw_id in raw_ids:
-        try:
-            algo_id = int(raw_id)
-        except (TypeError, ValueError):
+        if isinstance(raw_id, bool):
+            return None
+        if isinstance(raw_id, int):
+            algo_id = raw_id
+        elif isinstance(raw_id, str) and raw_id.strip():
+            try:
+                algo_id = int(raw_id.strip())
+            except ValueError:
+                return None
+        else:
             return None
         if algo_id <= 0:
             return None
@@ -1888,6 +1895,175 @@ def classify_demo_ownership(
     return {
         "position_plan": position_rows,
         "automation": automation_rows,
+    }
+
+
+def _ownership_identity_value(value: Any) -> str | None:
+    identity = str(value or "").strip()
+    return identity or None
+
+
+def build_demo_ownership_diagnostic(
+    account_snapshot: dict[str, Any],
+    demo_state: dict[str, Any],
+    v21_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a deterministic, read-only ownership diagnostic from snapshots."""
+    classification = classify_demo_ownership(account_snapshot, demo_state, v21_state)
+    positions = [
+        position for position in account_snapshot.get("positions", [])
+        if isinstance(position, dict) and str(position.get("symbol") or "").strip()
+    ]
+    plans = demo_state.get("plans", {})
+    plans = plans if isinstance(plans, dict) else {}
+    active_plans = {
+        str(plan.get("id") or plan_key).strip(): plan
+        for plan_key, plan in plans.items()
+        if isinstance(plan, dict) and _plan_is_active(plan)
+    }
+    position_rows = []
+    for row in classification["position_plan"]:
+        position_index = row.get("position_index")
+        position = positions[position_index] if isinstance(position_index, int) and position_index < len(positions) else None
+        plan = active_plans.get(str(row.get("plan_id") or ""))
+        plan_identity = next(
+            (_ownership_identity_value(plan.get(key)) for key in ("exchange_position_id", "position_identity", "position_id") if plan and _ownership_identity_value(plan.get(key))),
+            None,
+        )
+        exchange_identity = next(
+            (_ownership_identity_value(position.get(key)) for key in ("exchange_position_id", "position_identity", "position_id") if position and _ownership_identity_value(position.get(key))),
+            None,
+        )
+        if plan_identity and exchange_identity:
+            identity_evidence = "EXPLICIT_EQUAL" if plan_identity == exchange_identity else "MISMATCH"
+        else:
+            identity_evidence = "MISSING"
+        protection_ids = sorted(_plan_protection_ids(plan) or []) if plan else []
+        position_rows.append({
+            **row,
+            "identity": {
+                "plan_identity": plan_identity,
+                "exchange_identity": exchange_identity,
+                "matched": identity_evidence == "EXPLICIT_EQUAL",
+                "evidence": identity_evidence,
+            },
+            "protection": {
+                "status": row.get("protection_status", "UNKNOWN"),
+                "plan_protection_ids": protection_ids,
+                "matched_algo_ids": list(row.get("matched_algo_ids") or []),
+                "unmatched_plan_ids": list(row.get("unmatched_algo_ids") or []),
+                "unassigned_exchange_algo_ids": [],
+            },
+        })
+
+    raw_algo_orders = account_snapshot.get("open_algo_orders", [])
+    raw_algo_orders = raw_algo_orders if isinstance(raw_algo_orders, list) else []
+    exchange_algo_ids: set[int] = set()
+    malformed_algo_ids = False
+    for order in raw_algo_orders:
+        if not isinstance(order, dict):
+            malformed_algo_ids = True
+            continue
+        try:
+            algo_id = int(order.get("algo_id"))
+        except (TypeError, ValueError):
+            malformed_algo_ids = True
+            continue
+        if algo_id <= 0:
+            malformed_algo_ids = True
+            continue
+        exchange_algo_ids.add(algo_id)
+    assigned_algo_ids = {
+        algo_id
+        for plan in active_plans.values()
+        for algo_id in (_plan_protection_ids(plan) or set())
+    }
+    unassigned_algo_ids = sorted(exchange_algo_ids - assigned_algo_ids)
+    for row in position_rows:
+        row["protection"]["unassigned_exchange_algo_ids"] = unassigned_algo_ids
+
+    automation_rows = []
+    trades = (v21_state or {}).get("automation_trades", [])
+    trades = trades if isinstance(trades, list) else []
+    classified_by_index = {row["trade_index"]: row for row in classification["automation"]}
+    terminal_statuses = {
+        "KAPANDI", "CLOSED", "İPTAL", "GÜVENLİK İÇİN KAPATILDI", "CANCELLED", "CANCELED",
+        "EXPIRED", "FINISHED", "REJECTED",
+    }
+    for index, trade in enumerate(trades):
+        if not isinstance(trade, dict):
+            continue
+        status = str(trade.get("status") or "").strip().upper()
+        if status in terminal_statuses:
+            automation_rows.append({
+                "classification": "TERMINAL_AUTOMATION_RECORD",
+                "trade_index": index,
+                "plan_id": str(trade.get("plan_id") or "").strip() or None,
+                "symbol": str(trade.get("symbol") or "").strip() or None,
+                "status": status or None,
+                "terminal": True,
+            })
+            continue
+        row = classified_by_index.get(index)
+        if row is not None:
+            automation_rows.append({**row, "status": status or None, "terminal": False})
+
+    identity_keys = ("exchange_position_id", "position_identity", "position_id")
+    identity_fields_available = bool(positions) and all(
+        any(_ownership_identity_value(position.get(key)) for key in identity_keys)
+        for position in positions
+    )
+    protection_unknown = account_snapshot.get("open_algo_orders_available") is not True or malformed_algo_ids
+    protection_unknown = protection_unknown or any(
+        row["protection"]["status"] == "UNKNOWN" for row in position_rows
+    )
+    position_counts = {
+        "exchange_only": sum(row["classification"] == "EXCHANGE_ONLY" for row in position_rows),
+        "plan_only": sum(row["classification"] == "PLAN_ONLY" for row in position_rows),
+        "matched": sum(row["classification"] == "PLAN_AND_EXCHANGE_MATCHED" for row in position_rows),
+        "protection_unknown": sum(row["classification"] == "PROTECTION_UNKNOWN" for row in position_rows),
+    }
+    automation_counts = {
+        "active": sum(not row["terminal"] for row in automation_rows),
+        "terminal": sum(row["terminal"] for row in automation_rows),
+        "stale": sum(row["classification"] == "STALE_AUTOMATION_RECORD" for row in automation_rows),
+        "associated": sum(row["classification"] == "ASSOCIATED_AUTOMATION_RECORD" for row in automation_rows),
+    }
+    uncertainty_reasons = []
+    if positions and not identity_fields_available:
+        uncertainty_reasons.append("Exchange positions do not expose explicit position identity.")
+    if account_snapshot.get("open_algo_orders_available") is not True:
+        uncertainty_reasons.append("Exchange algo-order snapshot is unavailable.")
+    if malformed_algo_ids:
+        uncertainty_reasons.append("At least one exchange algo order has a missing or invalid numeric algo ID.")
+    if unassigned_algo_ids:
+        uncertainty_reasons.append("Some exchange algo IDs are not assigned to an active Demo plan.")
+    if any(_plan_protection_ids(plan) is None for plan in active_plans.values()):
+        uncertainty_reasons.append("At least one active Demo plan has missing or malformed protection IDs.")
+
+    return {
+        "position_plan": {"rows": position_rows, "counts": position_counts},
+        "automation": {"rows": automation_rows, "counts": automation_counts},
+        "protection_evidence": {
+            "orders_seen": len(raw_algo_orders),
+            "orders_with_numeric_algo_id": len(exchange_algo_ids),
+            "orders_with_client_id": sum(bool(order.get("client_algo_id")) for order in raw_algo_orders if isinstance(order, dict)),
+            "assigned_algo_ids": sorted(assigned_algo_ids),
+            "unassigned_algo_ids": unassigned_algo_ids,
+            "unknown": protection_unknown,
+        },
+        "aggregate_counts": {
+            "exchange_positions": len(positions),
+            "active_demo_plans": len(active_plans),
+            "open_algo_orders": len(raw_algo_orders),
+            "automation_trades": len(trades),
+        },
+        "evidence": {
+            "identity_fields_available": identity_fields_available,
+            "protection_snapshot_available": account_snapshot.get("open_algo_orders_available") is True,
+            "ownership_complete": bool(position_rows) and not uncertainty_reasons,
+            "uncertainty_reasons": uncertainty_reasons,
+        },
     }
 
 
@@ -2426,6 +2602,27 @@ async def demo_account(request: Request) -> dict[str, Any]:
             return empty_result
         trace_log("account.failed", request_id, duration_ms=round((time.monotonic() - started) * 1000, 2), success=False, error_type=type(exc).__name__, error_message=safe_trace_error(exc))
         raise safe_exchange_error(exc) from exc
+
+
+@router.get("/ownership-diagnostic")
+async def demo_ownership_diagnostic(request: Request) -> dict[str, Any]:
+    member = getattr(getattr(request, "state", None), "member", None)
+    user_id = str(member.get("id") or "").strip() if isinstance(member, dict) else ""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authenticated member context required.")
+    demo_state = state_for(request)
+    if str(demo_state.get("_user_id") or "").strip() != user_id:
+        raise HTTPException(status_code=403, detail="Demo ownership context mismatch.")
+    from .v21_demo import state_for as v21_state_for
+
+    v21_state = v21_state_for(request)
+    if str(v21_state.get("_user_id") or "").strip() != user_id:
+        raise HTTPException(status_code=403, detail="V21 ownership context mismatch.")
+    try:
+        snapshot = await account_snapshot(client_for(request), request_correlation_id(request))
+    except BinanceDemoError as exc:
+        raise safe_exchange_error(exc) from exc
+    return build_demo_ownership_diagnostic(snapshot, demo_state, v21_state)
 
 
 @router.post("/arm")
