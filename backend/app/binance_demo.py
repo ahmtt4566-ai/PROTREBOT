@@ -42,6 +42,7 @@ MAX_NOTIONAL_USDT = Decimal("200")
 MAX_OPEN_POSITIONS = 3
 ARM_SECONDS = 10 * 60
 CLIENT_PREFIX = "PTB_"
+PLAN_RECONCILIATION_GRACE_SECONDS = 15
 _PROTECTION_INSTALL_LOCKS: dict[str, asyncio.Lock] = {}
 logger = logging.getLogger(__name__)
 DEMO_SNAPSHOT_LOCK = asyncio.Lock()
@@ -900,6 +901,8 @@ def reconcile_demo_plans(state: dict[str, Any], snapshot: dict[str, Any]) -> dic
         internal_active += 1
         actual = actual_by_symbol.get(str(plan.get("symbol") or ""))
         if actual is None:
+            if _within_plan_reconciliation_grace(plan):
+                continue
             plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "tp3_status": "FILLED", "closed_at": plan.get("closed_at") or utc_now(), "last_reconciled": utc_now()})
             if "_sync_v21_automation_trade" in globals():
                 _sync_v21_automation_trade(state, plan)
@@ -921,6 +924,18 @@ def reconcile_demo_plans(state: dict[str, Any], snapshot: dict[str, Any]) -> dic
         "last_sync": utc_now(),
     }
     return {"changed": changed, **state["reconciliation"]}
+
+
+def _within_plan_reconciliation_grace(plan: dict[str, Any]) -> bool:
+    protected_at = plan.get("protected_at")
+    if not protected_at:
+        return False
+    try:
+        protected_epoch = datetime.fromisoformat(str(protected_at).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return False
+    age = time.time() - protected_epoch
+    return 0 <= age < PLAN_RECONCILIATION_GRACE_SECONDS
 
 
 def safe_exchange_error(exc: BinanceDemoError) -> HTTPException:
@@ -1751,6 +1766,7 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
     plan["protection_ids"] = protection_ids
     plan["monitoring_targets"] = monitoring_targets
     plan["status"] = "OPEN"
+    plan["position_status"] = "OPEN"
     plan["protection_status"] = "KORUMA AKTİF" if not monitoring_targets else "STOP AKTİF · HEDEF İZLEME"
     plan["protected_at"] = utc_now()
     add_event(state, "KORUMA KURULDU", f"{symbol} Stop aktif; hedef planı Demo hesabına işlendi.")
@@ -1846,6 +1862,8 @@ async def protection_loop(application: Any) -> None:
                         await install_protection(client, state, plan)
                         changed = True
                     elif active_position is None and plan.get("position_status") == "OPEN":
+                        if _within_plan_reconciliation_grace(plan):
+                            continue
                         await cleanup_closed_plan(client, plan)
                         plan["status"] = "KAPANDI"
                         plan["position_status"] = "CLOSED"

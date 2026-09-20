@@ -4,7 +4,9 @@ import hashlib
 import hmac
 import json
 import re
+import time
 import unittest
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from pathlib import Path
 from urllib.parse import urlencode
@@ -28,7 +30,7 @@ def load_core():
         "BinanceDemoError", "signed_query", "decimal_text", "floor_step", "round_tick", "normalize_symbol",
         "response_rows", "validate_levels", "verify_leverage_response", "verify_symbol_configuration",
         "set_isolated_margin", "apply_verified_leverage", "position_mode", "ensure_one_way_position_mode",
-        "update_position_lifecycle", "position_amount", "position_risk_summary", "reconcile_demo_plans", "mark_cancelled_protection", "duplicate_entry_reason",
+        "update_position_lifecycle", "position_amount", "position_risk_summary", "reconcile_demo_plans", "_within_plan_reconciliation_grace", "mark_cancelled_protection", "duplicate_entry_reason",
         "close_symbol_position",
     }
     nodes = [node for node in TREE.body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in wanted]
@@ -40,6 +42,10 @@ def load_core():
         "Decimal": Decimal,
         "ROUND_DOWN": ROUND_DOWN,
         "ROUND_HALF_UP": ROUND_HALF_UP,
+        "datetime": datetime,
+        "timezone": timezone,
+        "time": time,
+        "PLAN_RECONCILIATION_GRACE_SECONDS": 15,
         "DEMO_REST_BASE": "https://demo-fapi.binance.com",
         "re": re,
         "Any": object,

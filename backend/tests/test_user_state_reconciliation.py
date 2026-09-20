@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -68,6 +69,81 @@ class UserStateReconciliationTests(unittest.TestCase):
 
         self.assertIs(found, plan)
         self.assertEqual(found["user_id"], "user-a")
+
+    def test_recently_protected_plan_survives_temporary_empty_snapshot(self):
+        plan = self.plan()
+        plan["protected_at"] = datetime.now(timezone.utc).isoformat()
+        state = {"plans": {plan["id"]: plan}}
+
+        result = binance_demo.reconcile_demo_plans(state, {"positions": []})
+
+        self.assertEqual(result["internal_active_plans"], 1)
+        self.assertEqual(plan["status"], "OPEN")
+        self.assertEqual(plan["position_status"], "OPEN")
+
+    def test_old_protected_plan_is_closed_by_empty_snapshot(self):
+        plan = self.plan()
+        plan["protected_at"] = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        state = {"plans": {plan["id"]: plan}}
+
+        result = binance_demo.reconcile_demo_plans(state, {"positions": []})
+
+        self.assertEqual(result["internal_active_plans"], 0)
+        self.assertEqual(plan["status"], "KAPANDI")
+        self.assertEqual(plan["position_status"], "CLOSED")
+        self.assertEqual(plan["remaining_quantity"], "0")
+
+    async def _run_protection_loop_once(self, plan, position_rows):
+        state = self.user_demo_state("user-a", "session-a", plan)
+        self.application.state._binance_demo_user_state["user-a"] = state
+        client = SimpleNamespace(signed=AsyncMock(return_value=position_rows))
+        sleep_calls = 0
+
+        async def one_cycle(_delay):
+            nonlocal sleep_calls
+            sleep_calls += 1
+            if sleep_calls > 1:
+                raise asyncio.CancelledError
+
+        with patch.object(binance_demo, "client_for_state", return_value=client), \
+                patch.object(binance_demo, "persist_runtime"):
+            with patch.object(binance_demo.asyncio, "sleep", side_effect=one_cycle):
+                with self.assertRaises(asyncio.CancelledError):
+                    await binance_demo.protection_loop(self.application)
+
+    def test_protection_loop_graces_recently_protected_empty_snapshot(self):
+        plan = self.plan()
+        plan["protected_at"] = datetime.now(timezone.utc).isoformat()
+
+        asyncio.run(self._run_protection_loop_once(plan, []))
+
+        self.assertEqual(plan["status"], "OPEN")
+        self.assertEqual(plan["position_status"], "OPEN")
+
+    def test_protection_loop_closes_expired_protected_empty_snapshot(self):
+        plan = self.plan()
+        plan["protected_at"] = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+
+        asyncio.run(self._run_protection_loop_once(plan, []))
+
+        self.assertEqual(plan["status"], "KAPANDI")
+        self.assertEqual(plan["position_status"], "CLOSED")
+
+    def test_protection_loop_closes_open_plan_without_protected_at(self):
+        plan = self.plan()
+
+        asyncio.run(self._run_protection_loop_once(plan, []))
+
+        self.assertEqual(plan["status"], "KAPANDI")
+        self.assertEqual(plan["position_status"], "CLOSED")
+
+    def test_protection_loop_keeps_plan_open_when_exchange_position_exists(self):
+        plan = self.plan()
+
+        asyncio.run(self._run_protection_loop_once(plan, [{"symbol": "BRUSDT", "positionAmt": "1"}]))
+
+        self.assertEqual(plan["status"], "OPEN")
+        self.assertEqual(plan["position_status"], "OPEN")
 
     def test_background_client_uses_matching_user_credentials_and_no_cross_user_fallback(self):
         state_a = self.user_demo_state("user-a", "session-a", self.plan("user-a"))

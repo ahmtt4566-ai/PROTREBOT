@@ -55,6 +55,25 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, 1)
         self.assertEqual(plan["protection_ids"], [101, 102, 103, 104])
 
+    async def test_protection_completion_marks_plan_open(self):
+        plan = self.plan()
+        state = {"plans": {plan["id"]: plan}}
+
+        class FakeClient:
+            async def signed(self, method, path, params=None):
+                if path == "/fapi/v3/positionRisk":
+                    return [{"symbol": "BTCUSDT", "positionAmt": "1"}]
+                raise AssertionError((method, path, params))
+
+        with patch.object(binance_demo, "post_algo", new=AsyncMock(side_effect=[
+            {"algoId": 101}, {"algoId": 102}, {"algoId": 103}, {"algoId": 104},
+        ])):
+            await binance_demo.install_protection(FakeClient(), state, plan)
+
+        self.assertEqual(plan["status"], "OPEN")
+        self.assertEqual(plan["position_status"], "OPEN")
+        self.assertEqual(plan["protection_ids"], [101, 102, 103, 104])
+
     async def test_different_plans_install_independently(self):
         first_plan = self.plan("plan-a", "BTCUSDT")
         second_plan = self.plan("plan-b", "ETHUSDT")
