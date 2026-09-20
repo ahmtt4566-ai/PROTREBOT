@@ -248,7 +248,7 @@ class V22CommercialTests(unittest.TestCase):
         }
 
         request_b = SimpleNamespace(app=app, state=SimpleNamespace(member=user_b))
-        with patch("app.binance_demo.client_for", return_value=SimpleNamespace()), patch("app.binance_demo.close_symbol_position", new=AsyncMock(return_value={"orderId": 999})), patch("app.binance_demo.reduce_symbol_position", new=AsyncMock(return_value={"orderId": 998})):
+        with patch("app.binance_demo.client_for", return_value=SimpleNamespace()), patch("app.binance_demo.close_symbol_position", new=AsyncMock(return_value=None)), patch("app.binance_demo.reduce_symbol_position", new=AsyncMock(return_value={"orderId": 998})):
             with self.assertRaises(HTTPException) as close_ctx:
                 asyncio.run(demo_close_position(request_b, ClosePositionRequest(symbol="BTCUSDT", confirmation="DEMO KAPAT")))
             self.assertEqual(close_ctx.exception.status_code, 404)

@@ -2162,8 +2162,6 @@ async def demo_close_position(request: Request, body: ClosePositionRequest) -> d
     try:
         symbol = normalize_symbol(body.symbol)
         state = state_for(request)
-        if not _has_user_plan_access(state, symbol=symbol, request=request):
-            raise HTTPException(404, "Bu pozisyon sizde değil veya bulunamadı")
         client = client_for(request)
         result = await close_symbol_position(client, symbol, body.position_side)
         if result is None:
