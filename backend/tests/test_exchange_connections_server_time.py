@@ -2,6 +2,8 @@ import asyncio
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -10,6 +12,7 @@ BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
 from app import exchange_connections
+from app.exchange_connections import SaveCredentialsRequest, exchange_connection_save, exchange_connection_test
 
 
 class FakeBinanceHttp:
@@ -51,6 +54,7 @@ class FakeBinanceHttp:
 class ExchangeConnectionServerTimeTests(unittest.TestCase):
     def setUp(self):
         exchange_connections._SERVER_TIME_CACHE.clear()
+        exchange_connections._SERVER_TIME_REJECTION_CACHE.clear()
         exchange_connections._SERVER_TIME_LOCKS.clear()
 
     def test_server_time_200_continues_to_read_only_account_checks(self):
@@ -92,6 +96,23 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
             asyncio.run(exchange_connections._server_time_offset(http, "LIVE"))
         self.assertEqual(http.paths, ["/fapi/v1/time"])
 
+    def test_http_418_is_negative_cached_for_retry_window(self):
+        http = FakeBinanceHttp(time_status=418, time_headers={"Retry-After": "5"})
+
+        async def run():
+            errors = []
+            for _ in range(2):
+                try:
+                    await exchange_connections._server_time_offset(http, "LIVE")
+                except exchange_connections.BinanceServerTimeRejected as exc:
+                    errors.append(exc)
+            return errors
+
+        errors = asyncio.run(run())
+        self.assertEqual(http.paths, ["/fapi/v1/time"])
+        self.assertEqual(errors[0].retry_after, 5)
+        self.assertEqual(str(errors[0]), str(errors[1]))
+
     def test_malformed_retry_after_is_safe(self):
         http = FakeBinanceHttp(time_status=418, time_headers={"Retry-After": "999999999999999999999999999"})
         with self.assertRaisesRegex(exchange_connections.VaultError, "wait briefly"):
@@ -111,6 +132,45 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
             asyncio.run(exchange_connections.test_binance_credentials(http, "LIVE", api_key, secret_key))
         self.assertNotIn(api_key, str(context.exception))
         self.assertNotIn(secret_key, str(context.exception))
+
+    def _request(self):
+        pool = AsyncMock()
+        pool.fetch.return_value = []
+        application = SimpleNamespace(
+            state=SimpleNamespace(
+                db_pool=pool,
+                http=AsyncMock(),
+                exchange_vault={"ready": True, "storage": "POSTGRESQL + FERNET", "reason": None, "loaded_at": "now", "pool_id": id(pool)},
+            )
+        )
+        request = SimpleNamespace(
+            app=application,
+            headers={"authorization": "Bearer server-time-test-token"},
+            state=SimpleNamespace(member={"id": "owner-server-time", "role": "OWNER"}),
+        )
+        return request
+
+    def test_test_endpoint_maps_server_time_418_to_controlled_rate_limit(self):
+        request = self._request()
+        rejection = exchange_connections.BinanceServerTimeRejected("Binance server-time temporarily rejected the request (HTTP 418). Please wait 5 seconds before retrying.", retry_after=5)
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(side_effect=rejection)):
+            with self.assertRaises(exchange_connections.HTTPException) as context:
+                asyncio.run(exchange_connection_test(request, exchange_connections.TestCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe")))
+        self.assertEqual(context.exception.status_code, 429)
+        self.assertEqual(context.exception.headers["Retry-After"], "5")
+        self.assertIn("HTTP 418", str(context.exception.detail))
+        self.assertNotIn("api-key-safe", str(context.exception.detail))
+        self.assertNotIn("secret-safe", str(context.exception.detail))
+
+    def test_save_endpoint_maps_server_time_418_before_persisting(self):
+        request = self._request()
+        rejection = exchange_connections.BinanceServerTimeRejected("Binance server-time temporarily rejected the request (HTTP 418). Please wait briefly before retrying.", retry_after=10)
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(side_effect=rejection)):
+            with self.assertRaises(exchange_connections.HTTPException) as context:
+                asyncio.run(exchange_connection_save(request, SaveCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe", confirmation="CANLI KASAYA KAYDET")))
+        self.assertEqual(context.exception.status_code, 429)
+        self.assertEqual(context.exception.headers["Retry-After"], "10")
+        self.assertEqual(request.app.state.db_pool.execute.await_count, 2)
 
 
 if __name__ == "__main__":

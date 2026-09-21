@@ -54,11 +54,18 @@ _SESSION_CACHE: dict[tuple[str, str], tuple[str, str]] = {}
 _SESSION_META: dict[tuple[str, str], dict[str, Any]] = {}
 SERVER_TIME_CACHE_TTL_SECONDS = 10.0
 _SERVER_TIME_CACHE: dict[str, tuple[float, int]] = {}
+_SERVER_TIME_REJECTION_CACHE: dict[str, tuple[float, str, int]] = {}
 _SERVER_TIME_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 class VaultError(RuntimeError):
     pass
+
+
+class BinanceServerTimeRejected(VaultError):
+    def __init__(self, message: str, *, retry_after: int):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class SaveCredentialsRequest(BaseModel):
@@ -400,13 +407,16 @@ def _server_time_error(response: httpx.Response) -> VaultError:
     if response.status_code == 418:
         retry_after = response.headers.get("Retry-After", "").strip()
         if retry_after.isdigit() and 0 <= int(retry_after) <= 60:
-            return VaultError(
+            retry_seconds = max(1, int(retry_after))
+            return BinanceServerTimeRejected(
                 "Binance server-time temporarily rejected the request (HTTP 418). "
-                f"Please wait {int(retry_after)} seconds before retrying."
+                f"Please wait {retry_seconds} seconds before retrying.",
+                retry_after=retry_seconds,
             )
-        return VaultError(
+        return BinanceServerTimeRejected(
             "Binance server-time temporarily rejected the request (HTTP 418). "
-            "Please wait briefly before retrying."
+            "Please wait briefly before retrying.",
+            retry_after=int(SERVER_TIME_CACHE_TTL_SECONDS),
         )
     return VaultError(f"Binance saat servisi HTTP {response.status_code} döndürdü.")
 
@@ -417,6 +427,9 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
     cached = _SERVER_TIME_CACHE.get(normalized)
     if cached and cached[0] > now:
         return cached[1]
+    rejected = _SERVER_TIME_REJECTION_CACHE.get(normalized)
+    if rejected and rejected[0] > now:
+        raise BinanceServerTimeRejected(rejected[1], retry_after=rejected[2])
 
     lock = _SERVER_TIME_LOCKS.setdefault(normalized, asyncio.Lock())
     async with lock:
@@ -424,6 +437,9 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
         cached = _SERVER_TIME_CACHE.get(normalized)
         if cached and cached[0] > now:
             return cached[1]
+        rejected = _SERVER_TIME_REJECTION_CACHE.get(normalized)
+        if rejected and rejected[0] > now:
+            raise BinanceServerTimeRejected(rejected[1], retry_after=rejected[2])
         host = HOSTS[normalized]
         before = int(time.time() * 1000)
         try:
@@ -436,7 +452,14 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
         except httpx.NetworkError as exc:
             raise VaultError("Binance saat servisine ağ bağlantısı kurulamadı.") from exc
         except httpx.HTTPStatusError as exc:
-            raise _server_time_error(exc.response) from exc
+            error = _server_time_error(exc.response)
+            if isinstance(error, BinanceServerTimeRejected):
+                _SERVER_TIME_REJECTION_CACHE[normalized] = (
+                    time.monotonic() + error.retry_after,
+                    str(error),
+                    error.retry_after,
+                )
+            raise error from exc
         except httpx.HTTPError as exc:
             raise VaultError("Binance saat servisi HTTP isteği başarısız oldu.") from exc
 
@@ -483,6 +506,12 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
         "tested_at": now_iso(),
         "orders_created": False,
     }
+
+
+def _exchange_test_http_exception(exc: VaultError) -> HTTPException:
+    if isinstance(exc, BinanceServerTimeRejected):
+        return HTTPException(429, str(exc), headers={"Retry-After": str(exc.retry_after)})
+    return HTTPException(502, str(exc))
 
 
 def _public_connection(mode: str) -> dict[str, Any]:
@@ -579,7 +608,7 @@ async def exchange_connection_test(request: Request, body: TestCredentialsReques
     try:
         account = await test_binance_credentials(request.app.state.http, mode, api_key, secret_key)
     except VaultError as exc:
-        raise HTTPException(502, str(exc)) from exc
+        raise _exchange_test_http_exception(exc) from exc
     return {"ok": True, "message": "Bağlantı ve imza doğrulandı; hiçbir emir oluşturulmadı.", "account": account}
 
 
@@ -598,6 +627,8 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
         account = await test_binance_credentials(request.app.state.http, mode, api_key, secret_key)
         encrypted = encrypt_credentials(api_key, secret_key, mode=mode)
     except VaultError as exc:
+        if isinstance(exc, BinanceServerTimeRejected):
+            raise _exchange_test_http_exception(exc) from exc
         raise HTTPException(422 if "kısa" in str(exc) or "boşluk" in str(exc) else 502, str(exc)) from exc
     fingerprint = key_fingerprint(api_key)
     sid = session_id(request)
@@ -655,7 +686,7 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
         )
         _SESSION_META[(session_id(request), mode)].update({"active": False, "last_test_ok": False, "last_test_at": now_iso(), "last_error": str(exc)[:240]})
         _lock_runtime(request.app, mode)
-        raise HTTPException(502, str(exc)) from exc
+        raise _exchange_test_http_exception(exc) from exc
     sid = session_id(request)
     await pool.execute(
         "UPDATE protrebot_exchange_session_vault SET active = TRUE, last_test_ok = TRUE, last_test_at = NOW(), last_error = NULL, account_summary = $3::jsonb, updated_at = NOW() WHERE session_id = $1 AND mode = $2",
