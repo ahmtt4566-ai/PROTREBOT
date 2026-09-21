@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, KeyRound, Lock, Save, Send, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
+import LiveTradingPanel from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 
 type TradeSide = 'LONG' | 'SHORT'
@@ -42,8 +43,6 @@ type AccountOrder = { symbol?: string; side?: string; type?: string; price?: num
 type AccountSnapshot = { wallet_balance?: number; available_balance?: number; margin_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; plans?: AccountPlan[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number; max_margin_usdt?: number } }
 type PerformanceSnapshot = { total_trades: number; wins: number; losses: number; win_rate: number; total_profit: number; total_loss: number; net_profit: number; average_trade: number; best_trade: number; worst_trade: number; profit_factor: number | null; average_win: number | null; average_loss: number | null; losing_streak: number; max_drawdown: number; history_quality: string }
 type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[]; analysis: Analysis | null; mtf: MtfAnalysis[]; account: AccountSnapshot | null; currentPrice: number | null; priceUpdatedAt: string | null; marketUpdatedAt: string | null; accountUpdatedAt: string | null; marketError: string; accountError: string }
-type LiveConnection = { configured: boolean; active: boolean; fingerprint: string | null; last_test_ok: boolean; last_test_at: string | null; last_error: string | null; storage: string }
-type LiveVaultStatus = { vault: { ready: boolean; reason: string | null }; connections: { LIVE: LiveConnection } }
 type AccountSyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'DATA_UNAVAILABLE'
 type TradeHistorySyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'UNAVAILABLE'
 type CloseLifecycleState = 'IDLE' | 'CLOSING' | 'CLOSED' | 'CLOSE_FAILED' | 'HISTORY_SYNC_FAILED' | 'ACCOUNT_SYNC_FAILED' | 'SYNC_FAILED'
@@ -129,10 +128,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [lastAccountSyncAt, setLastAccountSyncAt] = useState<string | null>(null)
   const [lastHistorySyncAt, setLastHistorySyncAt] = useState<string | null>(null)
   const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null)
-  const [liveVault, setLiveVault] = useState<LiveVaultStatus | null>(null)
-  const [liveCredentials, setLiveCredentials] = useState({ apiKey: '', secretKey: '' })
-  const [liveBusy, setLiveBusy] = useState('')
-  const [liveNotice, setLiveNotice] = useState('')
   const candles = snapshot?.candles ?? []
   const analysis = snapshot?.analysis ?? null
   const mtfAnalyses = snapshot?.mtf ?? []
@@ -460,63 +455,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     } finally {
       setPositionActionBusy(false)
     }
-  }
-
-  const refreshLiveVault = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/exchange-connections/status`)
-      if (response.ok) setLiveVault(await response.json() as LiveVaultStatus)
-    } catch {
-      setLiveVault(null)
-    }
-  }
-
-  useEffect(() => { void refreshLiveVault() }, [])
-
-  const verifyLiveCredentials = async () => {
-    if (!liveCredentials.apiKey.trim() || !liveCredentials.secretKey.trim()) { setLiveNotice('Live API Key ve API Secret birlikte girilmelidir.'); return }
-    setLiveBusy('verify')
-    try {
-      const response = await fetch(`${API_BASE}/exchange-connections/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'LIVE', ['api' + '_key']: liveCredentials.apiKey, ['secret' + '_key']: liveCredentials.secretKey }) })
-      const payload = await response.json().catch(() => null) as { detail?: unknown } | null
-      if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Live bağlantı doğrulanamadı.')
-      setLiveNotice('Live bağlantı ve imza doğrulandı; hiçbir emir oluşturulmadı.')
-      await refreshLiveVault()
-    } catch (error) {
-      setLiveNotice(error instanceof Error ? error.message : 'Live bağlantı doğrulanamadı.')
-    } finally { setLiveBusy('') }
-  }
-
-  const saveLiveCredentials = async () => {
-    if (!liveCredentials.apiKey.trim() || !liveCredentials.secretKey.trim()) { setLiveNotice('Live API Key ve API Secret birlikte girilmelidir.'); return }
-    setLiveBusy('save')
-    try {
-      const response = await fetch(`${API_BASE}/exchange-connections/save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'LIVE', ['api' + '_key']: liveCredentials.apiKey, ['secret' + '_key']: liveCredentials.secretKey, confirmation: 'CANLI KASAYA KAYDET' }) })
-      const payload = await response.json().catch(() => null) as { detail?: unknown; message?: string } | null
-      if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Live credentials kaydedilemedi.')
-      setLiveCredentials({ apiKey: '', secretKey: '' })
-      setLiveNotice(payload?.message || 'Live credentials şifreli kasaya kaydedildi ve doğrulandı.')
-      await refreshLiveVault()
-    } catch (error) {
-      setLiveNotice(error instanceof Error ? error.message : 'Live credentials kaydedilemedi.')
-    } finally { setLiveBusy('') }
-  }
-
-  const submitLiveOrder = async () => {
-    if (!liveVault?.connections.LIVE.configured || !liveVault.connections.LIVE.active || !liveVault.connections.LIVE.last_test_ok) {
-      setLiveNotice('Live trading için API credentials gerekli ve bağlantı doğrulanmış olmalı.')
-      return
-    }
-    if (window.prompt('Bu işlem GERÇEK PARA kullanabilir. Göndermek için aynen yazın: CANLI EMİR GÖNDER') !== 'CANLI EMİR GÖNDER') return
-    setLiveBusy('order')
-    try {
-      const response = await fetch(`${API_BASE}${routeSegment('v25')}${routeSegment('order')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: draft.market, direction: draft.side, order_type: 'MARKET', margin_usdt: draft.margin, leverage: draft.leverage, limit_price: null, stop_loss: draft.stopLoss, tp1: draft.tp1, tp2: draft.tp2, tp3: draft.tp3, intent_id: `master-live-${Date.now()}`, confirmation: 'CANLI EMİR GÖNDER' }) })
-      const payload = await response.json().catch(() => null) as { detail?: unknown } | null
-      if (!response.ok) throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Canlı emir gönderilmedi.')
-      setLiveNotice('Canlı emir mevcut güvenlik kapılarından geçirilerek gönderildi.')
-    } catch (error) {
-      setLiveNotice(error instanceof Error ? error.message : 'Canlı emir gönderilmedi.')
-    } finally { setLiveBusy('') }
   }
 
   const fillFromCurrentAnalysis = async () => {
@@ -886,17 +824,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
                 {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
                 <button type="button" className="primaryOrderButton" onClick={() => { const validationError = validateOrderDraft(); setDemoOrderError(validationError); setDemoConfirmationChecked(false); setDemoConfirmationOpen(true) }} disabled={demoOrderBusy}>DEMO ORDER</button>
-                <section className="masterTradeLiveControls" aria-label="Master Trade live trading">
-                  <div><KeyRound /><span><b>LIVE TRADING</b><small>{liveVault?.connections.LIVE.configured ? `${liveVault.connections.LIVE.storage} · ${liveVault.connections.LIVE.last_test_ok ? 'VERIFIED' : 'VERIFY REQUIRED'}` : 'API credentials gerekli'}</small></span></div>
-                  <label><span>Live API Key</span><input type="password" autoComplete="new-password" value={liveCredentials.apiKey} onChange={event => setLiveCredentials(current => ({ ...current, apiKey: event.target.value }))} placeholder={liveVault?.connections.LIVE.configured ? 'Kayıtlı anahtar mevcut' : 'Live API Key'} /></label>
-                  <label><span>Live API Secret</span><input type="password" autoComplete="new-password" value={liveCredentials.secretKey} onChange={event => setLiveCredentials(current => ({ ...current, secretKey: event.target.value }))} placeholder={liveVault?.connections.LIVE.configured ? 'Kayıtlı secret görüntülenmez' : 'Live API Secret'} /></label>
-                  <div className="masterTradeLiveActions"><button type="button" onClick={() => void verifyLiveCredentials()} disabled={!!liveBusy || !liveVault?.vault.ready}><Activity /> VERIFY LIVE CONNECTION</button><button type="button" onClick={() => void saveLiveCredentials()} disabled={!!liveBusy || !liveVault?.vault.ready}><Save /> SAVE SECURELY</button><button type="button" onClick={() => void submitLiveOrder()} disabled={!!liveBusy || !liveVault?.connections.LIVE.configured || !liveVault.connections.LIVE.active || !liveVault.connections.LIVE.last_test_ok}><Send /> LIVE ORDER</button></div>
-                  {liveNotice && <small className="masterTradeLiveNotice" role="status">{liveNotice}</small>}
-                </section>
               </div>
             </div>
           </aside>
         </div>
+
+        <LiveTradingPanel active symbol={draft.market} analysis={analysis} />
 
         <div className="masterTradeDataGrid">
           <section className="masterTradePanel riskMonitorPanel">
