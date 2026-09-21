@@ -38,6 +38,7 @@ from .binance_demo import (
     DemoOrderRequest,
     account_snapshot,
     armed,
+    can_mutate_lifecycle,
     credentials_configured,
     close_symbol_position,
     decimal_text,
@@ -55,8 +56,11 @@ from .binance_demo import (
     safe_exchange_error,
     state_for as demo_state_for,
     symbol_rules,
+    _protection_classification,
+    _single_plan_algo_id,
     _owned_protection_orders,
     _plan_protection_ids,
+    _validate_new_protection_identity,
     validate_entry_risk,
 )
 from .local_storage import DATA_DIR, migrate_legacy_files
@@ -1348,19 +1352,26 @@ async def ensure_stop_protection(application: Any, snapshot: dict[str, Any], *, 
     demo_state = demo_state or application.state.binance_demo
     client = client or client_for_state(application, demo_state)
     changed = False
+    active_plans = [
+        candidate for candidate in demo_state.get("plans", {}).values()
+        if isinstance(candidate, dict)
+    ]
     for position in snapshot.get("positions", []):
         symbol = str(position.get("symbol"))
         plan = active_plan(application, symbol, demo_state)
-        if not plan:
+        if not plan or not can_mutate_lifecycle(plan):
             continue
-        owned_stops = [
-            order for order in _owned_protection_orders(plan, snapshot)
-            if str(order.get("type", "")).upper() == "STOP_MARKET"
-        ]
-        if owned_stops:
+        stop_algo_id = _single_plan_algo_id(plan, "stop_algo_id")
+        protection_state, _matched_ids, _missing_ids = _protection_classification(
+            plan,
+            snapshot,
+            required_ids={stop_algo_id} if stop_algo_id is not None else set(),
+            plans=active_plans,
+        )
+        if protection_state == "MATCHED":
             continue
-        if _plan_protection_ids(plan) is None:
-            plan["protection_ids"] = []
+        if protection_state == "UNKNOWN":
+            continue
         params = {
             "algoType": "CONDITIONAL", "symbol": symbol,
             "side": "SELL" if position.get("direction") == "LONG" else "BUY",
@@ -1389,11 +1400,23 @@ async def ensure_stop_protection(application: Any, snapshot: dict[str, Any], *, 
                 plan["last_error"] = f"Stop onarımı: {exc}; güvenli kapatma: {close_exc}"
             changed = True
             continue
-        if result.get("algoId"):
-            plan["stop_algo_id"] = int(result["algoId"])
-            plan.setdefault("protection_ids", []).append(int(result["algoId"]))
+        new_id = _validate_new_protection_identity(
+            plan,
+            result,
+            active_plans,
+            expected_type="STOP_MARKET",
+            expected_side="SELL" if position.get("direction") == "LONG" else "BUY",
+        )
+        if new_id is None:
+            continue
+        current_ids = set() if "protection_ids" not in plan else _plan_protection_ids(plan)
+        if current_ids is None:
+            continue
+        if stop_algo_id is not None and stop_algo_id in current_ids:
+            plan["protection_ids"] = [new_id if algo_id == stop_algo_id else algo_id for algo_id in current_ids]
         else:
-            raise BinanceDemoError("Binance Demo Stop onarım kimliği doğrulanamadı.", http_status=409)
+            plan["protection_ids"] = [*current_ids, new_id]
+        plan["stop_algo_id"] = new_id
         plan["status"] = "KORUMA ONARILDI"
         state["protection_repairs"] += 1
         record_event(state, "PROTECTION_REPAIRED", f"{symbol} eksik Stop koruması Demo hesabında yeniden kuruldu.", symbol=symbol, source="RISK_ENGINE")
@@ -1413,10 +1436,14 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
         return False
     client = client or client_for_state(application, demo_state)
     changed = False
+    active_plans = [
+        candidate for candidate in demo_state.get("plans", {}).values()
+        if isinstance(candidate, dict)
+    ]
     for position in snapshot.get("positions", []):
         symbol = str(position.get("symbol"))
         plan = active_plan(application, symbol, demo_state)
-        if not plan or time.time() - float(plan.get("last_dynamic_update_epoch", 0)) < 30:
+        if not plan or not can_mutate_lifecycle(plan) or time.time() - float(plan.get("last_dynamic_update_epoch", 0)) < 30:
             continue
         entry = float(position.get("entry_price") or 0)
         mark = float(position.get("mark_price") or 0)
@@ -1447,10 +1474,21 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
         valid_side = desired < mark if direction == "LONG" else desired > mark
         if not label or not improves or not valid_side:
             continue
-        active_stops = [
-            order for order in snapshot.get("open_algo_orders", [])
-            if str(order.get("symbol")) == symbol and str(order.get("type", "")).upper() == "STOP_MARKET"
-        ]
+        protection_state, _matched_ids, _missing_ids = _protection_classification(
+            plan,
+            snapshot,
+            required_ids={_single_plan_algo_id(plan, "stop_algo_id")}
+            if _single_plan_algo_id(plan, "stop_algo_id") is not None
+            else set(),
+            plans=active_plans,
+        )
+        if protection_state != "MATCHED":
+            continue
+        active_stops = _owned_protection_orders(
+            plan,
+            snapshot,
+            plans=active_plans,
+        )
         stop_levels = []
         for order in active_stops:
             raw_trigger = order.get("trigger_price") or order.get("triggerPrice")
@@ -1483,19 +1521,33 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
                 "triggerPrice": decimal_text(desired_decimal), "closePosition": "true",
                 "workingType": "MARK_PRICE", "priceProtect": "TRUE", "clientAlgoId": new_client_id("DYNAMICSL"),
             })
-            new_id = int(result.get("algoId", 0)) or None
             old_id = plan.get("stop_algo_id")
-            if new_id:
-                plan["stop_algo_id"] = new_id
-                if new_id not in plan.setdefault("protection_ids", []):
-                    plan["protection_ids"].append(new_id)
-            plan["stop_loss"] = decimal_text(desired_decimal)
-            plan["last_dynamic_update_epoch"] = time.time()
+            new_id = _validate_new_protection_identity(
+                plan,
+                result,
+                active_plans,
+                expected_type="STOP_MARKET",
+                expected_side="SELL" if direction == "LONG" else "BUY",
+            )
+            if new_id is None:
+                continue
+            current_ids = _plan_protection_ids(plan)
+            if current_ids is None:
+                continue
             if old_id and old_id != new_id:
                 try:
                     await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": symbol, "algoId": old_id})
-                except BinanceDemoError:
-                    pass
+                except BinanceDemoError as exc:
+                    plan["protection_ids"] = sorted({*current_ids, new_id})
+                    plan["protection_status"] = "CRITICAL / AMBIGUOUS"
+                    plan["last_error"] = f"Dynamic Stop eski koruması silinemedi: {exc}"
+                    raise BinanceDemoError("Dynamic Stop replacement ownership is ambiguous.", http_status=409) from exc
+            plan["stop_algo_id"] = new_id
+            plan["protection_ids"] = [new_id if algo_id == old_id else algo_id for algo_id in current_ids]
+            if new_id not in plan["protection_ids"]:
+                plan["protection_ids"].append(new_id)
+            plan["stop_loss"] = decimal_text(desired_decimal)
+            plan["last_dynamic_update_epoch"] = time.time()
         record_event(state, "DYNAMIC_STOP", f"{symbol} {label} Stop {decimal_text(desired_decimal)} seviyesine iyileştirildi.", symbol=symbol, price=desired, source="RISK_ENGINE")
         changed = True
     if changed:

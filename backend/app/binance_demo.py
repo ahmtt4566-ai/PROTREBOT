@@ -1685,9 +1685,17 @@ def inspect_protection_state(
     return result
 
 
-def mark_cancelled_protection(plans: dict[str, Any], symbol: str, algo_id: int) -> dict[str, Any] | None:
+def mark_cancelled_protection(
+    plans: dict[str, Any],
+    symbol: str,
+    algo_id: int,
+    *,
+    owner: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     for plan in plans.values():
-        if plan.get("symbol") != symbol or int(plan.get("stop_algo_id") or 0) != algo_id:
+        if owner is not None and plan is not owner:
+            continue
+        if not can_mutate_lifecycle(plan) or plan.get("symbol") != symbol or int(plan.get("stop_algo_id") or 0) != algo_id:
             continue
         plan["stop_protection_cancelled"] = True
         plan["protection_status"] = "KORUMA İPTAL"
@@ -1734,30 +1742,33 @@ def _plan_protection_ids(plan: dict[str, Any]) -> set[int] | None:
             return None
         if algo_id <= 0:
             return None
+        if algo_id in protection_ids:
+            return None
         protection_ids.add(algo_id)
     return protection_ids
 
 
-def _owned_protection_orders(plan: dict[str, Any], snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    protection_ids = _plan_protection_ids(plan)
-    if not protection_ids:
+def _owned_protection_orders(
+    plan: dict[str, Any],
+    snapshot: dict[str, Any],
+    *,
+    plans: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    stop_algo_id = _single_plan_algo_id(plan, "stop_algo_id")
+    if stop_algo_id is None:
         return []
-    try:
-        expected_symbol = normalize_symbol(str(plan.get("symbol") or ""))
-    except BinanceDemoError:
+    state, matched_ids, _missing_ids = _protection_classification(
+        plan,
+        snapshot,
+        required_ids={stop_algo_id},
+        plans=plans,
+    )
+    if state != "MATCHED" or stop_algo_id not in matched_ids:
         return []
-    owned: list[dict[str, Any]] = []
-    for order in snapshot.get("open_algo_orders", []):
-        if not isinstance(order, dict) or not _symbol_matches(order.get("symbol"), expected_symbol):
-            continue
-        raw_algo_id = order.get("algo_id", order.get("algoId"))
-        try:
-            algo_id = int(raw_algo_id)
-        except (TypeError, ValueError):
-            continue
-        if algo_id in protection_ids:
-            owned.append(order)
-    return owned
+    return [
+        order for order in snapshot.get("open_algo_orders", [])
+        if isinstance(order, dict) and _algo_id(order) == stop_algo_id
+    ]
 
 
 def _symbol_matches(value: Any, expected: str) -> bool:
@@ -1780,28 +1791,196 @@ def _direct_position_identity_match(plan: dict[str, Any], position: dict[str, An
     return False
 
 
+def _single_plan_algo_id(plan: dict[str, Any], field: str) -> int | None:
+    raw_id = plan.get(field)
+    if raw_id in (None, ""):
+        return None
+    if isinstance(raw_id, bool):
+        return None
+    try:
+        algo_id = int(raw_id)
+    except (TypeError, ValueError):
+        return None
+    return algo_id if algo_id > 0 else None
+
+
+def _protection_ownership_metadata_valid(plan: dict[str, Any]) -> bool:
+    protection_ids = _plan_protection_ids(plan) if "protection_ids" in plan else set()
+    if protection_ids is None:
+        return False
+    ownership_ids: list[int] = []
+    for field in ("stop_algo_id", "tp1_algo_id", "tp2_algo_id", "tp3_algo_id"):
+        if field not in plan or plan[field] in (None, ""):
+            continue
+        algo_id = _single_plan_algo_id(plan, field)
+        if algo_id is None or algo_id in ownership_ids or algo_id not in protection_ids:
+            return False
+        ownership_ids.append(algo_id)
+    return True
+
+
+def _algo_id(order: dict[str, Any]) -> int | None:
+    raw_id = order.get("algo_id", order.get("algoId"))
+    try:
+        algo_id = int(raw_id)
+    except (TypeError, ValueError):
+        return None
+    return algo_id if algo_id > 0 else None
+
+
+def _validate_new_protection_identity(
+    plan: dict[str, Any],
+    algo: dict[str, Any],
+    plans: list[dict[str, Any]],
+    *,
+    expected_type: str,
+    expected_side: str,
+) -> int | None:
+    if not isinstance(algo, dict):
+        return None
+    if not _protection_ownership_metadata_valid(plan):
+        return None
+    new_id = _algo_id(algo)
+    if new_id is None:
+        return None
+    current_ids = set() if "protection_ids" not in plan else _plan_protection_ids(plan)
+    if current_ids is None or new_id in current_ids:
+        return None
+    for candidate in plans:
+        if candidate is plan or not isinstance(candidate, dict) or not _plan_is_active(candidate):
+            continue
+        if not _protection_ownership_metadata_valid(candidate):
+            return None
+        candidate_ids = _plan_protection_ids(candidate)
+        if new_id in candidate_ids:
+            return None
+    if not _symbol_matches(algo.get("symbol"), str(plan.get("symbol") or "").upper()):
+        return None
+    actual_type = algo.get("type", algo.get("orderType"))
+    if str(actual_type or "").upper() != expected_type:
+        return None
+    if str(algo.get("side") or "").upper() != expected_side:
+        return None
+    actual_status = algo.get("status", algo.get("algoStatus"))
+    if str(actual_status or "").upper() not in {"NEW", "WORKING", "PENDING_NEW", "PARTIALLY_FILLED"}:
+        return None
+    return new_id
+
+
 def _protection_classification(
     plan: dict[str, Any],
     snapshot: dict[str, Any],
+    *,
+    required_ids: set[int] | None = None,
+    plans: list[dict[str, Any]] | None = None,
 ) -> tuple[str, list[int], list[int]]:
     if snapshot.get("open_algo_orders_available") is not True:
         return "UNKNOWN", [], []
-    protection_ids = _plan_protection_ids(plan)
-    if not protection_ids:
+    protection_ids = set() if "protection_ids" not in plan else _plan_protection_ids(plan)
+    if protection_ids is None or not _protection_ownership_metadata_valid(plan):
         return "UNKNOWN", [], []
-    exchange_ids: set[int] = set()
-    for order in snapshot.get("open_algo_orders", []):
-        try:
-            algo_id = int(order.get("algo_id"))
-        except (TypeError, ValueError):
+    orders = snapshot.get("open_algo_orders")
+    if not isinstance(orders, list):
+        return "UNKNOWN", [], []
+    expected_symbol = str(plan.get("symbol") or "").upper()
+    if not expected_symbol:
+        return "UNKNOWN", [], []
+    expected_side = "SELL" if str(plan.get("direction") or "").upper() == "LONG" else "BUY"
+    required = set(protection_ids if required_ids is None else required_ids)
+    if not required.issubset(protection_ids):
+        return "UNKNOWN", [], []
+    if plans is not None:
+        for candidate in plans:
+            if candidate is plan or not isinstance(candidate, dict) or not _plan_is_active(candidate):
+                continue
+            if not _protection_ownership_metadata_valid(candidate):
+                return "UNKNOWN", [], []
+            candidate_ids = _plan_protection_ids(candidate)
+            if protection_ids.intersection(candidate_ids):
+                return "UNKNOWN", [], []
+    seen_ids: set[int] = set()
+    parsed_orders: list[tuple[int, dict[str, Any]]] = []
+    for order in orders:
+        if not isinstance(order, dict):
             return "UNKNOWN", [], []
-        if algo_id > 0:
-            exchange_ids.add(algo_id)
-    matched_ids = sorted(protection_ids & exchange_ids)
-    unmatched_ids = sorted(protection_ids - exchange_ids)
-    if unmatched_ids:
-        return "UNKNOWN", matched_ids, unmatched_ids
-    return "MATCHED", matched_ids, unmatched_ids
+        algo_id = _algo_id(order)
+        if algo_id is None or algo_id in seen_ids:
+            return "UNKNOWN", [], []
+        seen_ids.add(algo_id)
+        symbol = str(order.get("symbol") or "").upper()
+        if algo_id in protection_ids and symbol != expected_symbol:
+            return "UNKNOWN", [], []
+        if symbol == expected_symbol:
+            order_type = str(order.get("type") or "").upper()
+            status = str(order.get("status") or "").upper()
+            side = str(order.get("side") or "").upper()
+            if not order_type or not status or not side:
+                return "UNKNOWN", [], []
+            parsed_orders.append((algo_id, order))
+
+    active_statuses = {"NEW", "WORKING", "PENDING_NEW", "PARTIALLY_FILLED"}
+    expected_stop_id = _single_plan_algo_id(plan, "stop_algo_id")
+    same_symbol_stop_ids = {
+        algo_id
+        for algo_id, order in parsed_orders
+        if str(order.get("type") or "").upper() == "STOP_MARKET"
+    }
+    if expected_stop_id is None:
+        listed_stop_ids = same_symbol_stop_ids & protection_ids
+        if len(listed_stop_ids) == 1:
+            expected_stop_id = next(iter(listed_stop_ids))
+        elif len(listed_stop_ids) > 1:
+            return "UNKNOWN", [], []
+    if expected_stop_id is None:
+        if same_symbol_stop_ids:
+            return "UNKNOWN", [], []
+        if not required:
+            return "MISSING", [], []
+    if expected_stop_id is not None and expected_stop_id in same_symbol_stop_ids and any(
+        algo_id != expected_stop_id for algo_id in same_symbol_stop_ids
+    ):
+        return "UNKNOWN", [], [expected_stop_id]
+    matched_ids: list[int] = []
+    missing_ids: list[int] = []
+    for expected_id in sorted(required):
+        matches = [order for algo_id, order in parsed_orders if algo_id == expected_id]
+        if not matches:
+            missing_ids.append(expected_id)
+            continue
+        order = matches[0]
+        expected_type = "STOP_MARKET" if expected_id == expected_stop_id else "TAKE_PROFIT_MARKET"
+        if (
+            str(order.get("type") or "").upper() != expected_type
+            or str(order.get("side") or "").upper() != expected_side
+            or str(order.get("status") or "").upper() not in active_statuses
+        ):
+            return "UNKNOWN", [], [expected_id]
+        matched_ids.append(expected_id)
+
+    if missing_ids:
+        return "MISSING", matched_ids, missing_ids
+    return "MATCHED", matched_ids, []
+
+
+async def _fresh_protection_snapshot(client: BinanceDemoClient, symbol: str) -> dict[str, Any]:
+    try:
+        payload = await client.signed("GET", "/fapi/v1/openAlgoOrders", {"symbol": symbol})
+    except BinanceDemoError:
+        return {"open_algo_orders_available": False, "open_algo_orders": []}
+    orders: list[dict[str, Any]] = []
+    for item in response_rows(payload):
+        if not isinstance(item, dict):
+            return {"open_algo_orders_available": True, "open_algo_orders": [item]}
+        orders.append({
+            "symbol": item.get("symbol"),
+            "algo_id": item.get("algoId"),
+            "client_algo_id": item.get("clientAlgoId"),
+            "side": item.get("side"),
+            "type": item.get("orderType", item.get("type")),
+            "status": item.get("algoStatus", item.get("status")),
+            "trigger_price": item.get("triggerPrice", item.get("stopPrice")),
+        })
+    return {"open_algo_orders_available": True, "open_algo_orders": orders}
 
 
 def classify_demo_ownership(
@@ -1834,7 +2013,9 @@ def classify_demo_ownership(
             position = positions[position_index]
             used_plan_ids.add(plan_id)
             used_position_indexes.add(position_index)
-            protection_status, matched_ids, unmatched_ids = _protection_classification(plan, snapshot)
+            protection_status, matched_ids, unmatched_ids = _protection_classification(
+                plan, snapshot, plans=active_plans
+            )
             classification = (
                 "PROTECTION_UNKNOWN"
                 if protection_status == "UNKNOWN"
@@ -2283,20 +2464,94 @@ async def post_algo(client: BinanceDemoClient, params: dict[str, Any]) -> dict[s
         return recovered
 
 
-async def install_protection(client: BinanceDemoClient, state: dict[str, Any], plan: dict[str, Any], *, request_id: str | None = None) -> None:
+async def install_protection(
+    client: BinanceDemoClient,
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    *,
+    request_id: str | None = None,
+    entry_context: object | None = None,
+) -> None:
+    entry_context_valid = _valid_entry_installation_context(entry_context, plan)
+    if not entry_context_valid and not can_mutate_lifecycle(plan):
+        return
     lock = _protection_install_lock(plan)
     if lock.locked():
         return
     async with lock:
-        if _plan_protection_ids(plan):
+        parsed_ids = _plan_protection_ids(plan)
+        if parsed_ids is None and "protection_ids" in plan:
             return
-        if plan.get("protection_ids") is not None:
-            plan["protection_ids"] = []
-        await _install_protection(client, state, plan, request_id=request_id)
+        if parsed_ids:
+            return
+        await _install_protection(client, state, plan, request_id=request_id, entry_context=entry_context)
 
 
-async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], plan: dict[str, Any], *, request_id: str | None = None) -> None:
+async def _repair_missing_stop_protection(
+    client: BinanceDemoClient,
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    snapshot: dict[str, Any],
+    *,
+    plans: list[dict[str, Any]],
+) -> bool:
+    protection_state, _matched_ids, missing_ids = _protection_classification(
+        plan, snapshot, plans=plans
+    )
+    stop_algo_id = _single_plan_algo_id(plan, "stop_algo_id")
+    if protection_state != "MISSING" or stop_algo_id is None or stop_algo_id not in missing_ids:
+        return False
+    direction = str(plan.get("direction") or "").upper()
+    if direction not in {"LONG", "SHORT"}:
+        return False
+    result = await post_algo(client, {
+        "algoType": "CONDITIONAL",
+        "symbol": plan["symbol"],
+        "side": "SELL" if direction == "LONG" else "BUY",
+        "type": "STOP_MARKET",
+        "triggerPrice": plan["stop_loss"],
+        "closePosition": "true",
+        "workingType": "MARK_PRICE",
+        "priceProtect": "TRUE",
+        "clientAlgoId": new_client_id("REPAIRSL"),
+    })
+    new_id = _validate_new_protection_identity(
+        plan,
+        result,
+        plans,
+        expected_type="STOP_MARKET",
+        expected_side="SELL" if direction == "LONG" else "BUY",
+    )
+    if new_id is None:
+        raise BinanceDemoError("Binance Demo Stop onarım kimliği doğrulanamadı.", http_status=409)
+    protection_ids = _plan_protection_ids(plan)
+    if protection_ids is None:
+        return False
+    plan["protection_ids"] = [new_id if algo_id == stop_algo_id else algo_id for algo_id in protection_ids]
+    if new_id not in plan["protection_ids"]:
+        plan["protection_ids"].append(new_id)
+    plan["stop_algo_id"] = new_id
+    plan["protection_status"] = "KORUMA ONARILDI"
+    persist_runtime(state)
+    return True
+
+
+async def _install_protection(
+    client: BinanceDemoClient,
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    *,
+    request_id: str | None = None,
+    entry_context: object | None = None,
+) -> None:
+    entry_context_valid = _valid_entry_installation_context(entry_context, plan)
+    if not entry_context_valid and not can_mutate_lifecycle(plan):
+        return
     symbol = plan["symbol"]
+    active_plans = [
+        candidate for candidate in state.get("plans", {}).values()
+        if isinstance(candidate, dict)
+    ]
     correlation_id = request_id or f"local-{uuid.uuid4().hex[:16]}"
     if plan.get("stop_protection_cancelled"):
         return
@@ -2321,7 +2576,7 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
         "workingType": "MARK_PRICE",
         "priceProtect": "TRUE",
     }
-    stop_client_id = plan.setdefault("stop_client_id", new_client_id("SL"))
+    stop_client_id = plan.get("stop_client_id") or new_client_id("SL")
     stop_params = {
         **common,
         "type": "STOP_MARKET",
@@ -2329,40 +2584,50 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
         "closePosition": "true",
         "clientAlgoId": stop_client_id,
     }
-    protection_ids: list[int] = plan.setdefault("protection_ids", [])
+    protection_ids: list[int] = list(_plan_protection_ids(plan) or [])
     stop_started = time.monotonic()
     trace_log("protection.SL.start", correlation_id)
+    stop_response_received = False
     try:
         stop_result = await post_algo(client, stop_params)
-        if stop_result.get("algoId"):
-            stop_algo_id = int(stop_result["algoId"])
-            if stop_algo_id not in protection_ids:
-                protection_ids.append(stop_algo_id)
-            plan["stop_algo_id"] = stop_algo_id
-        else:
+        stop_response_received = True
+        stop_algo_id = _validate_new_protection_identity(
+            plan,
+            stop_result,
+            active_plans,
+            expected_type="STOP_MARKET",
+            expected_side=close_side,
+        )
+        if stop_algo_id is None:
             raise BinanceDemoError("Binance Demo Stop koruma kimliği doğrulanamadı.", http_status=409)
+        protection_ids.append(stop_algo_id)
+        plan["protection_ids"] = list(protection_ids)
+        plan["stop_client_id"] = stop_client_id
+        plan["stop_algo_id"] = stop_algo_id
         trace_log("protection.SL.end", correlation_id, duration_ms=round((time.monotonic() - stop_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
     except BinanceDemoError as exc:
+        if not stop_response_received and "protection_ids" not in plan:
+            plan["protection_ids"] = list(protection_ids)
         trace_log("protection.SL.end", correlation_id, duration_ms=round((time.monotonic() - stop_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
         await _abort_protection_installation(
             client, state, plan, exc,
             f"{symbol} Stop kurulamadı; Demo pozisyon güvenlik için kapatılıyor.",
             f"{symbol} Stop kurulamadı; pozisyon güvenli biçimde kapatıldı.",
+            entry_context=entry_context,
         )
 
     step = Decimal(str(plan["step"]))
     min_qty = Decimal(str(plan["min_qty"]))
     total_qty = abs(amount)
     partial_qty = floor_step(total_qty * Decimal("0.30"), step)
-    plan.setdefault("tp1_quantity", decimal_text(partial_qty))
-    plan.setdefault("tp2_quantity", decimal_text(partial_qty))
+    tp_quantity = decimal_text(partial_qty)
     update_position_lifecycle(plan, amount)
     targets = plan["targets"]
     monitoring_targets: list[str] = []
     if partial_qty >= min_qty:
         for index, trigger in enumerate(targets[:2], start=1):
             client_key = f"tp{index}_client_id"
-            algo_client_id = plan.setdefault(client_key, new_client_id(f"TP{index}"))
+            algo_client_id = plan.get(client_key) or new_client_id(f"TP{index}")
             params = {
                 **common,
                 "type": "TAKE_PROFIT_MARKET",
@@ -2375,11 +2640,20 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
                 target_started = time.monotonic()
                 trace_log(f"protection.TP{index}.start", correlation_id)
                 result = await post_algo(client, params)
-                if result.get("algoId"):
-                    algo_id = int(result["algoId"])
-                    plan[f"tp{index}_algo_id"] = algo_id
-                    if algo_id not in protection_ids:
-                        protection_ids.append(algo_id)
+                algo_id = _validate_new_protection_identity(
+                    plan,
+                    result,
+                    active_plans,
+                    expected_type="TAKE_PROFIT_MARKET",
+                    expected_side=close_side,
+                )
+                if algo_id is None:
+                    raise BinanceDemoError("Binance Demo hedef koruma kimliği doğrulanamadı.", http_status=409)
+                plan[f"tp{index}_algo_id"] = algo_id
+                plan[client_key] = algo_client_id
+                plan[f"tp{index}_quantity"] = tp_quantity
+                protection_ids.append(algo_id)
+                plan["protection_ids"] = list(protection_ids)
                 trace_log(f"protection.TP{index}.end", correlation_id, duration_ms=round((time.monotonic() - target_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
             except BinanceDemoError as exc:
                 trace_log(f"protection.TP{index}.end", correlation_id, duration_ms=round((time.monotonic() - target_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
@@ -2387,11 +2661,12 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
                     client, state, plan, exc,
                     f"{symbol} TP{index} kurulamadı; Demo pozisyon güvenlik için kapatılıyor.",
                     f"{symbol} TP{index} kurulamadı; pozisyon güvenli biçimde kapatıldı.",
+                    entry_context=entry_context,
                 )
     else:
         monitoring_targets.extend(["TP1", "TP2"])
 
-    tp3_client_id = plan.setdefault("tp3_client_id", new_client_id("TP3"))
+    tp3_client_id = plan.get("tp3_client_id") or new_client_id("TP3")
     tp3_started = time.monotonic()
     trace_log("protection.TP3.start", correlation_id)
     try:
@@ -2402,10 +2677,18 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
             "closePosition": "true",
             "clientAlgoId": tp3_client_id,
         })
-        if tp3_result.get("algoId"):
-            algo_id = int(tp3_result["algoId"])
-            if algo_id not in protection_ids:
-                protection_ids.append(algo_id)
+        algo_id = _validate_new_protection_identity(
+            plan,
+            tp3_result,
+            active_plans,
+            expected_type="TAKE_PROFIT_MARKET",
+            expected_side=close_side,
+        )
+        if algo_id is None:
+            raise BinanceDemoError("Binance Demo TP3 koruma kimliği doğrulanamadı.", http_status=409)
+        plan["tp3_client_id"] = tp3_client_id
+        protection_ids.append(algo_id)
+        plan["protection_ids"] = list(protection_ids)
         trace_log("protection.TP3.end", correlation_id, duration_ms=round((time.monotonic() - tp3_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
     except BinanceDemoError as exc:
         trace_log("protection.TP3.end", correlation_id, duration_ms=round((time.monotonic() - tp3_started) * 1000, 2), success=False, http_status=getattr(client, "last_status_code", None), error_type=type(exc).__name__, error_message=safe_trace_error(exc, client))
@@ -2413,6 +2696,7 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
             client, state, plan, exc,
             f"{symbol} TP3 kurulamadı; Demo pozisyon güvenlik için kapatılıyor.",
             f"{symbol} TP3 kurulamadı; pozisyon güvenli biçimde kapatıldı.",
+            entry_context=entry_context,
         )
 
     plan["protection_ids"] = protection_ids
@@ -2424,9 +2708,33 @@ async def _install_protection(client: BinanceDemoClient, state: dict[str, Any], 
     add_event(state, "KORUMA KURULDU", f"{symbol} Stop aktif; hedef planı Demo hesabına işlendi.")
 
 
-async def cleanup_closed_plan(client: BinanceDemoClient, plan: dict[str, Any]) -> None:
+async def cleanup_closed_plan(
+    client: BinanceDemoClient,
+    plan: dict[str, Any],
+    *,
+    entry_context: object | None = None,
+    snapshot: dict[str, Any] | None = None,
+    plans: list[dict[str, Any]] | None = None,
+) -> None:
+    if not _valid_entry_installation_context(entry_context, plan) and not can_mutate_lifecycle(plan):
+        return
+    snapshot = snapshot or await _fresh_protection_snapshot(client, plan["symbol"])
     remaining_ids: list[int] = []
-    for algo_id in list(plan.get("protection_ids", [])):
+    protection_ids = _plan_protection_ids(plan)
+    if protection_ids is None:
+        return
+    for algo_id in sorted(protection_ids):
+        ownership, matched_ids, missing_ids = _protection_classification(
+            plan,
+            snapshot,
+            required_ids={algo_id},
+            plans=plans,
+        )
+        if ownership == "MISSING" and algo_id in missing_ids:
+            continue
+        if ownership != "MATCHED" or algo_id not in matched_ids:
+            remaining_ids.append(algo_id)
+            continue
         try:
             await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": plan["symbol"], "algoId": algo_id})
         except BinanceDemoError as exc:
@@ -2442,14 +2750,23 @@ async def _abort_protection_installation(
     error: BinanceDemoError,
     event_message: str,
     close_message: str,
+    *,
+    entry_context: object | None = None,
 ) -> None:
+    if not _valid_entry_installation_context(entry_context, plan) and not can_mutate_lifecycle(plan):
+        return
     symbol = plan["symbol"]
     plan["status"] = "CRITICAL / UNPROTECTED"
     plan["protection_status"] = "CRITICAL / UNPROTECTED"
     plan["recovery_attempts"] = int(plan.get("recovery_attempts", 0)) + 1
     plan["last_error"] = str(error)
     add_event(state, "ACİL KORUMA", event_message)
-    await cleanup_closed_plan(client, plan)
+    await cleanup_closed_plan(
+        client,
+        plan,
+        entry_context=entry_context,
+        plans=[candidate for candidate in state.get("plans", {}).values() if isinstance(candidate, dict)],
+    )
     try:
         await cancel_entry_if_open(client, plan)
     except BinanceDemoError as cancel_exc:
@@ -2490,7 +2807,8 @@ async def protection_loop(application: Any) -> None:
                 client = client_for_state(application, state)
                 await recover_pending_entry_intents(client, state)
                 changed = False
-                for plan in list(state["plans"].values()):
+                plans = [candidate for candidate in state["plans"].values() if isinstance(candidate, dict)]
+                for plan in plans:
                     if plan.get("status") in {"KAPANDI", "İPTAL", "GÜVENLİK İÇİN KAPATILDI"}:
                         continue
                     rows = response_rows(
@@ -2510,13 +2828,21 @@ async def protection_loop(application: Any) -> None:
                             plan.get("tp1_status"), plan.get("tp2_status"), plan.get("tp3_status"),
                         )
                         changed = changed or lifecycle_before != lifecycle_after
-                    if active_position is not None and not plan.get("protection_ids"):
-                        await install_protection(client, state, plan)
-                        changed = True
+                    if active_position is not None:
+                        protection_snapshot = await _fresh_protection_snapshot(client, plan["symbol"])
+                        protection_state, _matched_ids, _missing_ids = _protection_classification(
+                            plan, protection_snapshot, plans=plans
+                        )
+                        if protection_state == "MISSING":
+                            changed = await _repair_missing_stop_protection(
+                                client, state, plan, protection_snapshot, plans=plans
+                            ) or changed
+                        elif protection_state == "UNKNOWN":
+                            continue
                     elif active_position is None and plan.get("position_status") == "OPEN":
                         if _within_plan_reconciliation_grace(plan):
                             continue
-                        await cleanup_closed_plan(client, plan)
+                        await cleanup_closed_plan(client, plan, plans=plans)
                         plan["status"] = "KAPANDI"
                         plan["position_status"] = "CLOSED"
                         plan["remaining_quantity"] = "0"
@@ -2915,8 +3241,30 @@ async def demo_cancel_algo(request: Request, body: CancelAlgoRequest) -> dict[st
     try:
         symbol = normalize_symbol(body.symbol)
         state = state_for(request)
-        result = await client_for(request).signed("DELETE", "/fapi/v1/algoOrder", {"symbol": symbol, "algoId": body.algo_id})
-        plan = mark_cancelled_protection(state.get("plans", {}), symbol, body.algo_id)
+        client = client_for(request)
+        snapshot = await _fresh_protection_snapshot(client, symbol)
+        owner = None
+        for candidate in state.get("plans", {}).values():
+            if not can_mutate_lifecycle(candidate) or not _symbol_matches(candidate.get("symbol"), symbol):
+                continue
+            protection_ids = _plan_protection_ids(candidate)
+            if protection_ids is None or body.algo_id not in protection_ids:
+                continue
+            ownership, matched_ids, _missing_ids = _protection_classification(
+                candidate,
+                snapshot,
+                required_ids={body.algo_id},
+                plans=[item for item in state.get("plans", {}).values() if isinstance(item, dict)],
+            )
+            if ownership == "MATCHED" and body.algo_id in matched_ids:
+                owner = candidate
+                break
+        if owner is None:
+            raise HTTPException(409, "Protection ownership could not be verified; algo order was not cancelled.")
+        result = await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": symbol, "algoId": body.algo_id})
+        plan = mark_cancelled_protection(
+            state.get("plans", {}), symbol, body.algo_id, owner=owner
+        )
         if plan:
             persist_runtime(state)
             message = f"{symbol} STOP koruması iptal edildi; pozisyon artık otomatik korunmuyor."
@@ -2940,8 +3288,12 @@ async def demo_close_position(request: Request, body: ClosePositionRequest) -> d
         if result is None:
             raise BinanceDemoError("Bu paritede açık Demo pozisyonu yok.", http_status=404)
         for plan in state.get("plans", {}).values():
-            if str(plan.get("symbol") or "").upper() == symbol and str(plan.get("user_id") or plan.get("_user_id") or "").strip() == _current_user_id(request=request, state=state) and plan.get("position_status") == "OPEN":
-                await cleanup_closed_plan(client, plan)
+            if can_mutate_lifecycle(plan) and str(plan.get("symbol") or "").upper() == symbol and str(plan.get("user_id") or plan.get("_user_id") or "").strip() == _current_user_id(request=request, state=state) and plan.get("position_status") == "OPEN":
+                await cleanup_closed_plan(
+                    client,
+                    plan,
+                    plans=[candidate for candidate in state.get("plans", {}).values() if isinstance(candidate, dict)],
+                )
                 plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "tp3_status": "FILLED", "closed_at": utc_now()})
         add_event(state, "POZİSYON KAPATILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle kapatıldı.")
         persist_runtime(state)
@@ -2989,9 +3341,23 @@ async def demo_emergency(request: Request, body: EmergencyRequest) -> dict[str, 
                     except BinanceDemoError:
                         pass
             for item in snapshot["open_algo_orders"]:
-                if str(item.get("client_algo_id") or "").startswith(CLIENT_PREFIX):
+                algo_id = _algo_id(item)
+                if algo_id is None or not str(item.get("client_algo_id") or "").startswith(CLIENT_PREFIX):
+                    continue
+                owned_algo_ids: set[int] = set()
+                for plan in state.get("plans", {}).values():
+                    if not can_mutate_lifecycle(plan):
+                        continue
+                    ownership, matched_ids, _missing_ids = _protection_classification(
+                        plan,
+                        snapshot,
+                        plans=[candidate for candidate in state.get("plans", {}).values() if isinstance(candidate, dict)],
+                    )
+                    if ownership == "MATCHED":
+                        owned_algo_ids.update(matched_ids)
+                if algo_id in owned_algo_ids:
                     try:
-                        await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": item["symbol"], "algoId": item["algo_id"]})
+                        await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": item["symbol"], "algoId": algo_id})
                         cancelled_algos += 1
                     except BinanceDemoError:
                         pass
