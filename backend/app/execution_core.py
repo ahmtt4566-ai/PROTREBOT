@@ -22,6 +22,7 @@ HARD_MAX_POSITIONS = 5
 HARD_MAX_DAILY_LOSS_USDT = 100.0
 HARD_MAX_DAILY_TRADES = 12
 HARD_MAX_CONSECUTIVE_LOSSES = 10
+HARD_MAX_TOTAL_EXPOSURE_USDT = 250.0
 
 
 DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
@@ -33,6 +34,7 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "max_loss_per_trade": 3.0,
     "max_leverage": 2,
     "max_positions": 5,
+    "max_total_exposure_usdt": 100.0,
     "daily_loss_limit": 10.0,
     "daily_trade_limit": 3,
     "consecutive_loss_limit": 3,
@@ -95,6 +97,7 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
     base["max_loss_per_trade"] = _number(source.get("max_loss_per_trade"), 3, 0.5, 25)
     base["max_leverage"] = _integer(source.get("max_leverage"), 2, 1, HARD_MAX_LEVERAGE)
     base["max_positions"] = _integer(source.get("max_positions"), 5, 1, HARD_MAX_POSITIONS)
+    base["max_total_exposure_usdt"] = _number(source.get("max_total_exposure_usdt"), 100, 25, HARD_MAX_TOTAL_EXPOSURE_USDT)
     base["daily_loss_limit"] = _number(source.get("daily_loss_limit"), 10, 5, HARD_MAX_DAILY_LOSS_USDT)
     base["daily_trade_limit"] = _integer(source.get("daily_trade_limit"), 3, 1, HARD_MAX_DAILY_TRADES)
     base["consecutive_loss_limit"] = _integer(source.get("consecutive_loss_limit"), 3, 1, HARD_MAX_CONSECUTIVE_LOSSES)
@@ -201,6 +204,8 @@ def evaluate_entry_gates(
     spread_bps: float,
     armed: bool,
     allowed_symbols: list[str] | None = None,
+    active_plans: list[dict[str, Any]] | None = None,
+    candidate_notional_usdt: float = 0.0,
 ) -> dict[str, Any]:
     settings = sanitize_execution_policy(policy)
     safe_symbol = normalize_live_symbol(symbol)
@@ -211,6 +216,19 @@ def evaluate_entry_gates(
     trap_score = int(radar.get("trap_score") or 100)
     positions = snapshot.get("positions", []) if isinstance(snapshot.get("positions"), list) else []
     orders = snapshot.get("open_orders", []) if isinstance(snapshot.get("open_orders"), list) else []
+    plans = active_plans if isinstance(active_plans, list) else []
+    existing_exposure = sum(
+        abs(float(item.get("notional") or item.get("notional_usdt") or 0))
+        for item in positions
+        if isinstance(item, dict)
+    )
+    existing_plan_match = any(
+        isinstance(item, dict)
+        and item.get("symbol") == safe_symbol
+        and str(item.get("direction") or "").upper() == direction
+        and item.get("status") not in {"KAPANDI", "İPTAL", "CLOSED_FOR_SECURITY"}
+        for item in plans
+    )
     gates = [
         GateResult(armed, "arm", "Süreli canlı kilit", "Canlı kilit yalnızca kısa süreli kullanıcı onayıyla açılır."),
         GateResult(safe_symbol in symbol_scope, "symbol", "Parite izin listesi", safe_symbol),
@@ -223,6 +241,8 @@ def evaluate_entry_gates(
         GateResult(not snapshot.get("hedge_mode", False), "one_way", "One-way pozisyon modu", "Hedge kapalı olmalı."),
         GateResult(len(positions) < settings["max_positions"], "positions", "Pozisyon sınırı", f"{len(positions)} / {settings['max_positions']}"),
         GateResult(not any(item.get("symbol") == safe_symbol for item in positions + orders), "duplicate", "Yinelenen parite", "Aynı paritede açık pozisyon/emir bulunmamalı."),
+        GateResult(not existing_plan_match, "active_plan", "Aktif plan çakışması", "Aynı parite ve yönde aktif plan bulunmamalı."),
+        GateResult(existing_exposure + max(0.0, float(candidate_notional_usdt)) <= float(settings["max_total_exposure_usdt"]), "exposure", "Toplam maruziyet sınırı", f"{existing_exposure + max(0.0, float(candidate_notional_usdt)):.2f} / {settings['max_total_exposure_usdt']:.2f} USDT"),
         GateResult(int(daily.get("entries", 0)) < settings["daily_trade_limit"], "daily_trades", "Günlük işlem sınırı", f"{daily.get('entries', 0)} / {settings['daily_trade_limit']}"),
         GateResult(float(daily.get("realized_pnl", 0)) > -float(settings["daily_loss_limit"]), "daily_loss", "Günlük kayıp kilidi", f"{daily.get('realized_pnl', 0):.2f} USDT"),
         GateResult(float(snapshot.get("unrealized_pnl") or 0) > -float(settings["daily_loss_limit"]), "open_loss", "Açık zarar kilidi", f"{float(snapshot.get('unrealized_pnl') or 0):.2f} USDT"),

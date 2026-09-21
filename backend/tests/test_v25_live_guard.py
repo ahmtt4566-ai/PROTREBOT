@@ -16,6 +16,7 @@ from app.execution_core import (  # noqa: E402
     HARD_MAX_LEVERAGE,
     HARD_MAX_MARGIN_USDT,
     HARD_MAX_POSITIONS,
+    HARD_MAX_TOTAL_EXPOSURE_USDT,
     credential_fingerprint,
     daily_execution_metrics,
     evaluate_entry_gates,
@@ -25,7 +26,7 @@ from app.execution_core import (  # noqa: E402
     risk_sized_order,
     sanitize_execution_policy,
 )
-from app.v25_execution import rank_market_tickers  # noqa: E402
+from app.v25_execution import initial_state, rank_market_tickers, sanitized_state  # noqa: E402
 
 
 EXECUTION_SOURCE = (BACKEND / "app" / "v25_execution.py").read_text(encoding="utf-8")
@@ -41,6 +42,30 @@ RENDER_SOURCE = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
 
 class V25LiveGuardCoreTests(unittest.TestCase):
+    def test_live_is_locked_and_auto_trade_is_off_by_default_and_after_restart(self):
+        self.assertTrue(initial_state()["real_trading_locked"])
+        self.assertFalse(initial_state()["live_auto_trade"])
+        restored = sanitized_state({"real_trading_locked": False, "live_auto_trade": True, "auto": {"enabled": True, "session_until": 9999999999}})
+        self.assertTrue(restored["real_trading_locked"])
+        self.assertFalse(restored["live_auto_trade"])
+        self.assertFalse(restored["auto"]["enabled"])
+
+    def test_hard_total_exposure_and_active_plan_gates_fail_closed(self):
+        self.assertEqual(HARD_MAX_TOTAL_EXPOSURE_USDT, 250.0)
+        kwargs = dict(
+            symbol="BTCUSDT",
+            signal={"direction": "LONG", "confidence": 100, "radar": {"trap_score": 1}},
+            snapshot={"positions": [{"symbol": "ETHUSDT", "notional": "90"}], "open_orders": [], "hedge_mode": False},
+            policy=sanitize_execution_policy({"max_total_exposure_usdt": 100}),
+            daily={"entries": 0, "realized_pnl": 0, "unverified_closures": 0},
+            spread_bps=1,
+            armed=True,
+        )
+        exposure = evaluate_entry_gates(candidate_notional_usdt=20, **kwargs)
+        self.assertIn("exposure", {item["key"] for item in exposure["gates"] if not item["passed"]})
+        active_plan = evaluate_entry_gates(active_plans=[{"symbol": "BTCUSDT", "direction": "LONG", "status": "KORUMA AKTİF"}], **{**kwargs, "snapshot": {"positions": [], "open_orders": [], "hedge_mode": False}})
+        self.assertIn("active_plan", {item["key"] for item in active_plan["gates"] if not item["passed"]})
+
     def test_restore_sanitizer_cannot_exceed_hard_caps(self):
         policy = sanitize_execution_policy({
             "max_margin_per_trade": 9999,
@@ -168,6 +193,27 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("origClientOrderId", EXECUTION_SOURCE)
         self.assertIn("find_order", EXECUTION_SOURCE)
         self.assertNotIn("for attempt in", EXECUTION_SOURCE)
+
+    def test_live_order_timeout_and_unknown_state_fail_closed(self):
+        self.assertIn("except httpx.TimeoutException", EXECUTION_SOURCE)
+        self.assertIn("unknown_execution=True", EXECUTION_SOURCE)
+        self.assertIn('"UNKNOWN_ORDER_STATE"', EXECUTION_SOURCE)
+        self.assertIn('state["real_trading_locked"] = True', EXECUTION_SOURCE)
+        self.assertIn('manuel uzlaştırma gerekiyor', EXECUTION_SOURCE)
+
+    def test_live_order_has_immutable_audit_and_hard_pre_submit_controls(self):
+        self.assertIn("MappingProxyType", EXECUTION_SOURCE)
+        self.assertIn('"mode": "LIVE"', EXECUTION_SOURCE)
+        self.assertIn('"estimated_notional_usdt"', EXECUTION_SOURCE)
+        self.assertIn('"risk_amount_usdt"', EXECUTION_SOURCE)
+        self.assertIn("active_plans=list(state.get(\"plans\", {}).values())", EXECUTION_SOURCE)
+        self.assertIn("candidate_notional_usdt=body.margin_usdt * body.leverage", EXECUTION_SOURCE)
+        self.assertIn('filters.get("MIN_NOTIONAL", {}) or filters.get("NOTIONAL", {})', EXECUTION_SOURCE)
+        self.assertIn('row.get("contractType") != "PERPETUAL"', EXECUTION_SOURCE)
+
+    def test_unexpected_live_exception_halts_auto_trade(self):
+        self.assertIn('state["live_auto_trade"] = False', EXECUTION_SOURCE)
+        self.assertIn('state["emergency"].update({"active": True, "reason": "AUTO_EXCEPTION"', EXECUTION_SOURCE)
 
     def test_consecutive_loss_gate_blocks_at_limit_and_resets_after_profit(self):
         events = [

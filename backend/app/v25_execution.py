@@ -21,6 +21,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -144,6 +145,7 @@ class PolicyUpdate(BaseModel):
     max_loss_per_trade: float | None = Field(default=None, ge=0.5, le=25)
     max_leverage: int | None = Field(default=None, ge=1, le=3)
     max_positions: int | None = Field(default=None, ge=1, le=5)
+    max_total_exposure_usdt: float | None = Field(default=None, ge=25, le=250)
     daily_loss_limit: float | None = Field(default=None, ge=5, le=100)
     daily_trade_limit: int | None = Field(default=None, ge=1, le=12)
     consecutive_loss_limit: int | None = Field(default=None, ge=1, le=10)
@@ -214,6 +216,8 @@ def initial_state() -> dict[str, Any]:
         "intents": {},
         "armed_until": 0.0,
         "auto": {"enabled": False, "busy": False, "cycles": 0, "last_scan": None, "last_scan_stats": None, "last_skip_reason": None, "last_cycle_stage": "idle", "last_decision": "Kullanıcı onayı bekleniyor.", "last_error": None, "session_until": 0.0},
+        "real_trading_locked": True,
+        "live_auto_trade": False,
         "emergency": {"active": False, "triggered_at": None, "reason": None},
         # Web consent is deliberately memory-only. A deployment or process
         # restart revokes it even though the audit event remains persisted.
@@ -244,6 +248,9 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
         base["intents"] = dict(rows)
     # Entry authority never survives a process restart.
     base["auto"]["last_decision"] = "Güvenli yeniden başlatma: canlı otomasyon yeniden onay bekliyor."
+    base["real_trading_locked"] = True
+    base["live_auto_trade"] = False
+    base["auto"].update({"enabled": False, "session_until": 0.0, "busy": False})
     return base
 
 
@@ -378,6 +385,7 @@ def is_armed(state: dict[str, Any]) -> bool:
     active = float(state.get("armed_until") or 0) > time.time()
     if not active:
         state["armed_until"] = 0.0
+        state["real_trading_locked"] = True
     return active
 
 
@@ -386,6 +394,8 @@ def auto_session_active(state: dict[str, Any]) -> bool:
     if not active:
         state["auto"]["enabled"] = False
         state["auto"]["session_until"] = 0.0
+        state["live_auto_trade"] = False
+        state["real_trading_locked"] = True
     return active
 
 
@@ -455,6 +465,8 @@ class BinanceLiveClient:
         request_url = f"{url}?{encoded_query}&signature={signature}" if signed else url
         try:
             response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise LiveExchangeError("Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.", unknown_execution=True) from exc
         except httpx.RequestError as exc:
             raise LiveExchangeError("Binance canlı Futures sunucusuna ulaşılamadı.") from exc
         if response.status_code >= 400:
@@ -502,7 +514,9 @@ async def live_symbol_rules(client: BinanceLiveClient, symbol: str, order_type: 
     filters = {item.get("filterType"): item for item in row.get("filters", [])}
     lot = filters.get("MARKET_LOT_SIZE" if order_type == "MARKET" else "LOT_SIZE") or filters.get("LOT_SIZE", {})
     price_filter = filters.get("PRICE_FILTER", {})
-    notional_filter = filters.get("MIN_NOTIONAL", {})
+    notional_filter = filters.get("MIN_NOTIONAL", {}) or filters.get("NOTIONAL", {})
+    if row.get("contractType") != "PERPETUAL" or row.get("quoteAsset") != "USDT":
+        raise LiveExchangeError(f"{symbol} yalnızca USDT perpetual canlı Futures sözleşmesi olmalı.", http_status=422)
     return {
         "step": Decimal(str(lot.get("stepSize", "0.001"))),
         "min_qty": Decimal(str(lot.get("minQty", "0"))),
@@ -1267,6 +1281,8 @@ def public_status(application: Any) -> dict[str, Any]:
         "connection": state.get("connection"),
         "stream": state.get("stream"),
         "armed": is_armed(state),
+        "real_trading_locked": bool(state.get("real_trading_locked", True)),
+        "live_auto_trade": bool(state.get("live_auto_trade", False)),
         "armed_until": datetime.fromtimestamp(state["armed_until"], timezone.utc).isoformat() if is_armed(state) else None,
         "auto": state["auto"],
         "scanner": {
@@ -1355,12 +1371,27 @@ async def execute_live_order(
         try:
             client = client_for(application)
             snapshot = await account_snapshot(client)
+            if state.get("real_trading_locked") is not False:
+                raise LiveExchangeError("Gerçek işlem kilidi kapalı; açık canlı onay olmadan emir gönderilmedi.", http_status=423)
+            if source == "V25_AUTO" and state.get("live_auto_trade") is not True:
+                raise LiveExchangeError("Canlı otomasyon açık değil; otomatik emir gönderilmedi.", http_status=423)
             if snapshot.get("hedge_mode"):
                 raise LiveExchangeError("Canlı hesap One-way / Tek Yön modunda olmalı.", http_status=409)
             symbol = normalize_symbol(body.symbol)
             daily = live_daily_metrics(state)
             manual_signal = {"direction": body.direction, "confidence": 100, "radar": {"trap_score": 0}}
-            guard = evaluate_entry_gates(symbol=symbol, signal=manual_signal, snapshot=snapshot, policy=state["policy"], daily=daily, spread_bps=await spread_bps(client, symbol), armed=True, allowed_symbols=allowed_symbols)
+            guard = evaluate_entry_gates(
+                symbol=symbol,
+                signal=manual_signal,
+                snapshot=snapshot,
+                policy=state["policy"],
+                daily=daily,
+                spread_bps=await spread_bps(client, symbol),
+                armed=True,
+                allowed_symbols=allowed_symbols,
+                active_plans=list(state.get("plans", {}).values()),
+                candidate_notional_usdt=body.margin_usdt * body.leverage,
+            )
             if not guard["passed"]:
                 raise LiveExchangeError(f"Canlı risk kapısı: {guard['reason']}", http_status=409)
             if float(snapshot.get("available_balance") or 0) < body.margin_usdt:
@@ -1378,6 +1409,22 @@ async def execute_live_order(
                 "targets": list(spec["targets"]), "step": decimal_text(spec["step"]),
                 "min_qty": decimal_text(spec["min_qty"]),
             }
+            audit_snapshot = MappingProxyType({
+                "decision_id": intent_id,
+                "timestamp": now_iso(),
+                "mode": "LIVE",
+                "symbol": spec["symbol"],
+                "side": spec["side"],
+                "position_side": "BOTH",
+                "quantity": spec["quantity"],
+                "leverage": spec["leverage"],
+                "margin_usdt": spec["margin_usdt"],
+                "estimated_notional_usdt": spec["notional_usdt"],
+                "stop_loss": spec["stop_loss"],
+                "tp_levels": list(spec["targets"]),
+                "risk_amount_usdt": spec["estimated_stop_loss_usdt"],
+            })
+            add_event(state, "LIVE_DECISION_AUDIT", "Canlı emir öncesi değişmez karar özeti oluşturuldu.", symbol=spec["symbol"], decision_id=intent_id, audit_snapshot=dict(audit_snapshot))
             state["intents"][intent_id] = {
                 "symbol": spec["symbol"], "client_order_id": client_id, "created_at": now_iso(),
                 "source": source, "spec": serializable_spec,
@@ -1409,6 +1456,13 @@ async def execute_live_order(
             persist_state(state)
             return {"ok": True, "order": {"order_id": result.get("orderId"), "client_order_id": client_id, "status": result.get("status", plan["status"])}, "plan": plan, "risk_guard": guard, "profit_guaranteed": False}
         except (LiveExchangeError, BinanceDemoError) as exc:
+            if isinstance(exc, LiveExchangeError) and exc.unknown_execution:
+                state["real_trading_locked"] = True
+                state["live_auto_trade"] = False
+                state["auto"].update({"enabled": False, "session_until": 0.0})
+                state["emergency"].update({"active": True, "reason": "UNKNOWN_ORDER_STATE", "triggered_at": now_iso()})
+                add_event(state, "UNKNOWN_ORDER_STATE", "Canlı emir sonucu belirsiz; yeni emirler kilitlendi ve manuel uzlaştırma gerekiyor.")
+                persist_state(state)
             state["connection"]["last_error"] = str(exc)[:240]
             raise safe_exchange_error(exc) from exc
 
@@ -1535,6 +1589,10 @@ async def automatic_cycle(application: Any) -> None:
         state["auto"]["last_skip_reason"] = "reconcile_failed"
         state["auto"]["last_cycle_stage"] = "error"
         state["auto"].update({"last_error": str(exc)[:240], "last_decision": "Canlı otomasyon turu güvenli biçimde durduruldu."})
+        state["real_trading_locked"] = True
+        state["live_auto_trade"] = False
+        state["auto"].update({"enabled": False, "session_until": 0.0})
+        state["emergency"].update({"active": True, "reason": "AUTO_EXCEPTION", "triggered_at": now_iso()})
         add_event(state, "AUTO_ERROR", "Canlı otomasyon turu hata nedeniyle yeni emir göndermedi.")
     finally:
         state["auto"]["busy"] = False
@@ -1619,9 +1677,9 @@ async def execution_loop(application: Any) -> None:
             state = application.state.v25_execution
             state["connected"] = False
             state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
-            if isinstance(exc, LiveExchangeError) and exc.http_status in {418, 429}:
-                state["auto"]["enabled"] = False
-                state["auto"]["session_until"] = 0.0
+            state["real_trading_locked"] = True
+            state["live_auto_trade"] = False
+            state["auto"].update({"enabled": False, "session_until": 0.0})
             await asyncio.sleep(backoff)
             backoff = min(60, backoff * 2)
 
@@ -1788,6 +1846,7 @@ async def v25_arm(request: Request, body: Confirmation) -> dict[str, Any]:
         pending = next((item["label"] for item in release["gates"] if not item["passed"]), "hazırlık kapısı")
         raise HTTPException(423, f"Canlı kilit açılamadı: {pending} bekleniyor.")
     state["armed_until"] = time.time() + LIVE_ARM_SECONDS
+    state["real_trading_locked"] = False
     add_event(state, "LIVE_ARM", "Canlı yeni giriş izni 5 dakika için açıldı.", actor=user["id"])
     return public_status(request.app)
 
@@ -1797,6 +1856,8 @@ async def v25_disarm(request: Request) -> dict[str, Any]:
     user = execution_owner(request)
     state = request.app.state.v25_execution
     state["armed_until"] = 0.0
+    state["real_trading_locked"] = True
+    state["live_auto_trade"] = False
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
     add_event(state, "LIVE_DISARM", "Canlı yeni girişler ve otomasyon kilitlendi; korumalar çalışmaya devam eder.", actor=user["id"])
@@ -1821,6 +1882,8 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     if not is_armed(state) or not readiness(request.app, state)["ready"]:
         raise HTTPException(423, "Önce bütün yayın kapılarını tamamlayıp 5 dakikalık canlı kilidi açın.")
     state["auto"].update({"enabled": True, "session_until": time.time() + LIVE_AUTO_SESSION_SECONDS, "last_error": None, "last_decision": "Bir saatlik gözetimli canlı tarama başlatıldı."})
+    state["live_auto_trade"] = True
+    state["real_trading_locked"] = False
     state["armed_until"] = 0.0
     add_event(state, "LIVE_AUTO_START", "Canlı otomasyon 5 dakikalık kilit içinden bir saatlik gözetimli oturum için açıldı.", actor=user["id"])
     persist_state(state)
@@ -1833,6 +1896,8 @@ async def v25_auto_stop(request: Request) -> dict[str, Any]:
     state = request.app.state.v25_execution
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
+    state["real_trading_locked"] = True
+    state["live_auto_trade"] = False
     state["auto"]["last_decision"] = "Yeni otomatik canlı girişler durduruldu."
     add_event(state, "LIVE_AUTO_STOP", "Canlı otomasyon durduruldu; mevcut Stop/TP korumaları açık.", actor=user["id"])
     persist_state(state)
@@ -1876,6 +1941,8 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
         raise HTTPException(422, "Acil işlem için CANLI ACİL DURDUR yazın.")
     state = request.app.state.v25_execution
     state["armed_until"] = 0.0
+    state["real_trading_locked"] = True
+    state["live_auto_trade"] = False
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
     cancelled_orders = cancelled_algos = closed = 0
