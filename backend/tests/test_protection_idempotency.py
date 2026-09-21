@@ -170,6 +170,11 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             if path == "/fapi/v3/positionRisk":
                 position_calls += 1
                 return [{"symbol": "BTCUSDT", "positionAmt": "1"}] if position_calls == 1 else []
+            if path == "/fapi/v1/openAlgoOrders":
+                return [order for order in [
+                    {"symbol": "BTCUSDT", "algoId": 101, "orderType": "STOP_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    {"symbol": "BTCUSDT", "algoId": 102, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                ] if order["algoId"] not in delete_calls]
             if method == "DELETE" and path == "/fapi/v1/algoOrder":
                 delete_calls.append(params["algoId"])
                 return {}
@@ -200,14 +205,26 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_retains_failed_ids_for_symbol_scoped_retry(self):
         plan = self.plan(symbol="BTCUSDT")
+        plan["provenance_state"] = "CONFIRMED"
         plan["protection_ids"] = [101, 202, 303]
         calls = []
+        deleted = set()
 
         class Client:
             async def signed(self, method, path, params=None):
                 calls.append((method, path, params.copy()))
-                if params["algoId"] == 202 and len(calls) == 2:
+                if path == "/fapi/v1/openAlgoOrders":
+                    return [order for order in [
+                        {"symbol": "BTCUSDT", "algoId": 101, "orderType": "STOP_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                        {"symbol": "BTCUSDT", "algoId": 202, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                        {"symbol": "BTCUSDT", "algoId": 303, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    ] if order["algoId"] not in deleted]
+                if params.get("algoId") == 202 and not any(
+                    call[2].get("algoId") == 202 for call in calls[:-1]
+                ):
                     raise binance_demo.BinanceDemoError("temporary cancellation failure", exchange_code=-1000)
+                if params.get("algoId"):
+                    deleted.add(params["algoId"])
                 return {}
 
         client = Client()
@@ -219,7 +236,9 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         await binance_demo.cleanup_closed_plan(client, plan)
 
         self.assertEqual(plan["protection_ids"], [])
-        self.assertEqual([call[2]["algoId"] for call in calls], [101, 202, 303, 202])
+        self.assertEqual([
+            call[2]["algoId"] for call in calls if call[0] == "DELETE"
+        ], [101, 202, 303, 202])
 
     async def test_partial_cleanup_completes_before_emergency_close(self):
         plan = self.plan()
@@ -235,6 +254,11 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
                 if path == "/fapi/v3/positionRisk":
                     order.append(("verify", None))
                     return []
+                if path == "/fapi/v1/openAlgoOrders":
+                    return [
+                        {"symbol": "BTCUSDT", "algoId": 101, "orderType": "STOP_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                        {"symbol": "BTCUSDT", "algoId": 102, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    ]
                 raise AssertionError((method, path, params))
 
         async def close_position(_client, _symbol):

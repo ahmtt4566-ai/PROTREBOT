@@ -494,13 +494,16 @@ class P0P2ProtectionOwnershipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_matched_deletes_exact_id(self):
         plan = self.plan(protection_ids=[101], stop_algo_id=101)
-        client = SimpleNamespace(signed=AsyncMock(return_value={}))
+        client = SimpleNamespace(signed=AsyncMock(side_effect=[{}, []]))
         await binance_demo.cleanup_closed_plan(
             client, plan, snapshot=self.snapshot([self.algo(101)])
         )
-        client.signed.assert_awaited_once_with(
+        self.assertEqual(client.signed.await_args_list[0].args,
+            (
             "DELETE", "/fapi/v1/algoOrder", {"symbol": "BTCUSDT", "algoId": 101}
+            )
         )
+        self.assertEqual(client.signed.await_count, 2)
         self.assertEqual(plan["protection_ids"], [])
 
 

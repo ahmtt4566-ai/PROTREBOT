@@ -1507,6 +1507,48 @@ def reconcile_demo_plans(state: dict[str, Any], snapshot: dict[str, Any]) -> dic
     return {"changed": changed, **state["reconciliation"]}
 
 
+async def _cleanup_reconciled_closed_plans(
+    client: BinanceDemoClient,
+    state: dict[str, Any],
+    snapshot: dict[str, Any],
+    *,
+    reconciliation_changed: bool = False,
+) -> bool:
+    actual_symbols = {
+        str(position.get("symbol") or "").upper()
+        for position in snapshot.get("positions", [])
+        if isinstance(position, dict) and float(position.get("quantity") or 0) > 0
+    }
+    plans = [candidate for candidate in state.get("plans", {}).values() if isinstance(candidate, dict)]
+    changed = False
+    for plan in plans:
+        symbol = str(plan.get("symbol") or "").upper()
+        if not symbol or symbol in actual_symbols or not _has_protection_identity(plan):
+            continue
+        if plan.get("status") in {"İPTAL", "GÜVENLİK İÇİN KAPATILDI"}:
+            continue
+        if plan.get("status") == "KAPANDI" and not reconciliation_changed:
+            continue
+        if plan.get("status") != "KAPANDI" and can_mutate_lifecycle(plan):
+            continue
+        cleaned = await cleanup_closed_plan(
+            client,
+            plan,
+            allow_closed_position_cleanup=True,
+            plans=plans,
+        )
+        if not cleaned:
+            continue
+        plan.update({
+            "status": "KAPANDI",
+            "position_status": "CLOSED",
+            "remaining_quantity": "0",
+            "closed_at": plan.get("closed_at") or utc_now(),
+        })
+        changed = True
+    return changed
+
+
 def _within_plan_reconciliation_grace(plan: dict[str, Any]) -> bool:
     protected_at = plan.get("protected_at")
     if not protected_at:
@@ -3270,26 +3312,32 @@ async def cleanup_closed_plan(
     entry_context: object | None = None,
     snapshot: dict[str, Any] | None = None,
     plans: list[dict[str, Any]] | None = None,
-) -> None:
+    allow_closed_position_cleanup: bool = False,
+) -> bool:
     if not _has_protection_identity(plan):
-        return
-    if not _valid_entry_installation_context(entry_context, plan) and not can_mutate_lifecycle(plan):
-        return
+        return True
+    if (
+        not _valid_entry_installation_context(entry_context, plan)
+        and not can_mutate_lifecycle(plan)
+        and not allow_closed_position_cleanup
+    ):
+        return False
     lock = _protection_cleanup_lock(plan)
     async with lock:
         protection_ids = _plan_protection_ids(plan)
         if protection_ids is None:
-            return
+            return False
         pending_ids = plan.get("cleanup_pending_ids", [])
         if not isinstance(pending_ids, list) or any(not isinstance(item, int) or item <= 0 for item in pending_ids):
-            return
+            return False
         claimed_ids = sorted(protection_ids - set(pending_ids))
         if not claimed_ids:
-            return
+            return True
         plan["cleanup_pending_ids"] = sorted(set(pending_ids).union(claimed_ids))
 
     snapshot = snapshot or await _fresh_protection_snapshot(client, plan["symbol"])
     removed_ids: set[int] = set()
+    delete_attempted: set[int] = set()
     for algo_id in claimed_ids:
         ownership, matched_ids, missing_ids = _protection_classification(
             plan,
@@ -3303,21 +3351,34 @@ async def cleanup_closed_plan(
         if ownership != "MATCHED" or algo_id not in matched_ids:
             continue
         try:
+            delete_attempted.add(algo_id)
             await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": plan["symbol"], "algoId": algo_id})
-            removed_ids.add(algo_id)
         except BinanceDemoError as exc:
             if exc.exchange_code in {-2011, -2013}:
+                removed_ids.add(algo_id)
+
+    if delete_attempted:
+        verified_snapshot = await _fresh_protection_snapshot(client, plan["symbol"])
+        for algo_id in delete_attempted:
+            ownership, matched_ids, missing_ids = _protection_classification(
+                plan,
+                verified_snapshot,
+                required_ids={algo_id},
+                plans=plans,
+            )
+            if ownership == "MISSING" and algo_id in missing_ids:
                 removed_ids.add(algo_id)
 
     async with lock:
         current_ids = _plan_protection_ids(plan)
         if current_ids is None:
-            return
+            return False
         pending_ids = plan.get("cleanup_pending_ids", [])
         if not isinstance(pending_ids, list):
-            return
+            return False
         plan["protection_ids"] = sorted(current_ids - removed_ids)
         plan["cleanup_pending_ids"] = [item for item in pending_ids if item not in claimed_ids]
+        return not plan["protection_ids"]
 
 
 async def _abort_protection_installation(
@@ -3388,12 +3449,25 @@ async def protection_loop(application: Any) -> None:
                 for plan in plans:
                     if plan.get("status") in {"KAPANDI", "İPTAL", "GÜVENLİK İÇİN KAPATILDI"}:
                         continue
-                    if not can_mutate_lifecycle(plan):
-                        continue
                     rows = response_rows(
                         await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": plan["symbol"]})
                     )
                     active_position = next((row for row in rows if Decimal(str(row.get("positionAmt", "0"))) != 0), None)
+                    if not can_mutate_lifecycle(plan):
+                        if active_position is None and plan.get("position_status") == "OPEN":
+                            if _within_plan_reconciliation_grace(plan):
+                                continue
+                            cleaned = await cleanup_closed_plan(
+                                client,
+                                plan,
+                                allow_closed_position_cleanup=True,
+                                plans=plans,
+                            )
+                            if cleaned:
+                                plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": utc_now()})
+                                add_event(state, "POZİSYON KAPANDI", f"{plan['symbol']} Demo pozisyonu kapandı; kalan bot emirleri temizlendi.")
+                                changed = True
+                        continue
                     if active_position is not None and plan.get("stop_protection_cancelled"):
                         continue
                     if active_position is not None:
@@ -3421,13 +3495,14 @@ async def protection_loop(application: Any) -> None:
                     elif active_position is None and plan.get("position_status") == "OPEN":
                         if _within_plan_reconciliation_grace(plan):
                             continue
-                        await cleanup_closed_plan(client, plan, plans=plans)
-                        plan["status"] = "KAPANDI"
-                        plan["position_status"] = "CLOSED"
-                        plan["remaining_quantity"] = "0"
-                        plan["closed_at"] = utc_now()
-                        add_event(state, "POZİSYON KAPANDI", f"{plan['symbol']} Demo pozisyonu kapandı; kalan bot emirleri temizlendi.")
-                        changed = True
+                        cleaned = await cleanup_closed_plan(client, plan, plans=plans)
+                        if cleaned:
+                            plan["status"] = "KAPANDI"
+                            plan["position_status"] = "CLOSED"
+                            plan["remaining_quantity"] = "0"
+                            plan["closed_at"] = utc_now()
+                            add_event(state, "POZİSYON KAPANDI", f"{plan['symbol']} Demo pozisyonu kapandı; kalan bot emirleri temizlendi.")
+                            changed = True
                 if changed:
                     persist_runtime(state)
             except BinanceDemoError as exc:
@@ -3645,7 +3720,13 @@ async def execute_demo_order(
             symbol = await resolve_demo_symbol(client, body.symbol)
             body = body.model_copy(update={"symbol": symbol})
             reconciliation = reconcile_demo_plans(state, snapshot)
-            if reconciliation["changed"]:
+            cleanup_changed = await _cleanup_reconciled_closed_plans(
+                client,
+                state,
+                snapshot,
+                reconciliation_changed=reconciliation["changed"],
+            )
+            if reconciliation["changed"] or cleanup_changed:
                 persist_runtime(state)
             stale_reason = stale_protection_entry_reason(snapshot, state, symbol)
             if stale_reason:
@@ -3900,13 +3981,15 @@ async def demo_close_position(request: Request, body: ClosePositionRequest) -> d
         if result is None:
             raise BinanceDemoError("Bu paritede açık Demo pozisyonu yok.", http_status=404)
         for plan in state.get("plans", {}).values():
-            if can_mutate_lifecycle(plan) and str(plan.get("symbol") or "").upper() == symbol and str(plan.get("user_id") or plan.get("_user_id") or "").strip() == _current_user_id(request=request, state=state) and plan.get("position_status") == "OPEN":
-                await cleanup_closed_plan(
+            if str(plan.get("symbol") or "").upper() == symbol and str(plan.get("user_id") or plan.get("_user_id") or "").strip() == _current_user_id(request=request, state=state) and plan.get("position_status") == "OPEN":
+                cleaned = await cleanup_closed_plan(
                     client,
                     plan,
+                    allow_closed_position_cleanup=True,
                     plans=[candidate for candidate in state.get("plans", {}).values() if isinstance(candidate, dict)],
                 )
-                plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": utc_now()})
+                if cleaned:
+                    plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": utc_now()})
         add_event(state, "POZİSYON KAPATILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle kapatıldı.")
         persist_runtime(state)
         return {"ok": True, "symbol": symbol, "order_id": result.get("orderId")}

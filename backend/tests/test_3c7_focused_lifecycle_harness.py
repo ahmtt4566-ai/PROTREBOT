@@ -209,6 +209,8 @@ def test_protection_cleanup_race_deletes_each_owned_id_once():
 
     class Client:
         async def signed(self, method, path, params=None):
+            if method == "GET":
+                return []
             calls.append((method, params["algoId"]))
             return {}
 
