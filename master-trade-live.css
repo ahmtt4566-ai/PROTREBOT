@@ -130,8 +130,26 @@
 .masterTradeLiveConnection strong i.connected, .masterTradeLiveEmergency strong i:not(.active) { background: var(--live-green); }
 .masterTradeLiveConnection small, .masterTradeLiveEmergency small { display: block; margin-top: 4px; color: var(--live-muted); font-size: 9px; }
 .masterTradeLiveApiDrawer { display: grid; gap: 13px; padding: 16px; background: var(--live-surface-soft); }
+.masterTradeLiveConnectionCard { gap: 16px; }
 .masterTradeLiveApiHeader > span { color: var(--live-muted); font-size: 9px; }
+.masterTradeLiveApiHeader > strong { display: inline-flex; align-items: center; gap: 5px; color: var(--live-muted); font-size: 10px; letter-spacing: .05em; white-space: nowrap; }
+.masterTradeLiveApiHeader > strong.masterTradeLiveConnected { color: var(--live-green); }
+.masterTradeLiveExchangeRow { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px; border: 1px solid var(--live-line); border-radius: 7px; background: rgba(5, 11, 15, .48); }
+.masterTradeLiveExchangeIdentity { display: flex; align-items: center; gap: 10px; }
+.masterTradeLiveExchangeLogo { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; background: #f0b90b; color: #17130a; font-size: 17px; font-weight: 900; }
+.masterTradeLiveExchangeIdentity b, .masterTradeLiveExchangeIdentity small { display: block; }
+.masterTradeLiveExchangeIdentity b { color: var(--live-ink); font-size: 13px; }
+.masterTradeLiveExchangeIdentity small { margin-top: 3px; color: var(--live-muted); font-size: 9px; }
+.masterTradeLiveMode { display: flex; align-items: center; gap: 5px; }
+.masterTradeLiveMode > span { margin-right: 5px; color: var(--live-muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; }
+.masterTradeLiveMode button { min-height: 29px; padding: 0 11px; border: 1px solid var(--live-line); border-radius: 5px; background: transparent; color: var(--live-muted); font-size: 10px; font-weight: 800; }
+.masterTradeLiveMode button.selected { border-color: rgba(85, 215, 155, .55); background: rgba(85, 215, 155, .12); color: var(--live-green); }
 .masterTradeLiveApiGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.masterTradeLiveSecretField { position: relative; }
+.masterTradeLiveSecretField input { padding-right: 38px; }
+.masterTradeLiveSecretField button { position: absolute; top: 4px; right: 4px; display: grid; width: 27px; height: 27px; place-items: center; border: 0; background: transparent; color: var(--live-muted); }
+.masterTradeLiveSecretField button:hover { color: var(--live-ink); }
+.masterTradeLiveSecretField svg { width: 14px; height: 14px; }
 .masterTradeLiveCheck { display: flex; align-items: center; gap: 7px; color: var(--live-muted); font-size: 9px; }
 .masterTradeLiveApiMeta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .masterTradeLiveApiMeta span { color: var(--live-muted); font-size: 8px; }
@@ -139,6 +157,11 @@
 .masterTradeLiveApiActions { display: flex; flex-wrap: wrap; gap: 8px; }
 .masterTradeLiveApiActions button { min-height: 31px; padding: 0 10px; border: 1px solid var(--live-line-strong); border-radius: 5px; background: rgba(28, 49, 54, .6); color: var(--live-ink); font-size: 9px; font-weight: 800; }
 .masterTradeLiveApiActions button:hover:not(:disabled) { border-color: var(--live-green); }
+.masterTradeLiveApiActions .masterTradeLiveSaveButton { border-color: rgba(85, 215, 155, .45); background: rgba(36, 119, 86, .5); color: #effff7; }
+.masterTradeLiveApiHint { color: var(--live-muted); font-size: 9px; line-height: 1.45; }
+.masterTradeLiveDemoNotice { display: grid; gap: 5px; padding: 14px; border: 1px solid var(--live-line); border-radius: 6px; background: rgba(5, 11, 15, .42); }
+.masterTradeLiveDemoNotice b { color: var(--live-ink); font-size: 12px; }
+.masterTradeLiveDemoNotice span { color: var(--live-muted); font-size: 10px; line-height: 1.45; }
 .masterTradeLiveEmergency { border-color: rgba(240, 124, 115, .32); background: rgba(49, 24, 26, .35); }
 .masterTradeLiveEmergency .dangerAction { min-height: 34px; }
 .masterTradeLiveEmergency strong i.active { background: var(--live-red); box-shadow: 0 0 0 4px rgba(240, 124, 115, .12); }
@@ -163,6 +186,9 @@
   .masterTradeLiveFlow { overflow-x: auto; padding-bottom: 5px; }
   .masterTradeLiveFlow i { flex-basis: 20px; }
   .masterTradeLiveSetupGrid, .masterTradeLiveAdvanced { grid-template-columns: repeat(2, 1fr); }
+  .masterTradeLiveExchangeRow { align-items: flex-start; flex-direction: column; }
+  .masterTradeLiveMode { width: 100%; }
+  .masterTradeLiveMode button { flex: 1; }
   .masterTradeLiveControlMeta, .masterTradeLiveSafetyList, .masterTradeLiveApiMeta { grid-template-columns: 1fr 1fr; }
   .masterTradeLiveSignalGrid { grid-template-columns: repeat(2, 1fr); }
   .masterTradeLiveApiGrid { grid-template-columns: 1fr; }
