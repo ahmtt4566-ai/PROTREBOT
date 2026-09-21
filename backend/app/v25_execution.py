@@ -136,6 +136,33 @@ class LiveExchangeError(RuntimeError):
         self.unknown_execution = unknown_execution
 
 
+def lock_live_execution(
+    state: dict[str, Any],
+    reason: str,
+    *,
+    unknown: bool = False,
+    symbol: str | None = None,
+    client_id: str | None = None,
+) -> None:
+    state["armed_until"] = 0.0
+    state["real_trading_locked"] = True
+    state["live_auto_trade"] = False
+    state["auto"].update({"enabled": False, "session_until": 0.0})
+    state["execution_state"] = "UNKNOWN" if unknown else "LOCKED"
+    state["reconciliation_required"] = bool(unknown)
+    state["emergency"].update({"active": True, "triggered_at": now_iso(), "reason": reason})
+    add_event(
+        state,
+        "LIVE_UNKNOWN_EXECUTION" if unknown else "LIVE_FAIL_CLOSED",
+        "Canlı yürütme belirsiz; yeni emirler kilitlendi ve manuel uzlaştırma gerekiyor." if unknown else "Canlı yürütme güvenlik nedeniyle kilitlendi.",
+        reason=reason,
+        execution_state=state["execution_state"],
+        symbol=symbol,
+        client_order_id_suffix=str(client_id or "")[-8:] or None,
+        reconciliation_required=bool(unknown),
+    )
+
+
 class PolicyUpdate(BaseModel):
     allowed_symbols: list[str] | None = None
     interval: Literal["1m", "5m", "15m", "1h", "4h"] | None = None
@@ -227,6 +254,8 @@ def initial_state() -> dict[str, Any]:
         "recovery_ready": False,
         "recovery_loaded": True,
         "recovery_error": None,
+        "execution_state": "LOCKED",
+        "reconciliation_required": False,
     }
 
 
@@ -239,6 +268,15 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     for key in ("events", "plans", "intents", "duplicate_blocks", "protection_repairs"):
         if key in payload and isinstance(payload[key], type(base[key])):
             base[key] = payload[key]
+    if isinstance(payload.get("emergency"), dict):
+        base["emergency"] = {
+            "active": bool(payload["emergency"].get("active")),
+            "triggered_at": payload["emergency"].get("triggered_at"),
+            "reason": str(payload["emergency"].get("reason") or "")[:240] or None,
+        }
+    if payload.get("execution_state") in {"LOCKED", "UNKNOWN"}:
+        base["execution_state"] = payload["execution_state"]
+    base["reconciliation_required"] = bool(payload.get("reconciliation_required"))
     base["events"] = base["events"][:MAX_EVENTS]
     if len(base["plans"]) > MAX_PLANS:
         rows = sorted(base["plans"].items(), key=lambda item: item[1].get("created_at", ""), reverse=True)[:MAX_PLANS]
@@ -250,6 +288,7 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     base["auto"]["last_decision"] = "Güvenli yeniden başlatma: canlı otomasyon yeniden onay bekliyor."
     base["real_trading_locked"] = True
     base["live_auto_trade"] = False
+    base["execution_state"] = "UNKNOWN" if base["reconciliation_required"] else "LOCKED"
     base["auto"].update({"enabled": False, "session_until": 0.0, "busy": False})
     return base
 
@@ -279,6 +318,11 @@ def persist_state(state: dict[str, Any]) -> None:
     if os.getenv("DATABASE_URL", "").strip():
         state["recovery_ready"] = False
         state["recovery_error"] = "PostgreSQL persistence unavailable."
+        state["armed_until"] = 0.0
+        state["real_trading_locked"] = True
+        state["live_auto_trade"] = False
+        state["auto"].update({"enabled": False, "session_until": 0.0})
+        state["execution_state"] = "LOCKED"
         return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     payload = sanitized_state(state)
@@ -389,6 +433,14 @@ def is_armed(state: dict[str, Any]) -> bool:
     return active
 
 
+def live_execution_blocked(state: dict[str, Any]) -> bool:
+    return bool(
+        state.get("emergency", {}).get("active")
+        or state.get("execution_state") == "UNKNOWN"
+        or state.get("reconciliation_required")
+    )
+
+
 def auto_session_active(state: dict[str, Any]) -> bool:
     active = bool(state["auto"].get("enabled")) and float(state["auto"].get("session_until") or 0) > time.time()
     if not active:
@@ -468,7 +520,7 @@ class BinanceLiveClient:
         except httpx.TimeoutException as exc:
             raise LiveExchangeError("Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.", unknown_execution=True) from exc
         except httpx.RequestError as exc:
-            raise LiveExchangeError("Binance canlı Futures sunucusuna ulaşılamadı.") from exc
+            raise LiveExchangeError("Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.", unknown_execution=True) from exc
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -480,7 +532,7 @@ class BinanceLiveClient:
                 message = message.replace(self.api_key, "[gizli]")
             if response.status_code in {429, 418}:
                 message = "Binance API hız sınırı; yeni emir gönderilmedi. Geri çekilme süresi bekleniyor."
-            unknown = response.status_code == 503
+            unknown = response.status_code >= 500
             if unknown:
                 message = "Emir yürütme sonucu belirsiz; benzersiz emir kimliğiyle sorgulanacak, kör tekrar yapılmayacak."
             raise LiveExchangeError(message, http_status=429 if response.status_code in {429, 418} else 502, exchange_code=int(code) if isinstance(code, int) else None, unknown_execution=unknown)
@@ -726,11 +778,33 @@ def client_id_for(kind: str, intent_id: str) -> str:
 async def find_order(client: BinanceLiveClient, symbol: str, client_id: str) -> dict[str, Any] | None:
     try:
         payload = await client.signed("GET", "/fapi/v1/order", {"symbol": symbol, "origClientOrderId": client_id})
-        return payload if isinstance(payload, dict) and payload.get("orderId") else None
+        rows = response_rows(payload)
+        matches = [row for row in rows if isinstance(row, dict) and row.get("orderId")]
+        if len(matches) > 1:
+            raise LiveExchangeError("Birden fazla eşleşen canlı emir bulundu; sonuç belirsiz.", unknown_execution=True)
+        return matches[0] if matches else None
     except LiveExchangeError as exc:
         if exc.exchange_code in {-2011, -2013}:
             return None
         raise
+
+
+def order_matches_spec(order: dict[str, Any], spec: dict[str, Any], client_id: str) -> bool:
+    response_client_id = str(order.get("clientOrderId") or order.get("origClientOrderId") or "")
+    if response_client_id != client_id:
+        return False
+    if str(order.get("symbol") or "").upper() != str(spec["symbol"]).upper():
+        return False
+    if str(order.get("side") or "").upper() != str(spec["side"]).upper():
+        return False
+    if str(order.get("positionSide") or "BOTH").upper() != "BOTH":
+        return False
+    if str(order.get("type") or "").upper() != str(spec["order_type"]).upper():
+        return False
+    try:
+        return Decimal(str(order.get("origQty"))) == Decimal(str(spec["quantity"]))
+    except (TypeError, ValueError, ArithmeticError):
+        return False
 
 
 async def submit_entry(client: BinanceLiveClient, spec: dict[str, Any], client_id: str, *, test_only: bool) -> dict[str, Any]:
@@ -744,16 +818,24 @@ async def submit_entry(client: BinanceLiveClient, spec: dict[str, Any], client_i
     if not test_only:
         existing = await find_order(client, spec["symbol"], client_id)
         if existing is not None:
+            if not order_matches_spec(existing, spec, client_id):
+                raise LiveExchangeError("İlişkisiz veya uyuşmayan canlı emir bulundu; sahiplenilmedi.", unknown_execution=True)
             return {**existing, "recovered": True}
     try:
         payload = await client.signed("POST", path, params)
+        if not test_only and (not isinstance(payload, dict) or not payload.get("orderId")):
+            raise LiveExchangeError("Canlı emir yanıtı eksik; emir sonucu belirsiz ve uzlaştırma gerekiyor.", unknown_execution=True)
     except LiveExchangeError as exc:
         if not test_only and exc.unknown_execution:
             recovered = await find_order(client, spec["symbol"], client_id)
             if recovered is not None:
+                if not order_matches_spec(recovered, spec, client_id):
+                    raise LiveExchangeError("Uzlaştırılan canlı emir beklenen kimlik veya parametrelerle eşleşmedi.", unknown_execution=True) from exc
                 return {**recovered, "recovered": True}
         raise
-    return payload if isinstance(payload, dict) else {}
+    if test_only:
+        return payload if isinstance(payload, dict) else {}
+    return payload
 
 
 async def post_algo(client: BinanceLiveClient, params: dict[str, Any]) -> dict[str, Any]:
@@ -1227,7 +1309,8 @@ def recover_plan_from_intent(intent_id: str, intent: dict[str, Any], order: dict
     }
 
 
-async def recover_orphan_plans(client: BinanceLiveClient, state: dict[str, Any], positions: dict[str, dict[str, Any]]) -> None:
+async def recover_orphan_plans(client: BinanceLiveClient, state: dict[str, Any], positions: dict[str, dict[str, Any]]) -> int:
+    recovered_count = 0
     active_symbols = {
         str(plan.get("symbol") or "") for plan in state.get("plans", {}).values()
         if plan.get("status") not in {"KAPANDI", "İPTAL"}
@@ -1245,6 +1328,15 @@ async def recover_orphan_plans(client: BinanceLiveClient, state: dict[str, Any],
         order = await find_order(client, symbol, client_id)
         if not order:
             continue
+        recovery_spec = intent.get("spec") if isinstance(intent.get("spec"), dict) else {}
+        recovery_spec = {
+            **recovery_spec,
+            "symbol": symbol,
+            "side": "BUY" if str(recovery_spec.get("direction") or "").upper() == "LONG" else "SELL",
+        }
+        if not order_matches_spec(order, recovery_spec, client_id):
+            add_event(state, "LIVE_FOREIGN_ORDER", "İlişkisiz canlı emir uzlaştırılmadı; sahiplenilmedi.", symbol=symbol, client_order_id_suffix=client_id[-8:])
+            continue
         plan = recover_plan_from_intent(intent_id, intent, order)
         if plan is None:
             continue
@@ -1257,6 +1349,8 @@ async def recover_orphan_plans(client: BinanceLiveClient, state: dict[str, Any],
             symbol=symbol,
             plan_id=plan["id"],
         )
+        recovered_count += 1
+    return recovered_count
 
 
 def demo_certificate(application: Any) -> dict[str, Any]:
@@ -1387,8 +1481,11 @@ async def execute_live_order(
             raise HTTPException(423, "Bir saatlik gözetimli canlı otomasyon oturumu kapalı veya süresi doldu.")
     elif not is_armed(state):
         raise HTTPException(423, "5 dakikalık canlı emir kilidi kapalı veya süresi doldu.")
+    if live_execution_blocked(state):
+        raise HTTPException(423, "Canlı yürütme kilitli; acil durum veya belirsiz emir uzlaştırması tamamlanmadı.")
     if not readiness(application, state)["ready"]:
         raise HTTPException(423, "Canlı yayın kapıları tamamlanmadı; emir gönderilmedi.")
+    submission_started = False
     async with state["lock"]:
         try:
             client = client_for(application)
@@ -1472,6 +1569,7 @@ async def execute_live_order(
                 "margin_type": leverage_audit["margin_type"],
             }
             persist_state(state)
+            submission_started = True
             result = await submit_entry(client, spec, client_id, test_only=False)
             plan_id = uuid.uuid4().hex[:16]
             plan = {
@@ -1497,21 +1595,24 @@ async def execute_live_order(
             return {"ok": True, "order": {"order_id": result.get("orderId"), "client_order_id": client_id, "status": result.get("status", plan["status"])}, "plan": plan, "risk_guard": guard, "profit_guaranteed": False}
         except (LiveExchangeError, BinanceDemoError) as exc:
             if isinstance(exc, LiveExchangeError) and exc.unknown_execution:
-                state["real_trading_locked"] = True
-                state["live_auto_trade"] = False
-                state["auto"].update({"enabled": False, "session_until": 0.0})
-                state["emergency"].update({"active": True, "reason": "UNKNOWN_ORDER_STATE", "triggered_at": now_iso()})
-                add_event(state, "UNKNOWN_ORDER_STATE", "Canlı emir sonucu belirsiz; yeni emirler kilitlendi ve manuel uzlaştırma gerekiyor.")
+                lock_live_execution(
+                    state,
+                    "UNKNOWN_ORDER_STATE",
+                    unknown=True,
+                    symbol=body.symbol,
+                    client_id=body.intent_id,
+                )
                 persist_state(state)
             state["connection"]["last_error"] = str(exc)[:240]
             raise safe_exchange_error(exc) from exc
         except Exception as exc:
-            state["real_trading_locked"] = True
-            state["live_auto_trade"] = False
-            state["armed_until"] = 0.0
-            state["auto"].update({"enabled": False, "session_until": 0.0})
-            state["emergency"].update({"active": True, "reason": "LIVE_EXCEPTION", "triggered_at": now_iso()})
-            add_event(state, "LIVE_EXCEPTION", "Canlı emir akışında beklenmeyen hata; yeni emirler kilitlendi.")
+            lock_live_execution(
+                state,
+                "LIVE_EXCEPTION_UNKNOWN" if submission_started else "LIVE_EXCEPTION",
+                unknown=submission_started,
+                symbol=body.symbol,
+                client_id=body.intent_id,
+            )
             state["connection"]["last_error"] = "Beklenmeyen canlı emir hatası"
             persist_state(state)
             raise HTTPException(502, "Canlı emir akışı güvenli şekilde kilitlendi; manuel inceleme gerekli.") from exc
@@ -1639,10 +1740,7 @@ async def automatic_cycle(application: Any) -> None:
         state["auto"]["last_skip_reason"] = "reconcile_failed"
         state["auto"]["last_cycle_stage"] = "error"
         state["auto"].update({"last_error": str(exc)[:240], "last_decision": "Canlı otomasyon turu güvenli biçimde durduruldu."})
-        state["real_trading_locked"] = True
-        state["live_auto_trade"] = False
-        state["auto"].update({"enabled": False, "session_until": 0.0})
-        state["emergency"].update({"active": True, "reason": "AUTO_EXCEPTION", "triggered_at": now_iso()})
+        lock_live_execution(state, "AUTO_EXCEPTION")
         add_event(state, "AUTO_ERROR", "Canlı otomasyon turu hata nedeniyle yeni emir göndermedi.")
     finally:
         state["auto"]["busy"] = False
@@ -1660,7 +1758,12 @@ async def reconcile(application: Any) -> None:
     state["connection"].update({"last_checked": now_iso(), "last_error": None, "clock_offset_ms": client.time_offset_ms})
     positions = {item["symbol"]: item for item in snapshot.get("positions", [])}
     open_algos = snapshot.get("open_algo_orders", [])
-    await recover_orphan_plans(client, state, positions)
+    recovered_count = await recover_orphan_plans(client, state, positions)
+    if recovered_count and state.get("reconciliation_required"):
+        state["execution_state"] = "LOCKED"
+        state["reconciliation_required"] = False
+        state["emergency"].update({"active": False, "reason": "UNKNOWN_ORDER_RECONCILED"})
+        add_event(state, "UNKNOWN_ORDER_RECONCILED", "Belirsiz canlı emir exact kimlik ve parametrelerle uzlaştırıldı; yeniden arm gerekiyor.", recovery_state="LOCKED")
     for plan in state.get("plans", {}).values():
         if plan.get("status") in {"KAPANDI", "İPTAL"}:
             continue
@@ -1727,9 +1830,7 @@ async def execution_loop(application: Any) -> None:
             state = application.state.v25_execution
             state["connected"] = False
             state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
-            state["real_trading_locked"] = True
-            state["live_auto_trade"] = False
-            state["auto"].update({"enabled": False, "session_until": 0.0})
+            lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
             await asyncio.sleep(backoff)
             backoff = min(60, backoff * 2)
 
@@ -1891,6 +1992,8 @@ async def v25_arm(request: Request, body: Confirmation) -> dict[str, Any]:
     if body.confirmation.strip().upper() != "CANLI EMİR RİSKİNİ KABUL EDİYORUM":
         raise HTTPException(422, "Kilidi açmak için CANLI EMİR RİSKİNİ KABUL EDİYORUM yazın.")
     state = request.app.state.v25_execution
+    if live_execution_blocked(state):
+        raise HTTPException(423, "Canlı acil durdurma veya belirsiz uzlaştırma aktif; önce recovery tamamlanmalı.")
     release = readiness(request.app, state)
     if not release["ready"]:
         pending = next((item["label"] for item in release["gates"] if not item["passed"]), "hazırlık kapısı")
@@ -1929,7 +2032,7 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     if body.confirmation.strip().upper() != "CANLI OTOMATİK":
         raise HTTPException(422, "Otomasyonu açmak için CANLI OTOMATİK yazın.")
     state = request.app.state.v25_execution
-    if not is_armed(state) or not readiness(request.app, state)["ready"]:
+    if live_execution_blocked(state) or not is_armed(state) or not readiness(request.app, state)["ready"]:
         raise HTTPException(423, "Önce bütün yayın kapılarını tamamlayıp 5 dakikalık canlı kilidi açın.")
     state["auto"].update({"enabled": True, "session_until": time.time() + LIVE_AUTO_SESSION_SECONDS, "last_error": None, "last_decision": "Bir saatlik gözetimli canlı tarama başlatıldı."})
     state["live_auto_trade"] = True
@@ -1990,11 +2093,7 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
     if body.confirmation.strip().upper() != "CANLI ACİL DURDUR":
         raise HTTPException(422, "Acil işlem için CANLI ACİL DURDUR yazın.")
     state = request.app.state.v25_execution
-    state["armed_until"] = 0.0
-    state["real_trading_locked"] = True
-    state["live_auto_trade"] = False
-    state["auto"]["enabled"] = False
-    state["auto"]["session_until"] = 0.0
+    lock_live_execution(state, "MANUAL_EMERGENCY_STOP")
     cancelled_orders = cancelled_algos = closed = 0
     try:
         client = client_for(request.app)

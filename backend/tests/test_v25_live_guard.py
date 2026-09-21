@@ -1,4 +1,6 @@
 import asyncio
+import httpx
+import json
 import sys
 import time
 import unittest
@@ -29,7 +31,7 @@ from app.execution_core import (  # noqa: E402
     sanitize_execution_policy,
 )
 from app import v25_execution  # noqa: E402
-from app.v25_execution import LiveExchangeError, initial_state, rank_market_tickers, sanitized_state, validate_protection_readiness  # noqa: E402
+from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, initial_state, lock_live_execution, rank_market_tickers, sanitized_state, submit_entry, validate_protection_readiness  # noqa: E402
 
 
 EXECUTION_SOURCE = (BACKEND / "app" / "v25_execution.py").read_text(encoding="utf-8")
@@ -160,6 +162,181 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertNotIn("live-api-key", first or "")
 
 class V25LiveGuardIntegrationContractTests(unittest.TestCase):
+    def _live_spec(self):
+        return {
+            "symbol": "BTCUSDT", "side": "BUY", "order_type": "MARKET", "quantity": "0.500",
+        }
+
+    def _matching_order(self):
+        return {
+            "orderId": 7001, "clientOrderId": "V25_ENTRY_test-intent", "symbol": "BTCUSDT",
+            "side": "BUY", "positionSide": "BOTH", "type": "MARKET", "origQty": "0.500", "status": "NEW",
+        }
+
+    def test_unknown_transport_failures_have_zero_retry_and_safe_recovery(self):
+        class FakeClient:
+            def __init__(self, post_result):
+                self.calls = []
+                self.post_result = post_result
+
+            async def signed(self, method, path, params=None):
+                self.calls.append((method, path))
+                if method == "GET":
+                    return None
+                if isinstance(self.post_result, BaseException):
+                    raise self.post_result
+                return self.post_result
+
+        for failure in (
+            LiveExchangeError("timeout", unknown_execution=True),
+            LiveExchangeError("5xx", unknown_execution=True),
+            {},
+        ):
+            client = FakeClient(failure)
+            with self.assertRaises(LiveExchangeError) as raised:
+                asyncio.run(submit_entry(client, self._live_spec(), "V25_ENTRY_test-intent", test_only=False))
+            self.assertTrue(raised.exception.unknown_execution)
+            self.assertEqual(sum(1 for method, path in client.calls if method == "POST" and path == "/fapi/v1/order"), 1)
+            self.assertEqual(sum(1 for method, path in client.calls if method == "POST"), 1)
+
+    def test_exact_reconciliation_recovers_without_duplicate_post(self):
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            async def signed(self, method, path, params=None):
+                self.calls.append((method, path))
+                if method == "GET" and len([item for item in self.calls if item[0] == "GET"]) == 1:
+                    return None
+                if method == "POST":
+                    raise LiveExchangeError("timeout", unknown_execution=True)
+                return self._matching_order()
+
+            def _matching_order(self):
+                return {**V25LiveGuardIntegrationContractTests()._matching_order(), "clientOrderId": "V25_ENTRY_test-intent"}
+
+        client = FakeClient()
+        result = asyncio.run(submit_entry(client, self._live_spec(), "V25_ENTRY_test-intent", test_only=False))
+        self.assertTrue(result["recovered"])
+        second = asyncio.run(submit_entry(client, self._live_spec(), "V25_ENTRY_test-intent", test_only=False))
+        self.assertTrue(second["recovered"])
+        self.assertEqual(sum(1 for method, path in client.calls if method == "POST" and path == "/fapi/v1/order"), 1)
+
+    def test_ambiguous_and_foreign_reconciliation_are_not_owned(self):
+        class FakeClient:
+            def __init__(self, response):
+                self.response = response
+                self.calls = []
+
+            async def signed(self, method, path, params=None):
+                self.calls.append((method, path))
+                return self.response
+
+        for response in (
+            [self._matching_order(), {**self._matching_order(), "orderId": 7002}],
+            {**self._matching_order(), "clientOrderId": "FOREIGN_ORDER"},
+        ):
+            client = FakeClient(response)
+            with self.assertRaises(LiveExchangeError) as raised:
+                asyncio.run(submit_entry(client, self._live_spec(), "V25_ENTRY_test-intent", test_only=False))
+            self.assertTrue(raised.exception.unknown_execution)
+            self.assertEqual(sum(1 for method, path in client.calls if method == "POST" and path == "/fapi/v1/order"), 0)
+
+    def test_emergency_unknown_and_recovery_incomplete_states_reject(self):
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=initial_state()))
+        state = application.state.v25_execution
+        state["lock"] = asyncio.Lock()
+        state.update({"recovery_ready": True, "live_auto_trade": True})
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300})
+        state["emergency"]["active"] = True
+        with patch.object(v25_execution, "readiness", return_value={"ready": True}):
+            with self.assertRaises(v25_execution.HTTPException) as emergency_error:
+                asyncio.run(v25_execution.execute_live_order(application, LiveOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1, stop_loss=98, tp1=102, tp2=104, tp3=106), source="V25_AUTO"))
+        self.assertEqual(emergency_error.exception.status_code, 423)
+        state["emergency"]["active"] = False
+        state["execution_state"] = "UNKNOWN"
+        state["reconciliation_required"] = True
+        with patch.object(v25_execution, "readiness", return_value={"ready": True}):
+            with self.assertRaises(v25_execution.HTTPException):
+                asyncio.run(v25_execution.execute_live_order(application, LiveOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1, stop_loss=98, tp1=102, tp2=104, tp3=106), source="V25_AUTO"))
+        state["recovery_ready"] = False
+        state["execution_state"] = "LOCKED"
+        state["reconciliation_required"] = False
+        with self.assertRaises(v25_execution.HTTPException):
+            asyncio.run(v25_execution.execute_live_order(application, LiveOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1, stop_loss=98, tp1=102, tp2=104, tp3=106), source="V25_AUTO"))
+
+    def test_kill_switch_is_persisted_and_audit_is_secret_free(self):
+        state = initial_state()
+        lock_live_execution(state, "NETWORK_AMBIGUOUS", unknown=True, symbol="BTCUSDT", client_id="V25_ENTRY_secret-value")
+        restored = sanitized_state(state)
+        self.assertTrue(restored["real_trading_locked"])
+        self.assertFalse(restored["live_auto_trade"])
+        self.assertEqual(restored["execution_state"], "UNKNOWN")
+        self.assertTrue(restored["reconciliation_required"])
+        self.assertTrue(restored["emergency"]["active"])
+        audit = state["events"][0]
+        self.assertNotIn("secret-value", json.dumps(audit))
+        self.assertNotIn("api_key", json.dumps(audit).lower())
+
+    def test_request_timeout_and_5xx_are_unknown_without_real_transport(self):
+        class FakeHttp:
+            def __init__(self, result):
+                self.result = result
+
+            async def request(self, *args, **kwargs):
+                if isinstance(self.result, BaseException):
+                    raise self.result
+                return self.result
+
+        class Response:
+            def __init__(self, status_code):
+                self.status_code = status_code
+
+            def json(self):
+                return {"code": -1000, "msg": "ambiguous"}
+
+        for result in (httpx.TimeoutException("timeout"), httpx.ConnectError("reset"), Response(500), Response(503)):
+            client = BinanceLiveClient(FakeHttp(result), "fake-api-key-123", "fake-secret-key-123")
+            with self.assertRaises(LiveExchangeError) as raised:
+                asyncio.run(client._request("POST", "/fapi/v1/order", {}, signed=False))
+            self.assertTrue(raised.exception.unknown_execution)
+
+    def test_unexpected_submit_exception_locks_unknown_and_disables_auto(self):
+        state = initial_state()
+        state.update({"recovery_ready": True, "real_trading_locked": False, "live_auto_trade": True})
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300})
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        spec = {
+            "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "order_type": "MARKET",
+            "margin_usdt": 5.0, "leverage": 1, "notional_usdt": 5.0, "quantity": "0.050",
+            "entry_price": "100.00", "stop_loss": "98.00", "targets": ["102.00", "104.00", "106.00"],
+            "step": Decimal("0.001"), "min_qty": Decimal("0.001"), "estimated_stop_loss_usdt": 0.1,
+        }
+        with patch.multiple(
+            v25_execution,
+            client_for=lambda application: object(),
+            account_snapshot=AsyncMock(return_value={"available_balance": 100, "positions": [], "open_orders": [], "hedge_mode": False}),
+            spread_bps=AsyncMock(return_value=1.0),
+            readiness=lambda application, state: {"ready": True},
+            build_live_spec=AsyncMock(return_value=spec),
+            set_live_isolated_margin=AsyncMock(),
+            apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
+            submit_entry=AsyncMock(side_effect=RuntimeError("synthetic submit failure")),
+            persist_state=lambda state: None,
+        ):
+            with self.assertRaises(v25_execution.HTTPException) as raised:
+                asyncio.run(v25_execution.execute_live_order(
+                    application,
+                    LiveOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1, stop_loss=98, tp1=102, tp2=104, tp3=106, intent_id="test-intent-1"),
+                    source="V25_AUTO",
+                ))
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertTrue(state["real_trading_locked"])
+        self.assertFalse(state["live_auto_trade"])
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+
     def test_auto_trade_dry_run_reaches_submit_boundary_without_exchange_mutation(self):
         class FakeTransport:
             def __init__(self):
@@ -318,7 +495,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
 
     def test_unexpected_live_exception_halts_auto_trade(self):
         self.assertIn('state["live_auto_trade"] = False', EXECUTION_SOURCE)
-        self.assertIn('state["emergency"].update({"active": True, "reason": "AUTO_EXCEPTION"', EXECUTION_SOURCE)
+        self.assertIn('lock_live_execution(state, "AUTO_EXCEPTION")', EXECUTION_SOURCE)
 
     def test_consecutive_loss_gate_blocks_at_limit_and_resets_after_profit(self):
         events = [
