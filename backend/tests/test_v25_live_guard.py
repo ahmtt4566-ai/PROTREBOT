@@ -26,7 +26,7 @@ from app.execution_core import (  # noqa: E402
     risk_sized_order,
     sanitize_execution_policy,
 )
-from app.v25_execution import initial_state, rank_market_tickers, sanitized_state  # noqa: E402
+from app.v25_execution import LiveExchangeError, initial_state, rank_market_tickers, sanitized_state, validate_protection_readiness  # noqa: E402
 
 
 EXECUTION_SOURCE = (BACKEND / "app" / "v25_execution.py").read_text(encoding="utf-8")
@@ -210,6 +210,19 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("candidate_notional_usdt=body.margin_usdt * body.leverage", EXECUTION_SOURCE)
         self.assertIn('filters.get("MIN_NOTIONAL", {}) or filters.get("NOTIONAL", {})', EXECUTION_SOURCE)
         self.assertIn('row.get("contractType") != "PERPETUAL"', EXECUTION_SOURCE)
+
+    def test_protection_readiness_is_required_before_live_submission(self):
+        spec = {"direction": "LONG", "entry_price": "100", "stop_loss": "98", "targets": ["102", "104", "106"], "quantity": "0.1"}
+        validate_protection_readiness(spec, sanitize_execution_policy({}))
+
+    def test_invalid_protection_values_fail_closed_before_live_submission(self):
+        invalid_specs = [
+            {"direction": "LONG", "entry_price": "NaN", "stop_loss": "98", "targets": ["102", "104", "106"], "quantity": "0.1"},
+            {"direction": "LONG", "entry_price": "100", "stop_loss": "101", "targets": ["102", "104", "106"], "quantity": "0.1"},
+        ]
+        for spec in invalid_specs:
+            with self.assertRaises(LiveExchangeError):
+                validate_protection_readiness(spec, sanitize_execution_policy({}))
 
     def test_unexpected_live_exception_halts_auto_trade(self):
         self.assertIn('state["live_auto_trade"] = False', EXECUTION_SOURCE)

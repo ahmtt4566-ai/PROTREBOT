@@ -506,6 +506,28 @@ def safe_exchange_error(exc: LiveExchangeError | BinanceDemoError) -> HTTPExcept
     return HTTPException(getattr(exc, "http_status", 502), f"{exc}{suffix}")
 
 
+def validate_protection_readiness(spec: dict[str, Any], policy: dict[str, Any]) -> None:
+    if not sanitize_execution_policy(policy).get("stop_required", True):
+        raise LiveExchangeError("Canlı giriş için Stop koruması zorunludur.", http_status=423)
+    try:
+        entry = Decimal(str(spec["entry_price"]))
+        stop = Decimal(str(spec["stop_loss"]))
+        targets = [Decimal(str(value)) for value in spec["targets"]]
+        quantity = Decimal(str(spec["quantity"]))
+    except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+        raise LiveExchangeError("Canlı koruma planı doğrulanamadı; emir gönderilmedi.", http_status=422) from exc
+    values = [entry, stop, quantity, *targets]
+    if not all(value.is_finite() and value > 0 for value in values):
+        raise LiveExchangeError("Canlı koruma seviyeleri geçersiz; emir gönderilmedi.", http_status=422)
+    if len(targets) != 3 or any(target == entry for target in targets):
+        raise LiveExchangeError("Canlı TP koruma planı eksik veya geçersiz; emir gönderilmedi.", http_status=422)
+    direction = str(spec.get("direction") or "").upper()
+    if direction == "LONG" and not (stop < entry < targets[0] <= targets[1] <= targets[2]):
+        raise LiveExchangeError("Canlı LONG koruma seviyeleri geçersiz; emir gönderilmedi.", http_status=422)
+    if direction == "SHORT" and not (targets[2] <= targets[1] <= targets[0] < entry < stop):
+        raise LiveExchangeError("Canlı SHORT koruma seviyeleri geçersiz; emir gönderilmedi.", http_status=422)
+
+
 async def live_symbol_rules(client: BinanceLiveClient, symbol: str, order_type: str) -> dict[str, Decimal]:
     payload = await client.public_get("/fapi/v1/exchangeInfo")
     row = next((item for item in payload.get("symbols", []) if item.get("symbol") == symbol), None)
@@ -1397,6 +1419,7 @@ async def execute_live_order(
             if float(snapshot.get("available_balance") or 0) < body.margin_usdt:
                 raise LiveExchangeError("Canlı hesap kullanılabilir bakiyesi seçilen marjinden düşük.", http_status=409)
             spec = await build_live_spec(client, body, state["policy"], allowed_symbols=allowed_symbols)
+            validate_protection_readiness(spec, state["policy"])
             await set_live_isolated_margin(client, spec["symbol"])
             leverage_audit = await apply_live_verified_leverage(client, spec["symbol"], spec["leverage"])
             intent_id = body.intent_id or f"manual-{uuid.uuid4().hex}"
@@ -1465,6 +1488,16 @@ async def execute_live_order(
                 persist_state(state)
             state["connection"]["last_error"] = str(exc)[:240]
             raise safe_exchange_error(exc) from exc
+        except Exception as exc:
+            state["real_trading_locked"] = True
+            state["live_auto_trade"] = False
+            state["armed_until"] = 0.0
+            state["auto"].update({"enabled": False, "session_until": 0.0})
+            state["emergency"].update({"active": True, "reason": "LIVE_EXCEPTION", "triggered_at": now_iso()})
+            add_event(state, "LIVE_EXCEPTION", "Canlı emir akışında beklenmeyen hata; yeni emirler kilitlendi.")
+            state["connection"]["last_error"] = "Beklenmeyen canlı emir hatası"
+            persist_state(state)
+            raise HTTPException(502, "Canlı emir akışı güvenli şekilde kilitlendi; manuel inceleme gerekli.") from exc
 
 
 async def automatic_cycle(application: Any) -> None:
