@@ -15,6 +15,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -44,6 +45,7 @@ ACTIVATE_CONFIRMATIONS = {
 DELETE_CONFIRMATION = "ANAHTARI KALICI SİL"
 
 router = APIRouter(prefix="/api/exchange-connections", tags=["V28 Exchange Connections"])
+logger = logging.getLogger(__name__)
 
 # One Render web process is used by the supplied deployment.  Every process
 # reloads the encrypted rows at startup; plaintext never enters app.state or a
@@ -454,6 +456,11 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
         except httpx.HTTPStatusError as exc:
             error = _server_time_error(exc.response)
             if isinstance(error, BinanceServerTimeRejected):
+                logger.warning(
+                    "Binance server-time rejected request: mode=%s status=418 retry_after_seconds=%s",
+                    normalized,
+                    error.retry_after,
+                )
                 _SERVER_TIME_REJECTION_CACHE[normalized] = (
                     time.monotonic() + error.retry_after,
                     str(error),

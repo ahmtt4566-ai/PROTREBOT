@@ -92,9 +92,11 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
 
     def test_http_418_retry_after_is_guidance_only(self):
         http = FakeBinanceHttp(time_status=418, time_headers={"Retry-After": "5"})
-        with self.assertRaisesRegex(exchange_connections.VaultError, "wait 5 seconds"):
-            asyncio.run(exchange_connections._server_time_offset(http, "LIVE"))
+        with self.assertLogs(exchange_connections.logger, level="WARNING") as logs:
+            with self.assertRaisesRegex(exchange_connections.VaultError, "wait 5 seconds"):
+                asyncio.run(exchange_connections._server_time_offset(http, "LIVE"))
         self.assertEqual(http.paths, ["/fapi/v1/time"])
+        self.assertIn("retry_after_seconds=5", " ".join(logs.output))
 
     def test_http_418_is_negative_cached_for_retry_window(self):
         http = FakeBinanceHttp(time_status=418, time_headers={"Retry-After": "5"})
