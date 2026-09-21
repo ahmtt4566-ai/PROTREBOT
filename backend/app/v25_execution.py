@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import time
 import uuid
@@ -83,6 +84,8 @@ LIVE_AUTO_SESSION_SECONDS = 60 * 60
 RECONCILE_SECONDS = 10
 MAX_EVENTS = 500
 MAX_PLANS = 250
+PROVENANCE_STATES = {"NO_PROVENANCE", "PROVISIONAL", "CONFIRMED", "BROKEN"}
+PROTECTION_STATES = {"MATCHED", "MISSING", "UNKNOWN"}
 MARKET_SCAN_LIMIT = 100
 DEEP_ANALYSIS_LIMIT = 100
 MIN_24H_QUOTE_VOLUME = 1_000_000.0
@@ -284,6 +287,17 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     if len(base["intents"]) > 1_000:
         rows = sorted(base["intents"].items(), key=lambda item: item[1].get("created_at", ""), reverse=True)[:1_000]
         base["intents"] = dict(rows)
+    for plan in base["plans"].values():
+        if not isinstance(plan, dict):
+            continue
+        plan.setdefault("provenance_state", "NO_PROVENANCE")
+        if plan.get("provenance_state") == "CONFIRMED":
+            plan["provenance_state"] = "PROVISIONAL"
+        if plan.get("provenance_state") not in PROVENANCE_STATES:
+            plan["provenance_state"] = "BROKEN"
+        plan.setdefault("protection_state", "UNKNOWN")
+        if plan.get("protection_state") not in PROTECTION_STATES:
+            plan["protection_state"] = "UNKNOWN"
     # Entry authority never survives a process restart.
     base["auto"]["last_decision"] = "Güvenli yeniden başlatma: canlı otomasyon yeniden onay bekliyor."
     base["real_trading_locked"] = True
@@ -877,16 +891,16 @@ async def close_tracked_symbol(client: BinanceLiveClient, symbol: str, intent: s
         raise
 
 
-async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[dict[str, Any]], symbol: str) -> int:
+async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[dict[str, Any]], plan: dict[str, Any]) -> int:
     """Remove only V25-owned residual Stop/TP algos after a tracked position closes."""
+    if not live_plan_can_mutate(plan):
+        return 0
     cancelled = 0
-    for row in rows:
-        if row.get("symbol") != symbol or not str(row.get("client_algo_id") or "").startswith(LIVE_CLIENT_PREFIX):
-            continue
+    for row in owned_protection_rows(plan, rows):
         try:
             await client.signed(
                 "DELETE", "/fapi/v1/algoOrder",
-                {"symbol": symbol, "algoId": row["algo_id"]},
+                {"symbol": plan["symbol"], "algoId": row["algo_id"]},
             )
             cancelled += 1
         except LiveExchangeError:
@@ -898,14 +912,28 @@ async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[di
 
 async def install_protection(client: BinanceLiveClient, state: dict[str, Any], plan: dict[str, Any]) -> None:
     symbol = plan["symbol"]
+    plan.setdefault("protection_state", "UNKNOWN")
+    if plan.get("provenance_state") not in {"PROVISIONAL", "CONFIRMED"}:
+        plan["protection_state"] = "UNKNOWN"
+        return
     positions = response_rows(await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol}))
-    position = next((item for item in positions if Decimal(str(item.get("positionAmt", "0"))) != 0), None)
+    live_positions = [item for item in positions if Decimal(str(item.get("positionAmt", "0"))) != 0]
+    position = live_positions[0] if len(live_positions) == 1 else None
     if position is None:
+        plan["protection_state"] = "MISSING"
         plan["status"] = "DOLUM BEKLİYOR"
         return
     amount = Decimal(str(position["positionAmt"]))
     direction = "LONG" if amount > 0 else "SHORT"
+    position_view = {"symbol": symbol, "direction": direction, "quantity": decimal_text(abs(amount))}
+    if not live_plan_can_mutate(plan) and not confirm_live_plan_provenance(plan, position_view):
+        plan["provenance_state"] = "BROKEN"
+        plan["protection_state"] = "UNKNOWN"
+        state["reconciliation_required"] = True
+        lock_live_execution(state, "LIVE_PROVENANCE_UNCONFIRMED", unknown=True, symbol=symbol)
+        return
     if direction != plan["direction"]:
+        plan["protection_state"] = "UNKNOWN"
         plan["status"] = "YÖN UYUŞMAZLIĞI"
         state["armed_until"] = 0.0
         state["auto"]["enabled"] = False
@@ -956,7 +984,7 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
             ids.append(int(result["algoId"]))
     except LiveExchangeError:
         monitoring.append("TP3")
-    plan.update({"protection_ids": ids, "monitoring_targets": monitoring, "protected_at": now_iso(), "status": "KORUMA AKTİF" if not monitoring else "STOP AKTİF · HEDEF İZLEME"})
+    plan.update({"protection_ids": ids, "monitoring_targets": monitoring, "protected_at": now_iso(), "protection_state": "MATCHED" if plan.get("stop_algo_id") and not monitoring else "MISSING", "status": "KORUMA AKTİF" if not monitoring else "STOP AKTİF · HEDEF İZLEME"})
     add_event(state, "PROTECTION_ACTIVE", f"{symbol} canlı Stop ve TP koruma planı kuruldu.", symbol=symbol)
 
 
@@ -1370,6 +1398,95 @@ def readiness(application: Any, state: dict[str, Any]) -> dict[str, Any]:
     return {"ready": release_ready(gates), "score": round(sum(1 for item in gates if item["passed"]) / len(gates) * 100), "gates": gates, "demo_certificate": demo_certificate(application)}
 
 
+def live_plan_is_active(plan: dict[str, Any]) -> bool:
+    return str(plan.get("status") or "").upper() not in {"KAPANDI", "İPTAL", "CLOSED", "CANCELLED"}
+
+
+def live_plan_can_mutate(plan: dict[str, Any]) -> bool:
+    return plan.get("provenance_state") == "CONFIRMED"
+
+
+def confirm_live_plan_provenance(plan: dict[str, Any], position: dict[str, Any]) -> bool:
+    if plan.get("provenance_state") in {"BROKEN", "NO_PROVENANCE"}:
+        return False
+    if str(position.get("symbol") or "").upper() != str(plan.get("symbol") or "").upper():
+        return False
+    if str(position.get("direction") or "").upper() != str(plan.get("direction") or "").upper():
+        return False
+    try:
+        quantity = Decimal(str(position.get("quantity")))
+        expected = Decimal(str(plan.get("quantity")))
+    except (TypeError, ValueError, ArithmeticError):
+        return False
+    if not quantity.is_finite() or quantity <= 0 or quantity != expected:
+        return False
+    if not plan.get("entry_order_id") or not plan.get("entry_client_order_id"):
+        return False
+    plan["provenance_state"] = "CONFIRMED"
+    return True
+
+
+def owned_protection_rows(plan: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    expected = {
+        str(value) for value in (
+            plan.get("stop_client_id"),
+            client_id_for("TP1", str(plan.get("intent_id") or "")),
+            client_id_for("TP2", str(plan.get("intent_id") or "")),
+            client_id_for("TP3", str(plan.get("intent_id") or "")),
+        ) if value
+    }
+    return [
+        row for row in rows
+        if isinstance(row, dict)
+        and str(row.get("symbol") or "").upper() == str(plan.get("symbol") or "").upper()
+        and str(row.get("client_algo_id") or "") in expected
+    ]
+
+
+def live_auto_start_gate(application: Any, state: dict[str, Any]) -> tuple[bool, str]:
+    """Require every entry authority to be valid before opening automation."""
+    if state.get("real_trading_locked") is not False:
+        return False, "Gerçek işlem kilidi açık."
+    if live_execution_blocked(state):
+        return False, "Acil durdurma veya belirsiz uzlaştırma aktif."
+    if state.get("recovery_ready") is not True or state.get("recovery_error"):
+        return False, "Canlı recovery hazır değil."
+    if not is_armed(state):
+        return False, "Süreli canlı kilit açık değil."
+    release = readiness(application, state)
+    if not release["ready"]:
+        return False, "Canlı yayın kapıları tamamlanmadı."
+    snapshot = state.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return False, "Canlı hesap snapshot'ı mevcut değil."
+    if snapshot.get("hedge_mode") is not False:
+        return False, "Canlı hesap One-way modunda değil."
+    available_balance = snapshot.get("available_balance")
+    if available_balance is None or not math.isfinite(float(available_balance)) or float(available_balance) <= 0:
+        return False, "Canlı hesap bakiyesi hazır değil."
+    daily = live_daily_metrics(state)
+    if int(daily.get("unverified_closures", 0)) != 0:
+        return False, "Doğrulanmamış kapanış recovery gerektiriyor."
+    active_plans = [plan for plan in state.get("plans", {}).values() if isinstance(plan, dict) and live_plan_is_active(plan)]
+    if active_plans:
+        return False, "Aktif LIVE plan varken otomasyon açılamaz."
+    allowed_symbols = state["policy"].get("allowed_symbols") or ["BTCUSDT"]
+    risk = evaluate_entry_gates(
+        symbol=str(allowed_symbols[0]),
+        signal={"direction": "LONG", "confidence": 100, "radar": {"trap_score": 0}},
+        snapshot=snapshot,
+        policy=state["policy"],
+        daily=daily,
+        spread_bps=0.0,
+        armed=True,
+        active_plans=[],
+        candidate_notional_usdt=0.0,
+    )
+    if not risk["passed"]:
+        return False, f"Risk kapısı bloklu: {risk['reason']}"
+    return True, "Tüm LIVE otomasyon kapıları geçti."
+
+
 def live_daily_metrics(state: dict[str, Any]) -> dict[str, Any]:
     metrics = daily_execution_metrics(state.get("events", []))
     plan_blocks = sum(
@@ -1581,6 +1698,7 @@ async def execute_live_order(
                 "min_qty": decimal_text(spec["min_qty"]), "entry_order_id": int(result.get("orderId") or 0) or None,
                 "entry_client_order_id": client_id, "status": "DOLUM BEKLİYOR", "created_at": now_iso(),
                 "source": source, "live": True, "protection_ids": [],
+                "provenance_state": "PROVISIONAL", "protection_state": "UNKNOWN",
                 "exchange_order_ids": [int(result.get("orderId"))] if result.get("orderId") else [],
             }
             state["plans"] = {plan_id: plan, **state.get("plans", {})}
@@ -1767,6 +1885,10 @@ async def reconcile(application: Any) -> None:
     for plan in state.get("plans", {}).values():
         if plan.get("status") in {"KAPANDI", "İPTAL"}:
             continue
+        if not live_plan_can_mutate(plan):
+            state["reconciliation_required"] = True
+            lock_live_execution(state, "LIVE_PLAN_PROVENANCE_UNKNOWN", unknown=True, symbol=str(plan.get("symbol") or ""))
+            continue
         symbol = plan.get("symbol")
         position = positions.get(symbol)
         if position is None:
@@ -1778,7 +1900,7 @@ async def reconcile(application: Any) -> None:
                     add_event(state, "LIVE_ENTRY_CANCELLED", f"{symbol} giriş emri {entry_status}; pozisyon oluşmadı.", symbol=symbol, plan_id=plan.get("id"))
                 elif entry_status not in {"FILLED"}:
                     continue
-            cancelled = await cancel_owned_algos_for_symbol(client, open_algos, str(symbol))
+            cancelled = await cancel_owned_algos_for_symbol(client, open_algos, plan)
             if cancelled:
                 add_event(
                     state,
@@ -1789,8 +1911,20 @@ async def reconcile(application: Any) -> None:
                 )
             await settle_closed_plan(client, state, plan)
             continue
-        has_stop = any(item.get("symbol") == symbol and str(item.get("type", "")).upper() == "STOP_MARKET" for item in open_algos)
+        if snapshot.get("open_algo_orders_available") is not True:
+            plan["protection_state"] = "UNKNOWN"
+            state["reconciliation_required"] = True
+            lock_live_execution(state, "PROTECTION_SNAPSHOT_UNKNOWN", unknown=True, symbol=str(symbol))
+            continue
+        owned_algos = owned_protection_rows(plan, open_algos)
+        has_stop = any(str(item.get("type", "")).upper() == "STOP_MARKET" for item in owned_algos)
+        plan["protection_state"] = "MATCHED" if has_stop else "MISSING"
         if not has_stop:
+            if not live_plan_can_mutate(plan):
+                plan["protection_state"] = "UNKNOWN"
+                state["reconciliation_required"] = True
+                lock_live_execution(state, "PROTECTION_PROVENANCE_UNKNOWN", unknown=True, symbol=str(symbol))
+                continue
             state["protection_repairs"] += 1
             add_event(state, "PROTECTION_REPAIR", f"{symbol} Stop eksik; koruma yeniden kuruluyor.", symbol=symbol)
             await install_protection(client, state, plan)
@@ -2032,8 +2166,9 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     if body.confirmation.strip().upper() != "CANLI OTOMATİK":
         raise HTTPException(422, "Otomasyonu açmak için CANLI OTOMATİK yazın.")
     state = request.app.state.v25_execution
-    if live_execution_blocked(state) or not is_armed(state) or not readiness(request.app, state)["ready"]:
-        raise HTTPException(423, "Önce bütün yayın kapılarını tamamlayıp 5 dakikalık canlı kilidi açın.")
+    allowed, reason = live_auto_start_gate(request.app, state)
+    if not allowed:
+        raise HTTPException(423, reason)
     state["auto"].update({"enabled": True, "session_until": time.time() + LIVE_AUTO_SESSION_SECONDS, "last_error": None, "last_decision": "Bir saatlik gözetimli canlı tarama başlatıldı."})
     state["live_auto_trade"] = True
     state["real_trading_locked"] = False
@@ -2066,6 +2201,8 @@ async def v25_close(request: Request, body: CloseRequest) -> dict[str, Any]:
     plan = state.get("plans", {}).get(body.plan_id)
     if not plan:
         raise HTTPException(404, "Tracked canlı plan bulunamadı.")
+    if not live_plan_can_mutate(plan):
+        raise HTTPException(423, "Canlı plan provenance doğrulanmadı; pozisyon sahiplenilmedi.")
     try:
         close_intent = f"manual-close-{plan['id']}"
         close_client_id = client_id_for("CLOSE", close_intent)
@@ -2097,7 +2234,16 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
     cancelled_orders = cancelled_algos = closed = 0
     try:
         client = client_for(request.app)
+        confirmed_plans = [
+            plan for plan in state.get("plans", {}).values()
+            if isinstance(plan, dict) and live_plan_can_mutate(plan)
+        ]
         snapshot = await account_snapshot(client)
+        owned_algo_ids = {
+            str(row.get("client_algo_id") or "")
+            for plan in confirmed_plans
+            for row in owned_protection_rows(plan, snapshot.get("open_algo_orders", []))
+        }
         for row in snapshot.get("open_orders", []):
             if str(row.get("client_order_id") or "").startswith(LIVE_CLIENT_PREFIX):
                 try:
@@ -2106,7 +2252,7 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
                 except LiveExchangeError:
                     pass
         for row in snapshot.get("open_algo_orders", []):
-            if str(row.get("client_algo_id") or "").startswith(LIVE_CLIENT_PREFIX):
+            if str(row.get("client_algo_id") or "") in owned_algo_ids:
                 try:
                     await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": row["symbol"], "algoId": row["algo_id"]})
                     cancelled_algos += 1
@@ -2115,7 +2261,9 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
         if body.close_tracked_positions:
             active_plans = [
                 plan for plan in state.get("plans", {}).values()
-                if plan.get("symbol") and plan.get("status") not in {"KAPANDI", "İPTAL", "ACİL DURDURULDU"}
+                if live_plan_can_mutate(plan)
+                and plan.get("symbol")
+                and plan.get("status") not in {"KAPANDI", "İPTAL", "ACİL DURDURULDU"}
             ]
             handled_symbols: set[str] = set()
             for plan in active_plans:
@@ -2138,7 +2286,7 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
                         if order_id not in known:
                             known.append(order_id)
         for plan in state.get("plans", {}).values():
-            if plan.get("status") not in {"KAPANDI", "İPTAL"}:
+            if live_plan_can_mutate(plan) and plan.get("status") not in {"KAPANDI", "İPTAL"}:
                 plan["status"] = "ACİL DURDURULDU"
         state["emergency"] = {"active": True, "triggered_at": now_iso(), "reason": "Kullanıcı canlı acil durdurma komutu"}
         add_event(state, "LIVE_EMERGENCY", f"{cancelled_orders} giriş, {cancelled_algos} koruma iptal; {closed} tracked pozisyon kapanış emri.", actor=user["id"])

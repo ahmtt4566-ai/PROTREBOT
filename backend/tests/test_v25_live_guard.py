@@ -31,7 +31,7 @@ from app.execution_core import (  # noqa: E402
     sanitize_execution_policy,
 )
 from app import v25_execution  # noqa: E402
-from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, initial_state, lock_live_execution, rank_market_tickers, sanitized_state, submit_entry, validate_protection_readiness  # noqa: E402
+from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, rank_market_tickers, sanitized_state, submit_entry, validate_protection_readiness  # noqa: E402
 
 
 EXECUTION_SOURCE = (BACKEND / "app" / "v25_execution.py").read_text(encoding="utf-8")
@@ -47,6 +47,31 @@ RENDER_SOURCE = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
 
 class V25LiveGuardCoreTests(unittest.TestCase):
+    def test_auto_start_gate_rejects_missing_recovery_and_account_readiness(self):
+        state = initial_state()
+        state.update({"real_trading_locked": False, "connected": True, "armed_until": time.time() + 300})
+        state["policy_ack_digest"] = policy_digest(state["policy"])
+        state["snapshot"] = {"available_balance": 1000, "positions": [], "open_orders": [], "hedge_mode": False}
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
+        allowed, reason = live_auto_start_gate(application, state)
+        self.assertFalse(allowed)
+        self.assertIn("recovery", reason.lower())
+
+    def test_provenance_requires_exact_position_identity(self):
+        plan = {"provenance_state": "PROVISIONAL", "symbol": "BTCUSDT", "direction": "LONG", "quantity": "0.010", "entry_order_id": 42, "entry_client_order_id": "PTB_ENTRY_exact"}
+        self.assertFalse(confirm_live_plan_provenance(plan, {"symbol": "BTCUSDT", "direction": "LONG", "quantity": "0.011"}))
+        self.assertEqual(plan["provenance_state"], "PROVISIONAL")
+        self.assertTrue(confirm_live_plan_provenance(plan, {"symbol": "BTCUSDT", "direction": "LONG", "quantity": "0.010"}))
+        self.assertEqual(plan["provenance_state"], "CONFIRMED")
+
+    def test_protection_rows_ignore_same_symbol_foreign_client_ids(self):
+        plan = {"symbol": "BTCUSDT", "intent_id": "intent-1", "stop_client_id": "PTB_SL_owned"}
+        rows = [
+            {"symbol": "BTCUSDT", "client_algo_id": "PTB_SL_owned"},
+            {"symbol": "BTCUSDT", "client_algo_id": "PTB_FOREIGN"},
+        ]
+        self.assertEqual(owned_protection_rows(plan, rows), [rows[0]])
+
     def test_live_is_locked_and_auto_trade_is_off_by_default_and_after_restart(self):
         self.assertTrue(initial_state()["real_trading_locked"])
         self.assertFalse(initial_state()["live_auto_trade"])
