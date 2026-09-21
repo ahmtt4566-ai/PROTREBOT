@@ -50,6 +50,7 @@ from .binance_demo import (
     post_algo,
     protection_lock,
     position_amount,
+    record_entry_trade_observation,
     response_rows,
     reconcile_demo_plans,
     round_tick,
@@ -1187,6 +1188,20 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_st
         execution = str(order.get("x") or "")
         order_id = str(order.get("i") or "")
         client_order_id = str(order.get("c") or "")
+        if demo_state is not None and execution.upper() == "TRADE":
+            recorded_plan = record_entry_trade_observation(
+                demo_state,
+                symbol=symbol,
+                position_side=order.get("ps", order.get("positionSide")),
+                order_id=order.get("i"),
+                client_order_id=order.get("c"),
+                trade_id=order.get("t"),
+                last_fill_quantity=order.get("l"),
+                cumulative_fill_quantity=order.get("z"),
+                observation_cycle=int(demo_state.get("_provenance_reconciliation_cycle", 0)),
+            )
+            if recorded_plan is not None:
+                persist_runtime(demo_state)
         if demo_state is not None and execution.upper() == "TRADE" and order_id:
             for plan in demo_state.get("plans", {}).values():
                 if plan.get("symbol") != symbol:

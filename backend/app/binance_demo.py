@@ -115,6 +115,7 @@ def find_entry_plan_for_order(
     plans: dict[str, Any] | None,
     *,
     symbol: Any,
+    position_side: Any,
     client_order_id: Any,
     order_id: Any,
 ) -> dict[str, Any] | None:
@@ -123,20 +124,25 @@ def find_entry_plan_for_order(
     event_order_id = _usable_identifier(order_id)
     if not event_client_id:
         return None
+    event_position_side = str(position_side or "").strip().upper()
+    if not event_position_side:
+        return None
     try:
         normalized_symbol = normalize_symbol(str(symbol or ""))
     except BinanceDemoError:
         return None
+    candidates = []
     for plan in (plans or {}).values():
-        if not isinstance(plan, dict) or plan.get("provenance_state") in {
-            ProvenanceState.BROKEN.value,
-            ProvenanceState.CONFIRMED.value,
-        }:
+        if not isinstance(plan, dict) or plan.get("provenance_state") == ProvenanceState.BROKEN.value:
+            continue
+        if plan.get("status") in {"KAPANDI", "İPTAL", "GÜVENLİK İÇİN KAPATILDI", "ACİL DURDURULDU", "KORUMA İPTAL"}:
             continue
         try:
             if normalize_symbol(str(plan.get("symbol") or "")) != normalized_symbol:
                 continue
         except BinanceDemoError:
+            continue
+        if str(plan.get("position_side") or "BOTH").strip().upper() != event_position_side:
             continue
         if _usable_identifier(plan.get("provenance_entry_client_order_id")) != event_client_id:
             continue
@@ -145,8 +151,8 @@ def find_entry_plan_for_order(
             continue
         if plan_order_id and not event_order_id:
             continue
-        return plan
-    return None
+        candidates.append(plan)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _provenance_decimal(value: Any) -> Decimal | None:
@@ -161,6 +167,7 @@ def record_entry_trade_observation(
     state: dict[str, Any],
     *,
     symbol: Any,
+    position_side: Any,
     order_id: Any,
     client_order_id: Any,
     trade_id: Any,
@@ -172,6 +179,7 @@ def record_entry_trade_observation(
     plan = find_entry_plan_for_order(
         state.get("plans"),
         symbol=symbol,
+        position_side=position_side,
         client_order_id=client_order_id,
         order_id=order_id,
     )
