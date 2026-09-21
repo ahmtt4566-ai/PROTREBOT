@@ -829,7 +829,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           </aside>
         </div>
 
-        <LiveTradingPanel active symbol={draft.market} analysis={analysis} />
+        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade />
 
         <div className="masterTradeDataGrid">
           <section className="masterTradePanel riskMonitorPanel">

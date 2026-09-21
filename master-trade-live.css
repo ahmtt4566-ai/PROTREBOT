@@ -1,0 +1,171 @@
+.masterTradeLiveUx {
+  --live-ink: #e9f1f2;
+  --live-muted: #8e9da4;
+  --live-line: rgba(151, 174, 181, .18);
+  --live-line-strong: rgba(151, 174, 181, .3);
+  --live-surface: rgba(12, 19, 24, .88);
+  --live-surface-soft: rgba(18, 28, 33, .72);
+  --live-green: #55d79b;
+  --live-amber: #edbd67;
+  --live-red: #f07c73;
+  display: grid;
+  gap: 12px;
+  margin: 4px 0 24px;
+  color: var(--live-ink);
+  font-family: "IBM Plex Mono", "Cascadia Mono", monospace;
+}
+
+.masterTradeLiveUx button,
+.masterTradeLiveUx input,
+.masterTradeLiveUx select { font: inherit; }
+.masterTradeLiveUx button { cursor: pointer; }
+.masterTradeLiveUx button:disabled { cursor: not-allowed; opacity: .45; }
+.masterTradeLiveKicker { color: var(--live-muted); font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.masterTradeLiveHeader { display: grid; grid-template-columns: minmax(240px, 1.1fr) auto minmax(300px, 1fr); align-items: center; gap: 24px; padding: 20px 22px; border: 1px solid var(--live-line); border-radius: 12px; background: linear-gradient(110deg, rgba(16, 27, 34, .98), rgba(10, 16, 21, .96)); }
+.masterTradeLiveTitle h2 { margin: 6px 0 4px; color: #f7fbfc; font-size: clamp(22px, 2.4vw, 32px); letter-spacing: .02em; }
+.masterTradeLiveTitle p { margin: 0; color: var(--live-muted); font-size: 11px; }
+.masterTradeLiveHeadline { display: grid; grid-template-columns: auto auto; align-items: center; gap: 8px 10px; min-width: 145px; }
+.masterTradeLiveHeadline strong { color: var(--live-amber); font-size: 20px; letter-spacing: .04em; }
+.masterTradeLiveHeadline small { grid-column: 2; color: var(--live-muted); font-size: 8px; letter-spacing: .08em; }
+.liveStateDot, .masterTradeLiveSafetyList summary i, .masterTradeLiveConnection strong i, .masterTradeLiveEmergency strong i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--live-amber); box-shadow: 0 0 0 4px rgba(237, 189, 103, .1); }
+.masterTradeLiveHeader.ready .liveStateDot, .masterTradeLiveHeader.armed .liveStateDot, .masterTradeLiveHeader.running .liveStateDot { background: var(--live-green); box-shadow: 0 0 0 4px rgba(85, 215, 155, .1); }
+.masterTradeLiveHeader.blocked .liveStateDot { background: var(--live-red); box-shadow: 0 0 0 4px rgba(240, 124, 115, .1); }
+.masterTradeLiveHeader.running .masterTradeLiveHeadline strong { color: var(--live-green); }
+.masterTradeLiveChips { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.masterTradeLiveChips span { padding: 7px 9px; border: 1px solid var(--live-line); border-radius: 6px; color: var(--live-muted); font-size: 9px; white-space: nowrap; }
+.masterTradeLiveChips b { margin-left: 4px; color: var(--live-ink); font-weight: 800; }
+.masterTradeLiveAssistant { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 18px; border-left: 2px solid var(--live-amber); background: rgba(25, 27, 24, .62); }
+.masterTradeLiveAssistant strong { display: block; margin-top: 5px; color: #f5f8f1; font-size: 14px; }
+.masterTradeLiveAssistant small { display: block; margin-top: 5px; color: var(--live-muted); font-size: 10px; }
+.masterTradeLiveAssistantActions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.masterTradeLivePrimary, .masterTradeLiveControl .primaryAction { min-height: 38px; padding: 0 15px; border: 1px solid rgba(85, 215, 155, .5); border-radius: 6px; background: rgba(36, 119, 86, .78); color: #effff7; font-size: 10px; font-weight: 900; letter-spacing: .08em; }
+.masterTradeLivePrimary:hover:not(:disabled), .masterTradeLiveControl .primaryAction:hover:not(:disabled) { background: #2d9b70; }
+.masterTradeLiveTextButton, .masterTradeLiveSecondary { border: 0; background: transparent; color: #a9c6cb; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.masterTradeLiveTextButton:hover:not(:disabled), .masterTradeLiveSecondary:hover:not(:disabled) { color: #e7f7f8; }
+.masterTradeLiveFlow { display: flex; align-items: center; gap: 8px; padding: 2px 6px; color: #59686f; }
+.masterTradeLiveFlow span { display: inline-flex; align-items: center; gap: 6px; font-size: 9px; letter-spacing: .08em; }
+.masterTradeLiveFlow span.current, .masterTradeLiveFlow span.complete { color: var(--live-ink); }
+.masterTradeLiveFlow span.current b { color: var(--live-amber); }
+.masterTradeLiveFlow span.running b { color: var(--live-green); }
+.masterTradeLiveFlow i { height: 1px; flex: 0 1 60px; background: var(--live-line); }
+.masterTradeLiveGrid { display: grid; gap: 12px; }
+.masterTradeLivePrimaryGrid { grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); }
+.masterTradeLiveDataGrid { grid-template-columns: minmax(0, 1.25fr) minmax(310px, .75fr); }
+.masterTradeLiveLowerGrid { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
+.masterTradeLiveSection, .masterTradeLiveConnection, .masterTradeLiveApiDrawer, .masterTradeLiveEmergency { border: 1px solid var(--live-line); background: var(--live-surface); }
+.masterTradeLiveSection { min-width: 0; padding: 16px 18px; }
+.masterTradeLiveSection > header, .masterTradeLiveApiHeader, .masterTradeLiveConnection, .masterTradeLiveEmergency { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.masterTradeLiveSection > header { margin-bottom: 14px; }
+.masterTradeLiveSection h3, .masterTradeLiveApiHeader h3 { margin: 5px 0 0; color: #eef5f5; font-size: 16px; }
+.masterTradeLiveSection > header > strong, .masterTradeLiveSection > header > span { color: var(--live-muted); font-size: 10px; letter-spacing: .08em; }
+.masterTradeLiveControl { background: linear-gradient(145deg, rgba(18, 37, 35, .9), var(--live-surface)); }
+.masterTradeLiveControl header strong.ready, .masterTradeLiveControl header strong.blocked { padding: 5px 8px; border-radius: 4px; font-size: 9px; letter-spacing: .1em; }
+.masterTradeLiveControl header strong.ready { color: var(--live-green); background: rgba(85, 215, 155, .1); }
+.masterTradeLiveControl header strong.blocked { color: var(--live-amber); background: rgba(237, 189, 103, .1); }
+.masterTradeLiveControlBody { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.masterTradeLiveControlBody b { display: block; font-size: 13px; }
+.masterTradeLiveControlBody small { display: block; max-width: 300px; margin-top: 6px; color: var(--live-muted); font-size: 10px; line-height: 1.45; }
+.masterTradeLiveControl .dangerAction, .masterTradeLiveEmergency .dangerAction { min-height: 38px; padding: 0 13px; border: 1px solid rgba(240, 124, 115, .55); border-radius: 6px; background: rgba(136, 45, 45, .58); color: #fff0ee; font-size: 9px; font-weight: 900; letter-spacing: .08em; }
+.masterTradeLiveControlMeta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 18px 0 12px; padding-top: 12px; border-top: 1px solid var(--live-line); }
+.masterTradeLiveControlMeta span { color: var(--live-muted); font-size: 8px; line-height: 1.5; }
+.masterTradeLiveControlMeta b { display: block; margin-top: 3px; color: var(--live-ink); font-size: 10px; overflow-wrap: anywhere; }
+.masterTradeLiveControl > .masterTradeLiveSecondary { padding: 0; }
+.masterTradeLiveSetupGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.masterTradeLiveSetupGrid label, .masterTradeLiveAdvanced label, .masterTradeLiveApiGrid label { display: grid; gap: 5px; color: var(--live-muted); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+.masterTradeLiveSetupGrid input, .masterTradeLiveSetupGrid select, .masterTradeLiveAdvanced input, .masterTradeLiveApiGrid input { width: 100%; min-height: 34px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--live-line); border-radius: 5px; background: rgba(4, 10, 14, .7); color: var(--live-ink); font-size: 11px; }
+.masterTradeLiveSetupGrid strong { display: flex; align-items: center; min-height: 34px; color: var(--live-ink); font-size: 10px; }
+.masterTradeLiveMarkets { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.masterTradeLiveMarkets > span { margin-right: 3px; color: var(--live-muted); font-size: 8px; letter-spacing: .08em; }
+.masterTradeLiveMarkets button, .masterTradeLiveSide button { min-height: 26px; padding: 0 9px; border: 1px solid var(--live-line); border-radius: 4px; background: transparent; color: var(--live-muted); font-size: 9px; font-weight: 800; }
+.masterTradeLiveMarkets button.selected, .masterTradeLiveSide button.selected { border-color: rgba(85, 215, 155, .42); background: rgba(85, 215, 155, .1); color: var(--live-green); }
+.masterTradeLiveMarkets small { color: var(--live-muted); font-size: 9px; }
+.masterTradeLiveAdvanced { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--live-line); }
+.masterTradeLiveSide { display: flex; align-items: end; flex-wrap: wrap; gap: 5px; }
+.masterTradeLiveSide span { width: 100%; color: var(--live-muted); font-size: 8px; letter-spacing: .08em; }
+.masterTradeLiveSetupFooter { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 13px; }
+.masterTradeLiveSetupFooter small { color: var(--live-muted); font-size: 9px; }
+.masterTradeLiveSetupFooter .masterTradeLiveSecondary { min-height: 28px; padding: 0 9px; border: 1px solid var(--live-line); border-radius: 4px; }
+.masterTradeLiveCount { padding: 4px 7px; border: 1px solid var(--live-line); border-radius: 4px; }
+.masterTradeLiveTableWrap { overflow-x: auto; }
+.masterTradeLiveTableWrap table { width: 100%; border-collapse: collapse; font-size: 10px; white-space: nowrap; }
+.masterTradeLiveTableWrap th { padding: 0 8px 9px; color: var(--live-muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; text-align: left; text-transform: uppercase; }
+.masterTradeLiveTableWrap td { padding: 11px 8px; border-top: 1px solid var(--live-line); color: #c9d5d8; }
+.masterTradeLiveTableWrap td strong { color: var(--live-ink); }
+.masterTradeLiveTableWrap td .long { color: var(--live-green); }
+.masterTradeLiveTableWrap td .short { color: var(--live-red); }
+.masterTradeLiveProtected { color: var(--live-green); font-size: 9px; }
+.masterTradeLiveEmpty { display: grid; gap: 5px; padding: 22px 2px 7px; color: var(--live-muted); font-size: 10px; }
+.masterTradeLiveEmpty strong { color: var(--live-ink); font-size: 12px; }
+.masterTradeLiveSignal { background: linear-gradient(145deg, rgba(25, 30, 29, .9), var(--live-surface)); }
+.masterTradeLiveSignal header > strong { color: var(--live-amber); font-size: 9px; }
+.masterTradeLiveSignalSymbol { display: flex; align-items: baseline; gap: 10px; margin-bottom: 13px; }
+.masterTradeLiveSignalSymbol b { color: #f4f8f8; font-size: 23px; }
+.masterTradeLiveSignalSymbol span { color: var(--live-green); font-size: 11px; font-weight: 800; }
+.masterTradeLiveSignalGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.masterTradeLiveSignalGrid span { display: grid; gap: 4px; }
+.masterTradeLiveSignalGrid small { color: var(--live-muted); font-size: 8px; }
+.masterTradeLiveSignalGrid b { color: var(--live-ink); font-size: 11px; }
+.masterTradeLiveSignal p { margin: 15px 0 0; color: var(--live-muted); font-size: 9px; line-height: 1.5; }
+.masterTradeLiveActivity ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.masterTradeLiveActivity li { display: grid; grid-template-columns: 10px 55px 1fr; align-items: center; gap: 8px; min-height: 34px; border-bottom: 1px solid var(--live-line); color: var(--live-muted); font-size: 9px; }
+.masterTradeLiveActivity li:last-child { border-bottom: 0; }
+.masterTradeLiveActivity li i { width: 5px; height: 5px; border-radius: 50%; background: var(--live-green); }
+.masterTradeLiveActivity li span { color: var(--live-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.masterTradeLiveSafetyList { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 14px; }
+.masterTradeLiveSafetyList details { border-bottom: 1px solid var(--live-line); }
+.masterTradeLiveSafetyList summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; cursor: pointer; list-style: none; color: var(--live-ink); font-size: 9px; }
+.masterTradeLiveSafetyList summary::-webkit-details-marker { display: none; }
+.masterTradeLiveSafetyList summary span { display: flex; align-items: center; gap: 7px; }
+.masterTradeLiveSafetyList summary b { font-size: 8px; letter-spacing: .08em; }
+.masterTradeLiveSafetyList details.ready summary i { background: var(--live-green); box-shadow: none; }
+.masterTradeLiveSafetyList details.blocked summary i { background: var(--live-red); box-shadow: none; }
+.masterTradeLiveSafetyList details.unknown summary i { background: var(--live-amber); box-shadow: none; }
+.masterTradeLiveSafetyList details.ready summary b { color: var(--live-green); }
+.masterTradeLiveSafetyList details.blocked summary b { color: var(--live-red); }
+.masterTradeLiveSafetyList details.unknown summary b { color: var(--live-amber); }
+.masterTradeLiveSafetyList p { margin: 0 0 8px 15px; color: var(--live-muted); font-size: 8px; line-height: 1.45; }
+.masterTradeLiveConnection, .masterTradeLiveEmergency { padding: 13px 16px; }
+.masterTradeLiveConnection strong, .masterTradeLiveEmergency strong { display: block; margin-top: 5px; color: var(--live-ink); font-size: 12px; }
+.masterTradeLiveConnection strong i, .masterTradeLiveEmergency strong i { width: 6px; height: 6px; margin-right: 5px; background: var(--live-red); box-shadow: none; }
+.masterTradeLiveConnection strong i.connected, .masterTradeLiveEmergency strong i:not(.active) { background: var(--live-green); }
+.masterTradeLiveConnection small, .masterTradeLiveEmergency small { display: block; margin-top: 4px; color: var(--live-muted); font-size: 9px; }
+.masterTradeLiveApiDrawer { display: grid; gap: 13px; padding: 16px; background: var(--live-surface-soft); }
+.masterTradeLiveApiHeader > span { color: var(--live-muted); font-size: 9px; }
+.masterTradeLiveApiGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.masterTradeLiveCheck { display: flex; align-items: center; gap: 7px; color: var(--live-muted); font-size: 9px; }
+.masterTradeLiveApiMeta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.masterTradeLiveApiMeta span { color: var(--live-muted); font-size: 8px; }
+.masterTradeLiveApiMeta b { display: block; margin-top: 4px; color: var(--live-ink); font-size: 9px; overflow-wrap: anywhere; }
+.masterTradeLiveApiActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.masterTradeLiveApiActions button { min-height: 31px; padding: 0 10px; border: 1px solid var(--live-line-strong); border-radius: 5px; background: rgba(28, 49, 54, .6); color: var(--live-ink); font-size: 9px; font-weight: 800; }
+.masterTradeLiveApiActions button:hover:not(:disabled) { border-color: var(--live-green); }
+.masterTradeLiveEmergency { border-color: rgba(240, 124, 115, .32); background: rgba(49, 24, 26, .35); }
+.masterTradeLiveEmergency .dangerAction { min-height: 34px; }
+.masterTradeLiveEmergency strong i.active { background: var(--live-red); box-shadow: 0 0 0 4px rgba(240, 124, 115, .12); }
+.masterTradeLiveEmergency strong i:not(.active) { background: var(--live-green); }
+.masterTradeLiveUx > .liveNotice { margin: 0; }
+
+@media (max-width: 1100px) {
+  .masterTradeLiveHeader { grid-template-columns: 1fr auto; }
+  .masterTradeLiveChips { grid-column: 1 / -1; justify-content: flex-start; }
+  .masterTradeLivePrimaryGrid, .masterTradeLiveDataGrid, .masterTradeLiveLowerGrid { grid-template-columns: 1fr; }
+  .masterTradeLiveSetupGrid { grid-template-columns: repeat(3, 1fr); }
+  .masterTradeLiveAdvanced { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 650px) {
+  .masterTradeLiveHeader { grid-template-columns: 1fr; gap: 14px; padding: 17px; }
+  .masterTradeLiveHeadline { min-width: 0; }
+  .masterTradeLiveChips { gap: 5px; }
+  .masterTradeLiveAssistant, .masterTradeLiveControlBody, .masterTradeLiveConnection, .masterTradeLiveEmergency { align-items: flex-start; flex-direction: column; }
+  .masterTradeLiveAssistantActions { align-items: flex-start; flex-direction: column; width: 100%; }
+  .masterTradeLivePrimary { width: 100%; }
+  .masterTradeLiveFlow { overflow-x: auto; padding-bottom: 5px; }
+  .masterTradeLiveFlow i { flex-basis: 20px; }
+  .masterTradeLiveSetupGrid, .masterTradeLiveAdvanced { grid-template-columns: repeat(2, 1fr); }
+  .masterTradeLiveControlMeta, .masterTradeLiveSafetyList, .masterTradeLiveApiMeta { grid-template-columns: 1fr 1fr; }
+  .masterTradeLiveSignalGrid { grid-template-columns: repeat(2, 1fr); }
+  .masterTradeLiveApiGrid { grid-template-columns: 1fr; }
+  .masterTradeLiveSetupFooter { align-items: flex-start; flex-direction: column; }
+  .masterTradeLiveEmergency .dangerAction { width: 100%; }
+}
