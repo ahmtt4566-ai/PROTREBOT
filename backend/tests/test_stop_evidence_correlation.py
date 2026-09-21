@@ -14,6 +14,8 @@ def confirmed_plan(**overrides):
     plan = {
         "id": "plan-1",
         "symbol": "BTCUSDT",
+        "direction": "LONG",
+        "position_side": "BOTH",
         "provenance_state": "CONFIRMED",
         "stop_algo_id": 77,
         "stop_client_id": "PTB_SL_1",
@@ -55,6 +57,8 @@ def trade_update(**overrides):
             "t": 5001,
             "x": "TRADE",
             "X": "FILLED",
+            "S": "SELL",
+            "ps": "BOTH",
             "l": "2",
             "z": "2",
             "R": True,
@@ -62,6 +66,10 @@ def trade_update(**overrides):
     }
     event["o"].update(overrides)
     return event
+
+
+def position_snapshot(state):
+    stop_evidence.observe_position_snapshot(state, [{"symbol": "BTCUSDT", "positionSide": "BOTH", "positionAmt": "2"}])
 
 
 def state_with_plan(plan=None):
@@ -103,6 +111,7 @@ def test_manual_or_external_or_uncorrelated_execution_does_not_attribute_stop(pa
 def test_correlated_trade_with_trade_id_confirms_stop_without_touching_tp():
     plan = confirmed_plan()
     state = state_with_plan(plan)
+    position_snapshot(state)
     stop_evidence.observe_stream_payload(state, algo_update(), demo_state=state)
     stop_evidence.observe_stream_payload(state, trade_update(), demo_state=state)
 
@@ -116,6 +125,7 @@ def test_correlated_trade_with_trade_id_confirms_stop_without_touching_tp():
 def test_duplicate_trade_is_idempotent():
     plan = confirmed_plan()
     state = state_with_plan(plan)
+    position_snapshot(state)
     stop_evidence.observe_stream_payload(state, algo_update(), demo_state=state)
     stop_evidence.observe_stream_payload(state, trade_update(), demo_state=state)
     first = copy.deepcopy(state["stop_correlations"])

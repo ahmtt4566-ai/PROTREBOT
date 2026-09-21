@@ -15,6 +15,7 @@ def plan_with_protection():
         "user_id": "user-1",
         "symbol": "BTCUSDT",
         "direction": "LONG",
+        "position_side": "BOTH",
         "provenance_state": "CONFIRMED",
         "status": "OPEN",
         "position_status": "OPEN",
@@ -46,7 +47,7 @@ def stop_trade_event():
     return {
         "e": "ORDER_TRADE_UPDATE",
         "T": 101,
-        "o": {"s": "BTCUSDT", "i": 9001, "c": "PTB_ACTUAL_1", "t": 5001, "x": "TRADE", "X": "FILLED", "l": "2", "z": "2", "R": True},
+        "o": {"s": "BTCUSDT", "i": 9001, "c": "PTB_ACTUAL_1", "t": 5001, "x": "TRADE", "X": "FILLED", "S": "SELL", "ps": "BOTH", "l": "2", "z": "2", "R": True},
     }
 
 
@@ -62,12 +63,13 @@ def confirmed_stop_state():
 
 def test_duplicate_stop_algo_and_trade_produce_one_evidence_path():
     state = confirmed_stop_state()
+    stop_evidence.observe_position_snapshot(state, [{"symbol": "BTCUSDT", "positionSide": "BOTH", "positionAmt": "2"}])
     stop_evidence.observe_stream_payload(state, stop_algo_event(), demo_state=state)
     stop_evidence.observe_stream_payload(state, stop_algo_event(), demo_state=state)
     stop_evidence.observe_stream_payload(state, stop_trade_event(), demo_state=state)
     stop_evidence.observe_stream_payload(state, stop_trade_event(), demo_state=state)
 
-    assert len(state["evidence_observations"]) == 2
+    assert len(state["evidence_observations"]) == 3
     assert len(state["stop_correlations"]) == 1
     assert state["plans"]["plan-1"]["stop_execution_trade_id"] == "5001"
 

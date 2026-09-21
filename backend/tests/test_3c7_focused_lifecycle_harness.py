@@ -68,6 +68,7 @@ def stop_plan(**overrides):
         "user_id": "user-1",
         "symbol": "BTCUSDT",
         "direction": "LONG",
+        "position_side": "BOTH",
         "provenance_state": "CONFIRMED",
         "status": "OPEN",
         "stop_loss": "90",
@@ -99,7 +100,7 @@ def stop_trade_event(**overrides):
     event = {
         "e": "ORDER_TRADE_UPDATE",
         "T": 101,
-        "o": {"s": "BTCUSDT", "i": 9001, "c": "PTB_ACTUAL_1", "t": 5001, "x": "TRADE", "X": "FILLED", "l": "2", "z": "2", "R": True},
+        "o": {"s": "BTCUSDT", "i": 9001, "c": "PTB_ACTUAL_1", "t": 5001, "x": "TRADE", "X": "FILLED", "S": "SELL", "ps": "BOTH", "l": "2", "z": "2", "R": True},
     }
     event["o"].update(overrides)
     return event
@@ -155,6 +156,7 @@ def test_zero_position_and_quantity_drop_do_not_attribute_stop():
 
 def test_valid_stop_is_correlated_once_and_unrelated_or_foreign_is_blocked():
     state = stop_state()
+    stop_evidence.observe_position_snapshot(state, [{"symbol": "BTCUSDT", "positionSide": "BOTH", "positionAmt": "2"}])
     stop_evidence.observe_stream_payload(state, stop_algo_event(), demo_state=state)
     stop_evidence.observe_stream_payload(state, stop_trade_event(), demo_state=state)
     first = copy.deepcopy(state["stop_correlations"])

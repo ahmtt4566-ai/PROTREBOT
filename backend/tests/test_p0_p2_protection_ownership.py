@@ -306,19 +306,21 @@ class P0P2ProtectionOwnershipTests(unittest.IsolatedAsyncioTestCase):
         post_algo.assert_not_awaited()
         self.assertEqual(plan["protection_ids"], [])
 
-    async def test_missing_stop_repairs(self):
+    async def test_missing_stop_with_unknown_ownership_does_not_repair(self):
         plan = self.plan(protection_ids=[])
         application = self.application(plan)
         snapshot = {
             **self.snapshot([]),
             "positions": [{"symbol": "BTCUSDT", "direction": "LONG"}],
         }
+        before = plan.copy()
         with patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 303, "symbol": "BTCUSDT", "type": "STOP_MARKET", "side": "SELL", "status": "NEW"})) as post_algo, \
-                patch.object(v21_demo, "persist_runtime"):
+            patch.object(v21_demo, "persist_runtime") as persist_runtime:
             changed = await v21_demo.ensure_stop_protection(application, snapshot, client=SimpleNamespace())
-        self.assertTrue(changed)
-        post_algo.assert_awaited_once()
-        self.assertEqual(plan["protection_ids"], [303])
+        self.assertFalse(changed)
+        post_algo.assert_not_awaited()
+        persist_runtime.assert_not_called()
+        self.assertEqual(plan, before)
 
     async def test_v21_repair_rejects_invalid_response_identity(self):
         responses = [

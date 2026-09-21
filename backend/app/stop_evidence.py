@@ -97,6 +97,48 @@ def _identifier(value: Any) -> str | None:
     return normalized or None
 
 
+def _positive_quantity(value: Any) -> bool:
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _position_observed(state: dict[str, Any], symbol: str, position_side: Any) -> bool:
+    expected_side = _identifier(position_side)
+    if not expected_side:
+        return False
+    for observation in state.get("evidence_observations", []):
+        if not isinstance(observation, dict) or observation.get("event_type") != "POSITION_RISK_SNAPSHOT":
+            continue
+        if str(observation.get("symbol") or "") != symbol:
+            continue
+        observed_side = _identifier(observation.get("position_side"))
+        if observed_side and observed_side == expected_side:
+            return True
+    return False
+
+
+def _stop_execution_matches_plan(plan: dict[str, Any], observation: dict[str, Any]) -> bool:
+    if observation.get("execution_type") != "TRADE":
+        return False
+    if str(observation.get("order_status") or "").upper() not in {"FILLED", "PARTIALLY_FILLED"}:
+        return False
+    if not _identifier(observation.get("trade_id")) or not _positive_quantity(observation.get("last_fill_qty")):
+        return False
+    if observation.get("reduce_only") is not True:
+        return False
+    direction = str(plan.get("direction") or "").upper()
+    expected_side = {"LONG": "SELL", "SHORT": "BUY"}.get(direction)
+    if expected_side is None or str(observation.get("side") or "").upper() != expected_side:
+        return False
+    expected_position_side = _identifier(plan.get("position_side"))
+    observed_position_side = _identifier(observation.get("position_side"))
+    if not expected_position_side or not observed_position_side:
+        return False
+    return observed_position_side == expected_position_side
+
+
 def _owned_stop_plans(demo_state: dict[str, Any], symbol: str, algo_id: Any, client_algo_id: Any) -> list[dict[str, Any]]:
     event_algo_id = _identifier(algo_id)
     event_client_id = _identifier(client_algo_id)
@@ -108,9 +150,13 @@ def _owned_stop_plans(demo_state: dict[str, Any], symbol: str, algo_id: Any, cli
             continue
         stop_algo_id = _identifier(plan.get("stop_algo_id"))
         stop_client_id = _identifier(plan.get("stop_client_id"))
-        if (event_algo_id and stop_algo_id and event_algo_id == stop_algo_id) or (
-            event_client_id and stop_client_id and event_client_id == stop_client_id
-        ):
+        if stop_algo_id and stop_client_id:
+            identity_matches = event_algo_id == stop_algo_id and event_client_id == stop_client_id
+        else:
+            identity_matches = (event_algo_id == stop_algo_id if stop_algo_id else False) or (
+                event_client_id == stop_client_id if stop_client_id else False
+            )
+        if identity_matches:
             matches.append(plan)
     return matches
 
@@ -121,6 +167,8 @@ def _record_algo_correlation(
     observation: dict[str, Any],
 ) -> None:
     event = observation
+    if str(event.get("order_status") or "").upper() not in {"TRIGGERED", "FILLED", "EXECUTED"}:
+        return
     plans = _owned_stop_plans(
         demo_state,
         str(event.get("symbol") or ""),
@@ -163,8 +211,6 @@ def _confirm_stop_execution(
     demo_state: dict[str, Any],
     observation: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if observation.get("execution_type") != "TRADE" or not _identifier(observation.get("trade_id")):
-        return None
     candidates = []
     event_order_id = _identifier(observation.get("order_id"))
     event_client_id = _identifier(observation.get("client_order_id"))
@@ -191,6 +237,10 @@ def _confirm_stop_execution(
         return None
     plan = (demo_state.get("plans") or {}).get(correlation.get("plan_id"))
     if not isinstance(plan, dict) or plan.get("provenance_state") != "CONFIRMED":
+        return None
+    if not _stop_execution_matches_plan(plan, observation):
+        return None
+    if not _position_observed(state, str(observation.get("symbol") or ""), plan.get("position_side")):
         return None
     correlation.update({
         "status": "CONFIRMED",
