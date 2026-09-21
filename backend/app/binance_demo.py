@@ -2313,6 +2313,19 @@ def _direct_position_identity_match(plan: dict[str, Any], position: dict[str, An
     return False
 
 
+def _native_id_free_position_slot_match(plan: dict[str, Any], position: dict[str, Any]) -> bool:
+    """Match Binance position snapshots without inventing a native position ID."""
+    if not _symbol_matches(position.get("symbol"), normalize_symbol(str(plan.get("symbol") or ""))):
+        return False
+    expected_position_side = str(plan.get("position_side") or "BOTH").upper()
+    actual_position_side = str(position.get("position_side", position.get("positionSide")) or "BOTH").upper()
+    if actual_position_side != expected_position_side:
+        return False
+    expected_direction = str(plan.get("direction") or "").upper()
+    actual_direction = str(position.get("direction") or "").upper()
+    return not expected_direction or not actual_direction or expected_direction == actual_direction
+
+
 def _single_plan_algo_id(plan: dict[str, Any], field: str) -> int | None:
     raw_id = plan.get(field)
     if raw_id in (None, ""):
@@ -2399,7 +2412,7 @@ def _protection_classification(
     if snapshot.get("open_algo_orders_available") is not True:
         return "UNKNOWN", [], []
     protection_ids = set() if "protection_ids" not in plan else _plan_protection_ids(plan)
-    if protection_ids is None or not _protection_ownership_metadata_valid(plan):
+    if not protection_ids or not _protection_ownership_metadata_valid(plan):
         return "UNKNOWN", [], []
     orders = snapshot.get("open_algo_orders")
     if not isinstance(orders, list):

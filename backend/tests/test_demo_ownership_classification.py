@@ -97,13 +97,75 @@ def test_explicit_position_identity_and_protection_ids_are_matched():
     result = classify(
         plan=make_plan(position_id="exchange-1", protection_ids=[101]),
         positions=[make_position(position_id="exchange-1")],
-        algo_orders=[{"algo_id": 101, "symbol": "BTCUSDT", "status": "NEW"}],
+        algo_orders=[{
+            "algo_id": 101,
+            "symbol": "BTCUSDT",
+            "type": "TAKE_PROFIT_MARKET",
+            "side": "SELL",
+            "status": "NEW",
+        }],
     )
 
     row = result["position_plan"][0]
     assert row["classification"] == "PLAN_AND_EXCHANGE_MATCHED"
     assert row["protection_status"] == "MATCHED"
     assert row["matched_algo_ids"] == [101]
+
+
+def test_exact_protection_ids_match_without_native_position_identity():
+    result = classify(
+        plan=make_plan(
+            position_id=None,
+            protection_ids=[101],
+        ) | {
+            "position_side": "BOTH",
+            "stop_algo_id": 101,
+        },
+        positions=[make_position(position_id=None, position_side="BOTH")],
+        algo_orders=[{
+            "algo_id": 101,
+            "symbol": "BTCUSDT",
+            "type": "STOP_MARKET",
+            "side": "SELL",
+            "status": "NEW",
+        }],
+    )
+
+    row = result["position_plan"][0]
+    assert row["classification"] == "PLAN_AND_EXCHANGE_MATCHED"
+    assert row["protection_status"] == "MATCHED"
+    assert row["matched_algo_ids"] == [101]
+
+
+def test_native_id_free_match_rejects_position_side_mismatch_and_ambiguity():
+    plan = make_plan(position_id=None, protection_ids=[101]) | {
+        "position_side": "BOTH",
+        "stop_algo_id": 101,
+    }
+    algo_orders = [{
+        "algo_id": 101,
+        "symbol": "BTCUSDT",
+        "type": "STOP_MARKET",
+        "side": "SELL",
+        "status": "NEW",
+    }]
+
+    mismatch = classify(
+        plan=plan,
+        positions=[make_position(position_id=None, position_side="LONG")],
+        algo_orders=algo_orders,
+    )
+    assert position_classification(mismatch) == "PROTECTION_UNKNOWN"
+
+    ambiguous = classify(
+        plan=plan,
+        positions=[
+            make_position(position_id=None, position_side="BOTH"),
+            make_position(position_id=None, position_side="BOTH"),
+        ],
+        algo_orders=algo_orders,
+    )
+    assert position_classification(ambiguous) == "PROTECTION_UNKNOWN"
 
 
 def test_same_symbol_but_different_identity_is_not_matched():
@@ -171,7 +233,13 @@ def test_valid_integer_and_string_protection_ids_remain_matched():
         result = classify(
             plan=make_plan(position_id="exchange-1", protection_ids=[protection_id]),
             positions=[make_position(position_id="exchange-1")],
-            algo_orders=[{"algo_id": 101, "symbol": "BTCUSDT", "status": "NEW"}],
+            algo_orders=[{
+                "algo_id": 101,
+                "symbol": "BTCUSDT",
+                "type": "TAKE_PROFIT_MARKET",
+                "side": "SELL",
+                "status": "NEW",
+            }],
         )
 
         assert position_classification(result) == "PLAN_AND_EXCHANGE_MATCHED"
@@ -360,7 +428,13 @@ def test_diagnostic_preserves_position_classifications_and_identity_evidence():
     result = diagnostic(
         plan=make_plan(position_id="exchange-1", protection_ids=[101]),
         positions=[make_position(position_id="exchange-1")],
-        algo_orders=[{"algo_id": 101, "symbol": "BTCUSDT", "status": "NEW"}],
+            algo_orders=[{
+                "algo_id": 101,
+                "symbol": "BTCUSDT",
+                "type": "TAKE_PROFIT_MARKET",
+                "side": "SELL",
+                "status": "NEW",
+            }],
     )
 
     row = result["position_plan"]["rows"][0]
