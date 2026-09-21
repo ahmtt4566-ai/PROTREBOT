@@ -3666,7 +3666,9 @@ async def demo_arm(request: Request, body: ArmRequest) -> dict[str, Any]:
     state["connected"] = True
     state["last_checked"] = utc_now()
     add_event(state, "DEMO EMİR KİLİDİ AÇILDI", "Yalnızca Binance Futures Demo emirleri 10 dakika için açıldı.")
-    return public_status(state)
+    result = public_status(state)
+    result["configured"] = credentials_configured(request)
+    return result
 
 
 @router.post("/disarm")

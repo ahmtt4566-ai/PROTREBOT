@@ -191,6 +191,34 @@ def test_same_cycle_cannot_confirm_but_later_matching_cycle_can():
     assert plan["provenance_state"] == "CONFIRMED"
 
 
+def test_reconciliation_cycle_resumes_after_persisted_fill_cycle():
+    demo_state = {
+        "_provenance_reconciliation_cycle": 0,
+        "plans": {"plan-1": {"provenance_fill_observation_cycle": 119}},
+    }
+
+    assert v21_demo._next_provenance_reconciliation_cycle(demo_state) == 120
+
+
+def test_protection_unknown_does_not_block_provenance_confirmation():
+    plan = entry_plan()
+    state = completed_entry_state(plan)
+
+    with patch.object(binance_demo, "persist_runtime"):
+        asyncio.run(binance_demo.confirm_provenance_from_snapshot(
+            state,
+            {"_provenance_positions": [{
+                "symbol": "BTCUSDT",
+                "position_side": "BOTH",
+                "quantity": "1",
+            }]},
+            2,
+        ))
+
+    assert plan["provenance_state"] == "CONFIRMED"
+    assert binance_demo.can_mutate_lifecycle(plan)
+
+
 def test_confirmation_uses_exact_decimal_position_quantity():
     plan = entry_plan()
     plan["provenance_expected_quantity"] = "0.123456789123456789"

@@ -154,6 +154,11 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn('result["configured"] = credentials_configured(request)', SOURCE_TEXT)
         self.assertNotIn('return {**public_status(state), **snapshot, "plans":', SOURCE_TEXT)
 
+    def test_demo_arm_and_disarm_return_request_scoped_configuration(self):
+        self.assertGreaterEqual(SOURCE_TEXT.count('result["configured"] = credentials_configured(request)'), 3)
+        self.assertIn('async def demo_arm(request: Request, body: ArmRequest)', SOURCE_TEXT)
+        self.assertIn('async def demo_disarm(request: Request)', SOURCE_TEXT)
+
     def test_demo_account_missing_credentials_returns_empty_safe_payload(self):
         import asyncio
         from starlette.requests import Request

@@ -1627,6 +1627,20 @@ def _background_contexts(application: Any) -> list[tuple[str, dict[str, Any], di
     return contexts
 
 
+def _next_provenance_reconciliation_cycle(demo_state: dict[str, Any]) -> int:
+    """Resume after persisted fill evidence so a restart cannot block freshness."""
+    current = int(demo_state.get("_provenance_reconciliation_cycle", 0) or 0)
+    persisted_fill_cycles = [
+        int(plan.get("provenance_fill_observation_cycle"))
+        for plan in demo_state.get("plans", {}).values()
+        if isinstance(plan, dict)
+        and plan.get("provenance_fill_observation_cycle") is not None
+    ]
+    next_cycle = max([current, *persisted_fill_cycles], default=0) + 1
+    demo_state["_provenance_reconciliation_cycle"] = next_cycle
+    return next_cycle
+
+
 async def reconciliation_loop(application: Any) -> None:
     previous: dict[str, dict[str, Any] | None] = {}
     while True:
