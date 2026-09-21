@@ -59,9 +59,448 @@ class ProvenanceState(str, Enum):
     BROKEN = "BROKEN"
 
 
+_ACTIVE_ENTRY_INSTALLATION_CONTEXTS: dict[object, dict[str, Any]] = {}
+
+
+def _retire_entry_installation_context(context: object) -> None:
+    _ACTIVE_ENTRY_INSTALLATION_CONTEXTS.pop(context, None)
+
+
+def _valid_entry_installation_context(context: object | None, plan: dict[str, Any]) -> bool:
+    try:
+        record = _ACTIVE_ENTRY_INSTALLATION_CONTEXTS.get(context) if context is not None else None
+    except TypeError:
+        return False
+    return isinstance(record, dict) and record.get("plan") is plan
+
+
 def can_mutate_lifecycle(plan: dict[str, Any]) -> bool:
     """Allow lifecycle mutation only for an explicitly confirmed provenance record."""
     return plan.get("provenance_state") == ProvenanceState.CONFIRMED.value
+
+
+def confirmed_slot_key(plan: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the current one-way internal provenance slot for a plan."""
+    try:
+        symbol = normalize_symbol(str(plan.get("symbol") or ""))
+    except BinanceDemoError:
+        return None
+    return symbol, "BOTH"
+
+
+def find_conflicting_confirmed_plan(
+    plans: dict[str, Any] | None,
+    candidate: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Find another confirmed plan occupying the candidate's internal slot."""
+    candidate_key = confirmed_slot_key(candidate)
+    if candidate_key is None:
+        return None
+    for plan in (plans or {}).values():
+        if plan is candidate or not isinstance(plan, dict) or not can_mutate_lifecycle(plan):
+            continue
+        if confirmed_slot_key(plan) == candidate_key:
+            return plan
+    return None
+
+
+def _usable_identifier(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def find_entry_plan_for_order(
+    plans: dict[str, Any] | None,
+    *,
+    symbol: Any,
+    client_order_id: Any,
+    order_id: Any,
+) -> dict[str, Any] | None:
+    """Match a stream event to its exact persisted entry intent."""
+    event_client_id = _usable_identifier(client_order_id)
+    event_order_id = _usable_identifier(order_id)
+    if not event_client_id:
+        return None
+    try:
+        normalized_symbol = normalize_symbol(str(symbol or ""))
+    except BinanceDemoError:
+        return None
+    for plan in (plans or {}).values():
+        if not isinstance(plan, dict) or plan.get("provenance_state") in {
+            ProvenanceState.BROKEN.value,
+            ProvenanceState.CONFIRMED.value,
+        }:
+            continue
+        try:
+            if normalize_symbol(str(plan.get("symbol") or "")) != normalized_symbol:
+                continue
+        except BinanceDemoError:
+            continue
+        if _usable_identifier(plan.get("provenance_entry_client_order_id")) != event_client_id:
+            continue
+        plan_order_id = _usable_identifier(plan.get("provenance_entry_order_id"))
+        if plan_order_id and event_order_id and plan_order_id != event_order_id:
+            continue
+        if plan_order_id and not event_order_id:
+            continue
+        return plan
+    return None
+
+
+def _provenance_decimal(value: Any) -> Decimal | None:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed.is_finite() and parsed >= 0 else None
+
+
+def record_entry_trade_observation(
+    state: dict[str, Any],
+    *,
+    symbol: Any,
+    order_id: Any,
+    client_order_id: Any,
+    trade_id: Any,
+    last_fill_quantity: Any,
+    cumulative_fill_quantity: Any,
+    observation_cycle: int,
+) -> dict[str, Any] | None:
+    """Record exact entry-fill evidence without authorizing confirmation."""
+    plan = find_entry_plan_for_order(
+        state.get("plans"),
+        symbol=symbol,
+        client_order_id=client_order_id,
+        order_id=order_id,
+    )
+    if plan is None:
+        return None
+    normalized_trade_id = _usable_identifier(trade_id)
+    last_fill = _provenance_decimal(last_fill_quantity)
+    cumulative_fill = _provenance_decimal(cumulative_fill_quantity)
+    expected = _provenance_decimal(plan.get("provenance_expected_quantity"))
+    if not normalized_trade_id or last_fill is None or cumulative_fill is None or expected is None:
+        return None
+    trade_ids = plan.get("provenance_trade_ids")
+    if not isinstance(trade_ids, list):
+        trade_ids = []
+        plan["provenance_trade_ids"] = trade_ids
+    if normalized_trade_id in {str(value).strip() for value in trade_ids}:
+        return plan
+    trade_ids.append(normalized_trade_id)
+    plan["provenance_last_fill_quantity"] = decimal_text(last_fill)
+    plan["provenance_cumulative_fill_quantity"] = decimal_text(cumulative_fill)
+    plan["provenance_fill_observation_cycle"] = int(observation_cycle)
+    if cumulative_fill > expected:
+        plan["provenance_state"] = ProvenanceState.BROKEN.value
+        if not plan.get("provenance_broken_reason"):
+            plan["provenance_broken_reason"] = "expected_quantity_differs_from_cumulative_entry_fill"
+        return plan
+    if cumulative_fill < expected:
+        plan["provenance_state"] = ProvenanceState.PROVISIONAL.value
+        return plan
+    observation_id = f"entry-fill:{_usable_identifier(order_id) or 'unknown'}:{normalized_trade_id}"
+    observe_plan_provenance(
+        plan,
+        observed_quantity=decimal_text(cumulative_fill),
+        trade_ids=[normalized_trade_id],
+        provenance_linked_observation=True,
+        current_observation_id=observation_id,
+    )
+    return plan
+
+
+def derive_provenance_state(
+    *,
+    current_state: str | ProvenanceState | None = None,
+    entry_recorded: bool = False,
+    trade_ids: list[Any] | tuple[Any, ...] | None = None,
+    expected_quantity: Any = None,
+    observed_quantity: Any = None,
+    independent_reconciliation: bool = False,
+    provenance_linked_observation: bool = False,
+    previous_observation_id: str | None = None,
+    current_observation_id: str | None = None,
+    last_observation_id: str | None = None,
+    restored: bool = False,
+) -> ProvenanceState:
+    """Derive observer provenance without inventing exchange position identity."""
+    try:
+        state_value = current_state.value if isinstance(current_state, ProvenanceState) else str(current_state or ProvenanceState.NO_PROVENANCE.value)
+        state = ProvenanceState(state_value)
+    except ValueError:
+        state = ProvenanceState.NO_PROVENANCE
+    if state is ProvenanceState.BROKEN:
+        return state
+    if restored and state is ProvenanceState.CONFIRMED:
+        return ProvenanceState.PROVISIONAL
+    if not entry_recorded:
+        return ProvenanceState.NO_PROVENANCE
+    try:
+        expected = Decimal(str(expected_quantity))
+        observed = Decimal(str(observed_quantity))
+    except (InvalidOperation, TypeError, ValueError):
+        return ProvenanceState.BROKEN if independent_reconciliation else ProvenanceState.PROVISIONAL
+    if expected != observed:
+        return ProvenanceState.BROKEN
+    if not independent_reconciliation or not provenance_linked_observation:
+        return ProvenanceState.PROVISIONAL
+    normalized_previous = str(previous_observation_id or "").strip()
+    normalized_current = str(current_observation_id or "").strip()
+    normalized_last = str(last_observation_id or "").strip()
+    if not normalized_previous or not normalized_current or normalized_previous == normalized_current or normalized_previous != normalized_last:
+        return ProvenanceState.PROVISIONAL
+    normalized_trade_ids = {str(value).strip() for value in (trade_ids or ()) if str(value).strip()}
+    if not normalized_trade_ids:
+        return ProvenanceState.PROVISIONAL
+    return ProvenanceState.CONFIRMED
+
+
+def provenance_entry_fields(
+    *,
+    entry_client_order_id: Any = None,
+    entry_order_id: Any = None,
+    pre_entry_quantity: Any = None,
+    expected_quantity: Any = None,
+) -> dict[str, Any]:
+    """Build persisted observer fields from local entry provenance only."""
+    return {
+        "provenance_state": ProvenanceState.PROVISIONAL.value if entry_client_order_id or entry_order_id else ProvenanceState.NO_PROVENANCE.value,
+        "provenance_broken_reason": None,
+        "provenance_entry_client_order_id": entry_client_order_id,
+        "provenance_entry_order_id": entry_order_id,
+        "provenance_trade_ids": [],
+        "provenance_pre_entry_quantity": pre_entry_quantity,
+        "provenance_expected_quantity": expected_quantity,
+        "provenance_last_observed_quantity": None,
+        "provenance_last_reconciliation_at": None,
+        "provenance_last_observation_id": None,
+        "provenance_last_fill_quantity": None,
+        "provenance_cumulative_fill_quantity": None,
+        "provenance_fill_observation_cycle": None,
+    }
+
+
+def ensure_plan_provenance_fields(plan: dict[str, Any]) -> dict[str, Any]:
+    """Materialize observer fields for legacy plans without changing lifecycle state."""
+    defaults = provenance_entry_fields()
+    for key, value in defaults.items():
+        plan.setdefault(key, value)
+    if not isinstance(plan.get("provenance_trade_ids"), list):
+        plan["provenance_trade_ids"] = []
+    return plan
+
+
+def _record_plan_observation(
+    plan: dict[str, Any],
+    *,
+    observed_quantity: Any = None,
+    trade_ids: list[Any] | tuple[Any, ...] | None = None,
+    observed_at: str | None = None,
+    independent_reconciliation: bool = False,
+    provenance_linked_observation: bool = False,
+    previous_observation_id: str | None = None,
+    current_observation_id: str | None = None,
+    restored: bool = False,
+) -> tuple[dict[str, Any], bool]:
+    """Record observer data; this does not authorize lifecycle mutations."""
+    existing_trade_ids = plan.get("provenance_trade_ids")
+    merged_trade_ids = list(existing_trade_ids) if isinstance(existing_trade_ids, list) else []
+    for trade_id in trade_ids or ():
+        if str(trade_id).strip() and trade_id not in merged_trade_ids:
+            merged_trade_ids.append(trade_id)
+    plan["provenance_trade_ids"] = merged_trade_ids
+    if observed_quantity is not None:
+        plan["provenance_last_observed_quantity"] = observed_quantity
+    if observed_at:
+        plan["provenance_last_reconciliation_at"] = observed_at
+    next_state = derive_provenance_state(
+        current_state=plan.get("provenance_state"),
+        entry_recorded=bool(plan.get("provenance_entry_client_order_id") or plan.get("provenance_entry_order_id")),
+        trade_ids=merged_trade_ids,
+        expected_quantity=plan.get("provenance_expected_quantity"),
+        observed_quantity=observed_quantity if observed_quantity is not None else plan.get("provenance_last_observed_quantity"),
+        independent_reconciliation=independent_reconciliation,
+        provenance_linked_observation=provenance_linked_observation,
+        previous_observation_id=previous_observation_id,
+        current_observation_id=current_observation_id,
+        last_observation_id=plan.get("provenance_last_observation_id"),
+        restored=restored,
+    )
+    confirmation_eligible = next_state is ProvenanceState.CONFIRMED
+    if confirmation_eligible:
+        next_state = ProvenanceState.PROVISIONAL
+    plan["provenance_state"] = next_state.value
+    if current_observation_id:
+        plan["provenance_last_observation_id"] = current_observation_id
+    if next_state is ProvenanceState.BROKEN and not plan.get("provenance_broken_reason"):
+        plan["provenance_broken_reason"] = "expected_quantity_differs_from_observed_quantity"
+    return plan, confirmation_eligible
+
+
+def observe_plan_provenance(
+    plan: dict[str, Any],
+    *,
+    plans: dict[str, Any] | None = None,
+    observed_quantity: Any = None,
+    trade_ids: list[Any] | tuple[Any, ...] | None = None,
+    observed_at: str | None = None,
+    independent_reconciliation: bool = False,
+    provenance_linked_observation: bool = False,
+    previous_observation_id: str | None = None,
+    current_observation_id: str | None = None,
+    restored: bool = False,
+) -> dict[str, Any]:
+    """Record observer data without authorizing a CONFIRMED transition."""
+    previous_state = plan.get("provenance_state")
+    result, confirmation_eligible = _record_plan_observation(
+        plan,
+        observed_quantity=observed_quantity,
+        trade_ids=trade_ids,
+        observed_at=observed_at,
+        independent_reconciliation=independent_reconciliation,
+        provenance_linked_observation=provenance_linked_observation,
+        previous_observation_id=previous_observation_id,
+        current_observation_id=current_observation_id,
+        restored=restored,
+    )
+    if confirmation_eligible and previous_state == ProvenanceState.CONFIRMED.value and not restored:
+        result["provenance_state"] = ProvenanceState.CONFIRMED.value
+    return result
+
+
+async def observe_plan_provenance_locked(
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    *,
+    observation_cycle: int | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Apply one provenance observation under the owning state's mutation lock."""
+    plans = state.setdefault("plans", {})
+    lock = state.get("lock")
+    if lock is None:
+        result = observe_plan_provenance(plan, plans=plans, **kwargs)
+        persist_runtime(state)
+        return result
+    async with lock:
+        if observation_cycle is not None:
+            fill_cycle = plan.get("provenance_fill_observation_cycle")
+            try:
+                if fill_cycle is None or int(observation_cycle) <= int(fill_cycle):
+                    return plan
+            except (TypeError, ValueError):
+                return plan
+            if plan.get("provenance_state") != ProvenanceState.PROVISIONAL.value:
+                return plan
+            if not plan.get("provenance_last_observation_id") or not plan.get("provenance_trade_ids"):
+                return plan
+            expected = _provenance_decimal(plan.get("provenance_expected_quantity"))
+            completed_fill = _provenance_decimal(plan.get("provenance_cumulative_fill_quantity"))
+            if expected is None or completed_fill != expected:
+                return plan
+        previous_state = plan.get("provenance_state")
+        result, confirmation_eligible = _record_plan_observation(plan, **kwargs)
+        if confirmation_eligible:
+            if previous_state == ProvenanceState.CONFIRMED.value and not kwargs.get("restored", False):
+                result["provenance_state"] = ProvenanceState.CONFIRMED.value
+            elif isinstance(plans, dict) and not find_conflicting_confirmed_plan(plans, plan):
+                result["provenance_state"] = ProvenanceState.CONFIRMED.value
+        persist_runtime(state)
+        return result
+
+
+async def confirm_provenance_from_snapshot(
+    state: dict[str, Any],
+    snapshot: dict[str, Any],
+    observation_cycle: int,
+) -> None:
+    """Use a later position snapshot as the second provenance observation."""
+    positions = []
+    if isinstance(snapshot, dict):
+        raw_positions = snapshot.get("_provenance_positions")
+        positions = raw_positions if isinstance(raw_positions, list) else snapshot.get("positions", [])
+    if not isinstance(positions, list):
+        return
+    for plan in list(state.get("plans", {}).values()):
+        if not isinstance(plan, dict) or plan.get("provenance_state") != ProvenanceState.PROVISIONAL.value:
+            continue
+        expected = _provenance_decimal(plan.get("provenance_expected_quantity"))
+        completed_fill = _provenance_decimal(plan.get("provenance_cumulative_fill_quantity"))
+        if expected is None or completed_fill != expected:
+            continue
+        try:
+            normalized_symbol = normalize_symbol(str(plan.get("symbol") or ""))
+        except BinanceDemoError:
+            continue
+        position_side = str(plan.get("position_side") or "BOTH").upper()
+        matching_positions = [
+            item for item in positions
+            if isinstance(item, dict)
+            and str(item.get("symbol") or "").upper() == normalized_symbol
+            and str(item.get("position_side") or "BOTH").upper() == position_side
+        ]
+        if len(matching_positions) != 1:
+            continue
+        position = matching_positions[0]
+        previous_observation_id = _usable_identifier(plan.get("provenance_last_observation_id"))
+        if previous_observation_id is None:
+            continue
+        current_observation_id = f"position-cycle:{int(observation_cycle)}:{plan.get('id') or 'unknown'}"
+        await observe_plan_provenance_locked(
+            state,
+            plan,
+            observation_cycle=observation_cycle,
+            observed_quantity=position.get("quantity"),
+            trade_ids=list(plan.get("provenance_trade_ids") or []),
+            independent_reconciliation=True,
+            provenance_linked_observation=True,
+            previous_observation_id=previous_observation_id,
+            current_observation_id=current_observation_id,
+        )
+
+
+def provenance_diagnostic(plan: dict[str, Any]) -> dict[str, Any]:
+    """Return non-secret observer data without asserting position ownership."""
+    return {
+        "provenance_state": plan.get("provenance_state", ProvenanceState.NO_PROVENANCE.value),
+        "expected_quantity": plan.get("provenance_expected_quantity"),
+        "observed_quantity": plan.get("provenance_last_observed_quantity"),
+        "broken_reason": plan.get("provenance_broken_reason"),
+        "entry_order_id": plan.get("provenance_entry_order_id"),
+        "entry_client_order_id": plan.get("provenance_entry_client_order_id"),
+        "trade_ids": list(plan.get("provenance_trade_ids") or []),
+        "last_reconciliation_at": plan.get("provenance_last_reconciliation_at"),
+    }
+
+
+def provenance_observer_diagnostic(state: dict[str, Any], snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Report provenance and ambiguity without associating exchange positions to plans."""
+    terminal_statuses = {"KAPANDI", "CLOSED", "İPTAL", "GÜVENLİK İÇİN KAPATILDI", "ACİL DURDURULDU"}
+    active_plans = [
+        plan for plan in state.get("plans", {}).values()
+        if isinstance(plan, dict) and str(plan.get("status") or "").upper() not in terminal_statuses
+    ]
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for plan in active_plans:
+        key = (
+            str(plan.get("symbol") or "").upper(),
+            str(plan.get("position_side") or "BOTH").upper(),
+        )
+        grouped.setdefault(key, []).append(plan)
+    ambiguities = [
+        {"symbol": symbol, "position_side": position_side, "plan_ids": [str(plan.get("id") or "") for plan in plans]}
+        for (symbol, position_side), plans in grouped.items()
+        if len(plans) > 1
+    ]
+    positions = snapshot.get("positions", []) if isinstance(snapshot, dict) else []
+    return {
+        "exchange_position_identity_available": False,
+        "plans": [provenance_diagnostic(plan) | {"plan_id": plan.get("id")} for plan in active_plans],
+        "observed_position_count": len(positions) if isinstance(positions, list) else 0,
+        "ambiguities": ambiguities,
+    }
+
 
 def request_correlation_id(request: Request | None = None) -> str:
     return str(request.headers.get("Rndr-Id") or f"local-{uuid.uuid4().hex[:16]}") if request else f"local-{uuid.uuid4().hex[:16]}"
@@ -653,6 +1092,11 @@ def _state_from_demo_payload(
     persistence_action: str,
 ) -> dict[str, Any]:
     plans = payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
+    for plan in plans.values():
+        if isinstance(plan, dict):
+            ensure_plan_provenance_fields(plan)
+            if plan.get("provenance_state") == ProvenanceState.CONFIRMED.value:
+                observe_plan_provenance(plan, restored=True)
     state = {
         "connected": bool(payload.get("connected")),
         "armed_until": payload.get("armed_until", 0),
@@ -1032,11 +1476,13 @@ def reconcile_demo_plans(state: dict[str, Any], snapshot: dict[str, Any]) -> dic
         if plan.get("status") not in active_statuses and plan.get("position_status") != "OPEN":
             continue
         internal_active += 1
+        if not can_mutate_lifecycle(plan):
+            continue
         actual = actual_by_symbol.get(str(plan.get("symbol") or ""))
         if actual is None:
             if _within_plan_reconciliation_grace(plan):
                 continue
-            plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "tp3_status": "FILLED", "closed_at": plan.get("closed_at") or utc_now(), "last_reconciled": utc_now()})
+            plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": plan.get("closed_at") or utc_now(), "last_reconciled": utc_now()})
             if "_sync_v21_automation_trade" in globals():
                 _sync_v21_automation_trade(state, plan)
             stale_removed += 1
@@ -1273,11 +1719,17 @@ async def _account_snapshot(client: BinanceDemoClient, request_id: str | None = 
         position_risk["exchange_position_diagnostics"],
     )
     open_positions = []
+    provenance_positions = []
     for item in response_rows(positions):
         amount = position_amount(item.get("positionAmt"))
         symbol = str(item.get("symbol") or "").upper()
         if amount == 0:
             continue
+        provenance_positions.append({
+            "symbol": symbol,
+            "position_side": str(item.get("positionSide") or "BOTH").upper(),
+            "quantity": decimal_text(abs(amount)),
+        })
         configuration = config_by_symbol.get(symbol, {})
         raw_leverage = item.get("leverage", configuration.get("leverage"))
         raw_margin_type = item.get("marginType", configuration.get("marginType"))
@@ -1331,6 +1783,7 @@ async def _account_snapshot(client: BinanceDemoClient, request_id: str | None = 
         "margin_balance": float(account.get("totalMarginBalance", 0)),
         "unrealized_pnl": float(account.get("totalUnrealizedProfit", 0)),
         "positions": open_positions,
+        "_provenance_positions": provenance_positions,
         "open_orders": open_orders,
         "open_algo_orders": open_algos,
         "open_algo_orders_available": open_algo_orders_available,
@@ -1627,21 +2080,11 @@ async def reduce_symbol_position(client: BinanceDemoClient, symbol: str, quantit
 
 def update_position_lifecycle(plan: dict[str, Any], amount: Decimal) -> None:
     """Keep the durable demo plan aligned with the exchange position amount."""
+    if not can_mutate_lifecycle(plan):
+        return
     remaining = abs(amount)
-    initial = Decimal(str(plan.get("initial_quantity") or plan.get("quantity") or "0"))
     plan["remaining_quantity"] = decimal_text(remaining)
     plan["position_status"] = "OPEN" if remaining else "CLOSED"
-    if initial <= 0 or remaining <= 0:
-        if remaining <= 0:
-            plan["tp3_status"] = "FILLED"
-        return
-    reduction = (initial - remaining) / initial
-    tp1_quantity = Decimal(str(plan.get("tp1_quantity") or (initial * Decimal("0.30"))))
-    tp2_quantity = Decimal(str(plan.get("tp2_quantity") or (initial * Decimal("0.30"))))
-    if initial > 0 and reduction * initial >= tp1_quantity:
-        plan["tp1_status"] = "FILLED"
-    if initial > 0 and reduction * initial >= tp1_quantity + tp2_quantity:
-        plan["tp2_status"] = "FILLED"
 
 
 def inspect_protection_state(
@@ -2483,6 +2926,7 @@ async def install_protection(
     *,
     request_id: str | None = None,
     entry_context: object | None = None,
+    state_lock: asyncio.Lock | None = None,
 ) -> None:
     entry_context_valid = _valid_entry_installation_context(entry_context, plan)
     if not entry_context_valid and not can_mutate_lifecycle(plan):
@@ -2496,7 +2940,14 @@ async def install_protection(
             return
         if parsed_ids:
             return
-        await _install_protection(client, state, plan, request_id=request_id, entry_context=entry_context)
+        await _install_protection(
+            client,
+            state,
+            plan,
+            request_id=request_id,
+            entry_context=entry_context,
+            state_lock=state_lock,
+        )
 
 
 async def _repair_missing_stop_protection(
@@ -2555,6 +3006,7 @@ async def _install_protection(
     *,
     request_id: str | None = None,
     entry_context: object | None = None,
+    state_lock: asyncio.Lock | None = None,
 ) -> None:
     entry_context_valid = _valid_entry_installation_context(entry_context, plan)
     if not entry_context_valid and not can_mutate_lifecycle(plan):
@@ -2711,6 +3163,59 @@ async def _install_protection(
             entry_context=entry_context,
         )
 
+    verification_ids = tuple(sorted(protection_ids))
+    verification_metadata = copy.deepcopy({
+        field: plan.get(field)
+        for field in ("protection_ids", "stop_algo_id", "tp1_algo_id", "tp2_algo_id", "tp3_algo_id")
+    })
+    if state_lock is not None:
+        state_lock.release()
+    try:
+        final_snapshot = await _fresh_protection_snapshot(client, symbol)
+    finally:
+        if state_lock is not None:
+            await state_lock.acquire()
+
+    try:
+        current_plan = state.get("plans", {}).get(plan.get("id"))
+        current_ids = _plan_protection_ids(plan)
+        current_metadata = {
+            field: plan.get(field)
+            for field in ("protection_ids", "stop_algo_id", "tp1_algo_id", "tp2_algo_id", "tp3_algo_id")
+        }
+        active_plans = [
+            candidate for candidate in state.get("plans", {}).values()
+            if isinstance(candidate, dict)
+        ]
+        if (
+            current_plan is not plan
+            or current_ids is None
+            or tuple(sorted(current_ids)) != verification_ids
+            or current_metadata != verification_metadata
+        ):
+            raise BinanceDemoError(
+                "Binance Demo koruma kurulumu sırasında plan ownership değişti.",
+                http_status=409,
+            )
+        final_state, final_matched_ids, _missing_ids = _protection_classification(
+            plan,
+            final_snapshot,
+            required_ids=set(protection_ids),
+            plans=active_plans,
+        )
+        if final_state != "MATCHED" or set(final_matched_ids) != set(protection_ids):
+            raise BinanceDemoError(
+                "Binance Demo koruma kurulumu final snapshot ile doğrulanamadı.",
+                http_status=409,
+            )
+    except BinanceDemoError as exc:
+        await _abort_protection_installation(
+            client, state, plan, exc,
+            f"{symbol} korumaların tamamı doğrulanamadı; Demo pozisyon güvenlik için kapatılıyor.",
+            f"{symbol} korumaların tamamı doğrulanamadı; pozisyon güvenli biçimde kapatıldı.",
+            entry_context=entry_context,
+        )
+
     plan["protection_ids"] = protection_ids
     plan["monitoring_targets"] = monitoring_targets
     plan["status"] = "OPEN"
@@ -2823,6 +3328,8 @@ async def protection_loop(application: Any) -> None:
                 for plan in plans:
                     if plan.get("status") in {"KAPANDI", "İPTAL", "GÜVENLİK İÇİN KAPATILDI"}:
                         continue
+                    if not can_mutate_lifecycle(plan):
+                        continue
                     rows = response_rows(
                         await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": plan["symbol"]})
                     )
@@ -2858,7 +3365,6 @@ async def protection_loop(application: Any) -> None:
                         plan["status"] = "KAPANDI"
                         plan["position_status"] = "CLOSED"
                         plan["remaining_quantity"] = "0"
-                        plan["tp3_status"] = "FILLED"
                         plan["closed_at"] = utc_now()
                         add_event(state, "POZİSYON KAPANDI", f"{plan['symbol']} Demo pozisyonu kapandı; kalan bot emirleri temizlendi.")
                         changed = True
@@ -2984,7 +3490,9 @@ async def demo_ownership_diagnostic(request: Request) -> dict[str, Any]:
         snapshot = await account_snapshot(client_for(request), request_correlation_id(request))
     except BinanceDemoError as exc:
         raise safe_exchange_error(exc) from exc
-    return build_demo_ownership_diagnostic(snapshot, demo_state, v21_state)
+    result = build_demo_ownership_diagnostic(snapshot, demo_state, v21_state)
+    result["provenance"] = provenance_observer_diagnostic(demo_state, snapshot)
+    return result
 
 
 @router.post("/arm")
@@ -3082,6 +3590,15 @@ async def execute_demo_order(
             stale_reason = stale_protection_entry_reason(snapshot, state, symbol)
             if stale_reason:
                 raise BinanceDemoError(stale_reason, http_status=409)
+            confirmed_slot_conflict = find_conflicting_confirmed_plan(
+                state.get("plans"),
+                {"symbol": symbol},
+            )
+            if confirmed_slot_conflict is not None:
+                raise BinanceDemoError(
+                    f"Entry blocked: confirmed provenance slot already exists for {symbol}.",
+                    http_status=409,
+                )
             spec = await traced_stage("build_order_spec", request_id, build_order_spec(client, body), client=client)
             if resolved_v21_state is not None:
                 policy = resolved_v21_state.get("settings", {})
@@ -3155,6 +3672,7 @@ async def execute_demo_order(
                 "risk_per_trade": spec["risk_per_trade"],
                 "risk_adjusted": bool(spec.get("risk_adjusted")),
             }
+            plan.update(provenance_entry_fields(expected_quantity=spec["quantity"]))
             state.setdefault("plans", {})[plan_id] = plan
             persist_runtime(state)
             submit_started = time.monotonic()
@@ -3191,6 +3709,11 @@ async def execute_demo_order(
             )
             plan["entry_order_id"] = int(result.get("orderId", 0)) or None
             plan["entry_client_order_id"] = result.get("clientOrderId") or client_order_id
+            plan.update(provenance_entry_fields(
+                entry_client_order_id=plan["entry_client_order_id"],
+                entry_order_id=plan["entry_order_id"],
+                expected_quantity=spec["quantity"],
+            ))
             plan["status"] = "DOLUM BEKLİYOR"
             persist_runtime(state)
             add_event(
@@ -3200,7 +3723,24 @@ async def execute_demo_order(
             )
             add_event(state, "DEMO EMİR GÖNDERİLDİ", f"{spec['symbol']} {spec['direction']} {spec['order_type']} emri Demo hesabına gönderildi ({source}).")
             if spec["order_type"] == "MARKET":
-                await traced_stage("install_protection", request_id, install_protection(client, state, plan, request_id=request_id), client=client)
+                entry_context = object()
+                _ACTIVE_ENTRY_INSTALLATION_CONTEXTS[entry_context] = {"plan": plan}
+                try:
+                    await traced_stage(
+                        "install_protection",
+                        request_id,
+                        install_protection(
+                            client,
+                            state,
+                            plan,
+                            request_id=request_id,
+                            entry_context=entry_context,
+                            state_lock=state["lock"],
+                        ),
+                        client=client,
+                    )
+                finally:
+                    _retire_entry_installation_context(entry_context)
                 persist_runtime(state)
             verified_snapshot = await traced_stage("final_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
             response = {
@@ -3306,7 +3846,7 @@ async def demo_close_position(request: Request, body: ClosePositionRequest) -> d
                     plan,
                     plans=[candidate for candidate in state.get("plans", {}).values() if isinstance(candidate, dict)],
                 )
-                plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "tp3_status": "FILLED", "closed_at": utc_now()})
+                plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": utc_now()})
         add_event(state, "POZİSYON KAPATILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle kapatıldı.")
         persist_runtime(state)
         return {"ok": True, "symbol": symbol, "order_id": result.get("orderId")}
@@ -3379,6 +3919,8 @@ async def demo_emergency(request: Request, body: EmergencyRequest) -> dict[str, 
                         closed_positions += 1
             state["armed_until"] = 0
             for plan in state.get("plans", {}).values():
+                if not can_mutate_lifecycle(plan):
+                    continue
                 if plan.get("status") not in {"KAPANDI", "İPTAL"}:
                     plan["status"] = "ACİL DURDURULDU"
             persist_runtime(state)

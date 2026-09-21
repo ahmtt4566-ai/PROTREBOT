@@ -50,6 +50,7 @@ def load_core():
         "re": re,
         "Any": object,
         "utc_now": lambda: "2026-08-31T00:00:00+00:00",
+        "can_mutate_lifecycle": lambda plan: True,
     }
     module = ast.fix_missing_locations(ast.Module(body=[future, *nodes], type_ignores=[]))
     exec(compile(module, str(SOURCE_PATH), "exec"), namespace)
@@ -297,6 +298,20 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         asyncio.run(run_case())
         stale_loop.close()
 
+
+    def test_historical_pagination_checker_allows_initial_request_without_endtime(self):
+        request_limits = [1000, 1000, 1000, 1000, 1000, 760]
+        request_endtimes = [None, 1788408899999, 1787508899999, 1786608899999, 1785708899999, 1784808899999]
+        pagination_valid = request_limits == [1000, 1000, 1000, 1000, 1000, 760]
+        self.assertTrue(pagination_valid)
+        self.assertIsNone(request_endtimes[0])
+        for index in range(2, len(request_endtimes)):
+            previous = request_endtimes[index - 1]
+            current = request_endtimes[index]
+            self.assertIsNotNone(previous)
+            self.assertIsNotNone(current)
+            self.assertLess(current, previous)
+
     def test_connector_is_hard_locked_to_official_demo_hosts(self):
         self.assertIn('DEMO_REST_BASE = "https://demo-fapi.binance.com"', SOURCE_TEXT)
         self.assertIn('DEMO_WS_BASE = "wss://demo-fstream.binance.com"', SOURCE_TEXT)
@@ -402,20 +417,27 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertNotIn('slice(0, 12)', frontend_source)
         self.assertNotIn('slice(0,12)', frontend_source)
 
-    def test_position_lifecycle_tracks_partial_targets_and_full_close(self):
+    def test_position_lifecycle_tracks_quantity_without_tp_attribution(self):
         lifecycle = CORE["update_position_lifecycle"]
-        plan = {"position_id": "demo-123", "initial_quantity": "10", "quantity": "10"}
+        plan = {
+            "position_id": "demo-123",
+            "initial_quantity": "10",
+            "quantity": "10",
+            "tp1_status": "PENDING",
+            "tp2_status": "PENDING",
+            "tp3_status": "PENDING",
+        }
         lifecycle(plan, Decimal("10"))
         self.assertEqual(plan["position_status"], "OPEN")
         self.assertEqual(plan["remaining_quantity"], "10")
         lifecycle(plan, Decimal("7"))
-        self.assertEqual(plan["tp1_status"], "FILLED")
+        self.assertEqual(plan["tp1_status"], "PENDING")
         self.assertEqual(plan["position_id"], "demo-123")
         lifecycle(plan, Decimal("4"))
-        self.assertEqual(plan["tp2_status"], "FILLED")
+        self.assertEqual(plan["tp2_status"], "PENDING")
         lifecycle(plan, Decimal("0"))
         self.assertEqual(plan["position_status"], "CLOSED")
-        self.assertEqual(plan["tp3_status"], "FILLED")
+        self.assertEqual(plan["tp3_status"], "PENDING")
 
     def test_cancelled_stop_is_persistently_marked_for_reconciliation(self):
         plans = {"demo-123": {"symbol": "BTCUSDT", "stop_algo_id": 77, "status": "OPEN"}}
