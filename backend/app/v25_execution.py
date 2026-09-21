@@ -1424,6 +1424,12 @@ async def execute_live_order(
             leverage_audit = await apply_live_verified_leverage(client, spec["symbol"], spec["leverage"])
             intent_id = body.intent_id or f"manual-{uuid.uuid4().hex}"
             client_id = client_id_for("ENTRY", intent_id)
+            existing_exposure = sum(
+                abs(float(item.get("notional") or item.get("notional_usdt") or 0))
+                for item in snapshot.get("positions", [])
+                if isinstance(item, dict)
+            )
+            failed_gate_keys = {item["key"] for item in guard["gates"] if not item["passed"]}
             serializable_spec = {
                 "symbol": spec["symbol"], "direction": spec["direction"], "order_type": spec["order_type"],
                 "entry_price": spec["entry_price"], "quantity": spec["quantity"],
@@ -1446,6 +1452,17 @@ async def execute_live_order(
                 "stop_loss": spec["stop_loss"],
                 "tp_levels": list(spec["targets"]),
                 "risk_amount_usdt": spec["estimated_stop_loss_usdt"],
+                "exposure_usdt": existing_exposure + spec["notional_usdt"],
+                "exposure_limit_usdt": state["policy"]["max_total_exposure_usdt"],
+                "active_plan_conflict": "active_plan" in failed_gate_keys,
+                "protection_readiness": True,
+                "lock_state": bool(state.get("real_trading_locked", True)),
+                "order_parameters": {
+                    "type": spec["order_type"],
+                    "entry_price": spec["entry_price"],
+                    "stop_loss": spec["stop_loss"],
+                    "targets": list(spec["targets"]),
+                },
             })
             add_event(state, "LIVE_DECISION_AUDIT", "Canlı emir öncesi değişmez karar özeti oluşturuldu.", symbol=spec["symbol"], decision_id=intent_id, audit_snapshot=dict(audit_snapshot))
             state["intents"][intent_id] = {

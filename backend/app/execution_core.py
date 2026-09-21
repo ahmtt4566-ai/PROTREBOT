@@ -213,7 +213,7 @@ def evaluate_entry_gates(
     direction = str(signal.get("direction") or "BEKLE").upper()
     confidence = int(signal.get("confidence") or 0)
     radar = signal.get("radar") if isinstance(signal.get("radar"), dict) else {}
-    trap_score = int(radar.get("trap_score") or 100)
+    trap_score = int(radar.get("trap_score") if radar.get("trap_score") is not None else 100)
     positions = snapshot.get("positions", []) if isinstance(snapshot.get("positions"), list) else []
     orders = snapshot.get("open_orders", []) if isinstance(snapshot.get("open_orders"), list) else []
     plans = active_plans if isinstance(active_plans, list) else []

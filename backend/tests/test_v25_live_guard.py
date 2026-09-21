@@ -1,7 +1,9 @@
 import asyncio
 import sys
+import time
 import unittest
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -26,6 +28,7 @@ from app.execution_core import (  # noqa: E402
     risk_sized_order,
     sanitize_execution_policy,
 )
+from app import v25_execution  # noqa: E402
 from app.v25_execution import LiveExchangeError, initial_state, rank_market_tickers, sanitized_state, validate_protection_readiness  # noqa: E402
 
 
@@ -157,6 +160,95 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertNotIn("live-api-key", first or "")
 
 class V25LiveGuardIntegrationContractTests(unittest.TestCase):
+    def test_auto_trade_dry_run_reaches_submit_boundary_without_exchange_mutation(self):
+        class FakeTransport:
+            def __init__(self):
+                self.calls = []
+                self.submit_boundary_calls = 0
+                self.real_exchange_requests = 0
+                self.real_orders = 0
+                self.real_positions = 0
+                self.real_protection_orders = 0
+                self.testnet_mutations = 0
+                self.production_mutations = 0
+
+            async def signed(self, method, path, params=None):
+                self.calls.append((method, path, dict(params or {})))
+                if method == "POST" and path == "/fapi/v1/order":
+                    self.submit_boundary_calls += 1
+                    return {"status": "DRY_RUN_ACCEPTED", "dry_run": True, "orderId": 777001}
+                if method == "GET" and path == "/fapi/v1/order":
+                    return {}
+                return {}
+
+        async def fake_install_protection(client, state, plan):
+            state["dry_run_protection_checks"] = int(state.get("dry_run_protection_checks") or 0) + 1
+            plan["dry_run_protection_ready"] = True
+
+        state = initial_state()
+        state.update({
+            "recovery_ready": True,
+            "connected": True,
+            "real_trading_locked": False,
+            "live_auto_trade": True,
+            "armed_until": time.time() + 300,
+        })
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300, "last_scan": None})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        state["_app"] = application
+        state["lock"] = asyncio.Lock()
+        transport = FakeTransport()
+        snapshot = {"available_balance": 1000, "positions": [], "open_orders": [], "hedge_mode": False, "unrealized_pnl": 0}
+        spec = {
+            "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "close_side": "SELL", "order_type": "MARKET",
+            "margin_usdt": 25.0, "leverage": 2, "notional_usdt": 50.0, "quantity": "0.500",
+            "entry_price": "100.00", "stop_loss": "98.00", "targets": ["102.00", "104.00", "106.00"],
+            "step": Decimal("0.001"), "min_qty": Decimal("0.001"), "estimated_stop_loss_usdt": 1.0,
+        }
+        candles = [{"time": index, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for index in range(220)]
+        analysis = {"direction": "LONG", "confidence": 90, "radar": {"trap_score": 1}, "entry": 100, "stop_loss": 98, "tp1": 102, "tp2": 104, "tp3": 106}
+        ready = {"ready": True, "score": 100, "gates": []}
+        with patch.multiple(
+            v25_execution,
+            client_for=lambda application: transport,
+            account_snapshot=AsyncMock(return_value=snapshot),
+            scan_market_candidates=AsyncMock(return_value=[{"symbol": "BTCUSDT", "opportunity_score": 99}]),
+            live_candles=AsyncMock(return_value=(candles, 123)),
+            canonical_live_decision=AsyncMock(return_value={"decision": "BUY", "entry_eligible": True, "analysis": analysis}),
+            spread_bps=AsyncMock(return_value=1.0),
+            readiness=lambda application, state: ready,
+            build_live_spec=AsyncMock(return_value=spec),
+            set_live_isolated_margin=AsyncMock(),
+            apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 2, "margin_type": "isolated"}),
+            install_protection=fake_install_protection,
+            persist_state=lambda state: None,
+        ):
+            asyncio.run(v25_execution.automatic_cycle(application))
+            state["auto"]["last_scan"] = None
+            asyncio.run(v25_execution.automatic_cycle(application))
+
+        audit_events = [item for item in state["events"] if item["kind"] == "LIVE_DECISION_AUDIT"]
+        self.assertTrue(audit_events, state["auto"])
+        audit = audit_events[0]["audit_snapshot"]
+        self.assertEqual(transport.submit_boundary_calls, 1)
+        self.assertEqual(transport.real_exchange_requests, 0)
+        self.assertEqual(transport.real_orders, 0)
+        self.assertEqual(transport.real_positions, 0)
+        self.assertEqual(transport.real_protection_orders, 0)
+        self.assertEqual(transport.testnet_mutations, 0)
+        self.assertEqual(transport.production_mutations, 0)
+        self.assertEqual(state.get("dry_run_protection_checks"), 1)
+        self.assertEqual(state["auto"]["last_scan_stats"]["executed_symbols_count"], 0)
+        self.assertEqual(audit["symbol"], "BTCUSDT")
+        self.assertEqual(audit["side"], "BUY")
+        self.assertEqual(audit["position_side"], "BOTH")
+        self.assertEqual(audit["quantity"], "0.500")
+        self.assertEqual(audit["exposure_usdt"], 50.0)
+        self.assertFalse(audit["active_plan_conflict"])
+        self.assertTrue(audit["protection_readiness"])
+        self.assertFalse(audit["lock_state"])
+        self.assertFalse(any("secret" in str(key).lower() or "token" in str(key).lower() for key in audit))
+
     def test_mock_100_symbol_universe_ranks_unique_top_three_without_btc_fallback(self):
         symbols = [f"COIN{index}USDT" for index in range(120)]
         symbols[0] = "BTCUSDT"
