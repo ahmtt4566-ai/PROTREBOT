@@ -64,6 +64,7 @@ from .binance_demo import (
     validate_entry_risk,
 )
 from .local_storage import DATA_DIR, migrate_legacy_files
+from .stop_evidence import correlation_report, observe_position_snapshot, observe_stream_payload
 
 
 router = APIRouter(prefix="/api/v21", tags=["V21 Demo Complete"])
@@ -72,6 +73,7 @@ migrate_legacy_files(("v21_demo_state.json", "v21_demo_state.backup.json"))
 STATE_PATH = DATA_DIR / "v21_demo_state.json"
 BACKUP_PATH = DATA_DIR / "v21_demo_state.backup.json"
 JOURNAL_LIMIT = 1200
+EVIDENCE_RESPONSE_LIMIT = 200
 SCAN_INTERVAL_SECONDS = 900
 AUTO_TRADE_SYMBOLS = (
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
@@ -204,6 +206,9 @@ def initial_state() -> dict[str, Any]:
             "status": "BEKLEMEDE", "transport": "REST EŞLEŞTİRME", "last_event": None,
             "last_sync": None, "reconnect_count": 0, "error_count": 0, "last_error": None,
         },
+        "evidence_sequence": 0,
+        "evidence_status": "NO LIVE EVIDENCE AVAILABLE",
+        "evidence_observations": [],
         "snapshot": None,
         "reconciliation": {},
         "backtest": None,
@@ -247,7 +252,7 @@ def load_state() -> dict[str, Any]:
     for key in (
         "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades", "paper_positions",
-        "risk",
+        "risk", "evidence_sequence", "evidence_status", "evidence_observations",
         "notifications",
     ):
         if key in saved:
@@ -295,6 +300,9 @@ def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
         "scanner": state.get("scanner", {}),
         "automation_trades": state.get("automation_trades", [])[:100],
         "paper_positions": state.get("paper_positions", []),
+        "evidence_sequence": int(state.get("evidence_sequence", 0)),
+        "evidence_status": state.get("evidence_status", "NO LIVE EVIDENCE AVAILABLE"),
+        "evidence_observations": state.get("evidence_observations", []),
         "snapshot": state.get("snapshot"),
         "reconciliation": state.get("reconciliation", {}),
         "saved_at": now_iso(),
@@ -311,6 +319,7 @@ def _state_from_payload(payload: dict[str, Any], user_id: str, application: Any 
         "settings", "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades",
         "paper_positions", "risk", "notifications", "snapshot", "reconciliation",
+        "evidence_sequence", "evidence_status", "evidence_observations",
     ):
         if key in payload:
             state[key] = payload[key]
@@ -1154,6 +1163,7 @@ def reconcile_positions(state: dict[str, Any], previous: dict[str, Any] | None, 
 def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_state: dict[str, Any] | None = None) -> bool:
     event_type = str(payload.get("e") or "")
     event_time = payload.get("T", payload.get("E", 0))
+    observe_stream_payload(state, payload)
     state["stream"].update({"last_event": now_iso(), "status": "CANLI", "transport": "USER STREAM"})
     if event_type == "ORDER_TRADE_UPDATE":
         order = payload.get("o") if isinstance(payload.get("o"), dict) else {}
@@ -1597,7 +1607,11 @@ async def reconciliation_loop(application: Any) -> None:
                 try:
                     has_demo_plans = bool(demo_state.get("plans"))
                     client = client_for_state(application, demo_state)
-                    snapshot = await account_snapshot(client)
+                    demo_state["_provenance_reconciliation_cycle"] = int(
+                        demo_state.get("_provenance_reconciliation_cycle", 0)
+                    ) + 1
+                    observation_cycle = demo_state["_provenance_reconciliation_cycle"]
+                    snapshot = await account_snapshot(client, evidence_state=state)
                     state["snapshot"] = snapshot
                     previous_reconciliation = state.get("reconciliation")
                     plan_reconciliation = reconcile_demo_plans(demo_state, snapshot)
@@ -2205,6 +2219,9 @@ def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
         "top_candidates": scanner.get("top_candidates", [])[:3],
         "all_candidates": scanner.get("all_candidates", [])[:100],
     }
+    observations = state.get("evidence_observations", [])
+    observations = observations if isinstance(observations, list) else []
+    exposed_observations = observations[-EVIDENCE_RESPONSE_LIMIT:]
     return {
         "version": "21.0.0", "mode": "BINANCE_FUTURES_DEMO_ONLY", "settings": state["settings"],
         "auto": state["auto"], "risk": state.get("risk", {}), "notifications": state.get("notifications", {}),
@@ -2223,6 +2240,11 @@ def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
         },
         "journal": state.get("journal", [])[:60], "backtest": state.get("backtest"),
         "automation_trades": state.get("automation_trades", [])[:100],
+        "evidence": {
+            "observation_count": len(observations),
+            "observations": exposed_observations,
+            "correlation": correlation_report(exposed_observations),
+        },
         "certificate": certificate_payload(state), "last_saved": state.get("last_saved"),
         "real_trading_locked": True,
     }

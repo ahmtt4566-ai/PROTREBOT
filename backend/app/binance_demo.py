@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .local_storage import DATA_DIR, migrate_legacy_files
+from .stop_evidence import observe_position_snapshot
 
 
 DEMO_REST_BASE = "https://demo-fapi.binance.com"
@@ -1657,7 +1658,11 @@ async def snapshot_request(client: BinanceDemoClient, path: str, request_id: str
     return result
 
 
-async def account_snapshot(client: BinanceDemoClient, request_id: str | None = None) -> dict[str, Any]:
+async def account_snapshot(
+    client: BinanceDemoClient,
+    request_id: str | None = None,
+    evidence_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     correlation_id = request_id or f"local-{uuid.uuid4().hex[:16]}"
     wait_started = time.monotonic()
     await DEMO_SNAPSHOT_LOCK.acquire()
@@ -1668,7 +1673,7 @@ async def account_snapshot(client: BinanceDemoClient, request_id: str | None = N
         started = time.monotonic()
         trace_log("account_snapshot.start", correlation_id)
         try:
-            result = await _account_snapshot(client, correlation_id)
+            result = await _account_snapshot(client, correlation_id, evidence_state=evidence_state)
         except Exception as exc:
             trace_log(
                 "account_snapshot.end",
@@ -1685,13 +1690,19 @@ async def account_snapshot(client: BinanceDemoClient, request_id: str | None = N
         DEMO_SNAPSHOT_LOCK.release()
 
 
-async def _account_snapshot(client: BinanceDemoClient, request_id: str | None = None) -> dict[str, Any]:
+async def _account_snapshot(
+    client: BinanceDemoClient,
+    request_id: str | None = None,
+    evidence_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     # Keep private snapshot reads sequential on the shared HTTP client.  This
     # avoids a burst of signed requests competing with the protection loop for
     # the same Render connection pool.
     correlation_id = request_id or f"local-{uuid.uuid4().hex[:16]}"
     account = await snapshot_request(client, "/fapi/v3/account", correlation_id)
     positions = await snapshot_request(client, "/fapi/v3/positionRisk", correlation_id)
+    if evidence_state is not None:
+        observe_position_snapshot(evidence_state, response_rows(positions))
     orders = await snapshot_request(client, "/fapi/v1/openOrders", correlation_id)
     open_algo_orders_available = True
     try:
