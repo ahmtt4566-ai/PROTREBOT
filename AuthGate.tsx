@@ -10,6 +10,8 @@ type Session = { user:User }
 type Mode = 'login'|'register'|'forgot'|'reset'|'verify'
 type ProfileData = {user:User;profile?:{full_name?:string;preferences?:Record<string,unknown>};subscription?:{plan?:string;status?:string;currentPeriodStart?:string;currentPeriodEnd?:string}}
 
+const LOCAL_DEV_AUTO_ACCESS = import.meta.env.DEV && ['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)
+
 function detail(payload:unknown):string {
   if (payload && typeof payload === 'object' && 'detail' in payload) {
     const value = (payload as {detail:unknown}).detail
@@ -218,6 +220,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
     clearUserSessionToken(); setMemberMenuOpen(false); setToken(''); setSession(null); setMode('login'); setMessage('Oturum kapatıldı.')
   }
 
+  if (LOCAL_DEV_AUTO_ACCESS) return <>{children}</>
   if (busy && !session) return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>GÜVENLİ OTURUM</b><span>Hesap durumu kontrol ediliyor…</span></div></main>
   if (autoVerifying) return <main className="authLoading"><div className="authLoader"><MailCheck/><b>E-POSTA DOĞRULANIYOR</b><span>E-posta doğrulanıyor...</span></div></main>
   if (!session) {
