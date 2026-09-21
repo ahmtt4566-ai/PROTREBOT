@@ -22,6 +22,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode
@@ -50,6 +51,17 @@ DEMO_CLOCK_LOCK = asyncio.Lock()
 DEMO_CLOCK_OFFSET_MS = 0
 DEMO_CLOCK_SYNCED_AT = 0.0
 
+
+class ProvenanceState(str, Enum):
+    NO_PROVENANCE = "NO_PROVENANCE"
+    PROVISIONAL = "PROVISIONAL"
+    CONFIRMED = "CONFIRMED"
+    BROKEN = "BROKEN"
+
+
+def can_mutate_lifecycle(plan: dict[str, Any]) -> bool:
+    """Allow lifecycle mutation only for an explicitly confirmed provenance record."""
+    return plan.get("provenance_state") == ProvenanceState.CONFIRMED.value
 
 def request_correlation_id(request: Request | None = None) -> str:
     return str(request.headers.get("Rndr-Id") or f"local-{uuid.uuid4().hex[:16]}") if request else f"local-{uuid.uuid4().hex[:16]}"
