@@ -5,6 +5,7 @@ import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 
 const BinanceDemo = lazy(() => import('./BinanceDemo'))
+const LiveTradingPanel = lazy(() => import('./frontend/src/LiveTradingPanel'))
 const CommercialHub = lazy(() => import('./CommercialHub'))
 const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
 const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
@@ -414,7 +415,7 @@ export default function TestnetFirstApp() {
 
     {(view === 'pricing' || view === 'billing') && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Subscription workspace hazırlanıyor…</div>}><SubscriptionCenter mode={view} onNavigate={navigate}/></Suspense>}
 
-    {view === 'live' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Canlı güvenlik merkezi hazırlanıyor…</div>}><CommercialHub active initialTab="execution"/></Suspense>}
+    {view === 'live' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Canlı güvenlik merkezi hazırlanıyor…</div>}><LiveTradingPanel active symbol={symbol} analysis={analysis}/></Suspense>}
 
     {view === 'ops' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Bulut operasyon merkezi hazırlanıyor…</div>}><CloudOpsCenter/></Suspense>}
 
