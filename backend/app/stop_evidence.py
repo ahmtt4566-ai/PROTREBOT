@@ -58,7 +58,116 @@ def _append(state: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
     return observation
 
 
-def observe_stream_payload(state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+def _identifier(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _owned_stop_plans(demo_state: dict[str, Any], symbol: str, algo_id: Any, client_algo_id: Any) -> list[dict[str, Any]]:
+    event_algo_id = _identifier(algo_id)
+    event_client_id = _identifier(client_algo_id)
+    matches = []
+    for plan in (demo_state.get("plans") or {}).values():
+        if not isinstance(plan, dict) or plan.get("provenance_state") != "CONFIRMED":
+            continue
+        if str(plan.get("symbol") or "") != symbol:
+            continue
+        stop_algo_id = _identifier(plan.get("stop_algo_id"))
+        stop_client_id = _identifier(plan.get("stop_client_id"))
+        if (event_algo_id and stop_algo_id and event_algo_id == stop_algo_id) or (
+            event_client_id and stop_client_id and event_client_id == stop_client_id
+        ):
+            matches.append(plan)
+    return matches
+
+
+def _record_algo_correlation(
+    state: dict[str, Any],
+    demo_state: dict[str, Any],
+    observation: dict[str, Any],
+) -> None:
+    event = observation
+    plans = _owned_stop_plans(
+        demo_state,
+        str(event.get("symbol") or ""),
+        event.get("algo_id"),
+        event.get("client_algo_id"),
+    )
+    if len(plans) != 1:
+        return
+    plan = plans[0]
+    correlations = state.setdefault("stop_correlations", [])
+    observation_id = event.get("observation_id")
+    if any(item.get("algo_observation_id") == observation_id for item in correlations if isinstance(item, dict)):
+        return
+    correlations.append({
+        "correlation_id": f"stop-correlation:{plan.get('id') or 'unknown'}:{observation_id}",
+        "status": "INCOMPLETE" if not (event.get("actual_order_id") or event.get("actual_client_algo_id")) else "PENDING",
+        "plan_id": plan.get("id"),
+        "symbol": event.get("symbol"),
+        "stop_algo_id": event.get("algo_id"),
+        "stop_client_algo_id": event.get("client_algo_id"),
+        "algo_observation_id": observation_id,
+        "actual_order_id": event.get("actual_order_id"),
+        "actual_client_algo_id": event.get("actual_client_algo_id"),
+        "execution_trade_id": None,
+        "execution_confirmed": False,
+    })
+
+
+def _confirm_stop_execution(
+    state: dict[str, Any],
+    demo_state: dict[str, Any],
+    observation: dict[str, Any],
+) -> dict[str, Any] | None:
+    if observation.get("execution_type") != "TRADE" or not _identifier(observation.get("trade_id")):
+        return None
+    candidates = []
+    event_order_id = _identifier(observation.get("order_id"))
+    event_client_id = _identifier(observation.get("client_order_id"))
+    for correlation in state.get("stop_correlations", []):
+        if not isinstance(correlation, dict) or correlation.get("status") != "PENDING":
+            continue
+        if correlation.get("symbol") != observation.get("symbol"):
+            continue
+        comparisons = []
+        if correlation.get("actual_order_id"):
+            comparisons.append(_identifier(correlation.get("actual_order_id")) == event_order_id)
+        if correlation.get("actual_client_algo_id"):
+            comparisons.append(_identifier(correlation.get("actual_client_algo_id")) == event_client_id)
+        if comparisons and all(comparisons):
+            candidates.append(correlation)
+    if len(candidates) != 1:
+        return None
+    correlation = candidates[0]
+    trade_id = _identifier(observation.get("trade_id"))
+    if any(
+        isinstance(item, dict) and item.get("execution_trade_id") == trade_id
+        for item in state.get("stop_correlations", [])
+    ):
+        return None
+    plan = (demo_state.get("plans") or {}).get(correlation.get("plan_id"))
+    if not isinstance(plan, dict) or plan.get("provenance_state") != "CONFIRMED":
+        return None
+    correlation.update({
+        "status": "CONFIRMED",
+        "execution_trade_id": trade_id,
+        "execution_observation_id": observation.get("observation_id"),
+        "execution_type": observation.get("execution_type"),
+        "order_status": observation.get("order_status"),
+        "execution_confirmed": True,
+    })
+    plan["stop_fill_confirmed"] = True
+    plan["stop_execution_trade_id"] = trade_id
+    plan["stop_execution_observation_id"] = observation.get("observation_id")
+    return correlation
+
+
+def observe_stream_payload(
+    state: dict[str, Any],
+    payload: dict[str, Any],
+    demo_state: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Append one raw user-stream observation without changing lifecycle state."""
     event_type = payload.get("e")
     if event_type not in {"ALGO_UPDATE", "ORDER_TRADE_UPDATE"}:
@@ -68,7 +177,7 @@ def observe_stream_payload(state: dict[str, Any], payload: dict[str, Any]) -> di
         event = {}
     exchange_time = _raw(payload, "T", "E")
     if event_type == "ALGO_UPDATE":
-        return _append(state, {
+        observation = _append(state, {
             "exchange_event_time": exchange_time,
             "event_type": event_type,
             "symbol": _raw(event, "s", "symbol"),
@@ -79,7 +188,10 @@ def observe_stream_payload(state: dict[str, Any], payload: dict[str, Any]) -> di
             "order_status": _raw(event, "X", "algoStatus", "status"),
             "mark_price": _raw(event, "sp", "triggerPrice"),
         })
-    return _append(state, {
+        if demo_state is not None:
+            _record_algo_correlation(state, demo_state, observation)
+        return observation
+    observation = _append(state, {
         "exchange_event_time": exchange_time,
         "event_type": event_type,
         "symbol": _raw(event, "s"),
@@ -94,6 +206,9 @@ def observe_stream_payload(state: dict[str, Any], payload: dict[str, Any]) -> di
         "cumulative_fill_qty": _raw(event, "z"),
         "reduce_only": _raw(event, "R"),
     })
+    if demo_state is not None:
+        _confirm_stop_execution(state, demo_state, observation)
+    return observation
 
 
 def observe_position_snapshot(state: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

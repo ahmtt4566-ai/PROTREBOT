@@ -209,6 +209,7 @@ def initial_state() -> dict[str, Any]:
         "evidence_sequence": 0,
         "evidence_status": "NO LIVE EVIDENCE AVAILABLE",
         "evidence_observations": [],
+        "stop_correlations": [],
         "snapshot": None,
         "reconciliation": {},
         "backtest": None,
@@ -252,7 +253,7 @@ def load_state() -> dict[str, Any]:
     for key in (
         "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades", "paper_positions",
-        "risk", "evidence_sequence", "evidence_status", "evidence_observations",
+        "risk", "evidence_sequence", "evidence_status", "evidence_observations", "stop_correlations",
         "notifications",
     ):
         if key in saved:
@@ -303,6 +304,7 @@ def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
         "evidence_sequence": int(state.get("evidence_sequence", 0)),
         "evidence_status": state.get("evidence_status", "NO LIVE EVIDENCE AVAILABLE"),
         "evidence_observations": state.get("evidence_observations", []),
+        "stop_correlations": state.get("stop_correlations", []),
         "snapshot": state.get("snapshot"),
         "reconciliation": state.get("reconciliation", {}),
         "saved_at": now_iso(),
@@ -1163,7 +1165,10 @@ def reconcile_positions(state: dict[str, Any], previous: dict[str, Any] | None, 
 def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_state: dict[str, Any] | None = None) -> bool:
     event_type = str(payload.get("e") or "")
     event_time = payload.get("T", payload.get("E", 0))
-    observe_stream_payload(state, payload)
+    previous_stop_correlations = repr(state.get("stop_correlations", []))
+    observe_stream_payload(state, payload, demo_state=demo_state)
+    if demo_state is not None and previous_stop_correlations != repr(state.get("stop_correlations", [])):
+        persist_runtime(demo_state)
     state["stream"].update({"last_event": now_iso(), "status": "CANLI", "transport": "USER STREAM"})
     if event_type == "ORDER_TRADE_UPDATE":
         order = payload.get("o") if isinstance(payload.get("o"), dict) else {}
@@ -2244,6 +2249,7 @@ def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
             "observation_count": len(observations),
             "observations": exposed_observations,
             "correlation": correlation_report(exposed_observations),
+            "stop_correlations": state.get("stop_correlations", [])[-EVIDENCE_RESPONSE_LIMIT:],
         },
         "certificate": certificate_payload(state), "last_saved": state.get("last_saved"),
         "real_trading_locked": True,
