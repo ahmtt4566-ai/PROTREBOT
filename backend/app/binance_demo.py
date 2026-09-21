@@ -46,6 +46,7 @@ ARM_SECONDS = 10 * 60
 CLIENT_PREFIX = "PTB_"
 PLAN_RECONCILIATION_GRACE_SECONDS = 15
 _PROTECTION_INSTALL_LOCKS: dict[str, asyncio.Lock] = {}
+_PROTECTION_CLEANUP_LOCKS: dict[str, asyncio.Lock] = {}
 logger = logging.getLogger(__name__)
 DEMO_SNAPSHOT_LOCK = asyncio.Lock()
 DEMO_CLOCK_LOCK = asyncio.Lock()
@@ -1957,6 +1958,10 @@ def _protection_lock_key(plan: dict[str, Any]) -> str:
     return f"{plan.get('user_id') or ''}:{plan.get('id') or id(plan)}"
 
 
+def _has_protection_identity(plan: dict[str, Any]) -> bool:
+    return bool(str(plan.get("id") or "").strip())
+
+
 def _protection_install_lock(plan: dict[str, Any]) -> asyncio.Lock:
     key = _protection_lock_key(plan)
     lock = _PROTECTION_INSTALL_LOCKS.get(key)
@@ -1968,6 +1973,15 @@ def _protection_install_lock(plan: dict[str, Any]) -> asyncio.Lock:
 
 def protection_lock(plan: dict[str, Any]) -> asyncio.Lock:
     return _protection_install_lock(plan)
+
+
+def _protection_cleanup_lock(plan: dict[str, Any]) -> asyncio.Lock:
+    key = _protection_lock_key(plan)
+    lock = _PROTECTION_CLEANUP_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _PROTECTION_CLEANUP_LOCKS[key] = lock
+    return lock
 
 
 async def find_order_by_client_id(client: BinanceDemoClient, symbol: str, client_id: str) -> dict[str, Any] | None:
@@ -2939,6 +2953,8 @@ async def install_protection(
     entry_context: object | None = None,
     state_lock: asyncio.Lock | None = None,
 ) -> None:
+    if not _has_protection_identity(plan):
+        return
     entry_context_valid = _valid_entry_installation_context(entry_context, plan)
     if not entry_context_valid and not can_mutate_lifecycle(plan):
         return
@@ -2969,15 +2985,24 @@ async def _repair_missing_stop_protection(
     *,
     plans: list[dict[str, Any]],
 ) -> bool:
-    protection_state, _matched_ids, missing_ids = _protection_classification(
-        plan, snapshot, plans=plans
-    )
-    stop_algo_id = _single_plan_algo_id(plan, "stop_algo_id")
-    if protection_state != "MISSING" or stop_algo_id is None or stop_algo_id not in missing_ids:
+    if not _has_protection_identity(plan):
         return False
-    direction = str(plan.get("direction") or "").upper()
-    if direction not in {"LONG", "SHORT"}:
-        return False
+    lock = protection_lock(plan)
+    async with lock:
+        if plan.get("protection_repair_pending"):
+            return False
+        protection_state, _matched_ids, missing_ids = _protection_classification(
+            plan, snapshot, plans=plans
+        )
+        stop_algo_id = _single_plan_algo_id(plan, "stop_algo_id")
+        if protection_state != "MISSING" or stop_algo_id is None or stop_algo_id not in missing_ids:
+            return False
+        direction = str(plan.get("direction") or "").upper()
+        if direction not in {"LONG", "SHORT"}:
+            return False
+        plan["protection_repair_pending"] = True
+        persist_runtime(state)
+
     result = await post_algo(client, {
         "algoType": "CONDITIONAL",
         "symbol": plan["symbol"],
@@ -2998,15 +3023,17 @@ async def _repair_missing_stop_protection(
     )
     if new_id is None:
         raise BinanceDemoError("Binance Demo Stop onarım kimliği doğrulanamadı.", http_status=409)
-    protection_ids = _plan_protection_ids(plan)
-    if protection_ids is None:
-        return False
-    plan["protection_ids"] = [new_id if algo_id == stop_algo_id else algo_id for algo_id in protection_ids]
-    if new_id not in plan["protection_ids"]:
-        plan["protection_ids"].append(new_id)
-    plan["stop_algo_id"] = new_id
-    plan["protection_status"] = "KORUMA ONARILDI"
-    persist_runtime(state)
+    async with lock:
+        protection_ids = _plan_protection_ids(plan)
+        if protection_ids is None or not plan.get("protection_repair_pending"):
+            return False
+        plan["protection_ids"] = [new_id if algo_id == stop_algo_id else algo_id for algo_id in protection_ids]
+        if new_id not in plan["protection_ids"]:
+            plan["protection_ids"].append(new_id)
+        plan["stop_algo_id"] = new_id
+        plan["protection_status"] = "KORUMA ONARILDI"
+        plan["protection_repair_pending"] = False
+        persist_runtime(state)
     return True
 
 
@@ -3244,14 +3271,26 @@ async def cleanup_closed_plan(
     snapshot: dict[str, Any] | None = None,
     plans: list[dict[str, Any]] | None = None,
 ) -> None:
+    if not _has_protection_identity(plan):
+        return
     if not _valid_entry_installation_context(entry_context, plan) and not can_mutate_lifecycle(plan):
         return
+    lock = _protection_cleanup_lock(plan)
+    async with lock:
+        protection_ids = _plan_protection_ids(plan)
+        if protection_ids is None:
+            return
+        pending_ids = plan.get("cleanup_pending_ids", [])
+        if not isinstance(pending_ids, list) or any(not isinstance(item, int) or item <= 0 for item in pending_ids):
+            return
+        claimed_ids = sorted(protection_ids - set(pending_ids))
+        if not claimed_ids:
+            return
+        plan["cleanup_pending_ids"] = sorted(set(pending_ids).union(claimed_ids))
+
     snapshot = snapshot or await _fresh_protection_snapshot(client, plan["symbol"])
-    remaining_ids: list[int] = []
-    protection_ids = _plan_protection_ids(plan)
-    if protection_ids is None:
-        return
-    for algo_id in sorted(protection_ids):
+    removed_ids: set[int] = set()
+    for algo_id in claimed_ids:
         ownership, matched_ids, missing_ids = _protection_classification(
             plan,
             snapshot,
@@ -3259,16 +3298,26 @@ async def cleanup_closed_plan(
             plans=plans,
         )
         if ownership == "MISSING" and algo_id in missing_ids:
+            removed_ids.add(algo_id)
             continue
         if ownership != "MATCHED" or algo_id not in matched_ids:
-            remaining_ids.append(algo_id)
             continue
         try:
             await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": plan["symbol"], "algoId": algo_id})
+            removed_ids.add(algo_id)
         except BinanceDemoError as exc:
-            if exc.exchange_code not in {-2011, -2013}:
-                remaining_ids.append(algo_id)
-    plan["protection_ids"] = remaining_ids
+            if exc.exchange_code in {-2011, -2013}:
+                removed_ids.add(algo_id)
+
+    async with lock:
+        current_ids = _plan_protection_ids(plan)
+        if current_ids is None:
+            return
+        pending_ids = plan.get("cleanup_pending_ids", [])
+        if not isinstance(pending_ids, list):
+            return
+        plan["protection_ids"] = sorted(current_ids - removed_ids)
+        plan["cleanup_pending_ids"] = [item for item in pending_ids if item not in claimed_ids]
 
 
 async def _abort_protection_installation(

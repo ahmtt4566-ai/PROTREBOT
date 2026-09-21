@@ -58,6 +58,40 @@ def _append(state: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
     return observation
 
 
+def _existing_observation(state: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any] | None:
+    observations = state.get("evidence_observations", [])
+    if not isinstance(observations, list):
+        return None
+    event_type = fields.get("event_type")
+    for observation in observations:
+        if not isinstance(observation, dict) or observation.get("event_type") != event_type:
+            continue
+        if event_type == "ORDER_TRADE_UPDATE":
+            trade_id = _identifier(fields.get("trade_id"))
+            if trade_id and _identifier(observation.get("trade_id")) == trade_id:
+                return observation
+            continue
+        identity = (
+            fields.get("exchange_event_time"),
+            _identifier(fields.get("algo_id")),
+            _identifier(fields.get("client_algo_id")),
+            _identifier(fields.get("actual_order_id")),
+            _identifier(fields.get("actual_client_algo_id")),
+            str(fields.get("order_status") or "").upper(),
+        )
+        existing_identity = (
+            observation.get("exchange_event_time"),
+            _identifier(observation.get("algo_id")),
+            _identifier(observation.get("client_algo_id")),
+            _identifier(observation.get("actual_order_id")),
+            _identifier(observation.get("actual_client_algo_id")),
+            str(observation.get("order_status") or "").upper(),
+        )
+        if identity[1:] != (None, None, None, None, "") and identity == existing_identity:
+            return observation
+    return None
+
+
 def _identifier(value: Any) -> str | None:
     normalized = str(value or "").strip()
     return normalized or None
@@ -98,8 +132,17 @@ def _record_algo_correlation(
     plan = plans[0]
     correlations = state.setdefault("stop_correlations", [])
     observation_id = event.get("observation_id")
-    if any(item.get("algo_observation_id") == observation_id for item in correlations if isinstance(item, dict)):
-        return
+    for item in correlations:
+        if not isinstance(item, dict):
+            continue
+        if (
+            item.get("plan_id") == plan.get("id")
+            and _identifier(item.get("stop_algo_id")) == _identifier(event.get("algo_id"))
+            and _identifier(item.get("stop_client_algo_id")) == _identifier(event.get("client_algo_id"))
+            and _identifier(item.get("actual_order_id")) == _identifier(event.get("actual_order_id"))
+            and _identifier(item.get("actual_client_algo_id")) == _identifier(event.get("actual_client_algo_id"))
+        ):
+            return
     correlations.append({
         "correlation_id": f"stop-correlation:{plan.get('id') or 'unknown'}:{observation_id}",
         "status": "INCOMPLETE" if not (event.get("actual_order_id") or event.get("actual_client_algo_id")) else "PENDING",
@@ -177,7 +220,7 @@ def observe_stream_payload(
         event = {}
     exchange_time = _raw(payload, "T", "E")
     if event_type == "ALGO_UPDATE":
-        observation = _append(state, {
+        fields = {
             "exchange_event_time": exchange_time,
             "event_type": event_type,
             "symbol": _raw(event, "s", "symbol"),
@@ -187,11 +230,16 @@ def observe_stream_payload(
             "actual_client_algo_id": _raw(event, "ac", "actualClientAlgoId"),
             "order_status": _raw(event, "X", "algoStatus", "status"),
             "mark_price": _raw(event, "sp", "triggerPrice"),
-        })
+        }
+        observation = _existing_observation(state, {"event_type": event_type, **fields})
+        if observation is None:
+            observation = _append(state, {"event_type": event_type, **fields})
+        else:
+            return observation
         if demo_state is not None:
             _record_algo_correlation(state, demo_state, observation)
         return observation
-    observation = _append(state, {
+    fields = {
         "exchange_event_time": exchange_time,
         "event_type": event_type,
         "symbol": _raw(event, "s"),
@@ -205,7 +253,11 @@ def observe_stream_payload(
         "last_fill_qty": _raw(event, "l"),
         "cumulative_fill_qty": _raw(event, "z"),
         "reduce_only": _raw(event, "R"),
-    })
+    }
+    observation = _existing_observation(state, {"event_type": event_type, **fields})
+    if observation is not None:
+        return observation
+    observation = _append(state, {"event_type": event_type, **fields})
     if demo_state is not None:
         _confirm_stop_execution(state, demo_state, observation)
     return observation

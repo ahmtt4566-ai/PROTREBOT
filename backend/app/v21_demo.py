@@ -1165,6 +1165,16 @@ def reconcile_positions(state: dict[str, Any], previous: dict[str, Any] | None, 
 def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_state: dict[str, Any] | None = None) -> bool:
     event_type = str(payload.get("e") or "")
     event_time = payload.get("T", payload.get("E", 0))
+    stream_event_id = None
+    event = payload.get("o") if isinstance(payload.get("o"), dict) else payload.get("a", {})
+    if not isinstance(event, dict):
+        event = {}
+    if event_type == "ORDER_TRADE_UPDATE":
+        stream_event_id = f"order-{event_time}-{event.get('i') or event.get('c')}-{event.get('x')}-{event.get('X')}"
+    elif event_type == "ALGO_UPDATE":
+        stream_event_id = f"algo-{event_time}-{event.get('aid', event.get('algoId', ''))}-{event.get('X', event.get('algoStatus', event.get('status', 'UPDATE')))}"
+    if stream_event_id and stream_event_id in state.get("seen_event_ids", []):
+        return False
     previous_stop_correlations = repr(state.get("stop_correlations", []))
     observe_stream_payload(state, payload, demo_state=demo_state)
     if demo_state is not None and previous_stop_correlations != repr(state.get("stop_correlations", [])):
