@@ -55,7 +55,7 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
-export default function LiveTradingPanel({active, symbol, analysis}: Props) {
+export default function LiveTradingPanel({active, symbol, analysis, masterTrade}: Props) {
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [connections, setConnections] = useState<ConnectionStatus | null>(null)
   const [credentials, setCredentials] = useState({apiKey: '', secretKey: '', accepted: false})
