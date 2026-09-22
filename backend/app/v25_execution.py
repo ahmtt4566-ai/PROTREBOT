@@ -83,6 +83,10 @@ LIVE_WS_BASE = "wss://fstream.binance.com/private"
 LIVE_ARM_SECONDS = 5 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
 RECONCILE_SECONDS = 10
+RATE_LIMIT_AWARE_BACKOFF_ENABLED = os.getenv("V25_RATE_LIMIT_AWARE_BACKOFF_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+BINANCE_REQUEST_WEIGHT_LIMIT_1M = int(os.getenv("V25_BINANCE_REQUEST_WEIGHT_LIMIT_1M", "2400"))
+BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO = float(os.getenv("V25_BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO", "0.8"))
+RATE_LIMIT_PROACTIVE_WAIT_SECONDS = float(os.getenv("V25_RATE_LIMIT_PROACTIVE_WAIT_SECONDS", "1"))
 MAX_EVENTS = 500
 MAX_PLANS = 250
 PROVENANCE_STATES = {"NO_PROVENANCE", "PROVISIONAL", "CONFIRMED", "BROKEN"}
@@ -138,6 +142,18 @@ class LiveExchangeError(RuntimeError):
         self.http_status = http_status
         self.exchange_code = exchange_code
         self.unknown_execution = unknown_execution
+
+
+class LiveRateLimitError(LiveExchangeError):
+    def __init__(self, message: str, *, retry_after: int | None = None, exchange_code: int | None = None) -> None:
+        super().__init__(message, http_status=429, exchange_code=exchange_code)
+        self.retry_after = retry_after
+
+
+def rate_limit_backoff_seconds(exc: LiveRateLimitError, generic_backoff: int) -> int:
+    if RATE_LIMIT_AWARE_BACKOFF_ENABLED and exc.retry_after is not None:
+        return exc.retry_after
+    return generic_backoff
 
 
 def lock_live_execution(
@@ -476,6 +492,30 @@ class BinanceLiveClient:
         self.time_offset_ms = 0
         self.last_time_sync = 0.0
         self._clock_lock = asyncio.Lock()
+        self.last_used_weight_1m: int | None = None
+        self._rate_limit_cooldown_until = 0.0
+
+    @staticmethod
+    def _retry_after_seconds(response: httpx.Response) -> int | None:
+        value = getattr(response, "headers", {}).get("Retry-After", "").strip()
+        if not value.isdigit():
+            return None
+        return max(1, int(value))
+
+    async def _wait_before_request(self) -> None:
+        if not RATE_LIMIT_AWARE_BACKOFF_ENABLED:
+            return
+        now = time.monotonic()
+        cooldown_wait = self._rate_limit_cooldown_until - now
+        weight_wait = RATE_LIMIT_PROACTIVE_WAIT_SECONDS if (
+            self.last_used_weight_1m is not None
+            and self.last_used_weight_1m >= BINANCE_REQUEST_WEIGHT_LIMIT_1M * BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO
+        ) else 0.0
+        wait_seconds = max(cooldown_wait, weight_wait)
+        if wait_seconds > 0:
+            await asyncio.sleep(wait_seconds)
+        if cooldown_wait > 0:
+            self._rate_limit_cooldown_until = 0.0
 
     async def public_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         if path not in PUBLIC_PATHS:
@@ -530,12 +570,17 @@ class BinanceLiveClient:
             raise LiveExchangeError("Canlı Binance sunucu kilidi doğrulanamadı.", http_status=500)
         headers = {"X-MBX-APIKEY": self.api_key} if signed or api_key_header else {}
         request_url = f"{url}?{encoded_query}&signature={signature}" if signed else url
+        await self._wait_before_request()
         try:
             response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
         except httpx.TimeoutException as exc:
             raise LiveExchangeError("Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.", unknown_execution=True) from exc
         except httpx.RequestError as exc:
             raise LiveExchangeError("Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.", unknown_execution=True) from exc
+        response_headers = getattr(response, "headers", {})
+        used_weight = response_headers.get("X-MBX-USED-WEIGHT-1M", "")
+        if used_weight and used_weight.isdigit():
+            self.last_used_weight_1m = int(used_weight)
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -547,6 +592,19 @@ class BinanceLiveClient:
                 message = message.replace(self.api_key, "[gizli]")
             if response.status_code in {429, 418}:
                 message = "Binance API hız sınırı; yeni emir gönderilmedi. Geri çekilme süresi bekleniyor."
+                retry_after = self._retry_after_seconds(response)
+                if RATE_LIMIT_AWARE_BACKOFF_ENABLED and retry_after is not None:
+                    self._rate_limit_cooldown_until = time.monotonic() + retry_after
+                logger.warning(
+                    "LIVE Binance rate limit: method=%s path=%s status=%s code=%s retry_after_seconds=%s used_weight_1m=%s",
+                    method,
+                    path,
+                    response.status_code,
+                    code,
+                    retry_after,
+                    self.last_used_weight_1m,
+                )
+                raise LiveRateLimitError(message, retry_after=retry_after, exchange_code=int(code) if isinstance(code, int) else None)
             unknown = response.status_code >= 500
             if unknown:
                 message = "Emir yürütme sonucu belirsiz; benzersiz emir kimliğiyle sorgulanacak, kör tekrar yapılmayacak."
@@ -1965,7 +2023,14 @@ async def automatic_cycle(application: Any) -> None:
 async def reconcile(application: Any) -> None:
     state = application.state.v25_execution
     client = client_for(application)
-    snapshot = await account_snapshot(client)
+    try:
+        snapshot = await account_snapshot(client)
+    except LiveRateLimitError as exc:
+        state["connected"] = False
+        state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
+        state["auto"].update({"last_skip_reason": "rate_limited", "last_error": str(exc)[:240]})
+        persist_state(state)
+        raise
     state["snapshot"] = snapshot
     state["recovery_ready"] = True
     state["recovery_error"] = None
@@ -2062,6 +2127,13 @@ async def execution_loop(application: Any) -> None:
             await asyncio.sleep(RECONCILE_SECONDS)
         except asyncio.CancelledError:
             raise
+        except LiveRateLimitError as exc:
+            automation_telemetry("AUTOMATION_SKIP reason=binance_rate_limited", reason="binance_rate_limited")
+            state = application.state.v25_execution
+            state["connected"] = False
+            state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
+            await asyncio.sleep(rate_limit_backoff_seconds(exc, backoff))
+            backoff = min(60, backoff * 2) if exc.retry_after is None else 5
         except Exception as exc:
             automation_telemetry("AUTOMATION_SKIP reason=reconcile_failed", reason="reconcile_failed")
             state = application.state.v25_execution

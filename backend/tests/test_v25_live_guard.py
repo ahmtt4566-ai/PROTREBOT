@@ -519,6 +519,65 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
                 asyncio.run(client._request("POST", "/fapi/v1/order", {}, signed=False))
             self.assertTrue(raised.exception.unknown_execution)
 
+    def test_rate_limit_retry_after_uses_header_and_records_endpoint_weight(self):
+        class Response:
+            def __init__(self):
+                self.status_code = 429
+                self.headers = {"Retry-After": "7", "X-MBX-USED-WEIGHT-1M": "1900"}
+
+            def json(self):
+                return {"code": -1003, "msg": "Too many requests"}
+
+        class FakeHttp:
+            async def request(self, *args, **kwargs):
+                return Response()
+
+        client = BinanceLiveClient(FakeHttp(), "fake-api-key-123", "fake-secret-key-123")
+        with self.assertRaises(v25_execution.LiveRateLimitError) as raised:
+            asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
+        self.assertEqual(raised.exception.retry_after, 7)
+        self.assertEqual(raised.exception.exchange_code, -1003)
+        self.assertEqual(client.last_used_weight_1m, 1900)
+
+    def test_rate_limit_without_retry_after_falls_back_to_generic_backoff(self):
+        class Response:
+            status_code = 418
+            headers = {}
+
+            def json(self):
+                return {"code": -1003, "msg": "Too many requests"}
+
+        class FakeHttp:
+            async def request(self, *args, **kwargs):
+                return Response()
+
+        client = BinanceLiveClient(FakeHttp(), "fake-api-key-123", "fake-secret-key-123")
+        with self.assertRaises(v25_execution.LiveRateLimitError) as raised:
+            asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
+        self.assertIsNone(raised.exception.retry_after)
+        self.assertEqual(v25_execution.rate_limit_backoff_seconds(raised.exception, 5), 5)
+        self.assertEqual(v25_execution.rate_limit_backoff_seconds(v25_execution.LiveRateLimitError("limited", retry_after=7), 5), 7)
+
+    def test_used_weight_threshold_waits_before_next_request(self):
+        class Response:
+            status_code = 200
+
+            def __init__(self):
+                self.headers = {"X-MBX-USED-WEIGHT-1M": "1920"}
+
+            def json(self):
+                return {}
+
+        class FakeHttp:
+            async def request(self, *args, **kwargs):
+                return Response()
+
+        client = BinanceLiveClient(FakeHttp(), "fake-api-key-123", "fake-secret-key-123")
+        with patch.object(v25_execution.asyncio, "sleep", new=AsyncMock()) as sleep:
+            asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
+            asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
+        sleep.assert_awaited_once_with(v25_execution.RATE_LIMIT_PROACTIVE_WAIT_SECONDS)
+
     def test_unexpected_submit_exception_locks_unknown_and_disables_auto(self):
         state = initial_state()
         state.update({"recovery_ready": True, "real_trading_locked": False, "live_auto_trade": True})
