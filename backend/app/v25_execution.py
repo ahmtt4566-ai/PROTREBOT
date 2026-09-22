@@ -67,7 +67,7 @@ from .execution_core import (
     risk_sized_order,
     sanitize_execution_policy,
 )
-from .exchange_connections import session_credentials_for_request
+from .exchange_connections import session_credentials_for_request, session_id
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user
@@ -263,6 +263,7 @@ def initial_state() -> dict[str, Any]:
             "reconnect_count": 0,
         },
         "snapshot": None,
+        "snapshot_session_id": None,
         "events": [],
         "plans": {},
         "intents": {},
@@ -1634,7 +1635,13 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
     state = application.state.v25_execution
     consent = consent_status(state, request)
     release = readiness(application, state)
-    snapshot = state.get("snapshot") or {}
+    raw_snapshot = state.get("snapshot") or {}
+    snapshot_session_id = str(state.get("snapshot_session_id") or "")
+    current_session_id = session_id(request) if request is not None else ""
+    snapshot = raw_snapshot if current_session_id and current_session_id == snapshot_session_id else {}
+    account_snapshot_ready = isinstance(snapshot, dict) and all(
+        key in snapshot for key in ("wallet_balance", "available_balance", "positions", "open_orders")
+    )
     scan_stats = state["auto"].get("last_scan_stats") or {}
     return {
         "version": V25_VERSION,
@@ -1643,7 +1650,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "websocket_host": LIVE_WS_BASE,
         "credentials": {"configured": bool(consent.get("fingerprint")), "fingerprint": consent.get("fingerprint"), "storage": "OTURUM_KASASI" if consent.get("fingerprint") else "YOK"},
         "consent": consent,
-        "connected": bool(state.get("connected")),
+        "connected": bool(state.get("connected")) and account_snapshot_ready,
         "connection": state.get("connection"),
         "stream": state.get("stream"),
         "armed": is_armed(state),
@@ -2202,6 +2209,7 @@ async def v25_connect(request: Request) -> dict[str, Any]:
             client = client_for(request.app, request)
             snapshot = await account_snapshot(client)
             state["snapshot"] = snapshot
+            state["snapshot_session_id"] = session_id(request)
             state["connected"] = True
             state["connection"].update({"last_checked": now_iso(), "last_error": None, "clock_offset_ms": client.time_offset_ms})
             add_event(state, "READ_ONLY_CONNECTED", "Canlı hesap salt-okunur bağlantısı doğrulandı; emir gönderilmedi.", actor=user["id"])
@@ -2209,6 +2217,8 @@ async def v25_connect(request: Request) -> dict[str, Any]:
         return public_status(request.app, request)
     except (LiveExchangeError, BinanceDemoError) as exc:
         state["connected"] = False
+        state["snapshot_session_id"] = ""
+        state["snapshot"] = {}
         state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
         raise safe_exchange_error(exc) from exc
 

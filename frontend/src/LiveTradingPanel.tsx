@@ -134,6 +134,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
   const liveConnection = connections?.connections?.LIVE
   const configured = Boolean(liveConnection?.configured || status?.credentials?.configured)
   const connected = Boolean(status?.connected)
+  const marketDataConnected = status?.stream?.status === 'CANLI'
   const emergency = Boolean(status?.emergency?.active)
   const recoveryRequired = Boolean(emergency || status?.reconciliation_required || status?.recovery_error || status?.execution_state === 'UNKNOWN')
   const protectionGate = status?.readiness?.gates?.find(gate => /protection|koruma/i.test(`${gate.key} ${gate.label}`))
@@ -150,14 +151,14 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
     const gate = status.readiness?.gates?.find(item => patterns.some(pattern => pattern.test(`${item.key} ${item.label}`)))
     return gate ? gate.passed ? 'READY' : 'BLOCKED' : 'UNKNOWN'
   }
-  const connectionState = status === null || connections === null ? 'UNKNOWN' : configured && connected ? 'READY' : 'NOT CONNECTED'
+  const connectionState = status === null || connections === null ? 'UNKNOWN' : connected ? 'READY' : 'NOT CONNECTED'
   const armState = status === null ? 'UNKNOWN' : status.armed ? 'READY' : 'LOCKED'
   const riskState = riskGate ? riskGate.passed ? 'READY' : 'BLOCKED' : gateState([/risk/i, /policy/i, /limit/i, /safety/i, /guven/i])
   const exposureGate = gateState([/exposure/i, /notional/i])
   const exposureState = exposureGate !== 'UNKNOWN' ? exposureGate : status === null ? 'UNKNOWN' : exposure === 0 ? 'READY' : 'BLOCKED'
   const activePlanState = status === null ? 'UNKNOWN' : activePlans ? 'CONFLICT' : 'READY'
   const emergencyState = status === null ? 'UNKNOWN' : emergency ? 'ACTIVE' : 'CLEAR'
-  const autoReady = Boolean(status && connections && connectionState === 'READY' && armState === 'READY' && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
+  const autoReady = Boolean(status && connections && connected && connectionState === 'READY' && armState === 'READY' && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
   const policy = policyDraft || status?.policy || {}
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
@@ -289,7 +290,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
     <header className={`masterTradeLiveHeader ${liveState.toLowerCase()}`}>
       <div className="masterTradeLiveTitle"><span className="masterTradeLiveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE AUTO TRADE</h2><p>Binance Futures Mainnet · V25 backend control</p></div>
       <div className="masterTradeLiveHeadline"><span className="liveStateDot" /><strong>{liveState}</strong><small>{status?.live_auto_trade ? 'AUTO TRADE IS RUNNING' : 'AUTO TRADE IS OFF'}</small></div>
-      <div className="masterTradeLiveChips"><span>Binance Futures <b>{connectionState}</b></span><span>Risk <b>{riskState}</b></span><span>Exposure <b>{exposureState}</b></span><span>Protection <b>{protectionState}</b></span></div>
+      <div className="masterTradeLiveChips"><span>Market Data <b>{marketDataConnected ? 'CONNECTED' : status === null ? 'UNKNOWN' : 'DISCONNECTED'}</b></span><span>Live Account <b>{connected ? 'CONNECTED' : 'DISCONNECTED'}</b></span><span>Risk <b>{riskState}</b></span><span>Exposure <b>{exposureState}</b></span><span>Protection <b>{protectionState}</b></span></div>
     </header>
 
     <div className="masterTradeLiveAssistant"><div><span className="masterTradeLiveKicker">NEXT BEST ACTION</span><strong>{status?.live_auto_trade ? 'Auto Trade is actively monitoring approved markets.' : liveState === 'BLOCKED' ? 'LIVE is blocked until the backend recovery state is clear.' : !configured || !connected ? 'Connect and verify your LIVE API to continue.' : !readinessReady ? 'Complete the required safety checks before enabling Auto Trade.' : 'Everything is ready. Arm LIVE Auto Trade to continue.'}</strong><small>{status?.live_auto_trade ? 'STOP remains available at any time.' : blocker}</small></div><div className="masterTradeLiveAssistantActions"><button type="button" className="masterTradeLivePrimary" onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{status?.live_auto_trade ? <Power/> : <Power/>}{status?.live_auto_trade ? ' STOP AUTO TRADE' : ' START LIVE AUTO TRADE'}</button><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW REQUIREMENTS</button></div></div>
@@ -334,7 +335,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
   </section>
   return <section className="liveTradingPanel liveTerminal liveUx" aria-label="LIVE Trading Operations Terminal">
     <header className="liveUxHero"><div><span className="liveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE TRADING</h2><p>Binance Futures Mainnet · backend state only</p></div><div className={`liveUxState ${liveState.toLowerCase()}`}><ShieldAlert/><strong>{liveState}</strong><small>AUTO TRADE · {status?.live_auto_trade ? 'ON' : 'OFF'}</small></div></header>
-    <div className="liveUxStatus"><div><small>LIVE TRADING</small><b>{liveState}</b></div><div><small>AUTO TRADE</small><b>{status?.live_auto_trade ? 'ON' : 'OFF'}</b></div><div><small>CONNECTION</small><b>{connectionState}</b></div><div><small>RISK</small><b>{riskState}</b></div><div><small>EXPOSURE</small><b>{exposureState}</b></div><div><small>PROTECTION</small><b>{currentProtection}</b></div><div><small>RECOVERY</small><b>{recoveryState}</b></div><div><small>EMERGENCY</small><b>{emergencyState}</b></div></div>
+    <div className="liveUxStatus"><div><small>LIVE TRADING</small><b>{liveState}</b></div><div><small>AUTO TRADE</small><b>{status?.live_auto_trade ? 'ON' : 'OFF'}</b></div><div><small>MARKET DATA</small><b>{marketDataConnected ? 'CONNECTED' : status === null ? 'UNKNOWN' : 'DISCONNECTED'}</b></div><div><small>LIVE ACCOUNT</small><b>{connected ? 'CONNECTED' : 'DISCONNECTED'}</b></div><div><small>RISK</small><b>{riskState}</b></div><div><small>EXPOSURE</small><b>{exposureState}</b></div><div><small>PROTECTION</small><b>{currentProtection}</b></div><div><small>RECOVERY</small><b>{recoveryState}</b></div><div><small>EMERGENCY</small><b>{emergencyState}</b></div></div>
     <div className={`liveUxNow ${liveState.toLowerCase()}`}><div><small>WHAT TO DO NOW</small><strong>{liveState === 'BLOCKED' ? '⚠ LIVE IS BLOCKED' : liveState === 'READY' ? 'LIVE IS READY' : '🔒 LIVE IS LOCKED'}</strong><p>{blocker}</p></div><button type="button" onClick={() => void refresh(false)} disabled={Boolean(busy)}><RefreshCw/> REFRESH STATUS</button></div>
 
     <div className="liveUxGrid liveUxTopGrid"><section className="liveUxCard liveUxPosition"><header><CircleDollarSign/><div><small>CURRENT POSITION</small><h3>{currentPosition ? text(currentPosition.symbol) : 'NO OPEN POSITION'}</h3></div><b>{currentPosition ? 'OPEN' : 'NO ACTIVE POSITION'}</b></header>{currentPosition ? <><div className="liveUxPositionSide"><strong>{text(currentPosition.direction)}</strong><span>Position Status · OPEN</span></div><div className="liveUxMetrics"><span><small>ENTRY</small><b>{positionValue('entry_price')}</b></span><span><small>MARK PRICE</small><b>{positionValue('mark_price')}</b></span><span><small>QUANTITY</small><b>{positionValue('quantity')}</b></span><span><small>UNREALIZED PNL</small><b>{money(currentPosition.unrealized_pnl)}</b></span><span><small>STOP LOSS</small><b>{text(activePlan?.stop_loss)}</b></span><span><small>TAKE PROFIT 1</small><b>{text(activePlan?.targets?.[0])}</b></span><span><small>TAKE PROFIT 2</small><b>{text(activePlan?.targets?.[1])}</b></span><span><small>TAKE PROFIT 3</small><b>{text(activePlan?.targets?.[2])}</b></span></div><div className={`liveUxProtectionBadge ${currentProtection.toLowerCase().replaceAll(' ', '-')}`}>PROTECTION · {currentProtection}</div></> : <p className="liveUxEmpty">No active LIVE position. Position data is read from the backend account snapshot.</p>}</section>
