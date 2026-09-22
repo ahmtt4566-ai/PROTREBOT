@@ -39,6 +39,7 @@ type DemoStatus = {
 type DemoPosition = {
   symbol:string
   direction:'LONG'|'SHORT'
+  position_side?:string|null
   opened_at?:string|null
   quantity:number
   entry_price:number
@@ -164,7 +165,7 @@ type AutomationTrade = {symbol:string;side:string;scanner_rank:number;scanner_sc
 type V21Backtest = {symbol:string;interval:string;trades:number;wins:number;win_rate:number;net_pnl:number;ending_equity:number;max_drawdown_pct:number;profit_factor:number;no_lookahead:boolean;folds:{name:string;trades:number;net_pnl:number}[];recent_trades:{signal_time:number;entry_time:number;exit_time:number;direction:string;entry:number;exit:number;reason:string;pnl:number;cost_usdt:number;regime:string}[];note:string}
 type V21Summary = {
   version:string;mode:string;settings:V21Settings
-  auto:{enabled:boolean;busy:boolean;cycles:number;last_scan:string|null;last_decision:string;last_error:string|null;status?:string;pause_reason?:string|null;started_at?:string|null}
+  auto:{enabled:boolean;busy:boolean;cycles:number;last_scan:string|null;last_decision:string;last_error:string|null;status?:string;pause_reason?:string|null;started_at?:string|null;rejection_gate?:string|null;rejection_reason?:string|null}
   risk?:{daily_loss_pct?:number;last_warning_pct?:number;consecutive_losses?:number;consecutive_loss_limit?:number;kill_switch?:boolean}
   notifications?:{unread?:number}
   scanner:ScannerState
@@ -188,6 +189,10 @@ const normalizeV21Settings = (settings:V21Settings):V21Settings => ({...settings
 const fmt = (value?:number|null) => value === undefined || value === null || !Number.isFinite(value) ? '—' : value.toLocaleString('tr-TR',{maximumFractionDigits:value < 10 ? 5 : 2})
 const stamp = (value?:string|null) => value ? new Date(value).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'
 const numberValue = (value:string) => Number(value.replace(',','.'))
+
+function EmptyState({label='Veri bekleniyor...',detail,icon,className=''}:{label?:string;detail?:string;icon?:ReactNode;className?:string}) {
+  return <span className={`v21EmptyState ${className}`.trim()}><span className="v21EmptyIcon">{icon || <Activity/>}</span><strong>{label}</strong>{detail && <small>{detail}</small>}</span>
+}
 
 const fieldNames:Record<string,string> = {
   margin_usdt:'Marjin',leverage:'Kaldıraç',limit_price:'Limit fiyatı',stop_loss:'Stop Loss',
@@ -518,7 +523,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       runV21(() => v21Call<V21Summary>('/auto/stop',{method:'POST'}),'Yeni otomatik Demo girişleri durduruldu; mevcut korumalar açık.')
       return
     }
-    if (!status?.connections?.TESTNET?.active && !status?.connections?.TESTNET?.configured) {
+    if (!status?.configured) {
       setMessage('Demo API bağlantısı yok. Önce demo/testnet credential kaydedin ve doğrulayın.'); setMessageKind('error'); return
     }
     const confirmation = (autoConfirm || 'DEMO OTOMATİK').trim()
@@ -579,15 +584,15 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       : NaN
 
     return [
-      { label: 'Total Balance', value: Number.isFinite(balance) && balance > 0 ? `${fmt(balance)} USDT` : 'Unavailable' },
-      { label: 'Available Balance', value: Number.isFinite(available) && available >= 0 ? `${fmt(available)} USDT` : 'Unavailable' },
-      { label: 'Daily PnL', value: Number.isFinite(dailyPnL) ? `${dailyPnL >= 0 ? '+' : ''}${fmt(dailyPnL)} USDT` : 'Unavailable' },
-      { label: 'Total / Unrealized PnL', value: Number.isFinite(unrealized) ? `${unrealized >= 0 ? '+' : ''}${fmt(unrealized)} USDT` : 'Unavailable' },
-      { label: 'Open Positions', value: Number.isFinite(positions) ? `${positions}` : 'No data' },
-      { label: 'Daily Risk Usage', value: Number.isFinite(dailyRiskUsage) ? `${fmt(dailyRiskUsage)} USDT` : 'Unavailable' },
-      { label: 'Bot Status', value: v21?.auto.enabled ? 'ACTIVE' : (v21 ? 'OFFLINE' : 'Unavailable') },
-      { label: 'Last Trade', value: latestJournal ? `${latestJournal.kind} · ${stamp(latestJournal.created_at)}` : 'No data' },
-      { label: 'Active Strategy / Scanner State', value: analysis?.direction ? `${analysis.direction} · ${v21?.scanner.scan_status || 'UNAVAILABLE'}` : (v21?.scanner.scan_status || 'Unavailable') },
+      { label: 'Total Balance', value: Number.isFinite(balance) && balance > 0 ? `${fmt(balance)} USDT` : <EmptyState className="v21EmptyStateCompact"/> },
+      { label: 'Available Balance', value: Number.isFinite(available) && available >= 0 ? `${fmt(available)} USDT` : <EmptyState className="v21EmptyStateCompact"/> },
+      { label: 'Daily PnL', value: Number.isFinite(dailyPnL) ? `${dailyPnL >= 0 ? '+' : ''}${fmt(dailyPnL)} USDT` : <EmptyState className="v21EmptyStateCompact"/> },
+      { label: 'Total / Unrealized PnL', value: Number.isFinite(unrealized) ? `${unrealized >= 0 ? '+' : ''}${fmt(unrealized)} USDT` : <EmptyState className="v21EmptyStateCompact"/> },
+      { label: 'Open Positions', value: Number.isFinite(positions) ? `${positions}` : <EmptyState className="v21EmptyStateCompact"/> },
+      { label: 'Daily Risk Usage', value: Number.isFinite(dailyRiskUsage) ? `${fmt(dailyRiskUsage)} USDT` : <EmptyState className="v21EmptyStateCompact"/> },
+      { label: 'Bot Status', value: v21?.auto.enabled ? 'ACTIVE' : (v21 ? 'OFFLINE' : <EmptyState className="v21EmptyStateCompact"/>) },
+      { label: 'Last Trade', value: latestJournal ? `${latestJournal.kind} · ${stamp(latestJournal.created_at)}` : <EmptyState className="v21EmptyStateCompact"/> },
+      { label: 'Active Strategy / Scanner State', value: analysis?.direction ? `${analysis.direction} · ${v21?.scanner.scan_status || 'BEKLENİYOR'}` : (v21?.scanner.scan_status || <EmptyState className="v21EmptyStateCompact"/>) },
     ]
   }, [account, analysis, v21])
 
@@ -647,8 +652,8 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
     : autoStatus === 'ON' ? (v21?.scanner.running ? 'TARAMA YAPIYOR' : 'AKTİF') : 'DURDURULDU'
 
   const autoActivityCenter = useMemo(() => {
-    const auto = v21?.auto ?? {}
-    const scanner = v21?.scanner ?? {}
+    const auto = (v21?.auto ?? {}) as Partial<V21Summary['auto']>
+    const scanner = (v21?.scanner ?? {}) as Partial<ScannerState>
     const journal = v21?.journal ?? []
     const autoTrades = v21?.automation_trades ?? []
     const topCandidates = scanner.top_candidates ?? []
@@ -731,9 +736,9 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   }
 
   const formatRelativeTime = (value?: string | null) => {
-    if (!value) return 'No data'
+    if (!value) return 'Veri bekleniyor'
     const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return 'No data'
+    if (Number.isNaN(date.getTime())) return 'Veri bekleniyor'
     const deltaMs = Date.now() - date.getTime()
     const minutes = Math.max(0, Math.floor(deltaMs / 60000))
     if (minutes < 1) return 'just now'
@@ -803,13 +808,13 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
           <span>AUTO TRADE DIAGNOSTICS</span>
           <h2>AUTO TRADE AKTİVİTE MERKEZİ</h2>
         </div>
-        <b className={autoActivityCenter.botStatus === 'AKTİF' ? 'v21Running' : autoActivityCenter.botStatus === 'HATA' ? 'demoLoss' : 'v21Stopped'}>{autoActivityCenter.botStatus}</b>
+        <b className={autoActivityCenter.botStatus === 'AKTİF' ? 'v21Running' : ['HATA','DURDURULDU'].includes(autoActivityCenter.botStatus) ? 'demoLoss' : 'v21Stopped'}>{autoActivityCenter.botStatus}</b>
       </header>
       <div className="v21AutoActivityGrid">
         <article className="v21AutoActivityCard">
           <header><span>BOT DURUMU</span><h3>Auto Trade durumu</h3></header>
           <div className="v21AutoActivityMetricRow">
-            <div><small>DURUM</small><b className={autoActivityCenter.botStatus === 'AKTİF' ? 'demoProfit' : autoActivityCenter.botStatus === 'HATA' ? 'demoLoss' : ''}>{autoActivityCenter.botStatus}</b></div>
+            <div><small>DURUM</small><b className={autoActivityCenter.botStatus === 'AKTİF' ? 'demoProfit' : ['HATA','DURDURULDU'].includes(autoActivityCenter.botStatus) ? 'demoLoss' : ''}>{autoActivityCenter.botStatus}</b></div>
             <div><small>SON HEARTBEAT</small><b>{autoActivityCenter.heartbeat ? stamp(autoActivityCenter.heartbeat) : '—'}</b></div>
           </div>
           <p className="v21AutoActivityNote">{v21?.auto.last_decision || 'Yeni otomasyon kararı bekleniyor.'}</p>
@@ -838,12 +843,12 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
             </div>
             <div className="v21AutoActivityCandidateLevels">
               <span><small>ENTRY</small><b>{fmt(candidate.entry)}</b></span>
-              <span><small>STOP</small><b>{fmt(candidate.stop_loss)}</b></span>
+              <span className="v21StopMetric"><small>STOP</small><b>{fmt(candidate.stop_loss)}</b></span>
               <span><small>TP1</small><b>{fmt(candidate.tp1)}</b></span>
               <span><small>TP2</small><b>{fmt(candidate.tp2)}</b></span>
               <span><small>TP3</small><b>{fmt(candidate.tp3)}</b></span>
             </div>
-          </article>)}</div> : <div className="v21AutoActivityEmpty">Uygun işlem adayı bulunamadı.</div>}
+          </article>)}</div> : <EmptyState label="Uygun işlem adayı yok" detail="Scanner yeni bir sinyal bekliyor."/>}
         </article>
 
         <article className="v21AutoActivityCard">
@@ -851,10 +856,10 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
           {autoActivityCenter.lastAutoOrder && autoActivityCenter.lastAutoOrder.time ? <div className="v21AutoActivityMetricRow">
             <div><small>SON AUTO EMİR</small><b>{stamp(autoActivityCenter.lastAutoOrder.time)}</b></div>
             <div><small>SEMBOL</small><b>{autoActivityCenter.lastAutoOrder.symbol || '—'}</b></div>
-          </div> : <div className="v21AutoActivityEmpty">Henüz Auto Trade emri açılmadı.</div>}
+          </div> : <EmptyState label="Henüz Auto Trade emri yok" detail="İlk onaylı işlem burada görünecek."/>}
           {autoActivityCenter.lastAutoOrder && autoActivityCenter.lastAutoOrder.time ? <div className="v21AutoActivityMetricRow smallGrid">
             <div><small>YÖN</small><b>{autoActivityCenter.lastAutoOrder.side || '—'}</b></div>
-            <div><small>SONUÇ</small><b className={autoActivityCenter.lastAutoOrder.result === 'SUCCESS' ? 'demoProfit' : autoActivityCenter.lastAutoOrder.result === 'REJECTED' || autoActivityCenter.lastAutoOrder.result === 'ERROR' ? 'demoLoss' : ''}>{autoActivityCenter.lastAutoOrder.result || 'UNKNOWN'}</b></div>
+            <div><small>SONUÇ</small><b className={autoActivityCenter.lastAutoOrder.result === 'SUCCESS' ? 'demoProfit' : autoActivityCenter.lastAutoOrder.result === 'REJECTED' || autoActivityCenter.lastAutoOrder.result === 'ERROR' ? 'demoLoss' : ''}>{autoActivityCenter.lastAutoOrder.result || <EmptyState className="v21EmptyStateCompact"/>}</b></div>
             <div className="fullRow"><small>HATA / AÇIKLAMA</small><b>{autoActivityCenter.lastAutoOrder.error || '—'}</b></div>
           </div> : null}
         </article>
@@ -864,17 +869,17 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
           <div className="v21AutoActivityMetricRow">
             <div><small>AÇIK AUTO POZİSYON</small><b>{autoActivityCenter.openAutoPositions.length}</b></div>
           </div>
-          {autoActivityCenter.openAutoPositions.length ? <ul className="v21AutoActivityPositionList">{autoActivityCenter.openAutoPositions.map(trade => <li key={`${trade.symbol}-${trade.side}`}><span>{trade.symbol}</span><strong>{trade.side}</strong><em className={Number(trade.unrealized_pnl ?? 0) >= 0 ? 'demoProfit' : 'demoLoss'}>{Number(trade.unrealized_pnl ?? 0) >= 0 ? '+' : ''}{fmt(Number(trade.unrealized_pnl ?? 0))} USDT</em></li>)}</ul> : <div className="v21AutoActivityEmpty">Açık AUTO pozisyon yok.</div>}
+          {autoActivityCenter.openAutoPositions.length ? <ul className="v21AutoActivityPositionList">{autoActivityCenter.openAutoPositions.map(trade => <li key={`${trade.symbol}-${trade.side}`}><span>{trade.symbol}</span><strong>{trade.side}</strong><em className={Number(v21?.account.unrealized_pnl ?? 0) >= 0 ? 'demoProfit' : 'demoLoss'}>{Number(v21?.account.unrealized_pnl ?? 0) >= 0 ? '+' : ''}{fmt(Number(v21?.account.unrealized_pnl ?? 0))} USDT</em></li>)}</ul> : <EmptyState label="Açık AUTO pozisyon yok" detail="Yeni pozisyon açıldığında burada görünecek."/>}
         </article>
 
         <article className="v21AutoActivityCard wideCard">
           <header><span>ÖNCEKİ SEBEP DİYAGRAMI</span><h3>Why no trade?</h3></header>
-          <ul className="v21AutoActivityReasonList">{autoActivityCenter.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>
+          <ul className="v21AutoActivityReasonList">{autoActivityCenter.reasons.map(reason => <li className={/stop|loss|kayıp|reject|error|engell|paused|durdu/i.test(reason) ? 'v21CriticalText' : ''} key={reason}>{reason}</li>)}</ul>
         </article>
 
         <article className="v21AutoActivityCard fullWidthCard">
           <header><span>SON 20 AUTO TRADE OLAYI</span><h3>Time-ordered activity stream</h3></header>
-          {autoActivityCenter.recentEvents.length ? <ul className="v21AutoActivityEventList">{autoActivityCenter.recentEvents.map((event, index) => <li key={`${event.kind}-${event.time ?? index}`}><time>{event.time ? stamp(event.time) : '—'}</time><strong>{event.kind}</strong><span>{event.symbol || 'SYSTEM'}</span><small>{event.message}</small></li>)}</ul> : <div className="v21AutoActivityEmpty">Henüz Auto Trade olayı kaydedilmedi.</div>}
+          {autoActivityCenter.recentEvents.length ? <ul className="v21AutoActivityEventList">{autoActivityCenter.recentEvents.map((event, index) => <li className={/stop|loss|sl|reject|error|paused|durdur|kayıp/i.test(`${event.kind} ${event.message}`) ? 'v21CriticalEvent' : ''} key={`${event.kind}-${event.time ?? index}`}><time>{event.time ? stamp(event.time) : '—'}</time><strong>{event.kind}</strong><span>{event.symbol || 'SYSTEM'}</span><small>{event.message}</small></li>)}</ul> : <EmptyState label="Henüz Auto Trade olayı yok" detail="İlk otomasyon olayı burada görünecek."/>}
         </article>
       </div>
     </section>
@@ -925,7 +930,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
             </div>
             <div className="v21HealthMeta">
               <small>LAST UPDATE</small>
-              <b>{node.lastUpdate ? formatRelativeTime(node.lastUpdate) : 'UNKNOWN'}</b>
+              <b>{node.lastUpdate ? formatRelativeTime(node.lastUpdate) : <span className="v21EmptyInline">Veri bekleniyor</span>}</b>
             </div>
             <p>{node.detail}</p>
           </article>
@@ -943,10 +948,10 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
         <b><Gauge/> {v21?.daily.remaining_loss_budget !== undefined ? 'RISK DATA AVAILABLE' : 'RISK DATA UNKNOWN'}</b>
       </header>
       <div className="v21RiskRadarGrid">
-        <article><small>OPEN POSITIONS</small><strong>{account ? `${account.positions.length}` : 'Unavailable'}</strong><span>{v21?.settings.max_positions ? `Limit ${v21.settings.max_positions}` : 'Limit unavailable'}</span></article>
-        <article><small>EXPOSURE</small><strong>{account ? `${fmt(account.positions.reduce((total, position) => total + Math.abs(position.quantity * position.mark_price), 0))} USDT` : 'Unavailable'}</strong><span>Mark-price notional</span></article>
-        <article><small>DAILY LOSS BUDGET</small><strong>{v21?.daily.remaining_loss_budget !== undefined ? `${fmt(v21.daily.remaining_loss_budget)} USDT` : 'Unavailable'}</strong><span>{v21?.daily.date || 'Date unavailable'}</span></article>
-        <article><small>POSITION CONCENTRATION</small><strong>{account && account.positions.length && v21?.settings.max_positions ? `${Math.round((account.positions.length / v21.settings.max_positions) * 100)}%` : 'Unavailable'}</strong><span>Open positions vs limit</span></article>
+        <article><small>OPEN POSITIONS</small><strong>{account ? `${account.positions.length}` : <EmptyState className="v21EmptyStateCompact"/>}</strong><span>{v21?.settings.max_positions ? `Limit ${v21.settings.max_positions}` : 'Limit unavailable'}</span></article>
+        <article><small>EXPOSURE</small><strong>{account ? `${fmt(account.positions.reduce((total, position) => total + Math.abs(position.quantity * position.mark_price), 0))} USDT` : <EmptyState className="v21EmptyStateCompact"/>}</strong><span>Mark-price notional</span></article>
+        <article><small>DAILY LOSS BUDGET</small><strong>{v21?.daily.remaining_loss_budget !== undefined ? `${fmt(v21.daily.remaining_loss_budget)} USDT` : <EmptyState className="v21EmptyStateCompact"/>}</strong><span>{v21?.daily.date || 'Date unavailable'}</span></article>
+        <article><small>POSITION CONCENTRATION</small><strong>{account && account.positions.length && v21?.settings.max_positions ? `${Math.round((account.positions.length / v21.settings.max_positions) * 100)}%` : <EmptyState className="v21EmptyStateCompact"/>}</strong><span>Open positions vs limit</span></article>
       </div>
     </section>
 
@@ -968,9 +973,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
             </div>
             <time>{formatRelativeTime(alert.timestamp)}</time>
           </article>
-        )) : (
-          <div className="v21EmptyMini">No active real alerts from the current live state.</div>
-        )}
+        )) : <EmptyState label="Henüz aktif uyarı yok" detail="Yeni bir olay oluştuğunda burada görünecek."/>}
       </div>
     </section>
 
@@ -989,7 +992,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
         {v21?.scanner.last_scan_at ? <article><i className="scanner"/><div><strong>Scanner</strong><span>{v21.scanner.scan_status || 'Scan completed'}</span></div><time>{formatRelativeTime(v21.scanner.last_scan_at)}</time></article> : null}
         {v21?.auto.last_scan ? <article><i className="automation"/><div><strong>Automation</strong><span>{v21.auto.last_decision || (v21.auto.enabled ? 'Automation active' : 'Automation stopped')}</span></div><time>{formatRelativeTime(v21.auto.last_scan)}</time></article> : null}
         {v21?.journal?.slice(0, 3).map((entry, index) => <article key={`journal-${entry.created_at}-${index}`}><i className="journal"/><div><strong>Journal · {entry.kind}</strong><span>{entry.reason || 'Journal event recorded'}</span></div><time>{formatRelativeTime(entry.created_at)}</time></article>)}
-        {!status?.events?.length && !v21?.scanner.last_scan_at && !v21?.auto.last_scan && !v21?.journal?.length && <div className="v21EmptyMini">No live activity available.</div>}
+        {!status?.events?.length && !v21?.scanner.last_scan_at && !v21?.auto.last_scan && !v21?.journal?.length && <EmptyState label="Canlı aktivite bekleniyor" detail="Son olay zamanı henüz alınmadı."/>}
       </div>
     </section>
 
@@ -997,7 +1000,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       <header className="v21ScannerHeader"><div><span>CANLI COIN TARAMA · DEMO MARKET DATA</span><h2>Scanner Durumu ve Fırsat Sıralaması</h2><p>Dinamik USDT perpetual evreni, 15m sinyal ve 1h/4h trend doğrulamasıyla her 10 dakikada yenilenir.</p></div><button disabled={scannerBusy} onClick={runScanner}><RefreshCw className={scannerBusy ? 'spin' : ''}/> {scannerBusy ? 'TARANIYOR' : 'ŞİMDİ TARA'}</button></header>
       <div className="v21ScannerMetrics"><span><small>DURUM</small><b>{v21?.scanner.scan_status || 'BEKLEMEDE'}</b></span><span><small>SON TARAMA</small><b>{stamp(v21?.scanner.last_scan_at)}</b></span><span><small>SONRAKİ TARAMA</small><b>{stamp(v21?.scanner.next_scan_at)}</b><em>{nextScanSeconds === null ? 'bekleniyor' : nextScanCountdown}</em></span><span><small>TARANAN COIN</small><b>{v21?.scanner.coins_scanned ?? 0}</b></span><span><small>SEÇİLEN FIRSAT</small><b>{v21?.scanner.selected_count ?? 0}</b></span><span><small>SÜRE</small><b>{fmt(v21?.scanner.scan_duration_seconds)} sn</b></span></div>
       {v21?.scanner.last_error && <div className="v21ScannerError"><TriangleAlert/> {v21.scanner.last_error}</div>}
-      <div className="v21ScannerColumns"><article className="v21ScannerTop"><header><div><span>TOP 3</span><h3>Bugünün En İyi Fırsatları</h3></div><b>{v21?.scanner.top_candidates.length ?? 0}/3</b></header>{v21?.scanner.top_candidates.length ? v21.scanner.top_candidates.map(candidate => <div className="v21Candidate" key={candidate.symbol}><div className="v21CandidateHead"><b>#{candidate.rank} {candidate.symbol.replace('USDT','/USDT')}</b><strong>{candidate.direction}</strong><em>{candidate.score} / 100 · {candidate.confidence}</em></div><small>{candidate.trend} · {candidate.mtf_trend}</small><ul>{candidate.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div>) : <div className="v21ScannerEmpty"><Target/><b>Henüz uygun fırsat bulunamadı.</b><span>Yeni tarama bekleniyor.</span></div>}</article>
+      <div className="v21ScannerColumns"><article className="v21ScannerTop"><header><div><span>TOP 3</span><h3>Bugünün En İyi Fırsatları</h3></div><b>{v21?.scanner.top_candidates.length ?? 0}/3</b></header>{v21?.scanner.top_candidates.length ? v21.scanner.top_candidates.map(candidate => <div className="v21Candidate" key={candidate.symbol}><div className="v21CandidateHead"><b>#{candidate.rank} {candidate.symbol.replace('USDT','/USDT')}</b><strong>{candidate.direction}</strong><em>{candidate.score} / 100 · {candidate.confidence}</em></div><small>{candidate.trend} · {candidate.mtf_trend}</small><ul>{candidate.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div>) : <EmptyState label="Henüz uygun fırsat yok" detail="Yeni tarama bekleniyor." icon={<Target/>}/>}</article>
         <article className="v21ScannerTable"><header><div><span>TÜM SONUÇLAR</span><h3>Taranan Coinler</h3></div><b>{v21?.scanner.all_candidates.length ?? 0}</b></header><div className="v21TableScroll"><table><thead><tr><th>Rank</th><th>Coin</th><th>Score</th><th>Yön</th><th>Güven</th><th>Trend</th><th>Volume</th><th>Status</th></tr></thead><tbody>{v21?.scanner.all_candidates.length ? v21.scanner.all_candidates.map(candidate => <tr key={candidate.symbol}><td>#{candidate.rank}</td><td><b>{candidate.symbol}</b></td><td>{candidate.score}</td><td>{candidate.direction}</td><td>{candidate.confidence}</td><td>{candidate.mtf_trend}</td><td>{candidate.volume.toFixed(2)}x</td><td><em className={`scannerStatus scannerStatus-${candidate.status}`}>{candidate.status}</em></td></tr>) : <tr><td colSpan={8}>Henüz scanner sonucu yok.</td></tr>}</tbody></table></div></article></div>
       <article className="v21ScannerTrades"><header><div><span>GERÇEK BACKEND TRADE HISTORY · DEMO</span><h3>Otomasyon İşlemleri</h3></div><b>{v21?.automation_trades.length ?? 0}</b></header>{v21?.automation_trades.length ? <div className="v21TradeRows">{v21.automation_trades.map((trade,index) => <div key={`${trade.symbol}-${trade.entry_time}-${index}`}><strong>{trade.symbol} · {trade.side}</strong><span>Scanner #{trade.scanner_rank} · Score {trade.scanner_score} · {trade.confidence}</span><span>Giriş {stamp(trade.entry_time)} · {fmt(Number(trade.entry_price))} · {trade.margin} USDT · {trade.leverage}x</span><span>SL {String(trade.sl)} · TP {trade.tp.map(String).join(' · ')}</span><small>{trade.trade_reason.join(' · ')}</small><em>{trade.status}</em></div>)}</div> : <div className="v21ScannerEmpty"><History/><b>Henüz otomasyon işlemi yok.</b><span>Scanner tek başına emir açmaz; yalnızca açık onaylı Demo otomasyonunda işlem kaydı oluşur.</span></div>}</article>
     </section>
