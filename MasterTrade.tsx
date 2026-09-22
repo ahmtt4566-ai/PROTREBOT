@@ -129,7 +129,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const candles = snapshot?.candles ?? []
   const analysis = snapshot?.analysis ?? null
   const mtfAnalyses = snapshot?.mtf ?? []
-  const account = snapshot?.account
+  const account = snapshot?.account ?? (liveStatus?.account as AccountSnapshot | null) ?? null
 
   useEffect(() => {
     const controller = new AbortController()
