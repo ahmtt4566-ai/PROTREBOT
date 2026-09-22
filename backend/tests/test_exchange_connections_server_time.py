@@ -245,10 +245,8 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
 
     def test_live_activate_connects_read_only_snapshot_without_arming(self):
         request = self._request()
-        request.app.state.v25_execution = {
-            "connected": False,
-            "real_trading_locked": True,
-        }
+        request.app.state.v25_execution = v25_execution.initial_state()
+        request.app.state.v25_execution["lock"] = asyncio.Lock()
         session_key = (exchange_connections.session_id(request), "LIVE")
         exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
         exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
@@ -260,6 +258,31 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertTrue(result["connected"])
         self.assertTrue(result["real_trading_locked"])
         connect_read_only.assert_awaited_once_with(request.app, request, actor="owner-server-time")
+
+    def test_save_activate_binds_live_snapshot_to_the_same_session(self):
+        request = self._request()
+        request.app.state.v25_execution = v25_execution.initial_state()
+        request.app.state.v25_execution["lock"] = asyncio.Lock()
+        account = {"tested_at": "2026-09-22T12:00:00+00:00", "wallet_balance": 100.0, "available_balance": 90.0, "orders_created": False}
+        snapshot = {"wallet_balance": 100.0, "available_balance": 90.0, "positions": [], "open_orders": [], "hedge_mode": False}
+        client = SimpleNamespace(time_offset_ms=0)
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(return_value=account)), \
+               patch("app.exchange_connections.encrypt_credentials", return_value=b"encrypted-test-payload"), \
+             patch.object(v25_execution, "client_for", return_value=client), \
+             patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=snapshot)), \
+               patch.object(v25_execution, "submit_entry", new=AsyncMock()) as submit_entry, \
+             patch.object(v25_execution, "persist_state"):
+            asyncio.run(exchange_connection_save(request, SaveCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe", confirmation="CANLI KASAYA KAYDET")))
+            result = asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
+
+        current_session = exchange_connections.session_id(request)
+        self.assertTrue(result["connected"])
+        self.assertTrue(request.app.state.v25_execution["connected"])
+        self.assertEqual(request.app.state.v25_execution["snapshot_session_id"], current_session)
+        self.assertEqual(request.app.state.v25_execution["snapshot"], snapshot)
+        self.assertTrue(v25_execution.public_status(request.app, request)["connected"])
+        self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+        submit_entry.assert_not_awaited()
 
 
 if __name__ == "__main__":

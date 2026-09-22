@@ -216,7 +216,6 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
   const connectReadOnly = () => run('connect', async () => {
     await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ'})})
-    await call<LiveStatus>(V25, '/connect/read-only', {method: 'POST'})
   }, 'LIVE hesap salt-okunur bağlandı; gerçek emir kilidi kapalı kaldı.')
 
   const connectAndSave = () => run('connect-save', async () => {
@@ -225,8 +224,6 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     await call(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey, confirmation: 'CANLI KASAYA KAYDET'})})
     await refresh()
     await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ'})})
-    await refresh()
-    await call<LiveStatus>(V25, '/connect/read-only', {method: 'POST'})
     await refresh()
     setCredentials({apiKey: '', secretKey: '', accepted: false})
   }, 'Binance Connected; hesap salt-okunur bağlandı ve gerçek emir kilidi korunuyor.')

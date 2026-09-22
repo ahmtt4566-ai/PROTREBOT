@@ -140,13 +140,14 @@ export default function ExchangeConnections() {
     const confirmation = selected === 'TESTNET' ? 'TESTNET BAĞLANTIYI AÇ' : 'CANLI SALT OKUNUR BAĞLANTIYI AÇ'
     const next = await call<ConnectionStatus & {message:string}>('/activate',{method:'POST',body:JSON.stringify({mode:selected,confirmation})})
     setStatus(next)
-    const connectPath = selected === 'TESTNET' ? '/binance-demo/connect' : '/v25/connect/read-only'
-    const connectHeaders = new Headers()
-    const ownerToken = ownerAccessToken()
-    if (ownerToken) connectHeaders.set('X-ProTreBot-Owner',ownerToken)
-    const connectResponse = await fetch(`${API_BASE}${connectPath}`,{method:'POST',headers:connectHeaders})
-    const connectPayload = await connectResponse.json().catch(() => null) as {detail?:unknown}|null
-    if (!connectResponse.ok) throw new Error(`Kasa aktif ancak hesap merkezi bağlanamadı: ${errorText(connectPayload?.detail)}`)
+    if (selected === 'TESTNET') {
+      const ownerToken = ownerAccessToken()
+      const connectHeaders = new Headers()
+      if (ownerToken) connectHeaders.set('X-ProTreBot-Owner',ownerToken)
+      const connectResponse = await fetch(`${API_BASE}/binance-demo/connect`,{method:'POST',headers:connectHeaders})
+      const connectPayload = await connectResponse.json().catch(() => null) as {detail?:unknown}|null
+      if (!connectResponse.ok) throw new Error(`Kasa aktif ancak hesap merkezi bağlanamadı: ${errorText(connectPayload?.detail)}`)
+    }
     setNotice({kind:'ok',text:selected === 'TESTNET' ? 'Testnet kasası ve Demo hesap merkezi aktif. Emir kilidi yine ayrıca açılır.' : 'Gerçek hesap salt-okunur bağlandı. Gerçek emir kilidi ve otomasyon kapalı kaldı.'})
     await refresh(true)
   })
@@ -229,7 +230,7 @@ export default function ExchangeConnections() {
     <section className={`exchangeSafety ${selected.toLowerCase()}`}>
       <ShieldCheck/>
       <div><small>{selected === 'TESTNET' ? 'TESTNET İŞLEM ZİNCİRİ' : 'GERÇEK PARA GÜVENLİK ZİNCİRİ'}</small><h3>{selected === 'TESTNET' ? 'Aktivasyon bağlantıyı açar; 10 dakikalık Demo emir kilidi yine ayrıdır.' : 'Aktivasyon yalnızca hesabı salt-okunur bağlar; gerçek emir göndermez.'}</h3><p>{selected === 'TESTNET' ? 'Demo Komuta ekranındaki bağlantı, bakiye, pozisyon, Stop ve TP haritası bu anahtarı kullanır.' : 'Gerçek emir için Demo kanıtı, 24 saatlik risk izni, limit onayı ve yalnızca 5 dakikalık son kilit ayrıca geçmelidir.'}</p></div>
-      <ul><li><CheckCircle2/>Para çekme desteği yok</li><li><CheckCircle2/>Secret yanıtta yok</li><li><CheckCircle2/>Test emri yok</li><li><CheckCircle2/>Aktivasyon emir açmaz</li></ul>
+      <ul><li><CheckCircle2/>Para çekme/transfer izni gerekli değildir</li><li><CheckCircle2/>Secret yanıtta yok</li><li><CheckCircle2/>Test emri yok</li><li><CheckCircle2/>Aktivasyon emir açmaz</li></ul>
     </section>
   </div>
 }
