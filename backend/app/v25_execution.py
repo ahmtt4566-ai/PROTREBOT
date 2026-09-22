@@ -960,6 +960,7 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
             known = plan.setdefault("exchange_order_ids", [])
             if order_id not in known:
                 known.append(order_id)
+        plan["close_reason"] = close_reason_for_intent(close_intent)
         plan["status"] = "GÜVENLİK İÇİN KAPATILDI"
         plan["last_error"] = str(exc)[:240]
         return
@@ -1049,6 +1050,10 @@ def process_live_stream_event(state: dict[str, Any], payload: dict[str, Any]) ->
             known = plan.setdefault("exchange_order_ids", [])
             if order_id not in known:
                 known.append(order_id)
+        if plan and execution == "TRADE" and _truthy(order.get("R")):
+            reason = close_reason_for_client_id(plan, client_id)
+            if reason != "UNKNOWN":
+                plan["close_reason"] = reason
         realized = float(order.get("rp") or 0)
         add_event(
             state,
@@ -1241,6 +1246,24 @@ async def verified_plan_pnl(client: BinanceLiveClient, plan: dict[str, Any]) -> 
     close_rows = [item for item in selected if str(item.get("side") or "").upper() == close_side]
     if not close_rows:
         raise LiveExchangeError("Binance işlem geçmişi V25'e ait kapanış dolumunu henüz kimlikle doğrulamadı.")
+    entry_side = "BUY" if plan.get("direction") == "LONG" else "SELL"
+    entry_rows = [item for item in selected if str(item.get("side") or "").upper() == entry_side]
+    opened_at = None
+    entry_times = [int(item.get("time")) for item in entry_rows if str(item.get("time") or "").isdigit()]
+    if entry_times:
+        opened_at = datetime.fromtimestamp(min(entry_times) / 1000, timezone.utc).isoformat()
+    exit_notional = Decimal("0")
+    exit_quantity = Decimal("0")
+    for item in close_rows:
+        try:
+            price = Decimal(str(item.get("price")))
+            quantity = Decimal(str(item.get("qty")))
+        except (TypeError, ValueError, ArithmeticError):
+            continue
+        if price.is_finite() and quantity.is_finite() and price > 0 and quantity > 0:
+            exit_notional += price * quantity
+            exit_quantity += quantity
+    exit_price = round(float(exit_notional / exit_quantity), 8) if exit_quantity > 0 else None
     gross = sum(Decimal(str(item.get("realizedPnl") or "0")) for item in close_rows)
     commission_usdt = sum(
         Decimal(str(item.get("commission") or "0"))
@@ -1257,9 +1280,32 @@ async def verified_plan_pnl(client: BinanceLiveClient, plan: dict[str, Any]) -> 
         "commission_usdt": round(float(commission_usdt), 8),
         "realized_pnl": round(float(gross - commission_usdt), 8),
         "trade_count": len(selected),
+        "exit_price": exit_price,
+        "opened_at": opened_at,
         "non_usdt_commission_assets": non_usdt_commission,
         "funding_included": False,
     }
+
+
+def close_reason_for_intent(intent: str) -> str:
+    value = str(intent or "").lower()
+    if value.startswith("manual-close-"):
+        return "MANUAL"
+    if value.startswith("protection-"):
+        return "STOP"
+    if value.startswith("emergency-close-"):
+        return "EMERGENCY"
+    return "UNKNOWN"
+
+
+def close_reason_for_client_id(plan: dict[str, Any], client_id: str) -> str:
+    value = str(client_id or "")
+    if value == str(plan.get("stop_client_id") or ""):
+        return "STOP"
+    for index in range(1, 4):
+        if value == client_id_for(f"TP{index}", str(plan.get("intent_id") or "")):
+            return f"TP{index}"
+    return "UNKNOWN"
 
 
 async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], plan: dict[str, Any]) -> None:
@@ -1269,7 +1315,14 @@ async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], p
         None,
     )
     if verified:
-        plan.update({"status": "KAPANDI", "closed_at": verified.get("created_at"), "realized_pnl": verified.get("realized_pnl")})
+        plan.update({
+            "status": "KAPANDI",
+            "closed_at": verified.get("created_at"),
+            "realized_pnl": verified.get("realized_pnl"),
+            "exit_price": verified.get("exit_price"),
+            "opened_at": verified.get("opened_at"),
+            "close_reason": verified.get("close_reason") or plan.get("close_reason") or "UNKNOWN",
+        })
         return
     try:
         result = await verified_plan_pnl(client, plan)
@@ -1287,13 +1340,15 @@ async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], p
                 plan_id=plan_id,
             )
         return
-    plan.update({"status": "KAPANDI", "closed_at": now_iso(), "pnl_verified": True, **result})
+    close_reason = plan.get("close_reason") or "UNKNOWN"
+    plan.update({"status": "KAPANDI", "closed_at": now_iso(), "pnl_verified": True, "close_reason": close_reason, **result})
     add_event(
         state,
         "LIVE_POSITION_CLOSED",
         f"{plan['symbol']} tracked pozisyon kapandı; net işlem PnL {result['realized_pnl']:+.4f} USDT (funding hariç).",
         symbol=plan["symbol"],
         plan_id=plan_id,
+        close_reason=close_reason,
         **result,
     )
 
@@ -2216,6 +2271,7 @@ async def v25_close(request: Request, body: CloseRequest) -> dict[str, Any]:
             known = plan.setdefault("exchange_order_ids", [])
             if order_id not in known:
                 known.append(order_id)
+        plan["close_reason"] = close_reason_for_intent(close_intent)
         plan["status"] = "KAPATMA EMRİ GÖNDERİLDİ" if result else "KAPANDI"
         add_event(state, "LIVE_CLOSE", f"{plan['symbol']} tracked pozisyon reduce-only kapatıldı.", actor=user["id"], symbol=plan["symbol"])
         persist_state(state)
@@ -2276,6 +2332,7 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
                 close_ids = plan.setdefault("close_client_order_ids", [])
                 if close_client_id not in close_ids:
                     close_ids.append(close_client_id)
+                plan["close_reason"] = close_reason_for_intent(close_intent)
                 persist_state(state)
                 close_result = await close_tracked_symbol(client, symbol, close_intent)
                 if close_result:

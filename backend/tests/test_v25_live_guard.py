@@ -31,7 +31,7 @@ from app.execution_core import (  # noqa: E402
     sanitize_execution_policy,
 )
 from app import v25_execution  # noqa: E402
-from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, rank_market_tickers, sanitized_state, submit_entry, validate_protection_readiness  # noqa: E402
+from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, rank_market_tickers, sanitized_state, submit_entry, validate_protection_readiness  # noqa: E402
 
 
 EXECUTION_SOURCE = (BACKEND / "app" / "v25_execution.py").read_text(encoding="utf-8")
@@ -47,6 +47,62 @@ RENDER_SOURCE = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
 
 class V25LiveGuardCoreTests(unittest.TestCase):
+    def test_close_reason_mapping_covers_all_explicit_close_intents(self):
+        self.assertEqual(close_reason_for_intent("manual-close-plan"), "MANUAL")
+        self.assertEqual(close_reason_for_intent("protection-plan"), "STOP")
+        self.assertEqual(close_reason_for_intent("emergency-close-plan"), "EMERGENCY")
+        self.assertEqual(close_reason_for_intent("other-close-plan"), "UNKNOWN")
+        plan = {"intent_id": "intent-1", "stop_client_id": "PTB_SL_owned"}
+        self.assertEqual(close_reason_for_client_id(plan, "PTB_SL_owned"), "STOP")
+        for index in range(1, 4):
+            self.assertEqual(close_reason_for_client_id(plan, client_id_for(f"TP{index}", "intent-1")), f"TP{index}")
+        self.assertEqual(close_reason_for_client_id(plan, "foreign-client"), "UNKNOWN")
+
+    def test_tp_close_fill_sets_the_matching_close_reason(self):
+        plan = {"intent_id": "intent-1", "symbol": "BTCUSDT", "stop_client_id": "PTB_SL_owned"}
+        state = {"stream": {}, "events": [], "plans": {"plan-1": plan}}
+        payload = {
+            "e": "ORDER_TRADE_UPDATE",
+            "E": 1720000000000,
+            "o": {
+                "s": "BTCUSDT", "c": client_id_for("TP2", "intent-1"), "R": True,
+                "x": "TRADE", "X": "FILLED", "i": 42, "rp": "1.2", "ap": "102", "z": "0.1",
+            },
+        }
+        self.assertTrue(process_live_stream_event(state, payload))
+        self.assertEqual(plan["close_reason"], "TP2")
+
+    def test_verified_plan_pnl_adds_exit_price_and_opened_at_without_changing_pnl(self):
+        class FakeClient:
+            async def signed(self, method, path, params=None):
+                if path == "/fapi/v1/userTrades":
+                    return [
+                        {"orderId": 1, "side": "BUY", "price": "100", "qty": "3", "time": 1720000000000, "realizedPnl": "0", "commission": "0", "commissionAsset": "USDT"},
+                        {"orderId": 2, "side": "SELL", "price": "110", "qty": "2", "time": 1720000060000, "realizedPnl": "4", "commission": "0.1", "commissionAsset": "USDT"},
+                        {"orderId": 3, "side": "SELL", "price": "114", "qty": "1", "time": 1720000120000, "realizedPnl": "5", "commission": "0.1", "commissionAsset": "USDT"},
+                    ]
+                return []
+
+        plan = {"symbol": "BTCUSDT", "direction": "LONG", "created_at": datetime.now(timezone.utc).isoformat(), "entry_order_id": 1, "exchange_order_ids": [2, 3]}
+        result = asyncio.run(v25_execution.verified_plan_pnl(FakeClient(), plan))
+        self.assertEqual(result["gross_realized_pnl"], 9.0)
+        self.assertEqual(result["commission_usdt"], 0.2)
+        self.assertEqual(result["realized_pnl"], 8.8)
+        self.assertEqual(result["trade_count"], 3)
+        self.assertAlmostEqual(result["exit_price"], 111.33333333)
+        self.assertEqual(result["opened_at"], datetime.fromtimestamp(1720000000000 / 1000, timezone.utc).isoformat())
+
+    def test_verified_plan_pnl_leaves_opened_at_null_without_entry_fill(self):
+        class FakeClient:
+            async def signed(self, method, path, params=None):
+                if path == "/fapi/v1/userTrades":
+                    return [{"orderId": 2, "side": "SELL", "price": "110", "qty": "1", "time": 1720000060000, "realizedPnl": "4", "commission": "0", "commissionAsset": "USDT"}]
+                return []
+
+        plan = {"symbol": "BTCUSDT", "direction": "LONG", "created_at": datetime.now(timezone.utc).isoformat(), "entry_order_id": 1, "exchange_order_ids": [2]}
+        result = asyncio.run(v25_execution.verified_plan_pnl(FakeClient(), plan))
+        self.assertIsNone(result["opened_at"])
+
     def test_auto_start_gate_rejects_missing_recovery_and_account_readiness(self):
         state = initial_state()
         state.update({"real_trading_locked": False, "connected": True, "armed_until": time.time() + 300})
