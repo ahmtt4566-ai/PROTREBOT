@@ -45,7 +45,7 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "fee_bps_per_side": 5.0,
     "slippage_bps_per_side": 3.0,
     "minimum_net_reward_usdt": 0.25,
-    "scan_seconds": 60,
+    "scan_seconds": 120,
     "require_one_way": True,
     "require_isolated": True,
     "stop_required": True,
@@ -108,7 +108,7 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
     base["fee_bps_per_side"] = _number(source.get("fee_bps_per_side"), 5, 0, 25)
     base["slippage_bps_per_side"] = _number(source.get("slippage_bps_per_side"), 3, 0, 30)
     base["minimum_net_reward_usdt"] = _number(source.get("minimum_net_reward_usdt"), 0.25, 0, 25)
-    base["scan_seconds"] = _integer(source.get("scan_seconds"), 60, 30, 300)
+    base["scan_seconds"] = _integer(source.get("scan_seconds"), 120, 30, 300)
     if not base["allow_long"] and not base["allow_short"]:
         base["allow_long"] = True
     return base

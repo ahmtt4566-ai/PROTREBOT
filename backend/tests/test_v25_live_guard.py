@@ -468,7 +468,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             {"symbol": "COINDOWNUSDT", "quoteVolume": "5000000", "priceChangePercent": "2", "lastPrice": "10"},
         ])
         ranked = rank_market_tickers(exchange_info, tickers)
-        self.assertEqual(len(ranked), 100)
+        self.assertEqual(len(ranked), 50)
         top_three = [item["symbol"] for item in ranked[:3]]
         self.assertEqual(len(top_three), len(set(top_three)))
         self.assertNotIn("BTCUSDT", top_three)
@@ -701,7 +701,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn('state["policy"]["scan_seconds"]', EXECUTION_SOURCE)
 
     def test_automatic_execution_uses_dynamic_top_three_not_btc_policy_defaults(self):
-        self.assertIn("DEEP_ANALYSIS_LIMIT = 100", EXECUTION_SOURCE)
+        self.assertIn("DEEP_ANALYSIS_LIMIT = 50", EXECUTION_SOURCE)
         self.assertIn("candidates = await scan_market_candidates(client, snapshot)", EXECUTION_SOURCE)
         self.assertIn("selected = signals[:3]", EXECUTION_SOURCE)
         self.assertIn('"scanned_symbol_count": len(candidates)', EXECUTION_SOURCE)
