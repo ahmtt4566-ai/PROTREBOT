@@ -17,6 +17,7 @@ type LiveStatus = {
   scanner?: {last_scan_at?: string | null; scanned_symbol_count?: number; candidate_symbols?: string[]; candidate_count?: number; selected_symbols?: string[]; selected_symbols_count?: number; last_skip_reason?: string | null; last_cycle_stage?: string | null}
   policy?: LivePolicy
   policy_acknowledged?: boolean
+  consent?: {active?: boolean; expires_at?: string | null; fingerprint?: string | null}
   readiness?: {ready?: boolean; gates?: Array<{key?: string; label?: string; passed?: boolean; detail?: string}>}
   account?: {wallet_balance?: number | null; available_balance?: number | null; margin_balance?: number | null; unrealized_pnl?: number | null; positions?: Array<Record<string, unknown>>; open_orders?: Array<Record<string, unknown>>}
   daily?: {realized_pnl?: number; remaining_loss_budget?: number; entries?: number}
@@ -197,8 +198,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
   const updatePolicy = () => run('policy', async () => {
     await call<LiveStatus>(V25, '/policy', {method: 'PUT', body: JSON.stringify(policy)})
-    await call<LiveStatus>(V25, '/policy/acknowledge', {method: 'POST', body: JSON.stringify({confirmation: 'RİSK LİMİTLERİNİ ONAYLIYORUM'})})
-  }, 'LIVE risk ve strateji politikası kaydedildi; arm kapısı yeniden doğrulama istiyor.')
+  }, 'LIVE risk ve strateji politikası kaydedildi; policy acknowledgement ayrıca gereklidir.')
 
   const testConnection = () => run('test', async () => {
     const body = credentials.apiKey && credentials.secretKey ? {mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey} : {mode: 'LIVE'}
@@ -231,10 +231,26 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }, 'Binance Connected; hesap salt-okunur bağlandı ve gerçek emir kilidi korunuyor.')
 
   const armLive = () => {
+    if (!readinessReady) {
+      setNotice({kind: 'error', text: 'LIVE ARM için tüm backend readiness gate’leri PASS olmalıdır.'})
+      return
+    }
     setConfirm({title: 'LIVE ARM onayı', message: 'REAL MONEY — LIVE ACCOUNT. Backend readiness gate’leri geçmeden kilit açılmaz. LIVE ARM AUTO-TRADE başlatmaz.', expected: 'CANLI EMİR RİSKİNİ KABUL EDİYORUM', action: async () => {
-      await call(V25, '/consent', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM'})})
-      if (!status?.policy_acknowledged) await call(V25, '/policy/acknowledge', {method: 'POST', body: JSON.stringify({confirmation: 'RİSK LİMİTLERİNİ ONAYLIYORUM'})})
       await call(V25, '/arm', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI EMİR RİSKİNİ KABUL EDİYORUM'})})
+    }})
+    setConfirmText('')
+  }
+
+  const grantConsent = () => {
+    setConfirm({title: '24 saatlik LIVE risk izni', message: 'Bu izin yalnızca mevcut LIVE hesap fingerprint’i için 24 saat geçerlidir. Backend readiness tamamlanmadan LIVE kilidi açılmaz.', expected: 'CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM', action: async () => {
+      await call(V25, '/consent', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM'})})
+    }})
+    setConfirmText('')
+  }
+
+  const acknowledgePolicy = () => {
+    setConfirm({title: 'LIVE risk limitleri onayı', message: 'Mevcut backend risk limitlerini ve policy digest’ini açıkça onaylayın. Limitler değişirse bu acknowledgement geçersiz olur.', expected: 'RİSK LİMİTLERİNİ ONAYLIYORUM', action: async () => {
+      await call(V25, '/policy/acknowledge', {method: 'POST', body: JSON.stringify({confirmation: 'RİSK LİMİTLERİNİ ONAYLIYORUM'})})
     }})
     setConfirmText('')
   }
@@ -330,6 +346,15 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     <div className="masterTradeLiveAssistant"><div><span className="masterTradeLiveKicker">NEXT BEST ACTION</span><strong>{status?.live_auto_trade ? 'Auto Trade is actively monitoring approved markets.' : liveState === 'BLOCKED' ? 'LIVE is blocked until the backend recovery state is clear.' : !configured || !connected ? 'Connect and verify your LIVE API to continue.' : !readinessReady ? 'Complete the required safety checks before enabling Auto Trade.' : 'Everything is ready. Arm LIVE Auto Trade to continue.'}</strong><small>{status?.live_auto_trade ? 'STOP remains available at any time.' : blocker}</small></div><div className="masterTradeLiveAssistantActions"><button type="button" className="masterTradeLivePrimary" onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{status?.live_auto_trade ? <Power/> : <Power/>}{status?.live_auto_trade ? ' STOP AUTO TRADE' : ' START LIVE AUTO TRADE'}</button><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW REQUIREMENTS</button></div></div>
 
     <div className="masterTradeLiveFlow" aria-label="LIVE Auto Trade progression"><span className={locked ? 'current' : 'complete'}>1 <b>LOCKED</b></span><i /><span className={!locked && !status?.armed && readinessReady ? 'current' : status?.armed ? 'complete' : ''}>2 <b>READY</b></span><i /><span className={status?.armed && !status?.live_auto_trade ? 'current' : status?.live_auto_trade ? 'complete' : ''}>3 <b>ARMED</b></span><i /><span className={status?.live_auto_trade ? 'current running' : ''}>4 <b>RUNNING</b></span></div>
+
+    <section className="masterTradeLiveSection masterTradeLiveConfirmations" aria-label="LIVE Safety Confirmations">
+      <header><div><span className="masterTradeLiveKicker">LIVE SAFETY CONFIRMATIONS</span><h3>Complete the release prerequisites</h3></div><strong className={readinessReady ? 'ready' : 'blocked'}>{readinessReady ? 'READY' : 'REQUIRED'}</strong></header>
+      <div className="masterTradeLiveGrid masterTradeLiveConfirmationGrid">
+        <article><div><span className="masterTradeLiveKicker">24 HOUR CONSENT</span><h4>{status?.consent?.active ? 'Risk consent active' : 'LIVE işlem için 24 saatlik risk onayı gerekli.'}</h4><small>{status?.consent?.active ? `Valid until ${date(status.consent.expires_at)}` : 'This confirmation is bound to the current LIVE account and expires automatically.'}</small></div><strong className={status?.consent?.active ? 'ready' : 'blocked'}>{status?.consent?.active ? 'PASS' : 'PENDING'}</strong><button type="button" className="masterTradeLiveSecondary" onClick={grantConsent} disabled={Boolean(busy) || status?.consent?.active === true}>{status?.consent?.active ? '24 HOUR CONSENT ACTIVE' : '24 SAAT İZİN VER'}</button></article>
+        <article><div><span className="masterTradeLiveKicker">POLICY ACKNOWLEDGEMENT</span><h4>{status?.policy_acknowledged ? 'Risk policy acknowledged' : 'Risk limitleri için politika onayı gerekli.'}</h4><small>{status?.policy_acknowledged ? 'The current policy digest is acknowledged.' : 'Policy acknowledgement is invalidated when risk limits change.'}</small></div><strong className={status?.policy_acknowledged ? 'ready' : 'blocked'}>{status?.policy_acknowledged ? 'PASS' : 'PENDING'}</strong><button type="button" className="masterTradeLiveSecondary" onClick={acknowledgePolicy} disabled={Boolean(busy) || status?.policy_acknowledged === true}>{status?.policy_acknowledged ? 'POLICY ACKNOWLEDGED' : 'LİMİTLERİ ONAYLA'}</button></article>
+      </div>
+      <p className="masterTradeLiveOperationalNote">Consent ve policy acknowledgement tamamlandıktan sonra diğer backend readiness gate’leri ayrıca geçilmelidir. ARM LIVE bu koşullar tamamlanmadan çağrılmaz.</p>
+    </section>
 
     <section className="masterTradeLiveAccountHud" aria-label="LIVE Account Overview">
       <header><div><span className="masterTradeLiveKicker">LIVE ACCOUNT OVERVIEW</span><h3>Binance Futures account</h3></div><strong className={connected ? 'ready' : 'blocked'}><i />{connected ? 'LIVE CONNECTED' : 'LIVE DISCONNECTED'}</strong></header>

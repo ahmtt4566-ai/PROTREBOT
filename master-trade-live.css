@@ -60,6 +60,17 @@
 .masterTradeLiveSection > header { margin-bottom: 14px; }
 .masterTradeLiveSection h3, .masterTradeLiveApiHeader h3 { margin: 5px 0 0; color: #eef5f5; font-size: 16px; }
 .masterTradeLiveSection > header > strong, .masterTradeLiveSection > header > span { color: var(--live-muted); font-size: 10px; letter-spacing: .08em; }
+.masterTradeLiveConfirmations { border-left: 2px solid var(--live-amber); }
+.masterTradeLiveConfirmations > header > strong { padding: 5px 8px; border-radius: 4px; font-size: 9px; letter-spacing: .1em; }
+.masterTradeLiveConfirmations > header > strong.ready, .masterTradeLiveConfirmationGrid article > strong.ready { color: var(--live-green); background: rgba(85, 215, 155, .1); }
+.masterTradeLiveConfirmations > header > strong.blocked, .masterTradeLiveConfirmationGrid article > strong.blocked { color: var(--live-amber); background: rgba(237, 189, 103, .1); }
+.masterTradeLiveConfirmationGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.masterTradeLiveConfirmationGrid article { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px 14px; padding: 13px; border: 1px solid var(--live-line); background: rgba(8, 18, 20, .5); }
+.masterTradeLiveConfirmationGrid article h4 { margin: 5px 0 0; color: var(--live-ink); font-size: 12px; line-height: 1.4; }
+.masterTradeLiveConfirmationGrid article small { display: block; margin-top: 6px; color: var(--live-muted); font-size: 9px; line-height: 1.45; }
+.masterTradeLiveConfirmationGrid article > strong { padding: 4px 6px; font-size: 8px; letter-spacing: .08em; }
+.masterTradeLiveConfirmationGrid article .masterTradeLiveSecondary { grid-column: 1 / -1; justify-self: start; min-height: 30px; padding: 0 10px; border: 1px solid var(--live-line); border-radius: 4px; }
+.masterTradeLiveConfirmations > .masterTradeLiveOperationalNote { margin: 12px 0 0; }
 .masterTradeLiveControl { background: linear-gradient(145deg, rgba(18, 37, 35, .9), var(--live-surface)); }
 .masterTradeLiveControl header strong.ready, .masterTradeLiveControl header strong.blocked { padding: 5px 8px; border-radius: 4px; font-size: 9px; letter-spacing: .1em; }
 .masterTradeLiveControl header strong.ready { color: var(--live-green); background: rgba(85, 215, 155, .1); }
@@ -169,7 +180,7 @@
 @media (max-width: 1100px) {
   .masterTradeLiveHeader { grid-template-columns: 1fr auto; }
   .masterTradeLiveChips { grid-column: 1 / -1; justify-content: flex-start; }
-  .masterTradeLivePrimaryGrid, .masterTradeLiveDataGrid, .masterTradeLiveLowerGrid { grid-template-columns: 1fr; }
+  .masterTradeLivePrimaryGrid, .masterTradeLiveDataGrid, .masterTradeLiveLowerGrid, .masterTradeLiveConfirmationGrid { grid-template-columns: 1fr; }
   .masterTradeLiveSetupGrid { grid-template-columns: repeat(3, 1fr); }
   .masterTradeLiveAdvanced { grid-template-columns: repeat(3, 1fr); }
 }
@@ -190,4 +201,5 @@
   .masterTradeLiveApiGrid { grid-template-columns: 1fr; }
   .masterTradeLiveSetupFooter { align-items: flex-start; flex-direction: column; }
   .masterTradeLiveEmergency .dangerAction { width: 100%; }
+  .masterTradeLiveConfirmationGrid article .masterTradeLiveSecondary { width: 100%; }
 }
