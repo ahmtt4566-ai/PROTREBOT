@@ -638,7 +638,12 @@ async def exchange_connection_test(request: Request, body: TestCredentialsReques
         account = await test_binance_credentials(request.app.state.http, mode, api_key, secret_key)
     except VaultError as exc:
         raise _exchange_test_http_exception(exc) from exc
-    return {"ok": True, "message": "Bağlantı ve imza doğrulandı; hiçbir emir oluşturulmadı.", "account": account}
+    return {
+        "ok": True,
+        "message": "Bağlantı ve imza doğrulandı; hiçbir emir oluşturulmadı.",
+        "fingerprint": key_fingerprint(api_key),
+        "account": account,
+    }
 
 
 @router.post("/save")

@@ -12,7 +12,7 @@ BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
 from app import exchange_connections
-from app.exchange_connections import SaveCredentialsRequest, exchange_connection_activate, exchange_connection_save, exchange_connection_test
+from app.exchange_connections import SaveCredentialsRequest, TestCredentialsRequest, exchange_connection_activate, exchange_connection_save, exchange_connection_test
 
 
 class FakeBinanceHttp:
@@ -169,6 +169,17 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertIn("5 saniye", context.exception.detail["detail"])
         self.assertNotIn("api-key-safe", str(context.exception.detail))
         self.assertNotIn("secret-safe", str(context.exception.detail))
+
+    def test_test_endpoint_returns_safe_verification_metadata(self):
+        request = self._request()
+        account = {"tested_at": "2026-09-22T12:00:00+00:00", "wallet_balance": 100.0, "orders_created": False}
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(return_value=account)):
+            result = asyncio.run(exchange_connection_test(request, TestCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe")))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["account"], account)
+        self.assertEqual(result["fingerprint"], exchange_connections.key_fingerprint("api-key-safe"))
+        self.assertNotIn("api-key-safe", str(result))
+        self.assertNotIn("secret-safe", str(result))
 
     def test_save_endpoint_maps_server_time_418_before_persisting(self):
         request = self._request()
