@@ -430,6 +430,12 @@ def live_credentials_status(request: Request | None = None) -> tuple[str, str, s
     return api_key, secret_key, fingerprint if len(secret_key) >= 10 else None
 
 
+def update_account_snapshot(state: dict[str, Any], snapshot: dict[str, Any], *, session_binding: str | None = None) -> None:
+    state["snapshot"] = snapshot
+    if session_binding is not None:
+        state["snapshot_session_id"] = session_binding
+
+
 def consent_status(state: dict[str, Any] | None = None, request: Request | None = None) -> dict[str, Any]:
     api_key, _, fingerprint = live_credentials_status(request)
     local_payload = load_live_consent()
@@ -1853,7 +1859,7 @@ async def execute_live_order(
             persist_state(state)
             if spec["order_type"] == "MARKET":
                 await install_protection(client, state, plan)
-            state["snapshot"] = await account_snapshot(client)
+            update_account_snapshot(state, await account_snapshot(client))
             persist_state(state)
             return {"ok": True, "order": {"order_id": result.get("orderId"), "client_order_id": client_id, "status": result.get("status", plan["status"])}, "plan": plan, "risk_guard": guard, "profit_guaranteed": False}
         except (LiveExchangeError, BinanceDemoError) as exc:
@@ -2021,7 +2027,7 @@ async def reconcile(application: Any) -> None:
         state["auto"].update({"last_skip_reason": "rate_limited", "last_error": str(exc)[:240]})
         persist_state(state)
         raise
-    state["snapshot"] = snapshot
+    update_account_snapshot(state, snapshot)
     state["recovery_ready"] = True
     state["recovery_error"] = None
     state["connected"] = True
@@ -2200,27 +2206,30 @@ async def v25_market_candles(
         raise safe_exchange_error(exc) from exc
 
 
-@router.post("/connect/read-only")
-async def v25_connect(request: Request) -> dict[str, Any]:
-    user = execution_owner(request)
-    state = request.app.state.v25_execution
+async def connect_read_only_for_request(application: Any, request: Request, *, actor: str | None = None) -> dict[str, Any]:
+    state = application.state.v25_execution
     try:
         async with state["lock"]:
-            client = client_for(request.app, request)
+            client = client_for(application, request)
             snapshot = await account_snapshot(client)
-            state["snapshot"] = snapshot
-            state["snapshot_session_id"] = session_id(request)
+            update_account_snapshot(state, snapshot, session_binding=session_id(request))
             state["connected"] = True
             state["connection"].update({"last_checked": now_iso(), "last_error": None, "clock_offset_ms": client.time_offset_ms})
-            add_event(state, "READ_ONLY_CONNECTED", "Canlı hesap salt-okunur bağlantısı doğrulandı; emir gönderilmedi.", actor=user["id"])
+            add_event(state, "READ_ONLY_CONNECTED", "Canlı hesap salt-okunur bağlantısı doğrulandı; emir gönderilmedi.", actor=actor)
             persist_state(state)
-        return public_status(request.app, request)
+        return public_status(application, request)
     except (LiveExchangeError, BinanceDemoError) as exc:
         state["connected"] = False
         state["snapshot_session_id"] = ""
         state["snapshot"] = {}
         state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
         raise safe_exchange_error(exc) from exc
+
+
+@router.post("/connect/read-only")
+async def v25_connect(request: Request) -> dict[str, Any]:
+    user = execution_owner(request)
+    return await connect_read_only_for_request(request.app, request, actor=str(user["id"]))
 
 
 @router.put("/policy")

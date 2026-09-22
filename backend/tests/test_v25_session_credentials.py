@@ -112,6 +112,42 @@ class V25SessionCredentialTests(unittest.TestCase):
         account_gate = next(gate for gate in status["readiness"]["gates"] if gate["key"] == "read_only")
         self.assertTrue(account_gate["passed"])
 
+    def test_reconcile_preserves_authenticated_snapshot_binding(self):
+        request = self.request("session-a")
+        snapshot = {
+            "wallet_balance": 1000.0,
+            "available_balance": 800.0,
+            "positions": [],
+            "open_orders": [],
+        }
+        state = v25_execution.initial_state()
+        state["snapshot"] = snapshot
+        state["snapshot_session_id"] = exchange_connections.session_id(request)
+        state["connected"] = True
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+        with patch.object(v25_execution, "client_for", return_value=client), \
+             patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value={**snapshot, "unrealized_pnl": 1.0})), \
+             patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+             patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application))
+        self.assertEqual(state["snapshot_session_id"], exchange_connections.session_id(request))
+        status = v25_execution.public_status(application, request)
+        self.assertTrue(status["connected"])
+
+    def test_read_only_connect_rejects_other_session_snapshot(self):
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=v25_execution.initial_state()))
+        state = application.state.v25_execution
+        state["connected"] = True
+        state["snapshot"] = {
+            "wallet_balance": 1000.0,
+            "available_balance": 800.0,
+            "positions": [],
+            "open_orders": [],
+        }
+        state["snapshot_session_id"] = exchange_connections.session_id(self.request("session-a"))
+        self.assertFalse(v25_execution.public_status(application, self.request("session-b"))["connected"])
+
 
 if __name__ == "__main__":
     unittest.main()

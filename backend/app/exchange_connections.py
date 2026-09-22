@@ -739,7 +739,7 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
 
 @router.post("/activate")
 async def exchange_connection_activate(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
-    _require_member(request)
+    user = _require_member(request)
     pool = await _require_ready(request.app)
     await ensure_session_cache(request)
     mode = normalize_mode(body.mode)
@@ -766,6 +766,13 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
         sid, mode, json.dumps(account, ensure_ascii=False),
     )
     _SESSION_META[(sid, mode)].update({"active": True, "last_test_ok": True, "last_test_at": account["tested_at"], "last_error": None, "account": account, "updated_at": now_iso()})
+    if mode == "LIVE":
+        from .v25_execution import connect_read_only_for_request
+
+        return {
+            **await connect_read_only_for_request(request.app, request, actor=str(user["id"])),
+            "message": "Bağlantı aktifleştirildi ve canlı hesap salt-okunur snapshot'ı doğrulandı. Bu işlem emir kilidini açmadı.",
+        }
     return {**session_public_status(request.app, request), "message": "Bağlantı aktifleştirildi. Bu işlem emir kilidini açmadı."}
 
 

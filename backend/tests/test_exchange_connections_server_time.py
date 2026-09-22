@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[2]
 BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from app import exchange_connections
+from app import exchange_connections, v25_execution
 from app.exchange_connections import SaveCredentialsRequest, TestCredentialsRequest, exchange_connection_activate, exchange_connection_save, exchange_connection_test
 
 
@@ -242,6 +242,24 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertEqual(context.exception.detail["code"], "BINANCE_RATE_LIMITED")
         self.assertNotIn("HTTP 418", context.exception.detail["detail"])
         self.assertNotIn("HTTP 418", exchange_connections._SESSION_META[session_key]["last_error"])
+
+    def test_live_activate_connects_read_only_snapshot_without_arming(self):
+        request = self._request()
+        request.app.state.v25_execution = {
+            "connected": False,
+            "real_trading_locked": True,
+        }
+        session_key = (exchange_connections.session_id(request), "LIVE")
+        exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
+        exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
+        account = {"tested_at": "2026-09-22T12:00:00+00:00", "wallet_balance": 100.0, "orders_created": False}
+        status = {"connected": True, "real_trading_locked": True}
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(return_value=account)), \
+               patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock(return_value=status)) as connect_read_only:
+            result = asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
+        self.assertTrue(result["connected"])
+        self.assertTrue(result["real_trading_locked"])
+        connect_read_only.assert_awaited_once_with(request.app, request, actor="owner-server-time")
 
 
 if __name__ == "__main__":
