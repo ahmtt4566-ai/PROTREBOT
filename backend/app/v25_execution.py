@@ -1588,6 +1588,8 @@ def public_status(application: Any) -> dict[str, Any]:
         "armed": is_armed(state),
         "real_trading_locked": bool(state.get("real_trading_locked", True)),
         "live_auto_trade": bool(state.get("live_auto_trade", False)),
+        "reconciliation_required": bool(state.get("reconciliation_required", False)),
+        "execution_state": state.get("execution_state", "LOCKED"),
         "armed_until": datetime.fromtimestamp(state["armed_until"], timezone.utc).isoformat() if is_armed(state) else None,
         "auto": state["auto"],
         "scanner": {
@@ -1983,7 +1985,13 @@ async def reconcile(application: Any) -> None:
                     symbol=symbol,
                     plan_id=plan.get("id"),
                 )
-            await settle_closed_plan(client, state, plan)
+            cleanup_state = str(plan.get("protection_cleanup_state") or "UNKNOWN")
+            if cleanup_state == "CLEAN":
+                await settle_closed_plan(client, state, plan)
+            else:
+                plan["settle_deferred_reason"] = f"protection_cleanup_{cleanup_state.lower()}"
+                if cleanup_state == "UNKNOWN":
+                    lock_live_execution(state, reason=f"protection cleanup unknown for {plan['symbol']}", unknown=True)
             continue
         if snapshot.get("open_algo_orders_available") is not True:
             plan["protection_state"] = "UNKNOWN"

@@ -117,6 +117,69 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(plan["protection_cleanup_pending_ids"], ["101"])
         self.assertEqual(plan["protection_cleanup_last_error"], "temporary delete failure")
 
+    def test_reconcile_settles_after_clean_cleanup(self):
+        state = initial_state()
+        plan = {"id": "plan-1", "symbol": "BTCUSDT", "status": "KORUMA AKTİF", "provenance_state": "CONFIRMED"}
+        state["plans"] = {plan["id"]: plan}
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+        settle = AsyncMock()
+
+        async def clean_cleanup(client, rows, current_plan):
+            current_plan["protection_cleanup_state"] = "CLEAN"
+            return 1
+
+        with patch.object(v25_execution, "client_for", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value={"positions": [], "open_algo_orders": []})), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "cancel_owned_algos_for_symbol", new=clean_cleanup), \
+                patch.object(v25_execution, "settle_closed_plan", new=settle), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application))
+
+        settle.assert_awaited_once_with(client, state, plan)
+        self.assertNotIn("settle_deferred_reason", plan)
+
+    def test_reconcile_defers_unknown_cleanup_and_locks_live_execution(self):
+        state = initial_state()
+        plan = {"id": "plan-1", "symbol": "BTCUSDT", "status": "KORUMA AKTİF", "provenance_state": "CONFIRMED"}
+        state["plans"] = {plan["id"]: plan}
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+        settle = AsyncMock()
+
+        async def unknown_cleanup(client, rows, current_plan):
+            current_plan["protection_cleanup_state"] = "UNKNOWN"
+            return 0
+
+        with patch.object(v25_execution, "client_for", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value={"positions": [], "open_algo_orders": []})), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "cancel_owned_algos_for_symbol", new=unknown_cleanup), \
+                patch.object(v25_execution, "settle_closed_plan", new=settle), \
+                patch.object(v25_execution, "lock_live_execution", wraps=v25_execution.lock_live_execution) as lock, \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application))
+
+        settle.assert_not_awaited()
+        self.assertEqual(plan["settle_deferred_reason"], "protection_cleanup_unknown")
+        lock.assert_called_once_with(state, reason="protection cleanup unknown for BTCUSDT", unknown=True)
+        self.assertTrue(state["reconciliation_required"])
+
+    def test_public_status_exposes_reconciliation_state(self):
+        state = initial_state()
+        state["reconciliation_required"] = True
+        state["execution_state"] = "UNKNOWN"
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+
+        with patch.object(v25_execution, "consent_status", return_value={}), \
+                patch.object(v25_execution, "readiness", return_value={}), \
+                patch.object(v25_execution, "live_credential_source", return_value="TEST"):
+            status = v25_execution.public_status(application)
+
+        self.assertTrue(status["reconciliation_required"])
+        self.assertEqual(status["execution_state"], "UNKNOWN")
+
     def test_close_reason_mapping_covers_all_explicit_close_intents(self):
         self.assertEqual(close_reason_for_intent("manual-close-plan"), "MANUAL")
         self.assertEqual(close_reason_for_intent("protection-plan"), "STOP")
