@@ -187,6 +187,24 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertNotIn("api-key-safe", str(context.exception.detail))
         self.assertNotIn("secret-safe", str(context.exception.detail))
 
+    def test_test_endpoint_preserves_upstream_429_diagnostics(self):
+        request = self._request()
+        rejection = exchange_connections.BinanceServerTimeRejected(
+            "Binance server-time temporarily rejected the request (HTTP 429).",
+            retry_after=7,
+            upstream_status=429,
+            exchange_code=-1003,
+            used_weight_1m="2401",
+        )
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(side_effect=rejection)):
+            with self.assertRaises(exchange_connections.HTTPException) as context:
+                asyncio.run(exchange_connection_test(request, TestCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe")))
+        self.assertEqual(context.exception.status_code, 429)
+        self.assertEqual(context.exception.headers["Retry-After"], "7")
+        self.assertEqual(context.exception.detail["upstream_status"], 429)
+        self.assertEqual(context.exception.detail["exchange_code"], -1003)
+        self.assertEqual(context.exception.detail["used_weight_1m"], "2401")
+
     def test_test_endpoint_returns_safe_verification_metadata(self):
         request = self._request()
         account = {"tested_at": "2026-09-22T12:00:00+00:00", "wallet_balance": 100.0, "orders_created": False}

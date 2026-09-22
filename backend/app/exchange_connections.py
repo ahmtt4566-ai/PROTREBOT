@@ -27,7 +27,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
-from .binance_rate_limit import BINANCE_RATE_LIMITER
+from .binance_rate_limit import BINANCE_RATE_LIMITER, RATE_LIMIT_MAX_WAIT_SECONDS, retry_after_seconds
 
 VERSION = "28.0.0"
 Mode = Literal["TESTNET", "LIVE"]
@@ -70,9 +70,12 @@ class VaultError(RuntimeError):
 
 
 class BinanceServerTimeRejected(VaultError):
-    def __init__(self, message: str, *, retry_after: int):
+    def __init__(self, message: str, *, retry_after: int, upstream_status: int = 418, exchange_code: int | str | None = None, used_weight_1m: str | None = None):
         super().__init__(message)
         self.retry_after = retry_after
+        self.upstream_status = upstream_status
+        self.exchange_code = exchange_code
+        self.used_weight_1m = used_weight_1m
 
 
 class SaveCredentialsRequest(BaseModel):
@@ -423,19 +426,23 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
 
 
 def _server_time_error(response: httpx.Response) -> VaultError:
-    if response.status_code == 418:
-        retry_after = response.headers.get("Retry-After", "").strip()
-        if retry_after.isdigit() and 0 <= int(retry_after) <= 60:
-            retry_seconds = max(1, int(retry_after))
-            return BinanceServerTimeRejected(
-                "Binance server-time temporarily rejected the request (HTTP 418). "
-                f"Please wait {retry_seconds} seconds before retrying.",
-                retry_after=retry_seconds,
-            )
+    if response.status_code in {418, 429}:
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            payload = None
+        exchange_code = payload.get("code") if isinstance(payload, dict) else None
+        raw_retry_after = response.headers.get("Retry-After", "").strip()
+        retry_after = retry_after_seconds(response) if raw_retry_after.isdigit() and int(raw_retry_after) <= RATE_LIMIT_MAX_WAIT_SECONDS else None
+        retry_seconds = retry_after or int(SERVER_TIME_CACHE_TTL_SECONDS)
+        retry_message = f"Please wait {retry_seconds} seconds before retrying." if retry_after else "Please wait briefly before retrying."
         return BinanceServerTimeRejected(
-            "Binance server-time temporarily rejected the request (HTTP 418). "
-            "Please wait briefly before retrying.",
-            retry_after=int(SERVER_TIME_CACHE_TTL_SECONDS),
+            f"Binance server-time temporarily rejected the request (HTTP {response.status_code}). "
+            + retry_message,
+            retry_after=retry_seconds,
+            upstream_status=response.status_code,
+            exchange_code=exchange_code,
+            used_weight_1m=response.headers.get("X-MBX-USED-WEIGHT-1M"),
         )
     return VaultError(f"Binance saat servisi HTTP {response.status_code} döndürdü.")
 
@@ -482,9 +489,12 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
             error = _server_time_error(exc.response)
             if isinstance(error, BinanceServerTimeRejected):
                 logger.warning(
-                    "Binance server-time rejected request: mode=%s status=418 retry_after_seconds=%s",
+                    "Binance server-time rejected request: mode=%s status=%s code=%s retry_after_seconds=%s used_weight_1m=%s",
                     normalized,
+                    error.upstream_status,
+                    error.exchange_code,
                     error.retry_after,
+                    error.used_weight_1m,
                 )
                 _SERVER_TIME_REJECTION_CACHE[normalized] = (
                     time.monotonic() + error.retry_after,
@@ -557,7 +567,10 @@ def _exchange_test_http_exception(exc: VaultError) -> HTTPException:
             {
                 "detail": f"Binance bağlantısı geçici olarak hız sınırına ulaştı. Lütfen {wait} saniye bekleyip tekrar deneyin.",
                 "code": "BINANCE_RATE_LIMITED",
-                "upstream_status": 418,
+                "upstream_status": exc.upstream_status,
+                "exchange_code": exc.exchange_code,
+                "retry_after_seconds": wait,
+                "used_weight_1m": exc.used_weight_1m,
             },
             headers={"Retry-After": str(wait)},
         )
