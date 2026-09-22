@@ -517,8 +517,21 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
 
 def _exchange_test_http_exception(exc: VaultError) -> HTTPException:
     if isinstance(exc, BinanceServerTimeRejected):
-        return HTTPException(429, str(exc), headers={"Retry-After": str(exc.retry_after)})
+        wait = exc.retry_after
+        return HTTPException(
+            429,
+            {
+                "detail": f"Binance bağlantısı geçici olarak hız sınırına ulaştı. Lütfen {wait} saniye bekleyip tekrar deneyin.",
+                "code": "BINANCE_RATE_LIMITED",
+                "upstream_status": 418,
+            },
+            headers={"Retry-After": str(wait)},
+        )
     return HTTPException(502, str(exc))
+
+
+def _rate_limit_public_message(exc: BinanceServerTimeRejected) -> str:
+    return f"Binance bağlantısı geçici olarak hız sınırına ulaştı. Lütfen {exc.retry_after} saniye bekleyip tekrar deneyin."
 
 
 def _public_connection(mode: str) -> dict[str, Any]:
@@ -689,9 +702,10 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
         await pool.execute(
             "UPDATE protrebot_exchange_session_vault SET active = FALSE, last_test_ok = FALSE, last_test_at = NOW(), last_error = $3, updated_at = NOW() WHERE session_id = $1 AND mode = $2",
             session_id(request), mode,
-            str(exc)[:240],
+            _rate_limit_public_message(exc) if isinstance(exc, BinanceServerTimeRejected) else str(exc)[:240],
         )
-        _SESSION_META[(session_id(request), mode)].update({"active": False, "last_test_ok": False, "last_test_at": now_iso(), "last_error": str(exc)[:240]})
+        public_error = _rate_limit_public_message(exc) if isinstance(exc, BinanceServerTimeRejected) else str(exc)[:240]
+        _SESSION_META[(session_id(request), mode)].update({"active": False, "last_test_ok": False, "last_test_at": now_iso(), "last_error": public_error})
         _lock_runtime(request.app, mode)
         raise _exchange_test_http_exception(exc) from exc
     sid = session_id(request)

@@ -39,14 +39,27 @@ function errorText(value:unknown):string {
   return 'İşlem tamamlanamadı. Bağlantı ve kasa durumunu kontrol edin.'
 }
 
+const rateLimitMessage = (seconds:number|null) => seconds && seconds > 0
+  ? `Binance bağlantısı geçici olarak hız sınırına ulaştı. Tekrar denemeden önce ${seconds} saniye bekleyin.`
+  : 'Binance bağlantısı geçici olarak hız sınırına ulaştı.'
+const isConnectionAction = (path:string) => ['/test','/save','/activate'].includes(path)
+
 export default function ExchangeConnections() {
   const [status,setStatus] = useState<ConnectionStatus|null>(null)
   const [selected,setSelected] = useState<Mode>('TESTNET')
   const [forms,setForms] = useState<Record<Mode,FormState>>({TESTNET:emptyForm(),LIVE:emptyForm()})
   const [busy,setBusy] = useState('')
+  const [rateLimitSeconds,setRateLimitSeconds] = useState<number|null>(null)
   const [notice,setNotice] = useState<{kind:'ok'|'warn'|'error';text:string}>({kind:'warn',text:'Şifreli borsa kasası kontrol ediliyor…'})
 
+  useEffect(() => {
+    if (rateLimitSeconds === null || rateLimitSeconds <= 0) return
+    const timer = window.setInterval(() => setRateLimitSeconds(current => current === null ? null : Math.max(0,current - 1)),1000)
+    return () => window.clearInterval(timer)
+  },[rateLimitSeconds])
+
   const call = async <T,>(path:string,options:RequestInit={}):Promise<T> => {
+    if (rateLimitSeconds !== null && rateLimitSeconds > 0 && isConnectionAction(path)) throw new Error(rateLimitMessage(rateLimitSeconds))
     const headers = new Headers(options.headers)
     if (options.body) headers.set('Content-Type','application/json')
     const ownerToken = ownerAccessToken()
@@ -64,6 +77,12 @@ export default function ExchangeConnections() {
     }
     const payload = await response.json().catch(() => null) as T|{detail?:unknown}|null
     if (!response.ok) {
+      if (response.status === 429) {
+        const retryAfter = Number(response.headers.get('Retry-After'))
+        const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 0
+        setRateLimitSeconds(seconds)
+        throw new Error(rateLimitMessage(seconds || null))
+      }
       const detail = payload && typeof payload === 'object' && 'detail' in payload ? payload.detail : payload
       throw new Error(errorText(detail))
     }
@@ -176,8 +195,8 @@ export default function ExchangeConnections() {
         <label className="exchangeCheck"><input type="checkbox" checked={form.accepted} onChange={event => patchForm({accepted:event.target.checked})}/><span>Secret’ın yalnızca şifreli PostgreSQL kasasında tutulacağını ve kaydettikten sonra tekrar görüntülenmeyeceğini anladım.</span></label>
 
         <div className="exchangeActions">
-          <button className="secondary" onClick={testConnection} disabled={Boolean(busy) || !status?.vault.ready}>{busy === `test-${selected}` ? <LoaderCircle className="spin"/> : <Activity/>}BAĞLANTIYI TEST ET</button>
-          <button className="primary" onClick={saveConnection} disabled={Boolean(busy) || !status?.vault.ready}>{busy === `save-${selected}` ? <LoaderCircle className="spin"/> : <LockKeyhole/>}ŞİFRELİ KAYDET</button>
+          <button className="secondary" onClick={testConnection} disabled={Boolean(busy) || (rateLimitSeconds !== null && rateLimitSeconds > 0) || !status?.vault.ready}>{busy === `test-${selected}` ? <LoaderCircle className="spin"/> : <Activity/>}{rateLimitSeconds === null ? 'BAĞLANTIYI TEST ET' : rateLimitSeconds > 0 ? `Retry in ${rateLimitSeconds}s` : 'Retry now'}</button>
+          <button className="primary" onClick={saveConnection} disabled={Boolean(busy) || (rateLimitSeconds !== null && rateLimitSeconds > 0) || !status?.vault.ready}>{busy === `save-${selected}` ? <LoaderCircle className="spin"/> : <LockKeyhole/>}ŞİFRELİ KAYDET</button>
         </div>
 
         <div className="exchangeFingerprint"><span>Anahtar izi</span><b>{connection?.fingerprint || '—'}</b><em>Secret gösterilmez</em></div>
@@ -200,7 +219,7 @@ export default function ExchangeConnections() {
 
         <div className="activationActions">
           {!connection?.active
-            ? <button className="activate" onClick={activateConnection} disabled={Boolean(busy) || !connection?.configured || !connection?.last_test_ok}>{busy === `activate-${selected}` ? <LoaderCircle className="spin"/> : <Power/>}BAĞLANTIYI AKTİFLEŞTİR</button>
+            ? <button className="activate" onClick={activateConnection} disabled={Boolean(busy) || (rateLimitSeconds !== null && rateLimitSeconds > 0) || !connection?.configured || !connection?.last_test_ok}>{busy === `activate-${selected}` ? <LoaderCircle className="spin"/> : <Power/>}BAĞLANTIYI AKTİFLEŞTİR</button>
             : <button className="deactivate" onClick={deactivateConnection} disabled={Boolean(busy)}>{busy === `deactivate-${selected}` ? <LoaderCircle className="spin"/> : <PowerOff/>}BAĞLANTIYI KAPAT</button>}
           <button className="delete" onClick={deleteConnection} disabled={Boolean(busy) || !connection?.configured || connection?.active}>{busy === `delete-${selected}` ? <LoaderCircle className="spin"/> : <Trash2/>}ANAHTARI SİL</button>
         </div>

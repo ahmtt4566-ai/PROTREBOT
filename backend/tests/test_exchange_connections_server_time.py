@@ -12,7 +12,7 @@ BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
 from app import exchange_connections
-from app.exchange_connections import SaveCredentialsRequest, exchange_connection_save, exchange_connection_test
+from app.exchange_connections import SaveCredentialsRequest, exchange_connection_activate, exchange_connection_save, exchange_connection_test
 
 
 class FakeBinanceHttp:
@@ -56,6 +56,8 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         exchange_connections._SERVER_TIME_CACHE.clear()
         exchange_connections._SERVER_TIME_REJECTION_CACHE.clear()
         exchange_connections._SERVER_TIME_LOCKS.clear()
+        exchange_connections._SESSION_CACHE.clear()
+        exchange_connections._SESSION_META.clear()
 
     def test_server_time_200_continues_to_read_only_account_checks(self):
         http = FakeBinanceHttp()
@@ -160,7 +162,11 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
                 asyncio.run(exchange_connection_test(request, exchange_connections.TestCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe")))
         self.assertEqual(context.exception.status_code, 429)
         self.assertEqual(context.exception.headers["Retry-After"], "5")
-        self.assertIn("HTTP 418", str(context.exception.detail))
+        self.assertEqual(context.exception.detail["code"], "BINANCE_RATE_LIMITED")
+        self.assertEqual(context.exception.detail["upstream_status"], 418)
+        self.assertNotIn("HTTP 418", context.exception.detail["detail"])
+        self.assertNotIn("server-time temporarily rejected", context.exception.detail["detail"])
+        self.assertIn("5 saniye", context.exception.detail["detail"])
         self.assertNotIn("api-key-safe", str(context.exception.detail))
         self.assertNotIn("secret-safe", str(context.exception.detail))
 
@@ -172,7 +178,24 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
                 asyncio.run(exchange_connection_save(request, SaveCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe", confirmation="CANLI KASAYA KAYDET")))
         self.assertEqual(context.exception.status_code, 429)
         self.assertEqual(context.exception.headers["Retry-After"], "10")
+        self.assertEqual(context.exception.detail["code"], "BINANCE_RATE_LIMITED")
+        self.assertNotIn("HTTP 418", context.exception.detail["detail"])
         self.assertEqual(request.app.state.db_pool.execute.await_count, 2)
+
+    def test_activate_endpoint_maps_server_time_418_without_storing_technical_detail(self):
+        request = self._request()
+        session_key = (exchange_connections.session_id(request), "LIVE")
+        exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
+        exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
+        rejection = exchange_connections.BinanceServerTimeRejected("Binance server-time temporarily rejected the request (HTTP 418). Please wait 7 seconds before retrying.", retry_after=7)
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(side_effect=rejection)):
+            with self.assertRaises(exchange_connections.HTTPException) as context:
+                asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
+        self.assertEqual(context.exception.status_code, 429)
+        self.assertEqual(context.exception.headers["Retry-After"], "7")
+        self.assertEqual(context.exception.detail["code"], "BINANCE_RATE_LIMITED")
+        self.assertNotIn("HTTP 418", context.exception.detail["detail"])
+        self.assertNotIn("HTTP 418", exchange_connections._SESSION_META[session_key]["last_error"])
 
 
 if __name__ == "__main__":
