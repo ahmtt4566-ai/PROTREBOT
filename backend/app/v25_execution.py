@@ -903,9 +903,13 @@ async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[di
                 {"symbol": plan["symbol"], "algoId": row["algo_id"]},
             )
             cancelled += 1
-        except LiveExchangeError:
+        except LiveExchangeError as exc:
             # A simultaneously triggered/cancelled protection is already harmless;
             # the next reconciliation pass will verify the authoritative state.
+            logger.warning(
+                "cancel_owned_algos_for_symbol: DELETE failed for algoId=%s symbol=%s: %s",
+                row["algo_id"], plan["symbol"], exc,
+            )
             pass
     return cancelled
 

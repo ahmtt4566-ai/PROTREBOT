@@ -1768,6 +1768,7 @@ async def _account_snapshot(
     except BinanceDemoError:
         algo_orders = []
         open_algo_orders_available = False
+    algo_orders_quality = classify_algo_snapshot_payload(algo_orders) if open_algo_orders_available else "UNKNOWN"
     hedge_payload = await snapshot_request(client, "/fapi/v1/positionSide/dual", correlation_id)
     hedge_value = hedge_payload.get("dualSidePosition", hedge_payload.get("dualPosition", False))
     hedge_mode = hedge_value is True or str(hedge_value).lower() == "true"
@@ -1856,6 +1857,7 @@ async def _account_snapshot(
         "open_orders": open_orders,
         "open_algo_orders": open_algos,
         "open_algo_orders_available": open_algo_orders_available,
+        "algo_orders_quality": algo_orders_quality,
         "hedge_mode": hedge_mode,
         **position_risk,
     }
