@@ -1520,8 +1520,8 @@ def demo_certificate(application: Any) -> dict[str, Any]:
     return certificate_payload(state) if state else {}
 
 
-def readiness(application: Any, state: dict[str, Any]) -> dict[str, Any]:
-    consent = consent_status(state)
+def readiness(application: Any, state: dict[str, Any], request: Request | None = None) -> dict[str, Any]:
+    consent = consent_status(state, request)
     snapshot = state.get("snapshot") or {}
     gates = release_gates(
         credentials=bool(consent.get("fingerprint")), consent_active=bool(consent.get("active")),
@@ -1634,7 +1634,7 @@ def live_daily_metrics(state: dict[str, Any]) -> dict[str, Any]:
 def public_status(application: Any, request: Request | None = None) -> dict[str, Any]:
     state = application.state.v25_execution
     consent = consent_status(state, request)
-    release = readiness(application, state)
+    release = readiness(application, state, request)
     raw_snapshot = state.get("snapshot") or {}
     snapshot_session_id = str(state.get("snapshot_session_id") or "")
     current_session_id = session_id(request) if request is not None else ""
@@ -1743,7 +1743,7 @@ async def execute_live_order(
         raise HTTPException(423, "5 dakikalık canlı emir kilidi kapalı veya süresi doldu.")
     if live_execution_blocked(state):
         raise HTTPException(423, "Canlı yürütme kilitli; acil durum veya belirsiz emir uzlaştırması tamamlanmadı.")
-    if not readiness(application, state)["ready"]:
+    if not readiness(application, state, request)["ready"]:
         raise HTTPException(423, "Canlı yayın kapıları tamamlanmadı; emir gönderilmedi.")
     submission_started = False
     async with state["lock"]:
@@ -2296,7 +2296,7 @@ async def v25_arm(request: Request, body: Confirmation) -> dict[str, Any]:
     state = request.app.state.v25_execution
     if live_execution_blocked(state):
         raise HTTPException(423, "Canlı acil durdurma veya belirsiz uzlaştırma aktif; önce recovery tamamlanmalı.")
-    release = readiness(request.app, state)
+    release = readiness(request.app, state, request)
     if not release["ready"]:
         pending = next((item["label"] for item in release["gates"] if not item["passed"]), "hazırlık kapısı")
         raise HTTPException(423, f"Canlı kilit açılamadı: {pending} bekleniyor.")
