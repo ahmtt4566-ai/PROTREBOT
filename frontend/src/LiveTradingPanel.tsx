@@ -13,7 +13,8 @@ type LiveStatus = {
   armed_until?: string | null
   real_trading_locked?: boolean
   live_auto_trade?: boolean
-  auto?: {enabled?: boolean; last_decision?: string; last_error?: string | null; last_scan?: string | null}
+  auto?: {enabled?: boolean; status?: string; last_decision?: string; last_error?: string | null; last_scan?: string | null; last_skip_reason?: string | null; last_cycle_stage?: string | null; session_until?: string | null}
+  scanner?: {last_scan_at?: string | null; scanned_symbol_count?: number; candidate_symbols?: string[]; candidate_count?: number; selected_symbols?: string[]; selected_symbols_count?: number; last_skip_reason?: string | null; last_cycle_stage?: string | null}
   policy?: LivePolicy
   policy_acknowledged?: boolean
   readiness?: {ready?: boolean; gates?: Array<{key?: string; label?: string; passed?: boolean; detail?: string}>}
@@ -243,8 +244,11 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
     setPolicy('allowed_symbols', next)
   }
   const activity = (status?.events || []).slice(-8).reverse()
-  const latestSignal = activity.find(event => /SIGNAL|ENTRY|ORDER/i.test(String(event.kind || '')))
+  const latestSignal = activity.find(event => /SIGNAL|ENTRY|ORDER|SCAN|CANDIDATE/i.test(String(event.kind || '')))
   const signalStatus = status?.live_auto_trade ? 'RUNNING' : latestSignal ? text(latestSignal.kind).replaceAll('_', ' ') : 'WAITING'
+  const scannerStatus = status?.scanner?.last_cycle_stage || (status?.scanner?.last_scan_at ? 'WAITING FOR NEXT SCAN' : 'WAITING')
+  const candidateCount = status?.scanner?.selected_symbols_count ?? status?.scanner?.candidate_count ?? 0
+  const automationReason = status?.auto?.last_error || status?.auto?.last_skip_reason || status?.scanner?.last_skip_reason || status?.auto?.last_decision || blocker
   const safetyRows = [
     ['Account', configured && connected ? 'READY' : 'BLOCKED', configured && connected ? 'LIVE account verified' : 'Connect and verify LIVE API'],
     ['Risk', riskState, riskGate?.detail || 'Risk policy is backend-controlled'],
@@ -258,7 +262,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
   ] as const
 
   if (!active) return null
-  if (masterTrade) return <section id="master-trade-live-terminal" className="masterTradeLiveUx" aria-label="LIVE Auto Trade workspace">
+  if (masterTrade) return <section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
     <header className={`masterTradeLiveHeader ${liveState.toLowerCase()}`}>
       <div className="masterTradeLiveTitle"><span className="masterTradeLiveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE AUTO TRADE</h2><p>Binance Futures Mainnet · V25 backend control</p></div>
       <div className="masterTradeLiveHeadline"><span className="liveStateDot" /><strong>{liveState}</strong><small>{status?.live_auto_trade ? 'AUTO TRADE IS RUNNING' : 'AUTO TRADE IS OFF'}</small></div>
@@ -268,6 +272,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
     <div className="masterTradeLiveAssistant"><div><span className="masterTradeLiveKicker">NEXT BEST ACTION</span><strong>{status?.live_auto_trade ? 'Auto Trade is actively monitoring approved markets.' : liveState === 'BLOCKED' ? 'LIVE is blocked until the backend recovery state is clear.' : !configured || !connected ? 'Connect and verify your LIVE API to continue.' : !readinessReady ? 'Complete the required safety checks before enabling Auto Trade.' : 'Everything is ready. Arm LIVE Auto Trade to continue.'}</strong><small>{status?.live_auto_trade ? 'STOP remains available at any time.' : blocker}</small></div><div className="masterTradeLiveAssistantActions"><button type="button" className="masterTradeLivePrimary" onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{status?.live_auto_trade ? <Power/> : <Power/>}{status?.live_auto_trade ? ' STOP AUTO TRADE' : ' ENABLE AUTO TRADE'}</button><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW REQUIREMENTS</button></div></div>
 
     <div className="masterTradeLiveFlow" aria-label="LIVE Auto Trade progression"><span className={locked ? 'current' : 'complete'}>1 <b>LOCKED</b></span><i /><span className={!locked && !status?.armed && readinessReady ? 'current' : status?.armed ? 'complete' : ''}>2 <b>READY</b></span><i /><span className={status?.armed && !status?.live_auto_trade ? 'current' : status?.live_auto_trade ? 'complete' : ''}>3 <b>ARMED</b></span><i /><span className={status?.live_auto_trade ? 'current running' : ''}>4 <b>RUNNING</b></span></div>
+
+    <section className="masterTradeLiveSection masterTradeLiveOperations" aria-label="LIVE Auto Trade operations"><header><div><span className="masterTradeLiveKicker">AUTO TRADE OPERATIONS</span><h3>Scanner and decision state</h3></div><strong className={status?.live_auto_trade ? 'ready' : 'blocked'}>{status?.live_auto_trade ? 'ACTIVE' : 'OFF'}</strong></header><div className="masterTradeLiveControlMeta"><span>SCANNER <b>{scannerStatus}</b></span><span>SCANNED <b>{status?.scanner?.scanned_symbol_count ?? 0}</b></span><span>CANDIDATES <b>{candidateCount}</b></span><span>LAST SCAN <b>{date(status?.scanner?.last_scan_at || status?.auto?.last_scan)}</b></span></div><p className="masterTradeLiveOperationalNote">{automationReason}</p></section>
 
     <div className="masterTradeLiveGrid masterTradeLivePrimaryGrid">
       <section className="masterTradeLiveSection masterTradeLiveControl"><header><div><span className="masterTradeLiveKicker">AUTO TRADE CONTROL</span><h3>{status?.live_auto_trade ? 'AUTO TRADE' : 'AUTO TRADE OFF'}</h3></div><strong className={status?.live_auto_trade ? 'ready' : 'blocked'}>{status?.live_auto_trade ? 'RUNNING' : 'OFF'}</strong></header><div className="masterTradeLiveControlBody"><div><b>{status?.live_auto_trade ? 'Monitoring approved markets' : 'Ready when backend gates pass'}</b><small>{status?.auto?.last_decision || 'No automatic entries are enabled by default.'}</small></div><button type="button" className={status?.live_auto_trade ? 'dangerAction' : 'primaryAction'} onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{status?.live_auto_trade ? 'STOP AUTO TRADE' : 'ENABLE AUTO TRADE'}</button></div><div className="masterTradeLiveControlMeta"><span>LIVE ARM <b>{armState}</b></span><span>LIVE LOCK <b>{locked ? 'LOCKED' : 'READY'}</b></span><span>BLOCKER <b>{status?.live_auto_trade ? 'NONE' : blocker}</b></span></div><button type="button" className="masterTradeLiveSecondary" onClick={status?.armed ? () => run('disarm', () => call(V25, '/disarm', {method: 'POST'}).then(() => undefined), 'LIVE disarmed; AUTO-TRADE kapalı.') : armLive} disabled={Boolean(busy) || (!status?.armed && (!configured || !connected || emergency || recoveryRequired || !readinessReady || !protectionReady))}>{status?.armed ? 'DISARM LIVE' : 'LIVE ARM'}</button></section>

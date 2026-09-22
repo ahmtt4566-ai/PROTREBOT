@@ -20,6 +20,8 @@
 .masterTradeLiveUx select { font: inherit; }
 .masterTradeLiveUx button { cursor: pointer; }
 .masterTradeLiveUx button:disabled { cursor: not-allowed; opacity: .45; }
+.masterTradeLiveUx.operational .masterTradeLiveSetup { display: none; }
+.masterTradeLiveUx.advanced-open .masterTradeLiveSetup { border-color: rgba(239, 190, 77, .42); }
 .masterTradeLiveKicker { color: var(--live-muted); font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
 .masterTradeLiveHeader { display: grid; grid-template-columns: minmax(240px, 1.1fr) auto minmax(300px, 1fr); align-items: center; gap: 24px; padding: 20px 22px; border: 1px solid var(--live-line); border-radius: 12px; background: linear-gradient(110deg, rgba(16, 27, 34, .98), rgba(10, 16, 21, .96)); }
 .masterTradeLiveTitle h2 { margin: 6px 0 4px; color: #f7fbfc; font-size: clamp(22px, 2.4vw, 32px); letter-spacing: .02em; }
