@@ -31,6 +31,7 @@ from app.execution_core import (  # noqa: E402
     sanitize_execution_policy,
 )
 from app import v25_execution  # noqa: E402
+from app.binance_demo import BinanceDemoError  # noqa: E402
 from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, rank_market_tickers, sanitized_state, submit_entry, validate_protection_readiness  # noqa: E402
 
 
@@ -47,6 +48,34 @@ RENDER_SOURCE = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
 
 class V25LiveGuardCoreTests(unittest.TestCase):
+    def test_live_account_snapshot_algo_orders_quality_contract(self):
+        class FakeClient:
+            def __init__(self, algo_orders):
+                self.algo_orders = algo_orders
+
+            async def signed(self, method, path, params=None):
+                if path == "/fapi/v3/account":
+                    return {}
+                if path in {"/fapi/v3/positionRisk", "/fapi/v1/openOrders", "/fapi/v1/symbolConfig"}:
+                    return []
+                if path == "/fapi/v1/openAlgoOrders":
+                    if isinstance(self.algo_orders, BaseException):
+                        raise self.algo_orders
+                    return self.algo_orders
+                if path == "/fapi/v1/positionSide/dual":
+                    return {"dualSidePosition": False}
+                raise AssertionError(f"Unexpected snapshot path: {path}")
+
+        cases = (
+            ([{"symbol": "BTCUSDT", "algoId": 101}], "VALID_ORDERS"),
+            ([], "VALID_EMPTY"),
+            ({}, "UNKNOWN"),
+            (BinanceDemoError("openAlgoOrders unavailable"), "UNKNOWN"),
+        )
+        for algo_orders, expected_quality in cases:
+            snapshot = asyncio.run(v25_execution.account_snapshot(FakeClient(algo_orders)))
+            self.assertEqual(snapshot["algo_orders_quality"], expected_quality)
+
     def test_close_reason_mapping_covers_all_explicit_close_intents(self):
         self.assertEqual(close_reason_for_intent("manual-close-plan"), "MANUAL")
         self.assertEqual(close_reason_for_intent("protection-plan"), "STOP")
