@@ -11,7 +11,8 @@ class MasterTradeV2SafetyTests(unittest.TestCase):
         source = MASTER.read_text(encoding='utf-8')
         self.assertIn('MASTER TRADE V2', source)
         self.assertIn('PERSISTENT HISTORY', source)
-        self.assertIn('DEMO ACCOUNT SNAPSHOT', source)
+        self.assertIn('LIVE ACCOUNT SNAPSHOT', source)
+        self.assertNotIn('DEMO ACCOUNT', source)
         self.assertIn('RECOVERY', source)
         self.assertIn('LIVE TRADING LOCKED', source)
 
