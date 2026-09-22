@@ -28,16 +28,24 @@ def _simulate_stop_hit(
 
 
 class NoOrderFakeClient:
-    def __init__(self) -> None:
+    def __init__(self, symbol: str | None = None, open_orders: list[dict] | None = None) -> None:
         self.calls: list[tuple[str, str, dict]] = []
+        self.symbol = symbol
+        self.open_orders = open_orders if open_orders is not None else []
 
     async def signed(self, method: str, path: str, params: dict | None = None):
         request = dict(params or {})
         self.calls.append((method, path, request))
+        if method == "GET" and path == "/fapi/v1/openAlgoOrders":
+            return self.open_orders
         if method != "DELETE":
             raise AssertionError(f"Unexpected exchange mutation: {method} {path}")
         if path != "/fapi/v1/algoOrder":
             raise AssertionError(f"Unexpected cleanup path: {path}")
+        self.open_orders[:] = [
+            order for order in self.open_orders
+            if order.get("algoId") != request.get("algoId")
+        ]
         return {}
 
 
@@ -66,6 +74,7 @@ def _plan(plan_id: str, symbol: str, direction: str) -> dict:
         "id": plan_id,
         "symbol": symbol,
         "direction": direction,
+        "provenance_state": "CONFIRMED",
         "status": "OPEN",
         "position_status": "OPEN",
         "entry_price": entry,
@@ -126,7 +135,15 @@ def _run_simulated_lifecycle(direction: str) -> tuple[dict, dict, NoOrderFakeCli
 
 
 def test_long_lifecycle_closes_plan_and_cleans_owned_protection() -> None:
-    state, target, client = _run_simulated_lifecycle("LONG")
+    state, target, _ = _run_simulated_lifecycle("LONG")
+    client = NoOrderFakeClient(
+        target["symbol"],
+        [
+            {"symbol": target["symbol"], "algoId": 101, "orderType": "STOP_MARKET", "side": "SELL", "algoStatus": "NEW"},
+            {"symbol": target["symbol"], "algoId": 102, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+            {"symbol": target["symbol"], "algoId": 103, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+        ],
+    )
 
     assert target["status"] == "KAPANDI"
     assert target["position_status"] == "CLOSED"
@@ -137,13 +154,21 @@ def test_long_lifecycle_closes_plan_and_cleans_owned_protection() -> None:
     asyncio.run(binance_demo.cleanup_closed_plan(client, target))
 
     assert target["protection_ids"] == []
-    assert [call[2]["algoId"] for call in client.calls] == [101, 102, 103]
+    assert [call[2]["algoId"] for call in client.calls if call[0] == "DELETE"] == [101, 102, 103]
     assert "SAGAUSDT" not in state["plans"]
     assert "AVAAIUSDT" not in state["plans"]
 
 
 def test_short_lifecycle_closes_plan_and_cleans_owned_protection() -> None:
-    state, target, client = _run_simulated_lifecycle("SHORT")
+    state, target, _ = _run_simulated_lifecycle("SHORT")
+    client = NoOrderFakeClient(
+        target["symbol"],
+        [
+            {"symbol": target["symbol"], "algoId": 101, "orderType": "STOP_MARKET", "side": "BUY", "algoStatus": "NEW"},
+            {"symbol": target["symbol"], "algoId": 102, "orderType": "TAKE_PROFIT_MARKET", "side": "BUY", "algoStatus": "NEW"},
+            {"symbol": target["symbol"], "algoId": 103, "orderType": "TAKE_PROFIT_MARKET", "side": "BUY", "algoStatus": "NEW"},
+        ],
+    )
 
     assert target["status"] == "KAPANDI"
     assert target["position_status"] == "CLOSED"
@@ -154,7 +179,7 @@ def test_short_lifecycle_closes_plan_and_cleans_owned_protection() -> None:
     asyncio.run(binance_demo.cleanup_closed_plan(client, target))
 
     assert target["protection_ids"] == []
-    assert [call[2]["algoId"] for call in client.calls] == [101, 102, 103]
+    assert [call[2]["algoId"] for call in client.calls if call[0] == "DELETE"] == [101, 102, 103]
     assert "SAGAUSDT" not in state["plans"]
     assert "AVAAIUSDT" not in state["plans"]
 
@@ -197,7 +222,11 @@ def test_fake_client_rejects_unexpected_order_calls_and_lifecycle_makes_none() -
 
     asyncio.run(binance_demo.cleanup_closed_plan(client, target))
 
-    assert all(method == "DELETE" for method, _, _ in client.calls)
+    assert all(
+        (method == "DELETE" and path == "/fapi/v1/algoOrder")
+        or (method == "GET" and path == "/fapi/v1/openAlgoOrders")
+        for method, path, _ in client.calls
+    )
     assert not any(method == "POST" for method, _, _ in client.calls)
     assert state["plans"]["unrelated"]["position_status"] == "OPEN"
     assert "SAGAUSDT" not in repr(state)
