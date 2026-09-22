@@ -1129,7 +1129,7 @@ app.add_middleware(
     allow_origin_regex=WEB_CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Accept", "Authorization", "Content-Type", "Origin", "X-Requested-With", "X-Protrebot-Owner"],
+    allow_headers=["Accept", "Authorization", "Content-Type", "Origin", "X-Requested-With", "X-Protrebot-Owner", "X-ProTreBot-Session"],
 )
 
 MEMBER_PUBLIC_PATHS = frozenset({
@@ -1214,6 +1214,9 @@ async def owner_preview_gate(request, call_next):
             request.state.member = authenticated_user(request)
         except HTTPException as exc:
             return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
+    if request.url.path.startswith("/api/") and request.method.upper() != "OPTIONS" and request.url.path not in MEMBER_PUBLIC_PATHS:
+        if owner_access_authenticated:
+            request.state.member = {"id": "WEB_OWNER", "role": "OWNER"}
         await hydrate_authenticated_user_state(request)
     request.state.web_owner_authenticated = bool(
         owner_access_authenticated

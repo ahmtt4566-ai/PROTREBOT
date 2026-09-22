@@ -227,12 +227,16 @@ async def ensure_schema(pool: Any) -> None:
 
 def session_id(request: Request) -> str:
     headers = getattr(request, "headers", {})
+    session_header = str(headers.get("x-protrebot-session") or "").strip()
     authorization = str(headers.get("authorization") or "").strip()
-    return hashlib.sha256(authorization.encode("utf-8")).hexdigest() if authorization else ""
+    identity = session_header or authorization
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest() if identity else ""
 
 
 def _require_member(request: Request) -> dict[str, Any]:
     user = getattr(request.state, "member", None)
+    if not user and bool(getattr(request.state, "web_owner_authenticated", False)):
+        user = {"id": "WEB_OWNER", "role": "OWNER"}
     if not user:
         raise HTTPException(401, "Oturum gerekli")
     if not session_id(request):

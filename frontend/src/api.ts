@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'protrebot.web.owner-access'
+const SESSION_KEY = 'protrebot.web.session-id'
 
 function normalizedApiBase(value: string | undefined): string {
   const base = (value || 'http://127.0.0.1:8000').trim().replace(/\/+$/, '')
@@ -20,6 +21,14 @@ export function saveOwnerAccessToken(token: string): void {
 
 export function clearOwnerAccessToken(): void {
   sessionStorage.removeItem(TOKEN_KEY)
+}
+
+function ownerSessionId(): string {
+  const existing = sessionStorage.getItem(SESSION_KEY)
+  if (existing) return existing
+  const created = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  sessionStorage.setItem(SESSION_KEY, created)
+  return created
 }
 
 function apiRequestPath(input: RequestInfo | URL): string | null {
@@ -56,6 +65,9 @@ export function installAuthorizedFetch(): void {
     const token = ownerAccessToken()
     if (token && isOwnerProtectedApiRequest(input) && !headers.has('X-ProTreBot-Owner')) {
       headers.set('X-ProTreBot-Owner', token)
+    }
+    if (token && isOwnerProtectedApiRequest(input) && !headers.has('X-ProTreBot-Session')) {
+      headers.set('X-ProTreBot-Session', ownerSessionId())
     }
     return originalFetch(input, {...init, headers})
   }

@@ -124,7 +124,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
   const run = async (key: string, action: () => Promise<void>, success: string) => {
     setBusy(key)
     try { await action(); setNotice({kind: 'ok', text: success}); await refresh() }
-    catch (error) { setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE işlemi tamamlanamadı.'}) }
+    catch (error) {
+      await refresh()
+      setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE işlemi tamamlanamadı.'})
+    }
     finally { setBusy('') }
   }
 
@@ -184,8 +187,11 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
     if (!credentials.apiKey || !credentials.secretKey) throw new Error('LIVE API Key ve Secret Key birlikte girilmelidir.')
     if (!credentials.accepted) throw new Error('Secret yalnızca şifreli sunucu kasasında tutulur onayını verin.')
     await call(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey, confirmation: 'CANLI KASAYA KAYDET'})})
+    await refresh()
     await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ'})})
+    await refresh()
     await call<LiveStatus>(V25, '/connect/read-only', {method: 'POST'})
+    await refresh()
     setCredentials({apiKey: '', secretKey: '', accepted: false})
   }, 'Binance Connected; hesap salt-okunur bağlandı ve gerçek emir kilidi korunuyor.')
 

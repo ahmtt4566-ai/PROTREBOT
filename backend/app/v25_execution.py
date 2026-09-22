@@ -53,7 +53,7 @@ from .binance_demo import (
     verify_leverage_response,
     verify_symbol_configuration,
 )
-from .credential_store import live_credential_source, load_live_consent, load_live_credentials
+from .credential_store import load_live_consent
 from .execution_core import (
     DEFAULT_EXECUTION_POLICY,
     LIVE_CLIENT_PREFIX,
@@ -67,6 +67,7 @@ from .execution_core import (
     risk_sized_order,
     sanitize_execution_policy,
 )
+from .exchange_connections import session_credentials_for_request
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user
@@ -420,14 +421,16 @@ def add_event(state: dict[str, Any], kind: str, message: str, **extra: Any) -> d
     return row
 
 
-def live_credentials_status() -> tuple[str, str, str | None]:
-    api_key, secret_key = load_live_credentials()
+def live_credentials_status(request: Request | None = None) -> tuple[str, str, str | None]:
+    if request is None:
+        return "", "", None
+    api_key, secret_key = session_credentials_for_request(request, "LIVE", active_only=True)
     fingerprint = credential_fingerprint(api_key)
     return api_key, secret_key, fingerprint if len(secret_key) >= 10 else None
 
 
-def consent_status(state: dict[str, Any] | None = None) -> dict[str, Any]:
-    api_key, _, fingerprint = live_credentials_status()
+def consent_status(state: dict[str, Any] | None = None, request: Request | None = None) -> dict[str, Any]:
+    api_key, _, fingerprint = live_credentials_status(request)
     local_payload = load_live_consent()
     web_payload = state.get("web_consent", {}) if isinstance(state, dict) else {}
     candidates = [payload for payload in (web_payload, local_payload) if isinstance(payload, dict)]
@@ -594,8 +597,8 @@ class BinanceLiveClient:
             return {}
 
 
-def client_for(application: Any) -> BinanceLiveClient:
-    api_key, secret_key, _ = live_credentials_status()
+def client_for(application: Any, request: Request | None = None) -> BinanceLiveClient:
+    api_key, secret_key, _ = live_credentials_status(request)
     return BinanceLiveClient(application.state.http, api_key, secret_key)
 
 
@@ -1627,9 +1630,9 @@ def live_daily_metrics(state: dict[str, Any]) -> dict[str, Any]:
     return metrics
 
 
-def public_status(application: Any) -> dict[str, Any]:
+def public_status(application: Any, request: Request | None = None) -> dict[str, Any]:
     state = application.state.v25_execution
-    consent = consent_status(state)
+    consent = consent_status(state, request)
     release = readiness(application, state)
     snapshot = state.get("snapshot") or {}
     scan_stats = state["auto"].get("last_scan_stats") or {}
@@ -1638,7 +1641,7 @@ def public_status(application: Any) -> dict[str, Any]:
         "mode": "LIVE_GUARD",
         "host": LIVE_REST_BASE,
         "websocket_host": LIVE_WS_BASE,
-        "credentials": {"configured": bool(consent.get("fingerprint")), "fingerprint": consent.get("fingerprint"), "storage": live_credential_source()},
+        "credentials": {"configured": bool(consent.get("fingerprint")), "fingerprint": consent.get("fingerprint"), "storage": "OTURUM_KASASI" if consent.get("fingerprint") else "YOK"},
         "consent": consent,
         "connected": bool(state.get("connected")),
         "connection": state.get("connection"),
@@ -1721,6 +1724,7 @@ async def execute_live_order(
     *,
     source: str,
     allowed_symbols: list[str] | None = None,
+    request: Request | None = None,
 ) -> dict[str, Any]:
     state = application.state.v25_execution
     if not state.get("recovery_ready", False):
@@ -1737,7 +1741,7 @@ async def execute_live_order(
     submission_started = False
     async with state["lock"]:
         try:
-            client = client_for(application)
+            client = client_for(application, request)
             snapshot = await account_snapshot(client)
             if state.get("real_trading_locked") is not False:
                 raise LiveExchangeError("Gerçek işlem kilidi kapalı; açık canlı onay olmadan emir gönderilmedi.", http_status=423)
@@ -2162,7 +2166,7 @@ async def shutdown_v25_execution(application: Any) -> None:
 @router.get("/status")
 async def v25_status(request: Request) -> dict[str, Any]:
     execution_owner(request)
-    return public_status(request.app)
+    return public_status(request.app, request)
 
 
 @router.get("/market/candles")
@@ -2195,14 +2199,14 @@ async def v25_connect(request: Request) -> dict[str, Any]:
     state = request.app.state.v25_execution
     try:
         async with state["lock"]:
-            client = client_for(request.app)
+            client = client_for(request.app, request)
             snapshot = await account_snapshot(client)
             state["snapshot"] = snapshot
             state["connected"] = True
             state["connection"].update({"last_checked": now_iso(), "last_error": None, "clock_offset_ms": client.time_offset_ms})
             add_event(state, "READ_ONLY_CONNECTED", "Canlı hesap salt-okunur bağlantısı doğrulandı; emir gönderilmedi.", actor=user["id"])
             persist_state(state)
-        return public_status(request.app)
+        return public_status(request.app, request)
     except (LiveExchangeError, BinanceDemoError) as exc:
         state["connected"] = False
         state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
@@ -2221,7 +2225,7 @@ async def v25_policy(request: Request, body: PolicyUpdate) -> dict[str, Any]:
     state["auto"]["session_until"] = 0.0
     add_event(state, "POLICY_CHANGED", "Canlı risk limitleri değişti; onay ve emir kilidi sıfırlandı.", actor=user["id"])
     persist_state(state)
-    return public_status(request.app)
+    return public_status(request.app, request)
 
 
 @router.post("/policy/acknowledge")
@@ -2233,7 +2237,7 @@ async def v25_policy_ack(request: Request, body: Confirmation) -> dict[str, Any]
     state["policy_ack_digest"] = policy_digest(state["policy"])
     add_event(state, "POLICY_ACK", "Mevcut canlı risk politikası sahibi tarafından onaylandı.", actor=user["id"])
     persist_state(state)
-    return public_status(request.app)
+    return public_status(request.app, request)
 
 
 @router.post("/consent")
@@ -2243,7 +2247,7 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
     if body.confirmation.strip().upper() != "CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM":
         raise HTTPException(422, "Onay için CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM yazın.")
     state = request.app.state.v25_execution
-    api_key, secret_key, fingerprint = live_credentials_status()
+    api_key, secret_key, fingerprint = live_credentials_status(request)
     if not api_key or len(secret_key) < 10 or not fingerprint:
         raise HTTPException(412, "Önce programdaki Borsa Bağlantıları bölümünden canlı Binance API anahtarını kaydedip aktifleştirin.")
     state["web_consent"] = {
@@ -2256,7 +2260,7 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
     state["auto"]["session_until"] = 0.0
     add_event(state, "LIVE_WEB_CONSENT", "24 saatlik canlı risk izni verildi; sunucu yeniden başlarsa izin iptal olur.", actor=user["id"])
     persist_state(state)
-    return public_status(request.app)
+    return public_status(request.app, request)
 
 
 @router.post("/order/test")
@@ -2264,7 +2268,7 @@ async def v25_order_test(request: Request, body: LiveOrderRequest) -> dict[str, 
     user = execution_owner(request)
     state = request.app.state.v25_execution
     try:
-        client = client_for(request.app)
+        client = client_for(request.app, request)
         spec = await build_live_spec(client, body, state["policy"])
         result = await submit_entry(client, spec, client_id_for("TEST", body.intent_id or uuid.uuid4().hex), test_only=True)
         add_event(state, "LIVE_ORDER_TEST", f"{spec['symbol']} imzalı /order/test doğrulandı; gerçek emir oluşmadı.", actor=user["id"], symbol=spec["symbol"])
@@ -2289,7 +2293,7 @@ async def v25_arm(request: Request, body: Confirmation) -> dict[str, Any]:
     state["armed_until"] = time.time() + LIVE_ARM_SECONDS
     state["real_trading_locked"] = False
     add_event(state, "LIVE_ARM", "Canlı yeni giriş izni 5 dakika için açıldı.", actor=user["id"])
-    return public_status(request.app)
+    return public_status(request.app, request)
 
 
 @router.post("/disarm")
@@ -2302,7 +2306,7 @@ async def v25_disarm(request: Request) -> dict[str, Any]:
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
     add_event(state, "LIVE_DISARM", "Canlı yeni girişler ve otomasyon kilitlendi; korumalar çalışmaya devam eder.", actor=user["id"])
-    return public_status(request.app)
+    return public_status(request.app, request)
 
 
 @router.post("/order")
@@ -2311,7 +2315,7 @@ async def v25_order(request: Request, body: ManualLiveOrderRequest) -> dict[str,
     if body.confirmation.strip().upper() != "CANLI EMİR GÖNDER":
         raise HTTPException(422, "Canlı manuel emir için CANLI EMİR GÖNDER yazın.")
     payload = body.model_dump(exclude={"confirmation"})
-    return await execute_live_order(request.app, LiveOrderRequest(**payload), source="MANUAL")
+    return await execute_live_order(request.app, LiveOrderRequest(**payload), source="MANUAL", request=request)
 
 
 @router.post("/auto/start")
@@ -2329,7 +2333,7 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     state["armed_until"] = 0.0
     add_event(state, "LIVE_AUTO_START", "Canlı otomasyon 5 dakikalık kilit içinden bir saatlik gözetimli oturum için açıldı.", actor=user["id"])
     persist_state(state)
-    return public_status(request.app)
+    return public_status(request.app, request)
 
 
 @router.post("/auto/stop")
@@ -2343,7 +2347,7 @@ async def v25_auto_stop(request: Request) -> dict[str, Any]:
     state["auto"]["last_decision"] = "Yeni otomatik canlı girişler durduruldu."
     add_event(state, "LIVE_AUTO_STOP", "Canlı otomasyon durduruldu; mevcut Stop/TP korumaları açık.", actor=user["id"])
     persist_state(state)
-    return public_status(request.app)
+    return public_status(request.app, request)
 
 
 @router.post("/position/close")
@@ -2364,7 +2368,7 @@ async def v25_close(request: Request, body: CloseRequest) -> dict[str, Any]:
         if close_client_id not in close_ids:
             close_ids.append(close_client_id)
         persist_state(state)
-        result = await close_tracked_symbol(client_for(request.app), plan["symbol"], close_intent)
+        result = await close_tracked_symbol(client_for(request.app, request), plan["symbol"], close_intent)
         if result and result.get("orderId"):
             order_id = int(result["orderId"])
             known = plan.setdefault("exchange_order_ids", [])
@@ -2388,7 +2392,7 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
     lock_live_execution(state, "MANUAL_EMERGENCY_STOP")
     cancelled_orders = cancelled_algos = closed = 0
     try:
-        client = client_for(request.app)
+        client = client_for(request.app, request)
         confirmed_plans = [
             plan for plan in state.get("plans", {}).values()
             if isinstance(plan, dict) and live_plan_can_mutate(plan)
