@@ -896,7 +896,11 @@ async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[di
     if not live_plan_can_mutate(plan):
         return 0
     cancelled = 0
+    pending_ids: list[str] = []
+    last_error: str | None = None
+    plan["protection_cleanup_attempted_at"] = now_iso()
     for row in owned_protection_rows(plan, rows):
+        algo_id = str(row["algo_id"])
         try:
             await client.signed(
                 "DELETE", "/fapi/v1/algoOrder",
@@ -910,7 +914,12 @@ async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[di
                 "cancel_owned_algos_for_symbol: DELETE failed for algoId=%s symbol=%s: %s",
                 row["algo_id"], plan["symbol"], exc,
             )
-            pass
+            if exc.exchange_code not in {-2011, -2013}:
+                pending_ids.append(algo_id)
+                last_error = str(exc)[:240]
+    plan["protection_cleanup_pending_ids"] = pending_ids
+    plan["protection_cleanup_last_error"] = last_error
+    plan["protection_cleanup_state"] = "UNKNOWN" if pending_ids else "CLEAN"
     return cancelled
 
 
@@ -1392,6 +1401,10 @@ def recover_plan_from_intent(intent_id: str, intent: dict[str, Any], order: dict
         "live": True,
         "recovered_after_restart": True,
         "protection_ids": [],
+        "protection_cleanup_state": "IDLE",
+        "protection_cleanup_pending_ids": [],
+        "protection_cleanup_last_error": None,
+        "protection_cleanup_attempted_at": None,
         "exchange_order_ids": [order_id],
     }
 
@@ -1758,6 +1771,8 @@ async def execute_live_order(
                 "entry_client_order_id": client_id, "status": "DOLUM BEKLİYOR", "created_at": now_iso(),
                 "source": source, "live": True, "protection_ids": [],
                 "provenance_state": "PROVISIONAL", "protection_state": "UNKNOWN",
+                "protection_cleanup_state": "IDLE", "protection_cleanup_pending_ids": [],
+                "protection_cleanup_last_error": None, "protection_cleanup_attempted_at": None,
                 "exchange_order_ids": [int(result.get("orderId"))] if result.get("orderId") else [],
             }
             state["plans"] = {plan_id: plan, **state.get("plans", {})}

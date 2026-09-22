@@ -76,6 +76,47 @@ class V25LiveGuardCoreTests(unittest.TestCase):
             snapshot = asyncio.run(v25_execution.account_snapshot(FakeClient(algo_orders)))
             self.assertEqual(snapshot["algo_orders_quality"], expected_quality)
 
+    def test_live_cleanup_state_is_clean_after_successful_delete(self):
+        plan = {"symbol": "BTCUSDT", "intent_id": "intent-1", "stop_client_id": "PTB_SL_owned", "provenance_state": "CONFIRMED"}
+        rows = [{"symbol": "BTCUSDT", "client_algo_id": "PTB_SL_owned", "algo_id": 101}]
+
+        class FakeClient:
+            async def signed(self, method, path, params=None):
+                return {}
+
+        asyncio.run(v25_execution.cancel_owned_algos_for_symbol(FakeClient(), rows, plan))
+        self.assertEqual(plan["protection_cleanup_state"], "CLEAN")
+        self.assertEqual(plan["protection_cleanup_pending_ids"], [])
+        self.assertIsNone(plan["protection_cleanup_last_error"])
+        self.assertIsNotNone(plan["protection_cleanup_attempted_at"])
+
+    def test_live_cleanup_known_missing_delete_is_clean(self):
+        plan = {"symbol": "BTCUSDT", "intent_id": "intent-1", "stop_client_id": "PTB_SL_owned", "provenance_state": "CONFIRMED"}
+        rows = [{"symbol": "BTCUSDT", "client_algo_id": "PTB_SL_owned", "algo_id": 101}]
+
+        for exchange_code in (-2011, -2013):
+            class FakeClient:
+                async def signed(self, method, path, params=None):
+                    raise v25_execution.LiveExchangeError("already gone", exchange_code=exchange_code)
+
+            asyncio.run(v25_execution.cancel_owned_algos_for_symbol(FakeClient(), rows, plan))
+            self.assertEqual(plan["protection_cleanup_state"], "CLEAN")
+            self.assertEqual(plan["protection_cleanup_pending_ids"], [])
+            self.assertIsNone(plan["protection_cleanup_last_error"])
+
+    def test_live_cleanup_unknown_delete_failure_requires_retry_state(self):
+        plan = {"symbol": "BTCUSDT", "intent_id": "intent-1", "stop_client_id": "PTB_SL_owned", "provenance_state": "CONFIRMED"}
+        rows = [{"symbol": "BTCUSDT", "client_algo_id": "PTB_SL_owned", "algo_id": 101}]
+
+        class FakeClient:
+            async def signed(self, method, path, params=None):
+                raise v25_execution.LiveExchangeError("temporary delete failure")
+
+        asyncio.run(v25_execution.cancel_owned_algos_for_symbol(FakeClient(), rows, plan))
+        self.assertEqual(plan["protection_cleanup_state"], "UNKNOWN")
+        self.assertEqual(plan["protection_cleanup_pending_ids"], ["101"])
+        self.assertEqual(plan["protection_cleanup_last_error"], "temporary delete failure")
+
     def test_close_reason_mapping_covers_all_explicit_close_intents(self):
         self.assertEqual(close_reason_for_intent("manual-close-plan"), "MANUAL")
         self.assertEqual(close_reason_for_intent("protection-plan"), "STOP")
