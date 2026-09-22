@@ -94,8 +94,10 @@ async def _test_concurrent_cleanup_deletes_each_protection_once():
 
     class Client:
         async def signed(self, method, path, params=None):
-            calls.append((method, path, params["algoId"]))
+            calls.append((method, path, params["algoId"] if method == "DELETE" else None))
             await asyncio.sleep(0)
+            if method == "GET" and path == "/fapi/v1/openAlgoOrders":
+                return []
             return {}
 
     state = {"plans": {"plan-1": plan}}
@@ -116,14 +118,30 @@ def test_cleanup_delete_failure_retains_id_for_retry():
 async def _test_cleanup_delete_failure_retains_id_for_retry():
     plan = plan_with_protection()
     attempts = 0
+    remaining_orders = protection_snapshot()["open_algo_orders"]
 
     class Client:
         async def signed(self, method, path, params=None):
             nonlocal attempts
+            if method == "GET" and path == "/fapi/v1/openAlgoOrders":
+                return [
+                    {
+                        "symbol": order["symbol"],
+                        "algoId": order["algo_id"],
+                        "orderType": order["type"],
+                        "side": order["side"],
+                        "algoStatus": order["status"],
+                    }
+                    for order in remaining_orders
+                ]
             if method == "DELETE":
                 attempts += 1
                 if attempts == 1:
                     raise binance_demo.BinanceDemoError("temporary delete failure")
+                remaining_orders[:] = [
+                    order for order in remaining_orders
+                    if order["algo_id"] != params["algoId"]
+                ]
             return {}
 
     await binance_demo.cleanup_closed_plan(Client(), plan, snapshot=protection_snapshot(), plans=[plan])
@@ -131,6 +149,29 @@ async def _test_cleanup_delete_failure_retains_id_for_retry():
     await binance_demo.cleanup_closed_plan(Client(), plan, snapshot=protection_snapshot(), plans=[plan])
     assert plan["protection_ids"] == []
     assert attempts == 3
+
+
+def test_ambiguous_verification_snapshot_does_not_confirm_removal():
+    asyncio.run(_test_ambiguous_verification_snapshot_does_not_confirm_removal())
+
+
+async def _test_ambiguous_verification_snapshot_does_not_confirm_removal():
+    plan = plan_with_protection()
+
+    class Client:
+        async def signed(self, method, path, params=None):
+            if method == "GET" and path == "/fapi/v1/openAlgoOrders":
+                return {}
+            return {}
+
+    await binance_demo.cleanup_closed_plan(
+        Client(),
+        plan,
+        snapshot=protection_snapshot(),
+        plans=[plan],
+    )
+
+    assert plan["protection_ids"] == [101, 102]
 
 
 def test_concurrent_missing_stop_repair_posts_once():

@@ -698,6 +698,13 @@ def response_rows(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def classify_algo_snapshot_payload(payload: Any) -> str:
+    """Classify a raw openAlgoOrders response without changing generic normalization."""
+    if isinstance(payload, list):
+        return "VALID_ORDERS" if payload else "VALID_EMPTY"
+    return "UNKNOWN"
+
+
 def load_demo_credentials() -> tuple[str, str]:
     # V28 web deployments use the encrypted in-application vault.  Once a
     # TESTNET record exists, its active switch is authoritative and legacy
@@ -2509,11 +2516,20 @@ async def _fresh_protection_snapshot(client: BinanceDemoClient, symbol: str) -> 
     try:
         payload = await client.signed("GET", "/fapi/v1/openAlgoOrders", {"symbol": symbol})
     except BinanceDemoError:
-        return {"open_algo_orders_available": False, "open_algo_orders": []}
+        return {
+            "open_algo_orders_available": False,
+            "open_algo_orders_quality": "UNKNOWN",
+            "open_algo_orders": [],
+        }
+    quality = classify_algo_snapshot_payload(payload)
     orders: list[dict[str, Any]] = []
     for item in response_rows(payload):
         if not isinstance(item, dict):
-            return {"open_algo_orders_available": True, "open_algo_orders": [item]}
+            return {
+                "open_algo_orders_available": True,
+                "open_algo_orders_quality": "UNKNOWN",
+                "open_algo_orders": [item],
+            }
         orders.append({
             "symbol": item.get("symbol"),
             "algo_id": item.get("algoId"),
@@ -2523,7 +2539,11 @@ async def _fresh_protection_snapshot(client: BinanceDemoClient, symbol: str) -> 
             "status": item.get("algoStatus", item.get("status")),
             "trigger_price": item.get("triggerPrice", item.get("stopPrice")),
         })
-    return {"open_algo_orders_available": True, "open_algo_orders": orders}
+    return {
+        "open_algo_orders_available": True,
+        "open_algo_orders_quality": "CONFIRMED" if quality in {"VALID_EMPTY", "VALID_ORDERS"} else "UNKNOWN",
+        "open_algo_orders": orders,
+    }
 
 
 def classify_demo_ownership(
@@ -3359,6 +3379,9 @@ async def cleanup_closed_plan(
     snapshot = snapshot or await _fresh_protection_snapshot(client, plan["symbol"])
     removed_ids: set[int] = set()
     delete_attempted: set[int] = set()
+    delete_succeeded: set[int] = set()
+    delete_failed_known: set[int] = set()
+    delete_failed_unknown: set[int] = set()
     for algo_id in claimed_ids:
         ownership, matched_ids, missing_ids = _protection_classification(
             plan,
@@ -3374,21 +3397,26 @@ async def cleanup_closed_plan(
         try:
             delete_attempted.add(algo_id)
             await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": plan["symbol"], "algoId": algo_id})
+            delete_succeeded.add(algo_id)
         except BinanceDemoError as exc:
             if exc.exchange_code in {-2011, -2013}:
-                removed_ids.add(algo_id)
+                delete_failed_known.add(algo_id)
+            else:
+                delete_failed_unknown.add(algo_id)
 
     if delete_attempted:
         verified_snapshot = await _fresh_protection_snapshot(client, plan["symbol"])
-        for algo_id in delete_attempted:
-            ownership, matched_ids, missing_ids = _protection_classification(
-                plan,
-                verified_snapshot,
-                required_ids={algo_id},
-                plans=plans,
-            )
-            if ownership == "MISSING" and algo_id in missing_ids:
-                removed_ids.add(algo_id)
+        if verified_snapshot.get("open_algo_orders_quality", "CONFIRMED") != "UNKNOWN":
+            verifiable_ids = delete_succeeded | delete_failed_known
+            for algo_id in verifiable_ids:
+                ownership, matched_ids, missing_ids = _protection_classification(
+                    plan,
+                    verified_snapshot,
+                    required_ids={algo_id},
+                    plans=plans,
+                )
+                if ownership == "MISSING" and algo_id in missing_ids:
+                    removed_ids.add(algo_id)
 
     async with lock:
         current_ids = _plan_protection_ids(plan)
