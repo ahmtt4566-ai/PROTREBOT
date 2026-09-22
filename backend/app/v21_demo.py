@@ -41,6 +41,7 @@ from .binance_demo import (
     can_mutate_lifecycle,
     credentials_configured,
     close_symbol_position,
+    confirm_provenance_from_snapshot,
     decimal_text,
     execute_demo_order,
     load_demo_credentials,
@@ -322,7 +323,7 @@ def _state_from_payload(payload: dict[str, Any], user_id: str, application: Any 
         "settings", "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades",
         "paper_positions", "risk", "notifications", "snapshot", "reconciliation",
-        "evidence_sequence", "evidence_status", "evidence_observations",
+        "evidence_sequence", "evidence_status", "evidence_observations", "stop_correlations",
     ):
         if key in payload:
             state[key] = payload[key]
@@ -1091,8 +1092,10 @@ async def rotate_safe_demo_positions(
         if await close_symbol_position(client, symbol) is None:
             continue
         for plan in state.get("plans", {}).values():
+            if not can_mutate_lifecycle(plan):
+                continue
             if plan.get("symbol") == symbol and plan.get("source") == "AUTO_SCANNER":
-                plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": utc_now(), "close_reason": "SAFE_ROTATION"})
+                plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": now_iso(), "close_reason": "SAFE_ROTATION"})
         rotated += 1
         emit_notification(v21_state or application.state.v21_demo, "ROTATION", f"{symbol} güvenli rotasyonla kapatıldı; mevcut korumalar önceliklendirildi.", event_id=f"{today()}-rotation-{symbol}-{int(time.time() // SCAN_INTERVAL_SECONDS)}")
     if rotated:
@@ -1204,7 +1207,7 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_st
                 persist_runtime(demo_state)
         if demo_state is not None and execution.upper() == "TRADE" and order_id:
             for plan in demo_state.get("plans", {}).values():
-                if plan.get("symbol") != symbol:
+                if plan.get("symbol") != symbol or not can_mutate_lifecycle(plan):
                     continue
                 matches_tp1 = order_id == str(plan.get("tp1_actual_order_id") or "")
                 matches_tp1 = matches_tp1 or client_order_id == str(plan.get("tp1_actual_client_order_id") or "")
@@ -1236,7 +1239,7 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_st
         actual_client_order_id = str(order.get("ac") or order.get("actualClientAlgoId") or "")
         if demo_state is not None and status.upper() in {"TRIGGERED", "FILLED", "EXECUTED"}:
             for plan in demo_state.get("plans", {}).values():
-                if plan.get("symbol") != symbol:
+                if plan.get("symbol") != symbol or not can_mutate_lifecycle(plan):
                     continue
                 if client_algo_id == str(plan.get("tp1_client_id") or "") or algo_id == str(plan.get("tp1_algo_id") or ""):
                     if actual_order_id:
@@ -1651,10 +1654,7 @@ async def reconciliation_loop(application: Any) -> None:
                 try:
                     has_demo_plans = bool(demo_state.get("plans"))
                     client = client_for_state(application, demo_state)
-                    demo_state["_provenance_reconciliation_cycle"] = int(
-                        demo_state.get("_provenance_reconciliation_cycle", 0)
-                    ) + 1
-                    observation_cycle = demo_state["_provenance_reconciliation_cycle"]
+                    observation_cycle = _next_provenance_reconciliation_cycle(demo_state)
                     snapshot = await account_snapshot(client, evidence_state=state)
                     state["snapshot"] = snapshot
                     previous_reconciliation = state.get("reconciliation")
@@ -1665,6 +1665,11 @@ async def reconciliation_loop(application: Any) -> None:
                     changed = False
                     if has_demo_plans:
                         changed = reconcile_positions(state, previous.get(user_id), snapshot)
+                        await confirm_provenance_from_snapshot(
+                            demo_state,
+                            snapshot,
+                            observation_cycle,
+                        )
                     previous[user_id] = snapshot
                     if has_demo_plans:
                         changed |= await ensure_stop_protection(application, snapshot, demo_state=demo_state, v21_state=state, client=client)

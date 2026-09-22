@@ -1226,7 +1226,15 @@ async def owner_preview_gate(request, call_next):
                 status_code=410,
             ),
         )
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    finally:
+        member = getattr(request.state, "member", None)
+        user_id = str((member or {}).get("id") or "").strip()
+        pending = getattr(request.app.state, "_binance_demo_persistence_tasks", {})
+        tasks = pending.pop(user_id, []) if user_id and isinstance(pending, dict) else []
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     if request.url.path.startswith("/api/"):
