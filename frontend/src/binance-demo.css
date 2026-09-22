@@ -5,6 +5,30 @@
 @media(max-width:1100px){.liveStatusGrid{grid-template-columns:repeat(3,1fr)}.liveSafetyRail{grid-template-columns:1fr}.liveOrderForm{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:700px){.liveTerminalHeader{align-items:flex-start;flex-direction:column}.liveTerminalLock{width:100%;box-sizing:border-box;justify-items:start;text-align:left}.liveOpsGrid,.liveTerminalGrid{grid-template-columns:1fr}.liveStatusGrid{grid-template-columns:repeat(2,1fr)}.liveReadOnlyStrip{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.liveFormGrid,.liveOrderForm{grid-template-columns:1fr}.liveReadOnlyStrip{grid-template-columns:1fr}.liveOrderFooter span{width:100%}}
+
+.masterTradeLiveAccountHud{border:1px solid #27343a;background:#0b1115;box-shadow:0 12px 28px rgba(0,0,0,.22);padding:16px}
+.masterTradeLiveAccountHud>header{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid #223037;padding-bottom:12px}
+.masterTradeLiveAccountHud h3{margin:5px 0 0;color:#e8f0f1;font-size:14px}
+.masterTradeLiveAccountHud>header>strong{display:flex;align-items:center;gap:7px;color:#ee907d;font-size:9px;letter-spacing:.7px}
+.masterTradeLiveAccountHud>header>strong.ready{color:#61d09a}
+.masterTradeLiveAccountHud>header i{width:7px;height:7px;border-radius:50%;background:#ee907d;box-shadow:0 0 0 3px rgba(238,144,125,.12)}
+.masterTradeLiveAccountHud>header>strong.ready i{background:#61d09a;box-shadow:0 0 0 3px rgba(97,208,154,.12)}
+.masterTradeLiveAccountMetrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;margin-top:12px;background:#27343a}
+.masterTradeLiveAccountMetrics>span{display:grid;gap:6px;min-height:68px;padding:12px;background:#10181d}
+.masterTradeLiveAccountMetrics small{color:#71858c;font-size:7px;font-weight:800;letter-spacing:.7px}
+.masterTradeLiveAccountMetrics b{color:#dce7e9;font-size:13px;line-height:1.2}
+.masterTradeLiveAccountMetrics b.positive{color:#61d09a}.masterTradeLiveAccountMetrics b.negative{color:#ee907d}
+.masterTradeLiveAccountMetrics em{color:#64777d;font-size:7px;font-style:normal;line-height:1.25}
+.masterTradeLiveAccountTable{min-width:0}
+.masterTradeLiveAccountTable .masterTradeLiveTableWrap{overflow-x:auto}
+.masterTradeLiveAccountTable table{min-width:920px}
+.masterTradeLiveAccountTable td,.masterTradeLiveAccountTable th{white-space:nowrap}
+.masterTradeLiveAccountTable td.positive{color:#61d09a}.masterTradeLiveAccountTable td.negative{color:#ee907d}
+.masterTradeLiveSafetyList details.pass summary b{color:#61d09a}
+.masterTradeLiveSafetyList details.warning summary b{color:#e7bf73}
+.masterTradeLiveSafetyList details.blocked summary b{color:#ee907d}
+@media(max-width:1100px){.masterTradeLiveAccountMetrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:640px){.masterTradeLiveAccountHud>header{align-items:flex-start;flex-direction:column}.masterTradeLiveAccountMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 /* LIVE terminal controls stay dark even when shared Demo rules load later. */
 .liveTerminal,.liveTerminal *{box-sizing:border-box}.liveTerminal{background:#070b0e;color:#d7e1e4}.liveTerminal .liveTerminalPanel,.liveTerminal .liveTerminalHeader,.liveTerminal .liveStatusGrid,.liveTerminal .liveNotice,.liveTerminal .liveSafetyRail,.liveTerminal .liveConfirm{background:#0b1115;color:#d7e1e4}.liveTerminal input,.liveTerminal select,.liveTerminal textarea{background:#080d11!important;border-color:#2b3a41!important;color:#e5eef0!important}.liveTerminal button{background:#142329;color:#dce8ea;border-color:#304148}.liveTerminal button:disabled{background:#11191d;color:#718087;border-color:#263238}.liveTerminal .liveEmergencyButton{background:#351a1a!important;color:#ffac9a!important}.liveTerminal .liveAuto .liveButtons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.liveTerminal .liveAuto .liveButtons button:first-child{background:#123d2c;border-color:#2c8d61;color:#8be0b1}.liveTerminal .liveAuto .liveButtons button:nth-child(2){background:#2b2020;border-color:#764a45;color:#e3a29a}
 /* Scanner dashboard */

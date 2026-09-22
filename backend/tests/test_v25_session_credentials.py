@@ -43,6 +43,24 @@ class V25SessionCredentialTests(unittest.TestCase):
         self.assertFalse(status["credentials"]["configured"])
         self.assertEqual(status["credentials"]["storage"], "YOK")
 
+    def test_status_exposes_snapshot_account_fields_without_private_material(self):
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=v25_execution.initial_state()))
+        application.state.v25_execution["snapshot"] = {
+            "wallet_balance": 1000.0,
+            "available_balance": 800.0,
+            "unrealized_pnl": 12.5,
+            "positions": [{"symbol": "BTCUSDT", "quantity": 0.01, "mark_price": 50000}],
+            "open_orders": [{"symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "price": 49000, "quantity": 0.01, "status": "NEW"}],
+        }
+        status = v25_execution.public_status(application, self.request("session-a"))
+        self.assertEqual(status["account"]["wallet_balance"], 1000.0)
+        self.assertEqual(status["account"]["available_balance"], 800.0)
+        self.assertEqual(status["account"]["unrealized_pnl"], 12.5)
+        self.assertEqual(status["account"]["positions"][0]["symbol"], "BTCUSDT")
+        self.assertEqual(status["account"]["open_orders"][0]["status"], "NEW")
+        self.assertNotIn("api_key", status)
+        self.assertNotIn("secret_key", status)
+
 
 if __name__ == "__main__":
     unittest.main()
