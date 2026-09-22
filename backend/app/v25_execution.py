@@ -35,6 +35,7 @@ from .analysis import analyze
 from .binance_demo import (
     BinanceDemoError,
     account_snapshot,
+    classify_algo_snapshot_payload,
     decimal_text,
     floor_step,
     normalize_symbol,
@@ -898,6 +899,7 @@ async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[di
     cancelled = 0
     pending_ids: list[str] = []
     last_error: str | None = None
+    retry_required = False
     plan["protection_cleanup_attempted_at"] = now_iso()
     for row in owned_protection_rows(plan, rows):
         algo_id = str(row["algo_id"])
@@ -906,6 +908,25 @@ async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[di
                 "DELETE", "/fapi/v1/algoOrder",
                 {"symbol": plan["symbol"], "algoId": row["algo_id"]},
             )
+            try:
+                verification = await client.signed(
+                    "GET", "/fapi/v1/openAlgoOrders", {"symbol": plan["symbol"]},
+                )
+                verification_quality = classify_algo_snapshot_payload(verification)
+                verification_rows = response_rows(verification)
+                still_present = any(
+                    str(item.get("algoId") or item.get("algo_id") or "") == algo_id
+                    for item in verification_rows
+                )
+                if verification_quality == "UNKNOWN":
+                    pending_ids.append(algo_id)
+                    last_error = "LIVE openAlgoOrders verification was unknown."
+                elif still_present:
+                    pending_ids.append(algo_id)
+                    retry_required = True
+            except LiveExchangeError as exc:
+                pending_ids.append(algo_id)
+                last_error = str(exc)[:240]
             cancelled += 1
         except LiveExchangeError as exc:
             # A simultaneously triggered/cancelled protection is already harmless;
@@ -919,7 +940,7 @@ async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[di
                 last_error = str(exc)[:240]
     plan["protection_cleanup_pending_ids"] = pending_ids
     plan["protection_cleanup_last_error"] = last_error
-    plan["protection_cleanup_state"] = "UNKNOWN" if pending_ids else "CLEAN"
+    plan["protection_cleanup_state"] = "UNKNOWN" if last_error else "RETRY_REQUIRED" if retry_required else "CLEAN"
     return cancelled
 
 
