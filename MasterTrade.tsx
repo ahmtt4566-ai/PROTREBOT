@@ -124,6 +124,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [lastAccountSyncAt, setLastAccountSyncAt] = useState<string | null>(null)
   const [lastHistorySyncAt, setLastHistorySyncAt] = useState<string | null>(null)
   const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null)
+  const marketRefreshInFlight = useRef(false)
   const accountRefreshInFlight = useRef(false)
   const candles = snapshot?.candles ?? []
   const analysis = snapshot?.analysis ?? null
@@ -133,11 +134,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   useEffect(() => {
     const controller = new AbortController()
     let active = true
-    let inFlight = false
     setMarketLoading(true)
     const refreshMarkets = async () => {
-      if (!active || inFlight) return
-      inFlight = true
+      if (!active || marketRefreshInFlight.current) return
+      marketRefreshInFlight.current = true
       try {
         const response = await fetch(`${API_BASE}/markets?limit=500`, { signal: controller.signal })
         if (!response.ok) throw new Error('Market data unavailable')
@@ -150,7 +150,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       } catch (error) {
         if (active && !(error instanceof Error && error.name === 'AbortError')) setMarketError('DATA STALE / DATA UNAVAILABLE')
       } finally {
-        inFlight = false
+        marketRefreshInFlight.current = false
         setMarketLoading(false)
       }
     }
