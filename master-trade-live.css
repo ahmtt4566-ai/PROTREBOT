@@ -144,6 +144,7 @@
 .masterTradeLiveMode > span { margin-right: 5px; color: var(--live-muted); font-size: 8px; font-weight: 800; letter-spacing: .08em; }
 .masterTradeLiveMode button { min-height: 29px; padding: 0 11px; border: 1px solid var(--live-line); border-radius: 5px; background: transparent; color: var(--live-muted); font-size: 10px; font-weight: 800; }
 .masterTradeLiveMode button.selected { border-color: rgba(85, 215, 155, .55); background: rgba(85, 215, 155, .12); color: var(--live-green); }
+.masterTradeLiveMode button:first-of-type { display: none; }
 .masterTradeLiveApiGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .masterTradeLiveSecretField { position: relative; }
 .masterTradeLiveSecretField input { padding-right: 38px; }

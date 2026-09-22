@@ -74,8 +74,6 @@ const fmtSignalAge = (seconds: number | null) => {
 }
 
 const MTF_INTERVALS = ['1m', '5m', '15m', '1h', '4h']
-const routeSegment = (name: string) => '/' + name
-
 const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   const responses = await Promise.all(MTF_INTERVALS.map(timeframe => fetch(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal })))
   const values = await Promise.all(responses.map(async (response, index) => {
@@ -116,10 +114,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [showChartLevels, setShowChartLevels] = useState(true)
   const [showChartVolume, setShowChartVolume] = useState(true)
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 2, margin: 50, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
-  const [demoConfirmationOpen, setDemoConfirmationOpen] = useState(false)
-  const [demoConfirmationChecked, setDemoConfirmationChecked] = useState(false)
-  const [demoOrderBusy, setDemoOrderBusy] = useState(false)
-  const [demoOrderError, setDemoOrderError] = useState('')
   const [positionAction, setPositionAction] = useState<{ mode: 'DETAILS' | 'REDUCE' | 'CLOSE'; position: AccountPosition } | null>(null)
   const [positionActionBusy, setPositionActionBusy] = useState(false)
   const [positionActionError, setPositionActionError] = useState('')
@@ -200,7 +194,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
   const refreshAccountData = async () => {
     const response = await Promise.all([
-      fetch(`${API_BASE}/binance-demo/account`),
+      fetch(`${API_BASE}/v25/status`),
       fetch(`${API_BASE}/v21/journal?limit=200`),
       fetch(`${API_BASE}/v21/performance?period=all`),
       fetch(`${API_BASE}/v21/performance?period=daily`),
@@ -210,13 +204,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     if (accountResponse.status === 412) {
       setAccountSyncState('DATA_UNAVAILABLE')
       setHistorySyncState('UNAVAILABLE')
-      setSnapshot(current => current ? { ...current, accountError: 'DEMO ACCOUNT NOT CONFIGURED' } : current)
+      setSnapshot(current => current ? { ...current, accountError: 'LIVE ACCOUNT NOT CONFIGURED' } : current)
       setLastAccountSyncAt(null)
       setLastHistorySyncAt(null)
       return false
     }
 
-    const accountPayload = accountResponse.ok ? await accountResponse.json().catch(() => null) as AccountSnapshot & { detail?: unknown } : null
+    const accountPayload = accountResponse.ok ? await accountResponse.json().catch(() => null) as { account?: AccountSnapshot; plans?: AccountPlan[]; detail?: unknown } : null
     if (!accountResponse.ok || !accountPayload) {
       const detail = accountPayload && typeof accountPayload.detail === 'string'
         ? accountPayload.detail
@@ -228,12 +222,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       return false
     }
 
-    const nextPositions = Array.isArray(accountPayload.positions) ? accountPayload.positions : []
-    accountRef.current = accountPayload
+    const nextPositions = Array.isArray(accountPayload.account?.positions) ? accountPayload.account.positions : []
+    const liveAccount = accountPayload.account ? { ...accountPayload.account, plans: accountPayload.plans } : null
+    accountRef.current = liveAccount
     setAccountSyncState(nextPositions.length === 0 ? 'EMPTY' : 'READY')
     setLastAccountSyncAt(new Date().toISOString())
     setLastSuccessfulRefreshAt(new Date().toISOString())
-    setSnapshot(current => current ? { ...current, account: accountPayload, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
+    setSnapshot(current => current ? { ...current, account: liveAccount, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
 
     if (journalResponse.ok) {
       const journalPayload = await journalResponse.json().catch(() => null) as { items?: Array<Record<string, unknown>> } | null
@@ -244,7 +239,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           entryPrice: null, exitPrice: typeof item.price === 'number' ? item.price : null, quantity: typeof item.quantity === 'number' ? item.quantity : null,
           leverage: null, margin: null, stopLoss: null, tp1: null, tp2: null, tp3: null, realizedPnl: Number(item.realized_pnl), pnlPercent: null,
           fees: null, funding: null, openTime: String(item.created_at || ''), closeTime: String(item.created_at || ''), duration: null,
-          closeReason: typeof item.reason === 'string' ? item.reason : null, source: String(item.source || 'BINANCE DEMO'), analysisScore: null, opportunityScore: null, scanCycle: null,
+          closeReason: typeof item.reason === 'string' ? item.reason : null, source: String(item.source || 'BINANCE LIVE'), analysisScore: null, opportunityScore: null, scanCycle: null,
         } satisfies TradeHistoryRow
       })
       setHistory(rows)
@@ -328,52 +323,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     setDecisionTimeline(current => [{ time: snapshot.marketUpdatedAt as string, message }, ...current].slice(0, 12))
   }, [snapshot?.marketUpdatedAt, snapshot?.symbol, snapshot?.timeframe, tradeDecision.direction, triggerMonitor.lifecycle, triggerMonitor.remainingConditions])
 
-  const demoOrderPayload = () => ({
-    symbol: draft.market,
-    direction: draft.side,
-    order_type: 'MARKET',
-    margin_usdt: draft.margin,
-    leverage: draft.leverage,
-    limit_price: null,
-    stop_loss: draft.stopLoss,
-    tp1: draft.tp1,
-    tp2: draft.tp2,
-    tp3: draft.tp3,
-  })
-
   const validateOrderDraft = () => {
-    if (!Number.isFinite(draft.margin) || draft.margin < 5 || draft.margin > 100) return 'Demo marjin 5–100 USDT arasında olmalı.'
-    if (!Number.isFinite(draft.leverage) || draft.leverage < 1 || draft.leverage > 50) return 'Demo kaldıraç 1–50x arasında olmalı.'
-    if (draft.margin * draft.leverage > 200) return 'Demo pozisyon büyüklüğü 200 USDT güvenlik sınırını aşıyor.'
+    if (!Number.isFinite(draft.margin) || draft.margin < 5 || draft.margin > 100) return 'LIVE margin must be between 5 and 100 USDT.'
+    if (!Number.isFinite(draft.leverage) || draft.leverage < 1 || draft.leverage > 3) return 'LIVE leverage must be between 1x and 3x.'
+    if (draft.margin * draft.leverage > 200) return 'LIVE position size exceeds the configured safety limit.'
     if (![draft.entry, draft.stopLoss, draft.tp1, draft.tp2, draft.tp3].every(value => Number.isFinite(value) && value > 0)) return 'Entry, Stop Loss ve TP1–TP3 alanlarını güncel analizden doldurun.'
     return ''
-  }
-
-  const submitDemoOrder = async () => {
-    if (!demoConfirmationChecked || demoOrderBusy) return
-    const validationError = validateOrderDraft()
-    if (validationError) { setDemoOrderError(validationError); return }
-    setDemoOrderBusy(true)
-    setDemoOrderError('')
-    try {
-      const token = userSessionToken()
-      const headers = new Headers({ 'Content-Type': 'application/json' })
-      if (token) headers.set('Authorization', `Bearer ${token}`)
-      const response = await fetch(`${API_BASE}${routeSegment('binance-demo')}${routeSegment('order')}`, { method: 'POST', headers, body: JSON.stringify(demoOrderPayload()) })
-      const payload = await response.json().catch(() => null) as { detail?: unknown; message?: string } | null
-      if (!response.ok) {
-        const detail = Array.isArray(payload?.detail)
-          ? payload.detail.map(item => typeof item === 'object' && item && 'msg' in item ? String(item.msg) : String(item)).join(' · ')
-          : typeof payload?.detail === 'string' ? payload.detail : payload?.message
-        throw new Error(detail || `Demo order gönderilemedi (HTTP ${response.status}).`)
-      }
-      setDemoConfirmationOpen(false)
-      setDemoConfirmationChecked(false)
-    } catch (error) {
-      setDemoOrderError(error instanceof Error ? error.message : 'Demo order gönderilemedi.')
-    } finally {
-      setDemoOrderBusy(false)
-    }
   }
 
   const submitPositionAction = async () => {
@@ -396,12 +351,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       const token = userSessionToken()
       const headers = new Headers({ 'Content-Type': 'application/json' })
       if (token) headers.set('Authorization', `Bearer ${token}`)
-      const response = await fetch(`${API_BASE}/binance-demo/position/${isClose ? 'close' : 'reduce'}`, {
+      const livePlan = account?.plans?.find(plan => plan.symbol === targetSymbol) as (AccountPlan & { id?: string }) | undefined
+      if (isClose && !livePlan?.id) throw new Error('LIVE tracked plan is unavailable for this position.')
+      const response = await fetch(`${API_BASE}/v25/position/close`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(isClose
-          ? { symbol: targetSymbol, position_side: positionAction.position.position_side || 'BOTH', confirmation: 'DEMO KAPAT' }
-          : { symbol: targetSymbol, position_side: positionAction.position.position_side || 'BOTH', quantity: requestedQuantity, confirmation: 'DEMO AZALT' }),
+        body: JSON.stringify({ plan_id: livePlan?.id, confirmation: 'CANLI POZİSYONU KAPAT' }),
       })
       const payload = await response.json().catch(() => null) as { detail?: unknown; message?: string } | null
       if (!response.ok) {
@@ -546,12 +501,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   }
 
   const overviewCards = [
-    { label: 'BALANCE', value: account?.wallet_balance === undefined ? '--' : `$${fmtCompact(account.wallet_balance)}`, note: account ? 'Demo/Testnet account' : 'DATA UNAVAILABLE', tone: 'default' },
+    { label: 'BALANCE', value: account?.wallet_balance === undefined ? '--' : `$${fmtCompact(account.wallet_balance)}`, note: account ? 'LIVE account equity' : 'DATA UNAVAILABLE', tone: 'default' },
     { label: 'AVAILABLE', value: account?.available_balance === undefined ? '--' : `$${fmtCompact(account.available_balance)}`, note: account ? 'Current margin' : 'DATA UNAVAILABLE', tone: 'default' },
     { label: 'UNREALIZED PNL', value: account?.unrealized_pnl === undefined ? '--' : `${account.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(account.unrealized_pnl)}`, note: account ? 'Account snapshot' : 'DATA UNAVAILABLE', tone: account?.unrealized_pnl && account.unrealized_pnl >= 0 ? 'positive' : 'default' },
-    { label: 'REALIZED PNL', value: performanceSnapshot ? `${performanceSnapshot.net_profit >= 0 ? '+' : ''}$${fmtCompact(performanceSnapshot.net_profit)}` : '--', note: performanceSnapshot ? 'Verified Demo history' : 'NO TRADE HISTORY', tone: 'default' },
+    { label: 'REALIZED PNL', value: performanceSnapshot ? `${performanceSnapshot.net_profit >= 0 ? '+' : ''}$${fmtCompact(performanceSnapshot.net_profit)}` : '--', note: performanceSnapshot ? 'Verified LIVE history' : 'NO TRADE HISTORY', tone: 'default' },
     { label: 'MARGIN USED', value: account?.wallet_balance !== undefined && account.available_balance !== undefined ? `$${fmtCompact(account.wallet_balance - account.available_balance)}` : '--', note: account ? 'Derived from account' : 'DATA UNAVAILABLE', tone: 'default' },
-    { label: 'OPEN POSITIONS', value: account?.positions ? String(account.positions.length) : '--', note: account ? 'Demo/Testnet account' : 'DATA UNAVAILABLE', tone: 'default' },
+    { label: 'OPEN POSITIONS', value: account?.positions ? String(account.positions.length) : '--', note: account ? 'LIVE account positions' : 'DATA UNAVAILABLE', tone: 'default' },
   ]
 
   const performanceTrend: number[] = []
@@ -593,7 +548,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
           <div className="masterTradeStatusRow">
             <span className="statusPill online"><Activity /> CONNECTED</span>
-            <span className="statusPill demo"><Wallet /> DEMO / TESTNET</span>
+            <span className="statusPill online"><Wallet /> LIVE ACCOUNT</span>
           </div>
         </header>
 
@@ -603,7 +558,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           <span className="terminalStatusItem"><small>LATENCY</small> --</span>
           <span className="terminalStatusItem"><small>LAST UPDATE</small> {latestUpdate}</span>
           <span className={`terminalStatusItem dataHealth-${dataHealth.toLowerCase().replaceAll(' ', '-')}`}><small>DATA HEALTH</small> {dataHealth}{marketAgeSeconds !== null ? ` · ${Math.floor(marketAgeSeconds)}s ago` : ''}</span>
-          <span className="terminalStatusItem demo">DEMO / TESTNET</span>
+          <span className="terminalStatusItem online">LIVE ACCOUNT</span>
         </div>
 
         <div className="masterTradeOverview">
@@ -619,7 +574,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         <div className="masterTradeWorkspace">
           <div className="masterTradeSafetyBanner" role="status">
             <strong>LIVE TRADING LOCKED</strong>
-            <span>DEMO ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY READY</span>
+            <span>LIVE ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY CONTROLLED</span>
             <em>{persistentTradeHistoryText}</em>
           </div>
           <aside className="masterTradePanel watchlistPanel">
@@ -757,7 +712,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 <span className="panelEyebrow">TRADE TERMINAL</span>
                 <div className="tradeSymbolRow">
                   <strong>{draft.market}</strong>
-                  <span className="demoBadge">DEMO</span>
+                  <span className="liveBadge">LIVE</span>
                 </div>
               </div>
             </div>
@@ -823,7 +778,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 </button>
                 {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
                 {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
-                <button type="button" className="primaryOrderButton" onClick={() => { const validationError = validateOrderDraft(); setDemoOrderError(validationError); setDemoConfirmationChecked(false); setDemoConfirmationOpen(true) }} disabled={demoOrderBusy}>DEMO ORDER</button>
+                <button type="button" className="primaryOrderButton" onClick={() => document.getElementById('master-trade-live-terminal')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>LIVE ORDER</button>
+                <small className="orderLockReason">Use the V25 LIVE terminal below after backend readiness gates pass.</small>
               </div>
             </div>
           </aside>
@@ -893,7 +849,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td>${fmtNum(stopLoss)}</td>
                       <td>${fmtNum(target)}</td>
                       <td><span className="statusBadge open">OPEN</span></td>
-                      <td><div className="positionActions"><button type="button" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'DETAILS', position }) }}>DETAILS</button><button type="button" onClick={() => { setPositionActionError(''); setReduceQuantity(String((position.quantity || 0) * 0.25)); setPositionAction({ mode: 'REDUCE', position }) }}>REDUCE</button><button type="button" className="dangerAction" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position }) }}>CLOSE</button></div></td>
+                      <td><div className="positionActions"><button type="button" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'DETAILS', position }) }}>DETAILS</button><button type="button" className="dangerAction" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position }) }}>CLOSE</button></div></td>
                     </tr>
                     )
                   }) : <tr><td colSpan={13} className="emptyState">{snapshot?.accountError || 'NO OPEN POSITIONS'}</td></tr>}
@@ -1055,7 +1011,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
             <div className="systemStatus">
               <div className="statusRow"><i className="onlineDot" /> <span>Connected</span></div>
-              <div className="statusRow muted"><span>DEMO ACCOUNT SNAPSHOT</span><strong>{account?.last_checked ? new Date(account.last_checked).toLocaleTimeString('en-GB') : '--'}</strong></div>
+              <div className="statusRow muted"><span>LIVE ACCOUNT SNAPSHOT</span><strong>{account?.last_checked ? new Date(account.last_checked).toLocaleTimeString('en-GB') : '--'}</strong></div>
               <div className="statusRow muted"><span>RECOVERY</span><strong>{snapshot?.accountError || (account ? 'Current account snapshot' : 'DATA UNAVAILABLE')}</strong></div>
             </div>
 
@@ -1070,7 +1026,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       {positionAction && (
         <div className="positionActionBackdrop" role="presentation" onClick={() => { if (!positionActionBusy) { setPositionAction(null); setPositionActionError('') } }}>
           <section className="positionActionModal" role="dialog" aria-modal="true" onClick={event => event.stopPropagation()}>
-            <header><div><span>DEMO / TESTNET</span><h2>{positionAction.mode === 'DETAILS' ? 'POSITION DETAILS' : positionAction.mode === 'REDUCE' ? 'REDUCE ONLY' : 'CLOSE DEMO POSITION'}</h2></div><button type="button" onClick={() => setPositionAction(null)} disabled={positionActionBusy}>CLOSE</button></header>
+            <header><div><span>LIVE POSITION</span><h2>{positionAction.mode === 'DETAILS' ? 'POSITION DETAILS' : positionAction.mode === 'REDUCE' ? 'REDUCE ONLY' : 'CLOSE LIVE POSITION'}</h2></div><button type="button" onClick={() => setPositionAction(null)} disabled={positionActionBusy}>CLOSE</button></header>
             <div className="positionActionGrid">
               <div><small>Symbol</small><b>{positionAction.position.symbol}</b></div>
               <div><small>Direction</small><b>{positionAction.position.direction || '--'}</b></div>
@@ -1089,7 +1045,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <div><small>TP3</small><b>--</b></div>
             </div>
             {positionAction.mode === 'REDUCE' && <div className="reduceControls"><label>Quantity<input type="number" min="0" max={positionAction.position.quantity || undefined} step="any" value={reduceQuantity} onChange={event => setReduceQuantity(event.target.value)} /></label><div><button type="button" onClick={() => setReduceQuantity(String((positionAction.position.quantity || 0) * 0.25))}>25%</button><button type="button" onClick={() => setReduceQuantity(String((positionAction.position.quantity || 0) * 0.5))}>50%</button><button type="button" onClick={() => setReduceQuantity(String((positionAction.position.quantity || 0) * 0.75))}>75%</button><button type="button" onClick={() => setReduceQuantity(String(positionAction.position.quantity || 0))}>100%</button></div></div>}
-            {positionAction.mode !== 'DETAILS' && <p className="positionActionWarning">This action will modify the selected Demo/Testnet position using a reduce-only order.</p>}
+            {positionAction.mode !== 'DETAILS' && <p className="positionActionWarning">This action uses the existing V25 live ownership and confirmation checks.</p>}
             {positionActionError && <div className="positionActionError" role="alert">{positionActionError}</div>}
             {positionAction.mode !== 'DETAILS' && <footer><button type="button" onClick={() => { setPositionAction(null); setPositionActionError('') }} disabled={positionActionBusy}>CANCEL</button><button type="button" className="dangerAction" onClick={() => void submitPositionAction()} disabled={positionActionBusy}>{positionActionBusy ? positionAction.mode === 'CLOSE' ? 'CLOSING POSITION...' : 'REDUCING POSITION...' : positionAction.mode === 'CLOSE' ? 'CLOSE POSITION' : 'REDUCE ONLY'}</button></footer>}
           </section>
@@ -1149,15 +1105,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         </div>
       )}
 
-      {demoConfirmationOpen && <div className="masterTradeConfirmationBackdrop" role="presentation" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>
-        <section className="masterTradeConfirmation" role="dialog" aria-modal="true" aria-labelledby="master-trade-confirmation-title" onClick={event => event.stopPropagation()}>
-          <h2 id="master-trade-confirmation-title">Demo order onayı</h2>
-          <p>Bu demo order'ı gerçekten göndermek istiyor musun?</p>
-          <label><input type="checkbox" checked={demoConfirmationChecked} onChange={event => setDemoConfirmationChecked(event.target.checked)} /><span>Bu işlemi onaylıyorum</span></label>
-          {demoOrderError && <div role="alert">{demoOrderError}</div>}
-          <div><button type="button" onClick={() => { setDemoConfirmationOpen(false); setDemoConfirmationChecked(false) }}>İPTAL</button><button type="button" disabled={!demoConfirmationChecked || demoOrderBusy} onClick={() => void submitDemoOrder()}>{demoOrderBusy ? 'SUBMITTING DEMO ORDER...' : 'ONAYLA VE GÖNDER'}</button></div>
-        </section>
-      </div>}
     </section>
   )
 }

@@ -11,23 +11,26 @@ DECISION = ROOT / "masterTradeDecision.ts"
 
 
 class MasterTradeSafetyTests(unittest.TestCase):
-    def test_master_trade_is_exposed_and_live_trading_is_locked(self):
+    def test_master_trade_is_exposed_and_live_first(self):
         source = MASTER.read_text(encoding="utf-8")
         decision_source = DECISION.read_text(encoding="utf-8")
         self.assertIn("MASTER TRADE", source)
-        self.assertIn("LIVE TRADING LOCKED", source)
-        self.assertIn("DEMO / TESTNET", source)
+        self.assertIn("LIVE ACCOUNT", source)
+        self.assertIn("LIVE ORDER", source)
+        self.assertIn("/v25/status", source)
+        self.assertNotIn("DEMO / TESTNET", source)
+        self.assertNotIn("binance-demo", source)
         self.assertIn("SETUP CONFIRMED", decision_source)
         self.assertIn("NO ORDER SENT", decision_source)
-        self.assertNotIn("/order", source)
+        self.assertNotIn("Demo order", source)
 
-    def test_master_trade_component_exists_for_persistent_history_and_locked_execution(self):
+    def test_master_trade_component_exists_for_persistent_history_and_live_execution(self):
         self.assertTrue(MASTER.exists())
         source = MASTER.read_text(encoding="utf-8")
         self.assertIn("localStorage", source)
-        self.assertIn("LIVE TRADING LOCKED", source)
+        self.assertIn("LIVE ACCOUNT SNAPSHOT", source)
         self.assertIn("trade history", source.lower())
-        self.assertIn("disabled", source)
+        self.assertIn("/v25/position/close", source)
 
     def test_master_trade_local_cors_allowlist_is_explicit_and_non_wildcard(self):
         main_source = (BACKEND / "app" / "main.py").read_text(encoding="utf-8")

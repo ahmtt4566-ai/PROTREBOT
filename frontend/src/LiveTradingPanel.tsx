@@ -64,9 +64,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
   const [confirm, setConfirm] = useState<{title: string;message: string;expected: string;action: () => Promise<void>} | null>(null)
   const [confirmText, setConfirmText] = useState('')
   const [busy, setBusy] = useState('')
-  const [connectionMode, setConnectionMode] = useState<'DEMO' | 'LIVE'>('DEMO')
   const [showSecret, setShowSecret] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const connectionMode = 'LIVE' as const
+  const setConnectionMode = (_mode: 'DEMO' | 'LIVE') => undefined
   const [notice, setNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string}>({kind: 'info', text: 'LIVE başlatılmadı. Gerçek emir kilidi varsayılan olarak kapalıdır.'})
 
   const call = async <T,>(base: string, path: string, options: RequestInit = {}): Promise<T> => {
@@ -257,7 +258,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
   ] as const
 
   if (!active) return null
-  if (masterTrade) return <section className="masterTradeLiveUx" aria-label="LIVE Auto Trade workspace">
+  if (masterTrade) return <section id="master-trade-live-terminal" className="masterTradeLiveUx" aria-label="LIVE Auto Trade workspace">
     <header className={`masterTradeLiveHeader ${liveState.toLowerCase()}`}>
       <div className="masterTradeLiveTitle"><span className="masterTradeLiveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE AUTO TRADE</h2><p>Binance Futures Mainnet · V25 backend control</p></div>
       <div className="masterTradeLiveHeadline"><span className="liveStateDot" /><strong>{liveState}</strong><small>{status?.live_auto_trade ? 'AUTO TRADE IS RUNNING' : 'AUTO TRADE IS OFF'}</small></div>
