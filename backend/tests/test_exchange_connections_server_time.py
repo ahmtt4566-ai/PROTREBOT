@@ -51,6 +51,11 @@ class FakeBinanceHttp:
         raise AssertionError(f"Unexpected Binance path: {path}")
 
 
+class HangingBinanceHttp:
+    async def get(self, url, headers=None):
+        await asyncio.Event().wait()
+
+
 class ExchangeConnectionServerTimeTests(unittest.TestCase):
     def setUp(self):
         exchange_connections._SERVER_TIME_CACHE.clear()
@@ -58,6 +63,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         exchange_connections._SERVER_TIME_LOCKS.clear()
         exchange_connections._SESSION_CACHE.clear()
         exchange_connections._SESSION_META.clear()
+        exchange_connections.BINANCE_RATE_LIMITER.reset()
 
     def test_server_time_200_continues_to_read_only_account_checks(self):
         http = FakeBinanceHttp()
@@ -89,6 +95,12 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
     def test_http_418_fails_closed_and_does_not_check_account(self):
         http = FakeBinanceHttp(time_status=418, time_payload={"code": -1003, "msg": "rate limited"})
         with self.assertRaisesRegex(exchange_connections.VaultError, "HTTP 418.*wait briefly"):
+            asyncio.run(exchange_connections.test_binance_credentials(http, "LIVE", "api-key-safe", "secret-safe"))
+        self.assertEqual(http.paths, ["/fapi/v1/time"])
+
+    def test_http_429_fails_closed_and_does_not_check_account(self):
+        http = FakeBinanceHttp(time_status=429, time_payload={"code": -1003, "msg": "rate limited"})
+        with self.assertRaisesRegex(exchange_connections.VaultError, "HTTP 429"):
             asyncio.run(exchange_connections.test_binance_credentials(http, "LIVE", "api-key-safe", "secret-safe"))
         self.assertEqual(http.paths, ["/fapi/v1/time"])
 
@@ -127,6 +139,11 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         with self.assertRaisesRegex(exchange_connections.VaultError, "zaman aşımı"):
             asyncio.run(exchange_connections.test_binance_credentials(http, "LIVE", "api-key-safe", "secret-safe"))
         self.assertEqual(http.paths, ["/fapi/v1/time"])
+
+    def test_verification_timeout_fails_closed(self):
+        with patch.object(exchange_connections, "BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS", 0.01):
+            with self.assertRaisesRegex(exchange_connections.VaultError, "zaman aşımı"):
+                asyncio.run(exchange_connections.test_binance_credentials(HangingBinanceHttp(), "LIVE", "api-key-safe", "secret-safe"))
 
     def test_server_time_error_does_not_expose_credentials(self):
         api_key = "api-key-that-must-stay-hidden"

@@ -54,6 +54,11 @@ class BinanceRateLimitTests(unittest.IsolatedAsyncioTestCase):
             await self._request(Response(429, {"Retry-After": "7"}))
         self.assertEqual(BINANCE_RATE_LIMITER.snapshot(self.HOST)["cooldown_until"], 107.0)
 
+    async def test_retry_after_is_capped(self):
+        with patch("app.binance_rate_limit.time.monotonic", return_value=100.0):
+            await self._request(Response(429, {"Retry-After": "999999999999"}))
+        self.assertEqual(BINANCE_RATE_LIMITER.snapshot(self.HOST)["cooldown_until"], 160.0)
+
     async def test_missing_retry_after_uses_safe_fallback(self):
         with patch("app.binance_rate_limit.time.monotonic", return_value=100.0):
             await self._request(Response(429))

@@ -56,6 +56,10 @@ _META: dict[str, dict[str, Any]] = {}
 _SESSION_CACHE: dict[tuple[str, str], tuple[str, str]] = {}
 _SESSION_META: dict[tuple[str, str], dict[str, Any]] = {}
 SERVER_TIME_CACHE_TTL_SECONDS = 10.0
+BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS = max(
+    1.0,
+    min(float(os.getenv("BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS", "15")), 60.0),
+)
 _SERVER_TIME_CACHE: dict[str, tuple[float, int]] = {}
 _SERVER_TIME_REJECTION_CACHE: dict[str, tuple[float, str, int]] = {}
 _SERVER_TIME_LOCKS: dict[str, asyncio.Lock] = {}
@@ -395,9 +399,15 @@ def _safe_exchange_message(payload: Any, api_key: str) -> str:
 async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: str, secret_key: str, timestamp: int) -> Any:
     query = _signed_query(secret_key, {"timestamp": timestamp, "recvWindow": 5000})
     try:
-        async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
-            response = await http.get(f"{host}{path}?{query}", headers={"X-MBX-APIKEY": api_key})
-            rate_limit.observe(response)
+        async def request() -> httpx.Response:
+            async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+                response = await http.get(f"{host}{path}?{query}", headers={"X-MBX-APIKEY": api_key})
+                rate_limit.observe(response)
+                return response
+
+        response = await asyncio.wait_for(request(), timeout=BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError as exc:
+        raise VaultError("Binance bağlantı isteği zaman aşımına uğradı.") from exc
     except httpx.RequestError as exc:
         raise VaultError("Binance sunucusuna ulaşılamadı.") from exc
     if response.status_code >= 400:
@@ -452,10 +462,16 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
         host = HOSTS[normalized]
         before = int(time.time() * 1000)
         try:
-            async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
-                response = await http.get(f"{host}/fapi/v1/time")
-                rate_limit.observe(response)
+            async def request() -> httpx.Response:
+                async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+                    response = await http.get(f"{host}/fapi/v1/time")
+                    rate_limit.observe(response)
+                    return response
+
+            response = await asyncio.wait_for(request(), timeout=BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
+        except asyncio.TimeoutError as exc:
+            raise VaultError("Binance saat servisine ulaşırken zaman aşımı oluştu.") from exc
         except httpx.TimeoutException as exc:
             raise VaultError("Binance saat servisine ulaşırken zaman aşımı oluştu.") from exc
         except httpx.ConnectError as exc:
@@ -499,10 +515,17 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
     normalized = normalize_mode(mode)
     validate_key_pair(api_key, secret_key)
     host = HOSTS[normalized]
+    started = time.monotonic()
+    logger.info("LIVE_CONNECTION_TEST TEST_START mode=%s", normalized)
+    logger.info("LIVE_CONNECTION_TEST CREDENTIALS_RESOLVED mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
+    logger.info("LIVE_CONNECTION_TEST SERVER_TIME_START mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     offset = await _server_time_offset(http, normalized)
+    logger.info("LIVE_CONNECTION_TEST SERVER_TIME_DONE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     timestamp = int(time.time() * 1000) + offset
+    logger.info("LIVE_CONNECTION_TEST ACCOUNT_VERIFY_START mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     account = await _signed_get(http, host, "/fapi/v3/account", api_key, secret_key, timestamp)
     position_mode = await _signed_get(http, host, "/fapi/v1/positionSide/dual", api_key, secret_key, timestamp)
+    logger.info("LIVE_CONNECTION_TEST ACCOUNT_VERIFY_DONE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     if not isinstance(account, dict):
         raise VaultError("Binance hesap yanıtı geçersiz.")
     positions = account.get("positions") if isinstance(account.get("positions"), list) else []
@@ -510,7 +533,7 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
         1 for row in positions
         if isinstance(row, dict) and abs(float(row.get("positionAmt") or 0)) > 0
     )
-    return {
+    result = {
         "mode": normalized,
         "host": host,
         "wallet_balance": float(account.get("totalWalletBalance") or 0),
@@ -522,6 +545,8 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
         "tested_at": now_iso(),
         "orders_created": False,
     }
+    logger.info("LIVE_CONNECTION_TEST TEST_RESPONSE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
+    return result
 
 
 def _exchange_test_http_exception(exc: VaultError) -> HTTPException:

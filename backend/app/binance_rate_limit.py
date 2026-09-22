@@ -17,14 +17,18 @@ RATE_LIMIT_AWARE_BACKOFF_ENABLED = os.getenv(
 BINANCE_REQUEST_WEIGHT_LIMIT_1M = int(os.getenv("BINANCE_REQUEST_WEIGHT_LIMIT_1M", "2400"))
 BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO = float(os.getenv("BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO", "0.8"))
 RATE_LIMIT_PROACTIVE_WAIT_SECONDS = float(os.getenv("BINANCE_RATE_LIMIT_PROACTIVE_WAIT_SECONDS", "1"))
-RATE_LIMIT_FALLBACK_SECONDS = int(os.getenv("BINANCE_RATE_LIMIT_FALLBACK_SECONDS", "10"))
+RATE_LIMIT_MAX_WAIT_SECONDS = max(1, int(os.getenv("BINANCE_RATE_LIMIT_MAX_WAIT_SECONDS", "60")))
+RATE_LIMIT_FALLBACK_SECONDS = min(
+    max(1, int(os.getenv("BINANCE_RATE_LIMIT_FALLBACK_SECONDS", "10"))),
+    RATE_LIMIT_MAX_WAIT_SECONDS,
+)
 
 
 def retry_after_seconds(response: Any) -> int | None:
     value = getattr(response, "headers", {}).get("Retry-After", "").strip()
     if not value.isdigit():
         return None
-    return max(1, int(value))
+    return min(max(1, int(value)), RATE_LIMIT_MAX_WAIT_SECONDS)
 
 
 @dataclass
