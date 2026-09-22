@@ -306,7 +306,21 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (key === 'STOP') return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT ACTIVE' : 'UNKNOWN'
     return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT SET' : 'UNKNOWN'
   }
-  const blocker = status === null ? 'LIVE status is not available.' : emergency ? (status.emergency?.reason || 'Emergency stop is active.') : status.recovery_error || status.auto?.last_decision || (readinessReady ? 'All backend safety gates passed.' : 'Complete the required safety checks before enabling live trading.')
+  const blocker = status === null
+    ? 'LIVE status is not available.'
+    : emergency
+      ? (status.emergency?.reason || 'Emergency stop is active.')
+      : recoveryRequired
+        ? (status.recovery_error || (status.reconciliation_required ? 'Reconciliation is required before LIVE execution can continue.' : 'LIVE recovery is required before execution can continue.'))
+        : !connected
+          ? 'LIVE account connection is required.'
+          : !readinessReady
+            ? 'Complete the required LIVE readiness checks before arming.'
+            : status.consent?.active !== true
+              ? '24-hour LIVE risk consent is required.'
+              : !status.armed
+                ? 'Canlı işlem onayı bekleniyor.'
+                : 'No LIVE blocker.'
   const liveState = status === null ? 'UNKNOWN' : emergency || recoveryRequired ? 'BLOCKED' : locked ? 'LOCKED' : status.live_auto_trade ? 'RUNNING' : status.armed ? 'ARMED' : readinessReady ? 'READY' : 'LOCKED'
   const positionValue = (key: string) => currentPosition ? text(currentPosition[key]) : 'NOT AVAILABLE'
   const activeConfirm = confirm
