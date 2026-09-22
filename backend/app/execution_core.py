@@ -274,7 +274,12 @@ def release_gates(
         GateResult(connected, "read_only", "Canlı hesap salt-okunur bağlantı", "Bakiye ve pozisyon modu imzalı API ile doğrulanır."),
         GateResult(one_way, "one_way", "One-way pozisyon modu", "Hedge modu kapalı olmalıdır."),
         GateResult(policy_acknowledged, "policy", "Risk politikası onayı", "Limitler değiştiğinde onay yeniden alınır."),
-        GateResult(certificate.get("status") == "DEMO SERTİFİKALI", "demo_certificate", "30 gün / 100 Demo işlem kanıtı", f"Demo sertifika puanı %{certificate.get('score', 0)}."),
+        GateResult(
+            certificate.get("status") == "DEMO SERTİFİKALI" or certificate.get("live_allowed") is True,
+            "demo_certificate",
+            "30 gün / 100 Demo işlem kanıtı",
+            "LIVE için Demo sertifikası açıkça waiver edildi." if certificate.get("live_allowed") is True else f"Demo sertifika puanı %{certificate.get('score', 0)}.",
+        ),
     ]
     return [item.as_dict() for item in checks]
 

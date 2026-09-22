@@ -15,7 +15,7 @@ type Event = {id:string;kind:string;message:string;created_at:string;symbol?:str
 type Candle = {time:number;open:number;high:number;low:number;close:number;volume:number}
 type CandleResponse = {symbol:string;interval:string;candles:Candle[];updated_at:string;orders_created:false}
 type Status = {
-  version:string;host:string;credentials:{configured:boolean;fingerprint:string|null;storage:string};consent:{active:boolean;accepted_at:string|null;expires_at:string|null;fingerprint:string|null;storage?:string};connected:boolean;connection:{last_checked:string|null;last_error:string|null;clock_offset_ms:number|null};stream:{status:string;transport:string;last_event:string|null;last_error:string|null;event_count:number;reconnect_count:number};armed:boolean;armed_until:string|null;auto_session_until:string|null;auto:{enabled:boolean;busy:boolean;cycles:number;last_scan:string|null;last_decision:string;last_error:string|null};policy:Policy;policy_digest:string;policy_acknowledged:boolean;readiness:{ready:boolean;score:number;gates:Gate[];demo_certificate:{status?:string;score?:number;gates?:{name:string;passed:boolean;value:string|number;target:string|number}[]}};account:{wallet_balance:number|null;available_balance:number|null;unrealized_pnl:number|null;positions:Position[];open_orders:unknown[];open_algo_orders:unknown[];hedge_mode:boolean|null};daily:{entries:number;realized_pnl:number;unverified_closures:number};plans:Plan[];events:Event[];emergency:{active:boolean;triggered_at:string|null;reason:string|null};profit_guaranteed:boolean
+  version:string;host:string;credentials:{configured:boolean;fingerprint:string|null;storage:string};consent:{active:boolean;accepted_at:string|null;expires_at:string|null;fingerprint:string|null;storage?:string};connected:boolean;connection:{last_checked:string|null;last_error:string|null;clock_offset_ms:number|null};stream:{status:string;transport:string;last_event:string|null;last_error:string|null;event_count:number;reconnect_count:number};armed:boolean;armed_until:string|null;auto_session_until:string|null;auto:{enabled:boolean;busy:boolean;cycles:number;last_scan:string|null;last_decision:string;last_error:string|null};policy:Policy;policy_digest:string;policy_acknowledged:boolean;readiness:{ready:boolean;score:number;gates:Gate[];demo_certificate:{status?:string;score?:number;live_allowed?:boolean;live_allowance_status?:string;gates?:{name:string;passed:boolean;value:string|number;target:string|number}[]}};account:{wallet_balance:number|null;available_balance:number|null;unrealized_pnl:number|null;positions:Position[];open_orders:unknown[];open_algo_orders:unknown[];hedge_mode:boolean|null};daily:{entries:number;realized_pnl:number;unverified_closures:number};plans:Plan[];events:Event[];emergency:{active:boolean;triggered_at:string|null;reason:string|null};profit_guaranteed:boolean
 }
 type LiveVaultConnection = {configured:boolean;active:boolean;fingerprint:string|null;last_test_ok:boolean;last_test_at:string|null;last_error:string|null;storage:string}
 type LiveVaultStatus = {vault:{ready:boolean;reason:string|null};connections:{LIVE:LiveVaultConnection}}
@@ -263,11 +263,24 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
       return
     }
     if (!validOrderForm()) return
-    const phrase = window.prompt('Bu işlem GERÇEK PARA kullanabilir. Göndermek için aynen yazın: CANLI EMİR GÖNDER')
-    if (!phrase) return
+    const payload = orderPayload('ui-live')
+    const details = [
+      `Parite: ${payload.symbol}`,
+      `Yön: ${payload.direction}`,
+      `Emir tipi: ${payload.order_type}`,
+      `Marjin: ${money(Number(payload.margin_usdt))} USDT`,
+      `Kaldıraç: ${payload.leverage}x`,
+      `Stop: ${money(Number(payload.stop_loss))} USDT`,
+      `TP1: ${money(Number(payload.tp1))} USDT`,
+      `TP2: ${money(Number(payload.tp2))} USDT`,
+      `TP3: ${money(Number(payload.tp3))} USDT`,
+      `Limit fiyatı: ${payload.order_type === 'LIMIT' ? money(Number(payload.limit_price)) : 'MARKET'}`,
+    ].join('\n')
+    const phrase = window.prompt(`Bu işlem GERÇEK PARA kullanabilir.\n\nCanlı emir detayları:\n${details}\n\nGöndermek için aynen yazın: CANLI EMİR GÖNDER`)
+    if (!phrase || phrase.trim() !== 'CANLI EMİR GÖNDER') return
     setBusy('live-order')
     try {
-      const result = await call<{ok:boolean;plan:Plan}>('/order',{method:'POST',body:JSON.stringify({...orderPayload('ui-live'),confirmation:phrase})})
+      const result = await call<{ok:boolean;plan:Plan}>('/order',{method:'POST',body:JSON.stringify({...payload,confirmation:phrase.trim()})})
       setChartSymbol(result.plan.symbol);setChartPlanId(result.plan.id)
       setNotice(`${result.plan.symbol} ${result.plan.direction} canlı emir kabul edildi; Stop/TP koruması denetleniyor.`);setNoticeKind('ok')
       await refresh(true)
@@ -335,7 +348,7 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
         <div className={`readinessSummary ${status.readiness.ready ? 'ready' : 'pending'}`}><div><span className="statusDot"/><div><small>CANLI İŞLEM HAZIRLIĞI</small><b>{status.readiness.ready ? 'HAZIR' : 'HAZIR DEĞİL'}</b></div></div><span>{status.readiness.gates.filter(gate => gate.passed).length} / {status.readiness.gates.length} tamamlandı</span></div>
         <div className="readinessProgress"><span style={{width:`${Math.min(100,status.readiness.score)}%`}}/></div>
         <div className="liveGates">{status.readiness.gates.map(gate => <article key={gate.key} className={gate.passed ? 'passed' : 'pending'}>{gate.passed ? <CheckCircle2/> : <XCircle/>}<div><b>{gate.label}</b><span>{gate.detail}</span></div><em>{gate.passed ? 'TAMAM' : 'DÜZELT'}</em></article>)}</div>
-        <div className="demoCertificate"><TestTube2/><div><small>BINANCE DEMO KANITI</small><b>{status.readiness.demo_certificate.status || 'KANIT BEKLİYOR'}</b><span>Demo doğrulaması tamamlanmadan canlı işlem açılamaz. Skor: %{status.readiness.demo_certificate.score ?? 0}</span></div><button onClick={connect} disabled={!!busy}><RefreshCw/> KONTROL ET</button></div>
+        <div className="demoCertificate"><TestTube2/><div><small>BINANCE DEMO KANITI</small><b>{status.readiness.demo_certificate.live_allowed ? status.readiness.demo_certificate.live_allowance_status : status.readiness.demo_certificate.status || 'KANIT BEKLİYOR'}</b><span>Demo evidence score: %{status.readiness.demo_certificate.score ?? 0}. LIVE waiver, Demo evidence sonuçlarını değiştirmez.</span></div><button onClick={connect} disabled={!!busy}><RefreshCw/> KONTROL ET</button></div>
       </section>
     </div>
 

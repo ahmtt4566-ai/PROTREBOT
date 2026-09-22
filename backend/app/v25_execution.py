@@ -1523,7 +1523,13 @@ async def recover_orphan_plans(client: BinanceLiveClient, state: dict[str, Any],
 
 def demo_certificate(application: Any) -> dict[str, Any]:
     state = getattr(application.state, "v21_demo", None)
-    return certificate_payload(state) if state else {}
+    if not state:
+        return {}
+    return {
+        **certificate_payload(state),
+        "live_allowed": True,
+        "live_allowance_status": "LIVE ALLOWED — DEMO CERTIFICATION WAIVED",
+    }
 
 
 def readiness(application: Any, state: dict[str, Any], request: Request | None = None) -> dict[str, Any]:

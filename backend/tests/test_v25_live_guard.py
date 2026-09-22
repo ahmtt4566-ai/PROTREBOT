@@ -177,8 +177,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
 
         with patch.object(v25_execution, "consent_status", return_value={}), \
-                patch.object(v25_execution, "readiness", return_value={}), \
-                patch.object(v25_execution, "live_credential_source", return_value="TEST"):
+            patch.object(v25_execution, "readiness", return_value={"ready": False, "score": 0, "gates": [], "demo_certificate": {}}):
             status = v25_execution.public_status(application)
 
         self.assertTrue(status["reconciliation_required"])
@@ -350,8 +349,15 @@ class V25LiveGuardCoreTests(unittest.TestCase):
     def test_release_requires_every_gate_and_demo_certificate(self):
         locked = release_gates(credentials=True, consent_active=True, connected=True, one_way=True, policy_acknowledged=True, demo_certificate={"status": "KANIT TOPLUYOR", "score": 75})
         self.assertFalse(release_ready(locked))
-        ready = release_gates(credentials=True, consent_active=True, connected=True, one_way=True, policy_acknowledged=True, demo_certificate={"status": "DEMO SERTİFİKALI", "score": 100})
-        self.assertTrue(release_ready(ready))
+        waived = release_gates(credentials=True, consent_active=True, connected=True, one_way=True, policy_acknowledged=True, demo_certificate={"status": "KANIT TOPLUYOR", "score": 38, "live_allowed": True})
+        self.assertTrue(release_ready(waived))
+        self.assertTrue(next(item for item in waived if item["key"] == "demo_certificate")["passed"])
+        for key in ("credentials", "local_consent", "read_only", "one_way", "policy"):
+            gate_values = {name: True for name in ("credentials", "consent_active", "connected", "one_way", "policy_acknowledged")}
+            gate_values[{"credentials": "credentials", "local_consent": "consent_active", "read_only": "connected", "one_way": "one_way", "policy": "policy_acknowledged"}[key]] = False
+            blocked = release_gates(**gate_values, demo_certificate={"status": "KANIT TOPLUYOR", "score": 38, "live_allowed": True})
+            self.assertFalse(release_ready(blocked), key)
+            self.assertFalse(next(item for item in blocked if item["key"] == key)["passed"])
 
     def test_daily_metrics_count_only_live_entries_and_closed_realized(self):
         events = [
@@ -593,10 +599,10 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         }
         with patch.multiple(
             v25_execution,
-            client_for=lambda application: object(),
+            client_for=lambda application, request=None: object(),
             account_snapshot=AsyncMock(return_value={"available_balance": 100, "positions": [], "open_orders": [], "hedge_mode": False}),
             spread_bps=AsyncMock(return_value=1.0),
-            readiness=lambda application, state: {"ready": True},
+            readiness=lambda application, state, request=None: {"ready": True},
             build_live_spec=AsyncMock(return_value=spec),
             set_live_isolated_margin=AsyncMock(),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
@@ -665,13 +671,13 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         ready = {"ready": True, "score": 100, "gates": []}
         with patch.multiple(
             v25_execution,
-            client_for=lambda application: transport,
+            client_for=lambda application, request=None: transport,
             account_snapshot=AsyncMock(return_value=snapshot),
             scan_market_candidates=AsyncMock(return_value=[{"symbol": "BTCUSDT", "opportunity_score": 99}]),
             live_candles=AsyncMock(return_value=(candles, 123)),
             canonical_live_decision=AsyncMock(return_value={"decision": "BUY", "entry_eligible": True, "analysis": analysis}),
             spread_bps=AsyncMock(return_value=1.0),
-            readiness=lambda application, state: ready,
+            readiness=lambda application, state, request=None: ready,
             build_live_spec=AsyncMock(return_value=spec),
             set_live_isolated_margin=AsyncMock(),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 2, "margin_type": "isolated"}),
