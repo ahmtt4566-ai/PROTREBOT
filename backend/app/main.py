@@ -7,6 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping
+from urllib.parse import urlsplit
 
 import httpx
 import asyncpg
@@ -952,9 +953,18 @@ async def restore_health_snapshot(application: FastAPI) -> None:
 
 
 def build_http_client() -> httpx.AsyncClient:
+    quotaguard_url = os.getenv("QUOTAGUARD_URL", "").strip()
+    if quotaguard_url:
+        try:
+            parsed_proxy = urlsplit(quotaguard_url)
+            if parsed_proxy.scheme.lower() not in {"http", "https"} or not parsed_proxy.hostname or parsed_proxy.port is None:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("Invalid QUOTAGUARD_URL configuration; expected an http(s) proxy URL.") from None
     return httpx.AsyncClient(
         timeout=httpx.Timeout(30, connect=10, read=30, write=10, pool=30),
         limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=30),
+        proxy=quotaguard_url or None,
         trust_env=False,
     )
 
