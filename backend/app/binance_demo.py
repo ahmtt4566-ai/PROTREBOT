@@ -4011,7 +4011,7 @@ async def demo_close_position(request: Request, body: ClosePositionRequest) -> d
                     allow_closed_position_cleanup=True,
                     plans=[candidate for candidate in state.get("plans", {}).values() if isinstance(candidate, dict)],
                 )
-                if cleaned:
+                if cleaned and can_mutate_lifecycle(plan):
                     plan.update({"status": "KAPANDI", "position_status": "CLOSED", "remaining_quantity": "0", "closed_at": utc_now()})
         add_event(state, "POZİSYON KAPATILDI", f"{symbol} Demo pozisyonu reduce-only piyasa emriyle kapatıldı.")
         persist_runtime(state)
