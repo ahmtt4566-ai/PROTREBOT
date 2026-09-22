@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .local_storage import DATA_DIR, migrate_legacy_files
+from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .stop_evidence import observe_position_snapshot
 
 
@@ -890,13 +891,15 @@ class BinanceDemoClient:
             logger.info("[DEMO_HTTP_TRACE] request_start request_id=%s method=%s url_path=%s", trace_request_id, method, path)
         for attempt in range(attempts):
             try:
-                response = await self.http.request(
-                    method,
-                    request_url,
-                    params=None if signed else params,
-                    headers=headers,
-                    timeout=30,
-                )
+                async with BINANCE_RATE_LIMITER.slot(DEMO_REST_BASE) as rate_limit:
+                    response = await self.http.request(
+                        method,
+                        request_url,
+                        params=None if signed else params,
+                        headers=headers,
+                        timeout=30,
+                    )
+                    rate_limit.observe(response)
                 break
             except httpx.RequestError as exc:
                 if attempt + 1 == attempts:

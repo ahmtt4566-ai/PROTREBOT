@@ -19,6 +19,7 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field
 from .analysis import analyze
+from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .exchange_connections import (
     clear_vault_cache,
     ensure_exchange_vault,
@@ -1387,7 +1388,9 @@ async def market_data_request(application: FastAPI, path: str, params: dict[str,
     last_error: httpx.HTTPError | None = None
     for attempt in range(3):
         try:
-            response = await application.state.http.get(f"{FUTURES_MARKET_DATA_API}{path}", params=params)
+            async with BINANCE_RATE_LIMITER.slot(FUTURES_MARKET_DATA_API) as rate_limit:
+                response = await application.state.http.get(f"{FUTURES_MARKET_DATA_API}{path}", params=params)
+                rate_limit.observe(response)
             if response.status_code not in {500, 502, 503, 504} or attempt == 2:
                 return response
         except httpx.RequestError as exc:
@@ -1411,10 +1414,10 @@ def market_data_http_exception(prefix: str, error: httpx.HTTPError) -> HTTPExcep
                 detail = str(payload.get("msg") or payload.get("message") or "").strip()
         except (ValueError, json.JSONDecodeError):
             detail = ""
-    if status == 418:
+    if status in {418, 429}:
         message = f"{prefix}: Binance Futures erişimi geçici olarak engelledi (HTTP 418)."
-    elif status == 429:
-        message = f"{prefix}: Binance Futures hız sınırına ulaşıldı (HTTP 429)."
+        if status == 429:
+            message = f"{prefix}: Binance Futures hız sınırına ulaşıldı (HTTP 429)."
     elif status >= 500:
         message = f"{prefix}: Binance Futures sunucu hatası (HTTP {status})."
     elif response is None:
@@ -1423,7 +1426,7 @@ def market_data_http_exception(prefix: str, error: httpx.HTTPError) -> HTTPExcep
         message = f"{prefix}: HTTP {status}."
     if detail:
         message = f"{message} {detail}"
-    return HTTPException(status_code=429 if status == 429 else 502 if status >= 500 else status, detail=message)
+    return HTTPException(status_code=429 if status in {418, 429} else 502 if status >= 500 else status, detail=message)
 
 
 async def historical_fetch_candles(symbol: str, interval: str, total_limit: int = 10_000) -> list[dict]:
@@ -1445,12 +1448,13 @@ async def historical_fetch_candles(symbol: str, interval: str, total_limit: int 
         rows = None
         for attempt in range(max_retries):
             try:
-                response = await app.state.http.get(f"{FUTURES_MARKET_DATA_API}/fapi/v1/klines", params=params)
-                if response.status_code == 429:
-                    if attempt == max_retries - 1:
-                        raise HTTPException(502, "Binance historical candle rate limitine ulaşıldı")
-                    await asyncio.sleep(0.5 * (2 ** attempt))
-                    continue
+                async with BINANCE_RATE_LIMITER.slot(FUTURES_MARKET_DATA_API) as rate_limit:
+                    response = await app.state.http.get(f"{FUTURES_MARKET_DATA_API}/fapi/v1/klines", params=params)
+                    rate_limit.observe(response)
+                if response.status_code in {429, 418}:
+                    retry_after = response.headers.get("Retry-After", "").strip()
+                    headers = {"Retry-After": retry_after} if retry_after.isdigit() else None
+                    raise HTTPException(429, "Binance historical candle rate limitine ulaşıldı", headers=headers)
                 response.raise_for_status()
                 rows = response.json()
                 break
@@ -2924,9 +2928,11 @@ async def orderbook_intelligence(symbol: str) -> dict:
     if cached and time.monotonic() - cached[0] < 4:
         return {**cached[1], "cached": True}
     try:
-        response = await app.state.http.get(
-            f"{BINANCE_API}/api/v3/depth", params={"symbol": safe_symbol, "limit": 100},
-        )
+        async with BINANCE_RATE_LIMITER.slot(BINANCE_API) as rate_limit:
+            response = await app.state.http.get(
+                f"{BINANCE_API}/api/v3/depth", params={"symbol": safe_symbol, "limit": 100},
+            )
+            rate_limit.observe(response)
         response.raise_for_status()
         raw = response.json()
         bids = [(float(price), float(quantity)) for price, quantity in raw.get("bids", [])[:40]]
@@ -4598,7 +4604,9 @@ async def liquidity_shield(symbol: str) -> dict:
         "depth_usdt": 0.0, "best_bid": None, "best_ask": None,
     }
     try:
-        response = await app.state.http.get(f"{BINANCE_API}/api/v3/depth", params={"symbol": safe_symbol, "limit": 20})
+        async with BINANCE_RATE_LIMITER.slot(BINANCE_API) as rate_limit:
+            response = await app.state.http.get(f"{BINANCE_API}/api/v3/depth", params={"symbol": safe_symbol, "limit": 20})
+            rate_limit.observe(response)
         response.raise_for_status()
         order_book = response.json()
         bids = [(float(price), float(quantity)) for price, quantity in order_book["bids"][:20]]
@@ -5351,7 +5359,9 @@ async def decision_archive(limit: int = Query(8, ge=1, le=20)):
 async def latest_price(symbol: str) -> float:
     safe_symbol = "".join(char for char in symbol.upper() if char.isalnum())
     try:
-        response = await app.state.http.get(f"{BINANCE_API}/api/v3/ticker/price", params={"symbol": safe_symbol})
+        async with BINANCE_RATE_LIMITER.slot(BINANCE_API) as rate_limit:
+            response = await app.state.http.get(f"{BINANCE_API}/api/v3/ticker/price", params={"symbol": safe_symbol})
+            rate_limit.observe(response)
         response.raise_for_status()
         return float(response.json()["price"])
     except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:

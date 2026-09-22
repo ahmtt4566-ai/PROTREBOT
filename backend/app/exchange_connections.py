@@ -27,6 +27,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
+from .binance_rate_limit import BINANCE_RATE_LIMITER
 
 VERSION = "28.0.0"
 Mode = Literal["TESTNET", "LIVE"]
@@ -390,7 +391,9 @@ def _safe_exchange_message(payload: Any, api_key: str) -> str:
 async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: str, secret_key: str, timestamp: int) -> Any:
     query = _signed_query(secret_key, {"timestamp": timestamp, "recvWindow": 5000})
     try:
-        response = await http.get(f"{host}{path}?{query}", headers={"X-MBX-APIKEY": api_key})
+        async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+            response = await http.get(f"{host}{path}?{query}", headers={"X-MBX-APIKEY": api_key})
+            rate_limit.observe(response)
     except httpx.RequestError as exc:
         raise VaultError("Binance sunucusuna ulaşılamadı.") from exc
     if response.status_code >= 400:
@@ -445,7 +448,9 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
         host = HOSTS[normalized]
         before = int(time.time() * 1000)
         try:
-            response = await http.get(f"{host}/fapi/v1/time")
+            async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+                response = await http.get(f"{host}/fapi/v1/time")
+                rate_limit.observe(response)
             response.raise_for_status()
         except httpx.TimeoutException as exc:
             raise VaultError("Binance saat servisine ulaşırken zaman aşımı oluştu.") from exc

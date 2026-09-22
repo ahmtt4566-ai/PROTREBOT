@@ -32,6 +32,14 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from .analysis import analyze
+from .binance_rate_limit import (
+    BINANCE_RATE_LIMITER,
+    BINANCE_REQUEST_WEIGHT_LIMIT_1M,
+    BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO,
+    RATE_LIMIT_AWARE_BACKOFF_ENABLED,
+    RATE_LIMIT_PROACTIVE_WAIT_SECONDS,
+    retry_after_seconds,
+)
 from .binance_demo import (
     BinanceDemoError,
     account_snapshot,
@@ -83,10 +91,6 @@ LIVE_WS_BASE = "wss://fstream.binance.com/private"
 LIVE_ARM_SECONDS = 5 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
 RECONCILE_SECONDS = 10
-RATE_LIMIT_AWARE_BACKOFF_ENABLED = os.getenv("V25_RATE_LIMIT_AWARE_BACKOFF_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
-BINANCE_REQUEST_WEIGHT_LIMIT_1M = int(os.getenv("V25_BINANCE_REQUEST_WEIGHT_LIMIT_1M", "2400"))
-BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO = float(os.getenv("V25_BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO", "0.8"))
-RATE_LIMIT_PROACTIVE_WAIT_SECONDS = float(os.getenv("V25_RATE_LIMIT_PROACTIVE_WAIT_SECONDS", "1"))
 MAX_EVENTS = 500
 MAX_PLANS = 250
 PROVENANCE_STATES = {"NO_PROVENANCE", "PROVISIONAL", "CONFIRMED", "BROKEN"}
@@ -492,30 +496,10 @@ class BinanceLiveClient:
         self.time_offset_ms = 0
         self.last_time_sync = 0.0
         self._clock_lock = asyncio.Lock()
-        self.last_used_weight_1m: int | None = None
-        self._rate_limit_cooldown_until = 0.0
 
-    @staticmethod
-    def _retry_after_seconds(response: httpx.Response) -> int | None:
-        value = getattr(response, "headers", {}).get("Retry-After", "").strip()
-        if not value.isdigit():
-            return None
-        return max(1, int(value))
-
-    async def _wait_before_request(self) -> None:
-        if not RATE_LIMIT_AWARE_BACKOFF_ENABLED:
-            return
-        now = time.monotonic()
-        cooldown_wait = self._rate_limit_cooldown_until - now
-        weight_wait = RATE_LIMIT_PROACTIVE_WAIT_SECONDS if (
-            self.last_used_weight_1m is not None
-            and self.last_used_weight_1m >= BINANCE_REQUEST_WEIGHT_LIMIT_1M * BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO
-        ) else 0.0
-        wait_seconds = max(cooldown_wait, weight_wait)
-        if wait_seconds > 0:
-            await asyncio.sleep(wait_seconds)
-        if cooldown_wait > 0:
-            self._rate_limit_cooldown_until = 0.0
+    @property
+    def last_used_weight_1m(self) -> int | None:
+        return BINANCE_RATE_LIMITER.snapshot(LIVE_REST_BASE)["used_weight_1m"]
 
     async def public_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         if path not in PUBLIC_PATHS:
@@ -570,17 +554,14 @@ class BinanceLiveClient:
             raise LiveExchangeError("Canlı Binance sunucu kilidi doğrulanamadı.", http_status=500)
         headers = {"X-MBX-APIKEY": self.api_key} if signed or api_key_header else {}
         request_url = f"{url}?{encoded_query}&signature={signature}" if signed else url
-        await self._wait_before_request()
         try:
-            response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
+            async with BINANCE_RATE_LIMITER.slot(LIVE_REST_BASE) as rate_limit:
+                response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
+                rate_limit.observe(response)
         except httpx.TimeoutException as exc:
             raise LiveExchangeError("Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.", unknown_execution=True) from exc
         except httpx.RequestError as exc:
             raise LiveExchangeError("Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.", unknown_execution=True) from exc
-        response_headers = getattr(response, "headers", {})
-        used_weight = response_headers.get("X-MBX-USED-WEIGHT-1M", "")
-        if used_weight and used_weight.isdigit():
-            self.last_used_weight_1m = int(used_weight)
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -592,9 +573,7 @@ class BinanceLiveClient:
                 message = message.replace(self.api_key, "[gizli]")
             if response.status_code in {429, 418}:
                 message = "Binance API hız sınırı; yeni emir gönderilmedi. Geri çekilme süresi bekleniyor."
-                retry_after = self._retry_after_seconds(response)
-                if RATE_LIMIT_AWARE_BACKOFF_ENABLED and retry_after is not None:
-                    self._rate_limit_cooldown_until = time.monotonic() + retry_after
+                retry_after = retry_after_seconds(response)
                 logger.warning(
                     "LIVE Binance rate limit: method=%s path=%s status=%s code=%s retry_after_seconds=%s used_weight_1m=%s",
                     method,

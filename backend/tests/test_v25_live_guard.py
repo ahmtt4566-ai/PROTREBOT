@@ -576,7 +576,8 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         with patch.object(v25_execution.asyncio, "sleep", new=AsyncMock()) as sleep:
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
-        sleep.assert_awaited_once_with(v25_execution.RATE_LIMIT_PROACTIVE_WAIT_SECONDS)
+        sleep.assert_awaited_once()
+        self.assertAlmostEqual(sleep.await_args.args[0], v25_execution.RATE_LIMIT_PROACTIVE_WAIT_SECONDS, places=2)
 
     def test_unexpected_submit_exception_locks_unknown_and_disables_auto(self):
         state = initial_state()
