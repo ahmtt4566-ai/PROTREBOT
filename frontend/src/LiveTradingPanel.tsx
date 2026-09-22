@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, CircleDollarSign, Eye, EyeOff, KeyRound, LockKeyhole, Power, RefreshCw, Send, ShieldAlert, ShieldCheck, TriangleAlert, UnlockKeyhole, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
 
@@ -39,7 +39,9 @@ type ConnectionTestResult = {testedAt?: string; fingerprint?: string | null}
 
 type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MARKET' | 'LIMIT'; margin_usdt: string; leverage: string; limit_price: string; stop_loss: string; tp1: string; tp2: string; tp3: string}
 
-type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean}
+export type SharedLiveStatus = LiveStatus
+export type SharedConnectionStatus = ConnectionStatus
+type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: () => Promise<void>}
 
 const V25 = `${API_BASE}/v25`
 const CONNECTIONS = `${API_BASE}/exchange-connections`
@@ -71,9 +73,9 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
-export default function LiveTradingPanel({active, symbol, analysis, masterTrade}: Props) {
-  const [status, setStatus] = useState<LiveStatus | null>(null)
-  const [connections, setConnections] = useState<ConnectionStatus | null>(null)
+export default function LiveTradingPanel({active, symbol, analysis, masterTrade, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
+  const [localStatus, setLocalStatus] = useState<LiveStatus | null>(null)
+  const [localConnections, setLocalConnections] = useState<ConnectionStatus | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
   const [credentials, setCredentials] = useState({apiKey: '', secretKey: '', accepted: false})
   const [order, setOrder] = useState<OrderDraft>(initialOrder(symbol))
@@ -85,6 +87,9 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
   const [showSecret, setShowSecret] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [notice, setNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string}>({kind: 'info', text: 'LIVE başlatılmadı. Gerçek emir kilidi varsayılan olarak kapalıdır.'})
+  const refreshInFlight = useRef(false)
+  const status = sharedStatus !== undefined ? sharedStatus : localStatus
+  const connections = sharedConnections !== undefined ? sharedConnections : localConnections
 
   useEffect(() => {
     if (rateLimitSeconds === null || rateLimitSeconds <= 0) return
@@ -114,16 +119,28 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
   }
 
   const refresh = async (quiet = true) => {
+    if (onRefreshStatus) {
+      try {
+        await onRefreshStatus()
+      } catch (error) {
+        if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
+      }
+      return
+    }
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
     try {
       const [nextStatus, nextConnections] = await Promise.all([
         call<LiveStatus>(V25, '/status'),
         call<ConnectionStatus>(CONNECTIONS, '/status'),
       ])
-      setStatus(nextStatus)
-      setConnections(nextConnections)
+      setLocalStatus(nextStatus)
+      setLocalConnections(nextConnections)
       setPolicyDraft(current => current || nextStatus.policy || {})
     } catch (error) {
       if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
+    } finally {
+      refreshInFlight.current = false
     }
   }
 
@@ -133,9 +150,9 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade}
     setConfirm(null)
     setConfirmText('')
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 5000)
-    return () => window.clearInterval(timer)
-  }, [active, symbol])
+    const timer = onRefreshStatus ? undefined : window.setInterval(() => void refresh(), 5000)
+    return () => { if (timer !== undefined) window.clearInterval(timer) }
+  }, [active, symbol, Boolean(onRefreshStatus)])
 
   const run = async (key: string, action: () => Promise<void>, success: string) => {
     setBusy(key)

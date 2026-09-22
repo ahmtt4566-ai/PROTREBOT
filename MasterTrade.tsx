@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
-import LiveTradingPanel from './frontend/src/LiveTradingPanel'
+import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 
 type TradeSide = 'LONG' | 'SHORT'
@@ -93,6 +93,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [accountSyncState, setAccountSyncState] = useState<AccountSyncState>('READY')
   const [performanceSnapshot, setPerformanceSnapshot] = useState<PerformanceSnapshot | null>(null)
   const [dailyPerformance, setDailyPerformance] = useState<PerformanceSnapshot | null>(null)
+  const [liveStatus, setLiveStatus] = useState<SharedLiveStatus | null>(null)
+  const [liveConnections, setLiveConnections] = useState<SharedConnectionStatus | null>(null)
   const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(null)
   const [markets, setMarkets] = useState<MarketRow[]>([])
   const [marketQuery, setMarketQuery] = useState('')
@@ -122,6 +124,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [lastAccountSyncAt, setLastAccountSyncAt] = useState<string | null>(null)
   const [lastHistorySyncAt, setLastHistorySyncAt] = useState<string | null>(null)
   const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null)
+  const accountRefreshInFlight = useRef(false)
   const candles = snapshot?.candles ?? []
   const analysis = snapshot?.analysis ?? null
   const mtfAnalyses = snapshot?.mtf ?? []
@@ -193,34 +196,40 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   }, [draft.market, interval])
 
   const refreshAccountData = async () => {
-    const response = await Promise.all([
-      fetch(`${API_BASE}/v25/status`),
-      fetch(`${API_BASE}/v21/journal?limit=200`),
-      fetch(`${API_BASE}/v21/performance?period=all`),
-      fetch(`${API_BASE}/v21/performance?period=daily`),
-    ])
-    const [accountResponse, journalResponse, performanceResponse, dailyResponse] = response
+    if (accountRefreshInFlight.current) return false
+    accountRefreshInFlight.current = true
+    try {
+      const response = await Promise.all([
+        fetch(`${API_BASE}/v25/status`),
+        fetch(`${API_BASE}/exchange-connections/status`),
+        fetch(`${API_BASE}/v21/journal?limit=200`),
+        fetch(`${API_BASE}/v21/performance?period=all`),
+        fetch(`${API_BASE}/v21/performance?period=daily`),
+      ])
+      const [accountResponse, connectionResponse, journalResponse, performanceResponse, dailyResponse] = response
+      if (connectionResponse.ok) setLiveConnections(await connectionResponse.json() as SharedConnectionStatus)
 
-    if (accountResponse.status === 412) {
-      setAccountSyncState('DATA_UNAVAILABLE')
-      setHistorySyncState('UNAVAILABLE')
-      setSnapshot(current => current ? { ...current, accountError: 'LIVE ACCOUNT NOT CONFIGURED' } : current)
-      setLastAccountSyncAt(null)
-      setLastHistorySyncAt(null)
-      return false
-    }
+      if (accountResponse.status === 412) {
+        setAccountSyncState('DATA_UNAVAILABLE')
+        setHistorySyncState('UNAVAILABLE')
+        setSnapshot(current => current ? { ...current, accountError: 'LIVE ACCOUNT NOT CONFIGURED' } : current)
+        setLastAccountSyncAt(null)
+        setLastHistorySyncAt(null)
+        return false
+      }
 
-    const accountPayload = accountResponse.ok ? await accountResponse.json().catch(() => null) as { account?: AccountSnapshot; plans?: AccountPlan[]; detail?: unknown } : null
-    if (!accountResponse.ok || !accountPayload) {
-      const detail = accountPayload && typeof accountPayload.detail === 'string'
-        ? accountPayload.detail
-        : `Account data unavailable (HTTP ${accountResponse.status}).`
-      setAccountSyncState('DISCONNECTED')
-      setSnapshot(current => current ? { ...current, accountError: detail } : current)
-      setHistorySyncState('UNAVAILABLE')
-      setLastAccountSyncAt(null)
-      return false
-    }
+      const accountPayload = accountResponse.ok ? await accountResponse.json().catch(() => null) as { account?: AccountSnapshot; plans?: AccountPlan[]; detail?: unknown } : null
+      if (!accountResponse.ok || !accountPayload) {
+        const detail = accountPayload && typeof accountPayload.detail === 'string'
+          ? accountPayload.detail
+          : `Account data unavailable (HTTP ${accountResponse.status}).`
+        setAccountSyncState('DISCONNECTED')
+        setSnapshot(current => current ? { ...current, accountError: detail } : current)
+        setHistorySyncState('UNAVAILABLE')
+        setLastAccountSyncAt(null)
+        return false
+      }
+      setLiveStatus(accountPayload as SharedLiveStatus)
 
     const nextPositions = Array.isArray(accountPayload.account?.positions) ? accountPayload.account.positions : []
     const liveAccount = accountPayload.account ? { ...accountPayload.account, plans: accountPayload.plans } : null
@@ -264,7 +273,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     } else {
       setDailyPerformance(null)
     }
-    return true
+      return true
+    } finally {
+      accountRefreshInFlight.current = false
+    }
   }
 
   useEffect(() => {
@@ -785,7 +797,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           </aside>
         </div>
 
-        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade />
+        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={() => refreshAccountData().then(() => undefined)} />
 
         <div className="masterTradeDataGrid">
           <section className="masterTradePanel riskMonitorPanel">
