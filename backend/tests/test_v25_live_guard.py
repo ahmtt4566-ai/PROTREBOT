@@ -189,6 +189,8 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         state = initial_state()
         state["reconciliation_required"] = True
         state["execution_state"] = "UNKNOWN"
+        state["recovery_ready"] = False
+        state["recovery_error"] = "PostgreSQL recovery pending."
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
 
         with patch.object(v25_execution, "consent_status", return_value={}), \
@@ -197,6 +199,8 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
         self.assertTrue(status["reconciliation_required"])
         self.assertEqual(status["execution_state"], "UNKNOWN")
+        self.assertFalse(status["recovery_ready"])
+        self.assertEqual(status["recovery_error"], "PostgreSQL recovery pending.")
 
     def test_public_status_exposes_only_sanitized_reconciliation_diagnostic_fields(self):
         state = initial_state()

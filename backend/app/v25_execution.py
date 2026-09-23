@@ -1899,6 +1899,8 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "live_auto_trade": bool(state.get("live_auto_trade", False)),
         "reconciliation_required": bool(state.get("reconciliation_required", False)),
         "execution_state": state.get("execution_state", "LOCKED"),
+        "recovery_ready": bool(state.get("recovery_ready", False)),
+        "recovery_error": state.get("recovery_error"),
         "armed_until": datetime.fromtimestamp(state["armed_until"], timezone.utc).isoformat() if is_armed(state) else None,
         "auto": state["auto"],
         "scanner": {
