@@ -381,9 +381,9 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(verified["unverified_closures"], 0)
 
     def test_key_fingerprint_is_one_way_and_stable(self):
-        first = credential_fingerprint("live-api-key-123456")
-        self.assertEqual(first, credential_fingerprint("live-api-key-123456"))
-        self.assertNotIn("live-api-key", first or "")
+        first = credential_fingerprint("LIVE_KEY_PLACEHOLDER")
+        self.assertEqual(first, credential_fingerprint("LIVE_KEY_PLACEHOLDER"))
+        self.assertNotIn("LIVE_KEY_PLACEHOLDER", first or "")
 
 class V25LiveGuardIntegrationContractTests(unittest.TestCase):
     def _live_spec(self):
@@ -520,7 +520,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
                 return {"code": -1000, "msg": "ambiguous"}
 
         for result in (httpx.TimeoutException("timeout"), httpx.ConnectError("reset"), Response(500), Response(503)):
-            client = BinanceLiveClient(FakeHttp(result), "fake-api-key-123", "fake-secret-key-123")
+            client = BinanceLiveClient(FakeHttp(result), "TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")
             with self.assertRaises(LiveExchangeError) as raised:
                 asyncio.run(client._request("POST", "/fapi/v1/order", {}, signed=False))
             self.assertTrue(raised.exception.unknown_execution)
@@ -538,7 +538,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             async def request(self, *args, **kwargs):
                 return Response()
 
-        client = BinanceLiveClient(FakeHttp(), "fake-api-key-123", "fake-secret-key-123")
+        client = BinanceLiveClient(FakeHttp(), "TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")
         with self.assertRaises(v25_execution.LiveRateLimitError) as raised:
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
         self.assertEqual(raised.exception.retry_after, 7)
@@ -557,7 +557,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             async def request(self, *args, **kwargs):
                 return Response()
 
-        client = BinanceLiveClient(FakeHttp(), "fake-api-key-123", "fake-secret-key-123")
+        client = BinanceLiveClient(FakeHttp(), "TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")
         with self.assertRaises(v25_execution.LiveRateLimitError) as raised:
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
         self.assertIsNone(raised.exception.retry_after)
@@ -578,7 +578,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             async def request(self, *args, **kwargs):
                 return Response()
 
-        client = BinanceLiveClient(FakeHttp(), "fake-api-key-123", "fake-secret-key-123")
+        client = BinanceLiveClient(FakeHttp(), "TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")
         with patch.object(v25_execution.asyncio, "sleep", new=AsyncMock()) as sleep:
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
@@ -603,6 +603,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             account_snapshot=AsyncMock(return_value={"available_balance": 100, "positions": [], "open_orders": [], "hedge_mode": False}),
             spread_bps=AsyncMock(return_value=1.0),
             readiness=lambda application, state, request=None: {"ready": True},
+            auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
             build_live_spec=AsyncMock(return_value=spec),
             set_live_isolated_margin=AsyncMock(),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
@@ -678,6 +679,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             canonical_live_decision=AsyncMock(return_value={"decision": "BUY", "entry_eligible": True, "analysis": analysis}),
             spread_bps=AsyncMock(return_value=1.0),
             readiness=lambda application, state, request=None: ready,
+            auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
             build_live_spec=AsyncMock(return_value=spec),
             set_live_isolated_margin=AsyncMock(),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 2, "margin_type": "isolated"}),
@@ -954,7 +956,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
     def test_real_entries_require_readiness_and_short_lived_arm(self):
         self.assertIn("LIVE_ARM_SECONDS = 5 * 60", EXECUTION_SOURCE)
         self.assertIn('if not is_armed(state)', EXECUTION_SOURCE)
-        self.assertIn('if not readiness(application, state)["ready"]', EXECUTION_SOURCE)
+        self.assertIn('if not readiness_for(application, state, credentials=credentials)["ready"]', EXECUTION_SOURCE)
         self.assertIn("30 gün / 100 Demo işlem kanıtı", CORE_SOURCE)
         self.assertIn("LIVE_AUTO_SESSION_SECONDS = 60 * 60", EXECUTION_SOURCE)
         self.assertIn('state["policy"]["scan_seconds"]', EXECUTION_SOURCE)
@@ -1031,6 +1033,102 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("class ManualLiveOrderRequest", EXECUTION_SOURCE)
         self.assertIn("CANLI EMİR GÖNDER", EXECUTION_SOURCE)
         self.assertIn("confirmation:phrase", FRONTEND_SOURCE)
+
+
+class V25AutoAuthorizationRaceTests(unittest.TestCase):
+    API_KEY = "TEST_KEY_PLACEHOLDER"
+    SECRET_KEY = "TEST_SECRET_PLACEHOLDER"
+    SESSION_ID = "authorized-session"
+    USER_ID = "authorized-user"
+
+    def _context(self):
+        credentials = (self.API_KEY, self.SECRET_KEY)
+        fingerprint = credential_fingerprint(self.API_KEY)
+        expires_at = time.time() + 300
+        state = initial_state()
+        state.update({
+            "recovery_ready": True,
+            "real_trading_locked": False,
+            "auto_authorization": {
+                "session_id": self.SESSION_ID,
+                "user_id": self.USER_ID,
+                "fingerprint": fingerprint,
+                "expires_at_epoch": expires_at,
+            },
+        })
+        state["auto"].update({"enabled": True, "session_until": expires_at})
+        state["web_consent"] = {
+            "accepted_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at_epoch": expires_at,
+            "key_fingerprint": fingerprint,
+        }
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        return application, state, credentials
+
+    def _resolve(self, application, result):
+        return patch.multiple(
+            v25_execution,
+            session_credentials_for_identity=AsyncMock(return_value=result),
+            readiness=lambda application, state, request=None: {"ready": True},
+        )
+
+    def test_a_deactivated_credential_blocks_submission(self):
+        application, state, _ = self._context()
+        with self._resolve(application, ("", "")):
+            result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
+        self.assertEqual(result, ("", ""))
+
+    def test_b_changed_fingerprint_blocks_submission(self):
+        application, state, _ = self._context()
+        with self._resolve(application, ("DIFFERENT_KEY_PLACEHOLDER", self.SECRET_KEY)):
+            result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
+        self.assertEqual(result, ("", ""))
+
+    def test_c_expired_session_blocks_submission(self):
+        application, state, credentials = self._context()
+        state["auto"]["session_until"] = time.time() - 1
+        with self._resolve(application, credentials):
+            result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
+        self.assertEqual(result, ("", ""))
+
+    def test_d_expired_auto_authorization_blocks_submission(self):
+        application, state, credentials = self._context()
+        state["auto_authorization"]["expires_at_epoch"] = time.time() - 1
+        with self._resolve(application, credentials):
+            result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
+        self.assertEqual(result, ("", ""))
+
+    def test_e_expired_consent_blocks_submission(self):
+        application, state, credentials = self._context()
+        state["web_consent"]["expires_at_epoch"] = time.time() - 1
+        with self._resolve(application, credentials):
+            result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
+        self.assertEqual(result, ("", ""))
+
+    def test_f_user_or_session_mismatch_blocks_submission(self):
+        application, state, credentials = self._context()
+        state["auto_authorization"]["user_id"] = "different-user"
+        with self._resolve(application, ("", "")):
+            result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
+        self.assertEqual(result, ("", ""))
+
+    def test_g_all_final_validations_allow_mocked_submission_boundary(self):
+        application, state, credentials = self._context()
+        with self._resolve(application, credentials):
+            result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
+        self.assertEqual(result, credentials)
+
+    def test_h_plaintext_credentials_do_not_enter_state_events_or_output(self):
+        application, state, credentials = self._context()
+        with self._resolve(application, credentials):
+            resolved = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
+        state_text = json.dumps(state, default=str)
+        events_text = json.dumps(state["events"], default=str)
+        self.assertEqual(resolved, credentials)
+        self.assertNotIn(self.API_KEY, state_text)
+        self.assertNotIn(self.SECRET_KEY, state_text)
+        self.assertNotIn(self.API_KEY, events_text)
+        self.assertNotIn(self.SECRET_KEY, events_text)
 
 
 if __name__ == "__main__":

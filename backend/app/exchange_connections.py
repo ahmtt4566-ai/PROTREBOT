@@ -262,6 +262,52 @@ def session_credentials(request: Request, mode: str, *, active_only: bool = True
 def session_credentials_for_request(request: Request, mode: str, *, active_only: bool = True) -> tuple[str, str]:
     return session_credentials(request, mode, active_only=active_only)
 
+async def session_credentials_for_identity(
+    application: Any,
+    session_value: str,
+    user_id: str,
+    mode: str,
+    fingerprint: str,
+    *,
+    force_refresh: bool = False,
+) -> tuple[str, str]:
+    """Resolve an active encrypted session vault row without a request object."""
+    normalized = normalize_mode(mode)
+    if not session_value or not user_id or not fingerprint:
+        return "", ""
+    key = (session_value, normalized)
+    meta = _SESSION_META.get(key, {})
+    cached = _SESSION_CACHE.get(key, ("", ""))
+    if not force_refresh and (
+        meta.get("active")
+        and str(meta.get("user_id") or "") == user_id
+        and key_fingerprint(cached[0]) == fingerprint
+        and cached[1]
+    ):
+        return cached
+
+    pool = getattr(application.state, "db_pool", None)
+    if pool is None or not await ensure_exchange_vault(application):
+        return "", ""
+    await ensure_schema(pool)
+    row = await pool.fetchrow(
+        """
+        SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active
+        FROM protrebot_exchange_session_vault
+        WHERE session_id = $1 AND user_id = $2 AND mode = $3 AND active = TRUE
+        """,
+        session_value, user_id, normalized,
+    )
+    if not row or str(row.get("fingerprint") or "") != fingerprint:
+        return "", ""
+    try:
+        credentials = decrypt_credentials(bytes(row["encrypted_payload"]), mode=normalized)
+    except (KeyError, TypeError, ValueError, VaultError):
+        return "", ""
+    if key_fingerprint(credentials[0]) != fingerprint:
+        return "", ""
+    return credentials
+
 
 def _session_connection(mode: str, key: tuple[str, str]) -> dict[str, Any]:
     meta = _SESSION_META.get(key, {})

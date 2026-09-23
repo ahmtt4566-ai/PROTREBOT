@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import inspect
 import json
 import logging
 import math
@@ -67,7 +68,7 @@ from .execution_core import (
     risk_sized_order,
     sanitize_execution_policy,
 )
-from .exchange_connections import session_credentials_for_request, session_id
+from .exchange_connections import session_credentials_for_identity, session_credentials_for_request, session_id
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user
@@ -270,6 +271,7 @@ def initial_state() -> dict[str, Any]:
         "intents": {},
         "armed_until": 0.0,
         "auto": {"enabled": False, "busy": False, "cycles": 0, "last_scan": None, "last_scan_stats": None, "last_skip_reason": None, "last_cycle_stage": "idle", "last_decision": "Kullanıcı onayı bekleniyor.", "last_error": None, "session_until": 0.0},
+            "auto_authorization": {"session_id": "", "user_id": "", "fingerprint": "", "expires_at_epoch": 0.0},
         "real_trading_locked": True,
         "live_auto_trade": False,
         "emergency": {"active": False, "triggered_at": None, "reason": None},
@@ -437,8 +439,17 @@ def update_account_snapshot(state: dict[str, Any], snapshot: dict[str, Any], *, 
         state["snapshot_session_id"] = session_binding
 
 
-def consent_status(state: dict[str, Any] | None = None, request: Request | None = None) -> dict[str, Any]:
-    api_key, _, fingerprint = live_credentials_status(request)
+def consent_status(
+    state: dict[str, Any] | None = None,
+    request: Request | None = None,
+    credentials: tuple[str, str] | None = None,
+) -> dict[str, Any]:
+    if credentials is None:
+        api_key, secret_key, fingerprint = live_credentials_status(request)
+        credentials = (api_key, secret_key)
+    else:
+        api_key, secret_key = credentials
+        fingerprint = credential_fingerprint(api_key) if len(secret_key) >= 10 else None
     local_payload = load_live_consent()
     web_payload = state.get("web_consent", {}) if isinstance(state, dict) else {}
     candidates = [payload for payload in (web_payload, local_payload) if isinstance(payload, dict)]
@@ -605,9 +616,23 @@ class BinanceLiveClient:
             return {}
 
 
-def client_for(application: Any, request: Request | None = None) -> BinanceLiveClient:
-    api_key, secret_key, _ = live_credentials_status(request)
+def client_for(
+    application: Any,
+    request: Request | None = None,
+    credentials: tuple[str, str] | None = None,
+) -> BinanceLiveClient:
+    api_key, secret_key = credentials or live_credentials_status(request)[:2]
     return BinanceLiveClient(application.state.http, api_key, secret_key)
+
+
+def client_for_with_credentials(
+    application: Any,
+    credentials: tuple[str, str],
+    request: Request | None = None,
+) -> BinanceLiveClient:
+    if "credentials" in inspect.signature(client_for).parameters:
+        return client_for(application, request, credentials=credentials)
+    return client_for(application, request)
 
 
 def public_client_for(application: Any) -> BinanceLiveClient:
@@ -1533,8 +1558,13 @@ def demo_certificate(application: Any) -> dict[str, Any]:
     }
 
 
-def readiness(application: Any, state: dict[str, Any], request: Request | None = None) -> dict[str, Any]:
-    consent = consent_status(state, request)
+def readiness(
+    application: Any,
+    state: dict[str, Any],
+    request: Request | None = None,
+    credentials: tuple[str, str] | None = None,
+) -> dict[str, Any]:
+    consent = consent_status(state, request, credentials)
     snapshot = state.get("snapshot") or {}
     gates = release_gates(
         credentials=bool(consent.get("fingerprint")), consent_active=bool(consent.get("active")),
@@ -1543,6 +1573,17 @@ def readiness(application: Any, state: dict[str, Any], request: Request | None =
         demo_certificate=demo_certificate(application),
     )
     return {"ready": release_ready(gates), "score": round(sum(1 for item in gates if item["passed"]) / len(gates) * 100), "gates": gates, "demo_certificate": demo_certificate(application)}
+
+
+def readiness_for(
+    application: Any,
+    state: dict[str, Any],
+    request: Request | None = None,
+    credentials: tuple[str, str] | None = None,
+) -> dict[str, Any]:
+    if "credentials" in inspect.signature(readiness).parameters:
+        return readiness(application, state, request, credentials)
+    return readiness(application, state, request)
 
 
 def live_plan_is_active(plan: dict[str, Any]) -> bool:
@@ -1590,7 +1631,44 @@ def owned_protection_rows(plan: dict[str, Any], rows: list[dict[str, Any]]) -> l
     ]
 
 
-def live_auto_start_gate(application: Any, state: dict[str, Any]) -> tuple[bool, str]:
+async def auto_session_credentials(
+    application: Any,
+    state: dict[str, Any],
+    *,
+    force_refresh: bool = False,
+) -> tuple[str, str]:
+    authorization = state.get("auto_authorization") or {}
+    if float(authorization.get("expires_at_epoch") or 0) <= time.time():
+        return "", ""
+    credentials = await session_credentials_for_identity(
+        application,
+        str(authorization.get("session_id") or ""),
+        str(authorization.get("user_id") or ""),
+        "LIVE",
+        str(authorization.get("fingerprint") or ""),
+        force_refresh=force_refresh,
+    )
+    if not credentials or not consent_status(state, credentials=credentials).get("active"):
+        return "", ""
+    return credentials
+
+
+async def fresh_auto_submission_credentials(application: Any, state: dict[str, Any]) -> tuple[str, str]:
+    credentials = await auto_session_credentials(application, state, force_refresh=True)
+    if not credentials:
+        return "", ""
+    if (
+        state.get("real_trading_locked") is not False
+        or not auto_session_active(state)
+        or live_execution_blocked(state)
+        or not state.get("recovery_ready", False)
+        or not readiness_for(application, state, credentials=credentials)["ready"]
+    ):
+        return "", ""
+    return credentials
+
+
+def live_auto_start_gate(application: Any, state: dict[str, Any], request: Request | None = None) -> tuple[bool, str]:
     """Require every entry authority to be valid before opening automation."""
     if state.get("real_trading_locked") is not False:
         return False, "Gerçek işlem kilidi açık."
@@ -1600,7 +1678,7 @@ def live_auto_start_gate(application: Any, state: dict[str, Any]) -> tuple[bool,
         return False, "Canlı recovery hazır değil."
     if not is_armed(state):
         return False, "Süreli canlı kilit açık değil."
-    release = readiness(application, state)
+    release = readiness(application, state, request)
     if not release["ready"]:
         return False, "Canlı yayın kapıları tamamlanmadı."
     snapshot = state.get("snapshot")
@@ -1745,6 +1823,7 @@ async def execute_live_order(
     source: str,
     allowed_symbols: list[str] | None = None,
     request: Request | None = None,
+    credentials: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     state = application.state.v25_execution
     if not state.get("recovery_ready", False):
@@ -1756,12 +1835,16 @@ async def execute_live_order(
         raise HTTPException(423, "5 dakikalık canlı emir kilidi kapalı veya süresi doldu.")
     if live_execution_blocked(state):
         raise HTTPException(423, "Canlı yürütme kilitli; acil durum veya belirsiz emir uzlaştırması tamamlanmadı.")
-    if not readiness(application, state, request)["ready"]:
+    if source == "V25_AUTO" and credentials is None:
+        credentials = await auto_session_credentials(application, state)
+        if not credentials:
+            raise HTTPException(423, "Canlı API bağlantısı aktif değil; otomasyon credential doğrulaması başarısız.")
+    if not readiness_for(application, state, request, credentials)["ready"]:
         raise HTTPException(423, "Canlı yayın kapıları tamamlanmadı; emir gönderilmedi.")
     submission_started = False
     async with state["lock"]:
         try:
-            client = client_for(application, request)
+            client = client_for_with_credentials(application, credentials, request)
             snapshot = await account_snapshot(client)
             if state.get("real_trading_locked") is not False:
                 raise LiveExchangeError("Gerçek işlem kilidi kapalı; açık canlı onay olmadan emir gönderilmedi.", http_status=423)
@@ -1842,6 +1925,12 @@ async def execute_live_order(
                 "margin_type": leverage_audit["margin_type"],
             }
             persist_state(state)
+            if source == "V25_AUTO":
+                fresh_credentials = await fresh_auto_submission_credentials(application, state)
+                if not fresh_credentials:
+                    raise LiveExchangeError("Canlı otomasyon yetkilendirmesi artık geçerli değil; emir gönderilmedi.", http_status=423)
+                credentials = fresh_credentials
+                client = client_for_with_credentials(application, credentials, request)
             submission_started = True
             result = await submit_entry(client, spec, client_id, test_only=False)
             plan_id = uuid.uuid4().hex[:16]
@@ -1894,7 +1983,7 @@ async def execute_live_order(
             raise HTTPException(502, "Canlı emir akışı güvenli şekilde kilitlendi; manuel inceleme gerekli.") from exc
 
 
-async def automatic_cycle(application: Any) -> None:
+async def automatic_cycle(application: Any, credentials: tuple[str, str] | None = None) -> None:
     state = application.state.v25_execution
     was_enabled = bool(state["auto"].get("enabled"))
     session_until = float(state["auto"].get("session_until") or 0)
@@ -1904,7 +1993,14 @@ async def automatic_cycle(application: Any) -> None:
         state["auto"]["last_cycle_stage"] = "skipped"
         automation_telemetry(f"AUTOMATION_SKIP reason={reason}", reason=reason)
         return
-    if not readiness(application, state)["ready"]:
+    if credentials is None:
+        credentials = await auto_session_credentials(application, state)
+    if not credentials:
+        state["auto"]["last_skip_reason"] = "no_credentials"
+        state["auto"]["last_cycle_stage"] = "skipped"
+        automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")
+        return
+    if not readiness_for(application, state, credentials=credentials)["ready"]:
         state["auto"]["last_skip_reason"] = "not_ready"
         state["auto"]["last_cycle_stage"] = "skipped"
         automation_telemetry("AUTOMATION_SKIP reason=not_ready", reason="not_ready")
@@ -1925,7 +2021,7 @@ async def automatic_cycle(application: Any) -> None:
     state["auto"]["last_scan"] = now_iso()
     state["auto"]["busy"] = True
     try:
-        client = client_for(application)
+        client = client_for_with_credentials(application, credentials)
         snapshot = await account_snapshot(client)
         daily = live_daily_metrics(state)
         state["auto"]["last_skip_reason"] = None
@@ -2002,7 +2098,7 @@ async def automatic_cycle(application: Any) -> None:
                 margin_usdt=risk["margin_usdt"], leverage=risk["leverage"], stop_loss=signal["stop_loss"],
                 tp1=signal["tp1"], tp2=signal["tp2"], tp3=signal["tp3"], intent_id=intent_id,
             )
-            await execute_live_order(application, body, source="V25_AUTO", allowed_symbols=[symbol])
+            await execute_live_order(application, body, source="V25_AUTO", allowed_symbols=[symbol], credentials=credentials)
             executed_symbols.append(symbol)
             state["auto"]["last_decision"] = f"{symbol} {signal['direction']} canlı işlem açıldı; Stop/TP doğrulandı."
             snapshot = await account_snapshot(client)
@@ -2023,9 +2119,9 @@ async def automatic_cycle(application: Any) -> None:
         persist_state(state)
 
 
-async def reconcile(application: Any) -> None:
+async def reconcile(application: Any, credentials: tuple[str, str] | None = None) -> None:
     state = application.state.v25_execution
-    client = client_for(application)
+    client = client_for_with_credentials(application, credentials)
     try:
         snapshot = await account_snapshot(client)
     except LiveRateLimitError as exc:
@@ -2116,16 +2212,16 @@ async def execution_loop(application: Any) -> None:
                 await asyncio.sleep(5)
                 continue
             automation_telemetry("AUTOMATION_LOOP running", reason="loop_running")
-            _, secret, fingerprint = live_credentials_status()
-            if not fingerprint or len(secret) < 10:
+            credentials = await auto_session_credentials(application, application.state.v25_execution)
+            if not credentials:
                 application.state.v25_execution["auto"]["last_skip_reason"] = "no_credentials"
                 application.state.v25_execution["auto"]["last_cycle_stage"] = "skipped"
                 automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")
                 await asyncio.sleep(5)
                 continue
             async with application.state.v25_execution["lock"]:
-                await reconcile(application)
-            await automatic_cycle(application)
+                await reconcile(application, credentials=credentials)
+            await automatic_cycle(application, credentials=credentials)
             backoff = 5
             await asyncio.sleep(RECONCILE_SECONDS)
         except asyncio.CancelledError:
@@ -2329,6 +2425,7 @@ async def v25_disarm(request: Request) -> dict[str, Any]:
     state["armed_until"] = 0.0
     state["real_trading_locked"] = True
     state["live_auto_trade"] = False
+    state["auto_authorization"] = initial_state()["auto_authorization"]
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
     add_event(state, "LIVE_DISARM", "Canlı yeni girişler ve otomasyon kilitlendi; korumalar çalışmaya devam eder.", actor=user["id"])
@@ -2350,13 +2447,20 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     if body.confirmation.strip().upper() != "CANLI OTOMATİK":
         raise HTTPException(422, "Otomasyonu açmak için CANLI OTOMATİK yazın.")
     state = request.app.state.v25_execution
-    allowed, reason = live_auto_start_gate(request.app, state)
+    allowed, reason = live_auto_start_gate(request.app, state, request)
     if not allowed:
         raise HTTPException(423, reason)
     state["auto"].update({"enabled": True, "session_until": time.time() + LIVE_AUTO_SESSION_SECONDS, "last_error": None, "last_decision": "Bir saatlik gözetimli canlı tarama başlatıldı."})
     state["live_auto_trade"] = True
     state["real_trading_locked"] = False
     state["armed_until"] = 0.0
+    api_key, secret_key, fingerprint = live_credentials_status(request)
+    state["auto_authorization"] = {
+        "session_id": session_id(request),
+        "user_id": str(user["id"]),
+        "fingerprint": fingerprint if api_key and secret_key else "",
+        "expires_at_epoch": state["auto"]["session_until"],
+    }
     add_event(state, "LIVE_AUTO_START", "Canlı otomasyon 5 dakikalık kilit içinden bir saatlik gözetimli oturum için açıldı.", actor=user["id"])
     persist_state(state)
     return public_status(request.app, request)
@@ -2370,6 +2474,7 @@ async def v25_auto_stop(request: Request) -> dict[str, Any]:
     state["auto"]["session_until"] = 0.0
     state["real_trading_locked"] = True
     state["live_auto_trade"] = False
+    state["auto_authorization"] = initial_state()["auto_authorization"]
     state["auto"]["last_decision"] = "Yeni otomatik canlı girişler durduruldu."
     add_event(state, "LIVE_AUTO_STOP", "Canlı otomasyon durduruldu; mevcut Stop/TP korumaları açık.", actor=user["id"])
     persist_state(state)
