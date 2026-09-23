@@ -2394,6 +2394,12 @@ async def execution_loop(application: Any) -> None:
             if not recovery_loaded or database_unavailable:
                 application.state.v25_execution["auto"]["last_skip_reason"] = "recovery_unavailable"
                 automation_telemetry("AUTOMATION_SKIP reason=recovery_unavailable", reason="recovery_unavailable")
+                logger.warning(
+                    "LIVE automation skipped: recovery_unavailable recovery_loaded=%s database_unavailable=%s recovery_error=%s",
+                    recovery_loaded,
+                    database_unavailable,
+                    str(application.state.v25_execution.get("recovery_error") or "")[:160],
+                )
                 await asyncio.sleep(5)
                 continue
             automation_telemetry("AUTOMATION_LOOP running", reason="loop_running")
