@@ -339,6 +339,23 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("recovery", reason.lower())
 
+    def test_auto_start_gate_rejects_unmanaged_external_position(self):
+        state = initial_state()
+        state.update({"real_trading_locked": False, "connected": True, "recovery_ready": True, "armed_until": time.time() + 300})
+        state["policy_ack_digest"] = policy_digest(state["policy"])
+        state["web_consent"] = {"key_fingerprint": "fingerprint", "expires_at_epoch": time.time() + 3600}
+        state["snapshot"] = {
+            "available_balance": 1000,
+            "positions": [{"symbol": "RAYSOLUSDT", "direction": "LONG", "quantity": "1"}],
+            "open_orders": [],
+            "hedge_mode": False,
+        }
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
+        with patch.object(v25_execution, "consent_status", return_value={"fingerprint": "fingerprint", "active": True}):
+            allowed, reason = live_auto_start_gate(application, state)
+        self.assertFalse(allowed)
+        self.assertIn("V25 dışı", reason)
+
     def test_provenance_requires_exact_position_identity(self):
         plan = {"provenance_state": "PROVISIONAL", "symbol": "BTCUSDT", "direction": "LONG", "quantity": "0.010", "entry_order_id": 42, "entry_client_order_id": "PTB_ENTRY_exact"}
         self.assertFalse(confirm_live_plan_provenance(plan, {"symbol": "BTCUSDT", "direction": "LONG", "quantity": "0.011"}))

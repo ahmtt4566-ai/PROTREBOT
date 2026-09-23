@@ -180,7 +180,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const riskGate = status?.readiness?.gates?.find(gate => /risk|policy|limit|safety|guven/i.test(`${gate.key} ${gate.label}`)) || {passed: false}
   const activePlans = status?.plans?.filter(plan => !['CLOSED', 'CANCELLED', 'CLOSED_CONFIRMED'].includes(String(plan.status || '').toUpperCase())).length ?? 0
   const noActivePositionOrPlan = (status?.account?.positions || []).length === 0 && activePlans === 0
-  const protectionState = recoveryRequired ? 'BLOCKED' : noActivePositionOrPlan ? 'READY' : protectionGate ? protectionGate.passed ? 'READY' : 'REQUIRED' : 'UNKNOWN'
+  const protectionState = recoveryRequired ? 'BLOCKED' : noActivePositionOrPlan ? 'READY' : activePlans === 0 ? 'EXTERNAL' : protectionGate ? protectionGate.passed ? 'READY' : 'REQUIRED' : 'UNKNOWN'
   const protectionReady = protectionState === 'READY'
   const exposure = (status?.account?.positions || []).reduce((sum, item) => sum + Math.abs(Number(item.notional || item.positionAmt || 0)), 0)
   const executionLocked = status === null || status.real_trading_locked !== false
@@ -198,7 +198,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const exposureState = exposureGate !== 'UNKNOWN' ? exposureGate : status === null ? 'UNKNOWN' : exposure === 0 ? 'READY' : 'BLOCKED'
   const activePlanState = status === null ? 'UNKNOWN' : activePlans ? 'CONFLICT' : 'READY'
   const emergencyState = status === null ? 'UNKNOWN' : emergency ? 'ACTIVE' : 'CLEAR'
-  const autoReady = Boolean(status && connections && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState !== 'BLOCKED' && recoveryState === 'READY' && emergencyState === 'CLEAR')
+  const autoReady = Boolean(status && connections && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
   const policy = policyDraft || status?.policy || {}
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
@@ -307,7 +307,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const currentPosition = positions[0]
   const activePlan = status?.plans?.find(plan => !['CLOSED', 'CANCELLED', 'KAPANDI', 'İPTAL'].includes(String(plan.status || '').toUpperCase()))
   const recentOrder = status?.events?.find(event => ['LIVE_ENTRY', 'LIVE_ENTRY_RECOVERED', 'LIVE_ORDER_UPDATE'].includes(String(event.kind)))
-  const currentProtection = activePlan?.protection_state === 'MATCHED' ? 'PROTECTED' : activePlan?.protection_state === 'MISSING' ? 'NOT PROTECTED' : protectionState === 'READY' ? 'PROTECTED' : 'UNKNOWN'
+  const currentProtection = activePlan?.protection_state === 'MATCHED' ? 'PROTECTED' : activePlan?.protection_state === 'MISSING' ? 'NOT PROTECTED' : protectionState === 'READY' ? 'PROTECTED' : protectionState === 'EXTERNAL' ? 'EXTERNAL / NOT MANAGED' : 'UNKNOWN'
   const protectionItem = (key: string) => {
     if (!activePlan) return 'UNKNOWN'
     if (key === 'STOP') return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT ACTIVE' : 'UNKNOWN'

@@ -1862,12 +1862,23 @@ def live_auto_start_gate(application: Any, state: dict[str, Any], request: Reque
         return False, "Canlı recovery hazır değil."
     if not is_armed(state):
         return False, "Süreli canlı kilit açık değil."
-    release = readiness(application, state, request)
-    if not release["ready"]:
-        return False, "Canlı yayın kapıları tamamlanmadı."
     snapshot = state.get("snapshot")
     if not isinstance(snapshot, dict):
         return False, "Canlı hesap snapshot'ı mevcut değil."
+    active_plans = [plan for plan in state.get("plans", {}).values() if isinstance(plan, dict) and live_plan_is_active(plan)]
+    if active_plans:
+        return False, "Aktif LIVE plan varken otomasyon açılamaz."
+    tracked_symbols = {str(plan.get("symbol") or "").upper() for plan in active_plans}
+    unmanaged_positions = [
+        position for position in snapshot.get("positions", [])
+        if str(position.get("symbol") or "").upper() not in tracked_symbols
+    ]
+    if unmanaged_positions:
+        symbols = ", ".join(str(position.get("symbol") or "UNKNOWN") for position in unmanaged_positions[:3])
+        return False, f"V25 dışı açık pozisyon protection kapsamı dışında: {symbols}. Önce manuel pozisyonu yönetin."
+    release = readiness(application, state, request)
+    if not release["ready"]:
+        return False, "Canlı yayın kapıları tamamlanmadı."
     if snapshot.get("hedge_mode") is not False:
         return False, "Canlı hesap One-way modunda değil."
     available_balance = snapshot.get("available_balance")
@@ -1876,9 +1887,6 @@ def live_auto_start_gate(application: Any, state: dict[str, Any], request: Reque
     daily = live_daily_metrics(state)
     if int(daily.get("unverified_closures", 0)) != 0:
         return False, "Doğrulanmamış kapanış recovery gerektiriyor."
-    active_plans = [plan for plan in state.get("plans", {}).values() if isinstance(plan, dict) and live_plan_is_active(plan)]
-    if active_plans:
-        return False, "Aktif LIVE plan varken otomasyon açılamaz."
     allowed_symbols = state["policy"].get("allowed_symbols") or ["BTCUSDT"]
     risk = evaluate_entry_gates(
         symbol=str(allowed_symbols[0]),
