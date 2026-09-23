@@ -298,7 +298,7 @@ async def session_credentials_for_identity(
         """,
         session_value, user_id, normalized,
     )
-    if not row and user_id == "WEB_OWNER":
+    if not row:
         row = await pool.fetchrow(
             """
             SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active
