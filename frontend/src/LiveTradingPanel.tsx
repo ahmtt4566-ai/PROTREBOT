@@ -86,6 +86,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [confirm, setConfirm] = useState<{title: string;message: string;expected: string;action: () => Promise<void>} | null>(null)
   const [confirmText, setConfirmText] = useState('')
   const [busy, setBusy] = useState('')
+  const [armPendingSync, setArmPendingSync] = useState(false)
   const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null)
   const [showSecret, setShowSecret] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -190,7 +191,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
   const connectionReady = status !== null && connections !== null && connected
   const connectionState = status === null || connections === null ? 'UNKNOWN' : connected ? 'CONNECTED' : 'NOT CONNECTED'
-  const armState = status === null ? 'UNKNOWN' : status.armed && !executionLocked ? 'READY' : 'LOCKED'
+  const liveArmed = Boolean((status?.armed || armPendingSync) && !executionLocked)
+  const armState = status === null ? 'UNKNOWN' : liveArmed ? 'READY' : 'LOCKED'
   const riskState = riskGate ? riskGate.passed ? 'READY' : 'BLOCKED' : gateState([/risk/i, /policy/i, /limit/i, /safety/i, /guven/i])
   const exposureGate = gateState([/exposure/i, /notional/i])
   const exposureState = exposureGate !== 'UNKNOWN' ? exposureGate : status === null ? 'UNKNOWN' : exposure === 0 ? 'READY' : 'BLOCKED'
@@ -238,6 +240,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     }
     setConfirm({title: 'LIVE ARM onayı', message: 'REAL MONEY — LIVE ACCOUNT. Backend readiness gate’leri geçmeden kilit açılmaz. LIVE ARM AUTO-TRADE başlatmaz.', expected: 'CANLI EMİR RİSKİNİ KABUL EDİYORUM', action: async () => {
       await call(V25, '/arm', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI EMİR RİSKİNİ KABUL EDİYORUM'})})
+      setArmPendingSync(true)
     }})
     setConfirmText('')
   }
@@ -257,6 +260,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
 
   const stopAutoTrade = () => run('auto-stop', () => call(V25, '/auto/stop', {method: 'POST'}).then(() => undefined), 'LIVE AUTO-TRADE kapatıldı; mevcut protection yönetimi backend’de devam eder.')
+  const disarmLive = () => run('disarm', () => call(V25, '/disarm', {method: 'POST'}).then(() => { setArmPendingSync(false) }), 'LIVE disarmed; AUTO-TRADE kapalı.')
   const autoToggle = () => {
     if (status?.live_auto_trade || status?.auto?.enabled) return stopAutoTrade()
     setConfirm({title: 'LIVE AUTO-TRADE onayı', message: 'REAL MONEY WILL BE USED. Otomatik işlemler yalnız mevcut V25 live safety chain üzerinden ilerler.', expected: 'CANLI OTOMATİK', action: async () => { await call(V25, '/auto/start', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI OTOMATİK'})}) }})
@@ -309,7 +313,6 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (key === 'STOP') return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT ACTIVE' : 'UNKNOWN'
     return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT SET' : 'UNKNOWN'
   }
-  const liveArmed = Boolean(status?.armed && !executionLocked)
   const blocker = status === null
     ? 'LIVE status is not available.'
     : emergency
@@ -419,7 +422,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     <div className={`liveUxNow ${liveState.toLowerCase()}`}><div><small>WHAT TO DO NOW</small><strong>{liveState === 'BLOCKED' ? '⚠ LIVE IS BLOCKED' : liveState === 'READY' ? 'LIVE IS READY' : '🔒 LIVE IS LOCKED'}</strong><p>{blocker}</p></div><button type="button" onClick={() => void refresh(false)} disabled={Boolean(busy)}><RefreshCw/> REFRESH STATUS</button></div>
 
     <div className="liveUxGrid liveUxTopGrid"><section className="liveUxCard liveUxPosition"><header><CircleDollarSign/><div><small>CURRENT POSITION</small><h3>{currentPosition ? text(currentPosition.symbol) : 'NO OPEN POSITION'}</h3></div><b>{currentPosition ? 'OPEN' : 'NO ACTIVE POSITION'}</b></header>{currentPosition ? <><div className="liveUxPositionSide"><strong>{text(currentPosition.direction)}</strong><span>Position Status · OPEN</span></div><div className="liveUxMetrics"><span><small>ENTRY</small><b>{positionValue('entry_price')}</b></span><span><small>MARK PRICE</small><b>{positionValue('mark_price')}</b></span><span><small>QUANTITY</small><b>{positionValue('quantity')}</b></span><span><small>UNREALIZED PNL</small><b>{money(currentPosition.unrealized_pnl)}</b></span><span><small>STOP LOSS</small><b>{text(activePlan?.stop_loss)}</b></span><span><small>TAKE PROFIT 1</small><b>{text(activePlan?.targets?.[0])}</b></span><span><small>TAKE PROFIT 2</small><b>{text(activePlan?.targets?.[1])}</b></span><span><small>TAKE PROFIT 3</small><b>{text(activePlan?.targets?.[2])}</b></span></div><div className={`liveUxProtectionBadge ${currentProtection.toLowerCase().replaceAll(' ', '-')}`}>PROTECTION · {currentProtection}</div></> : <p className="liveUxEmpty">No active LIVE position. Position data is read from the backend account snapshot.</p>}</section>
-      <section className="liveUxCard liveUxControls"><header><UnlockKeyhole/><div><small>LIVE ARM</small><h3>Release control</h3></div><b>{status?.armed ? 'ARMED' : 'LOCKED'}</b></header><div className="liveUxControlState"><strong>{status?.armed ? 'ARMED' : 'LOCKED'}</strong><span>Arming LIVE does not start an order. Auto Trade must be enabled separately.</span></div><button type="button" className="liveArmButton" onClick={status?.armed ? () => run('disarm', () => call(V25, '/disarm', {method: 'POST'}).then(() => undefined), 'LIVE disarmed; AUTO-TRADE kapalı.') : armLive} disabled={Boolean(busy) || (!status?.armed && (!configured || !connected || emergency || recoveryRequired || !readinessReady))}>{status?.armed ? <LockKeyhole/> : <UnlockKeyhole/>}{status?.armed ? ' DISARM LIVE' : ' ARM LIVE'}</button><small className="liveUxReason">{status?.armed ? 'New-entry authority is active until the backend arm window expires.' : 'Current backend blocker: ' + (blocker || 'unknown')}</small></section></div>
+      <section className="liveUxCard liveUxControls"><header><UnlockKeyhole/><div><small>LIVE ARM</small><h3>Release control</h3></div><b>{liveArmed ? 'ARMED' : 'LOCKED'}</b></header><div className="liveUxControlState"><strong>{liveArmed ? 'ARMED' : 'LOCKED'}</strong><span>Arming LIVE does not start an order. Auto Trade must be enabled separately.</span></div><button type="button" className="liveArmButton" onClick={liveArmed ? disarmLive : armLive} disabled={Boolean(busy) || (!liveArmed && (!configured || !connected || emergency || recoveryRequired || !readinessReady))}>{liveArmed ? <LockKeyhole/> : <UnlockKeyhole/>}{liveArmed ? ' DISARM LIVE' : ' ARM LIVE'}</button><small className="liveUxReason">{liveArmed ? 'New-entry authority is active until the backend arm window expires.' : 'Current backend blocker: ' + (blocker || 'unknown')}</small></section></div>
 
     <section className="liveUxCard liveUxAuto"><header><Power/><div><small>AUTO TRADE / LIVE ARM</small><h3>Supervised live automation</h3></div><b>{status?.live_auto_trade ? 'ON' : 'OFF'}</b></header><div className="liveUxActionRow"><button type="button" onClick={autoToggle} disabled={Boolean(busy) || !autoReady || Boolean(status?.live_auto_trade)}><Power/> START LIVE AUTO TRADE</button><button type="button" onClick={stopAutoTrade} disabled={Boolean(busy) || !status?.live_auto_trade}><Power/> STOP AUTO TRADE</button></div><p className="liveUxReason"><strong>Reason:</strong> {status?.live_auto_trade ? 'Automatic trading is enabled by backend state.' : status?.auto?.last_decision || blocker}</p></section>
 
