@@ -288,6 +288,7 @@ async def session_credentials_for_identity(
 
     pool = getattr(application.state, "db_pool", None)
     if pool is None or not await ensure_exchange_vault(application):
+        logger.warning("LIVE credential resolution failed: pool_unavailable")
         return "", ""
     await ensure_schema(pool)
     row = await pool.fetchrow(
@@ -310,10 +311,15 @@ async def session_credentials_for_identity(
             session_value, normalized,
         )
     if not row or str(row.get("fingerprint") or "") != fingerprint:
+        logger.warning(
+            "LIVE credential resolution failed: %s",
+            "identity_miss" if not row else "fingerprint_mismatch",
+        )
         return "", ""
     try:
         credentials = decrypt_credentials(bytes(row["encrypted_payload"]), mode=normalized)
     except (KeyError, TypeError, ValueError, VaultError):
+        logger.warning("LIVE credential resolution failed: decrypt_failed")
         return "", ""
     if key_fingerprint(credentials[0]) != fingerprint:
         return "", ""
