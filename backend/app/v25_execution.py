@@ -2578,6 +2578,11 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
     api_key, secret_key, fingerprint = live_credentials_status(request)
     if not api_key or len(secret_key) < 10 or not fingerprint:
         raise HTTPException(412, "Önce programdaki Borsa Bağlantıları bölümünden canlı Binance API anahtarını kaydedip aktifleştirin.")
+    state["live_session_authorization"] = {
+        "session_id": session_id(request),
+        "user_id": str(user["id"]),
+        "fingerprint": fingerprint,
+    }
     state["web_consent"] = {
         "accepted_at": now_iso(),
         "expires_at_epoch": time.time() + (24 * 60 * 60),
