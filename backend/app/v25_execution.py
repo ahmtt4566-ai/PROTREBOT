@@ -189,7 +189,121 @@ def lock_live_execution(
         symbol=symbol,
         client_order_id_suffix=str(client_id or "")[-8:] or None,
         reconciliation_required=bool(unknown),
+        unknown_execution=unknown,
     )
+
+
+def unresolved_execution_evidence(state: dict[str, Any]) -> bool:
+    """Return whether state contains evidence of an unresolved LIVE execution."""
+    events = state.get("events") if isinstance(state.get("events"), list) else []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        kind = str(event.get("kind") or "")
+        if kind == "UNKNOWN_ORDER_RECONCILED":
+            break
+        if kind in {"UNKNOWN_ORDER_STATE", "LIVE_EXCEPTION_UNKNOWN"}:
+            return True
+        if kind == "LIVE_UNKNOWN_EXECUTION":
+            if event.get("unknown_execution") is True or event.get("reason") != "RECONCILIATION_FAILURE":
+                return True
+
+    plans = state.get("plans") if isinstance(state.get("plans"), dict) else {}
+    active_plan_ids: set[str] = set()
+    for plan_id, plan in plans.items():
+        if not isinstance(plan, dict):
+            continue
+        status = str(plan.get("status") or "").upper()
+        if status not in {"KAPANDI", "İPTAL", "CLOSED", "CANCELLED", "CLOSED_CONFIRMED"}:
+            active_plan_ids.add(str(plan_id))
+        if plan.get("provenance_state") not in {None, "CONFIRMED"} or plan.get("protection_state") == "UNKNOWN":
+            return True
+        if plan.get("protection_cleanup_state") in {"UNKNOWN", "RETRY_REQUIRED"}:
+            return True
+    if active_plan_ids:
+        return True
+
+    intents = state.get("intents") if isinstance(state.get("intents"), dict) else {}
+    for intent_id, intent in intents.items():
+        if not isinstance(intent, dict):
+            continue
+        client_id = str(intent.get("client_order_id") or "")
+        if not client_id.startswith(LIVE_CLIENT_PREFIX):
+            continue
+        resolved = any(
+            str(plan.get("intent_id") or "") == str(intent_id)
+            or str(plan.get("entry_client_order_id") or "") == client_id
+            for plan in plans.values()
+            if isinstance(plan, dict)
+        )
+        if not resolved or active_plan_ids:
+            return True
+    return False
+
+
+def lock_reconciliation_failure(state: dict[str, Any]) -> None:
+    """Fail closed after reconciliation without claiming an unknown order."""
+    lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=False)
+    state["armed_until"] = 0.0
+    state["real_trading_locked"] = True
+    state["live_auto_trade"] = False
+    state["auto"].update({"enabled": False, "session_until": 0.0})
+    state["execution_state"] = "LOCKED"
+    state["reconciliation_required"] = True
+
+
+def clear_clean_reconciliation_state(state: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    """Clear only a stale technical UNKNOWN after a complete clean snapshot."""
+    emergency = state.get("emergency") if isinstance(state.get("emergency"), dict) else {}
+    if emergency.get("reason") != "RECONCILIATION_FAILURE":
+        return False
+    if state.get("execution_state") not in {"UNKNOWN", "LOCKED"} or not state.get("reconciliation_required"):
+        return False
+    required_snapshot_keys = {
+        "wallet_balance",
+        "available_balance",
+        "positions",
+        "open_orders",
+        "open_algo_orders",
+        "open_algo_orders_available",
+        "algo_orders_quality",
+    }
+    if not isinstance(snapshot, dict) or not required_snapshot_keys.issubset(snapshot):
+        return False
+    if any(not isinstance(snapshot.get(key), list) for key in ("positions", "open_orders", "open_algo_orders")):
+        return False
+    for balance_key in ("wallet_balance", "available_balance"):
+        balance = snapshot.get(balance_key)
+        if isinstance(balance, bool) or not isinstance(balance, (int, float, Decimal)) or not math.isfinite(float(balance)):
+            return False
+    if snapshot.get("open_algo_orders_available") is not True or snapshot.get("algo_orders_quality") not in {"VALID_EMPTY", "VALID_ORDERS"}:
+        return False
+    collection_fields = {
+        "positions": {"symbol", "position_side", "direction", "quantity"},
+        "open_orders": {"symbol", "order_id", "client_order_id", "side", "type", "status"},
+        "open_algo_orders": {"symbol", "algo_id", "client_algo_id", "side", "type", "status"},
+    }
+    for collection, required_fields in collection_fields.items():
+        for row in snapshot[collection]:
+            if not isinstance(row, dict) or not required_fields.issubset(row):
+                return False
+    for row in [*snapshot["open_orders"], *snapshot["open_algo_orders"]]:
+        if any(
+            str(row.get(key) or "").startswith(LIVE_CLIENT_PREFIX)
+            for key in ("clientOrderId", "client_order_id", "clientAlgoId", "client_algo_id")
+        ):
+            return False
+    if unresolved_execution_evidence(state):
+        return False
+    state["execution_state"] = "LOCKED"
+    state["reconciliation_required"] = False
+    state["real_trading_locked"] = True
+    state["live_auto_trade"] = False
+    state["armed_until"] = 0.0
+    state["auto"].update({"enabled": False, "session_until": 0.0})
+    state["emergency"].update({"active": False, "reason": "RECONCILIATION_CLEAN"})
+    add_event(state, "RECONCILIATION_CLEAN", "Tam ve temiz canlı hesap uzlaştırması tamamlandı; canlı işlem kilidi korunuyor.")
+    return True
 
 
 class PolicyUpdate(BaseModel):
@@ -2208,6 +2322,7 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
             await install_protection(client, state, plan)
         elif plan.get("status") == "DOLUM BEKLİYOR":
             plan["status"] = "KORUMA AKTİF"
+    clear_clean_reconciliation_state(state, snapshot)
     persist_state(state)
 
 
@@ -2245,6 +2360,7 @@ async def execution_loop(application: Any) -> None:
             state = application.state.v25_execution
             state["connected"] = False
             state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
+            lock_reconciliation_failure(state)
             await asyncio.sleep(rate_limit_backoff_seconds(exc, backoff))
             backoff = min(60, backoff * 2) if exc.retry_after is None else 5
         except Exception as exc:
@@ -2253,7 +2369,10 @@ async def execution_loop(application: Any) -> None:
             safe_message = sanitized_exception_message(exc)
             state["connected"] = False
             state["connection"].update({"last_checked": now_iso(), "last_error": safe_message})
-            lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
+            if unresolved_execution_evidence(state):
+                lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
+            else:
+                lock_reconciliation_failure(state)
             frame = traceback.extract_tb(exc.__traceback__)[-1] if exc.__traceback__ else None
             add_event(
                 state,

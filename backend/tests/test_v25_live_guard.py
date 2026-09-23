@@ -47,6 +47,21 @@ VERCEL_SOURCE = (ROOT / "vercel.json").read_text(encoding="utf-8")
 RENDER_SOURCE = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
 
+def complete_reconciliation_snapshot(**overrides):
+    snapshot = {
+        "wallet_balance": 100.0,
+        "available_balance": 100.0,
+        "positions": [],
+        "open_orders": [],
+        "open_algo_orders": [],
+        "open_algo_orders_available": True,
+        "algo_orders_quality": "VALID_EMPTY",
+        "hedge_mode": False,
+    }
+    snapshot.update(overrides)
+    return snapshot
+
+
 class V25LiveGuardCoreTests(unittest.TestCase):
     def test_live_account_snapshot_algo_orders_quality_contract(self):
         class FakeClient:
@@ -648,9 +663,10 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
 
         self.assertTrue(state["real_trading_locked"])
         self.assertTrue(state["reconciliation_required"])
-        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertEqual(state["execution_state"], "LOCKED")
         self.assertTrue(state["emergency"]["active"])
         self.assertEqual(state["emergency"]["reason"], "RECONCILIATION_FAILURE")
+        self.assertFalse(any(event["kind"] == "LIVE_UNKNOWN_EXECUTION" for event in state["events"]))
         self.assertTrue(any(event.get("reason") == "RECONCILIATION_FAILURE" for event in state["events"]))
         diagnostic = next(event for event in state["events"] if event["kind"] == "RECONCILIATION_FAILURE_DIAGNOSTIC")
         self.assertEqual(diagnostic["exception_type"], "RuntimeError")
@@ -664,6 +680,197 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             self.assertNotIn(secret, serialized)
             self.assertNotIn(secret, state["connection"]["last_error"])
         submit.assert_not_awaited()
+
+    def test_clean_reconciliation_clears_stale_technical_unknown_only(self):
+        state = initial_state()
+        state.update({
+            "execution_state": "UNKNOWN",
+            "reconciliation_required": True,
+            "real_trading_locked": True,
+            "live_auto_trade": True,
+            "armed_until": time.time() + 300,
+        })
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300})
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot())), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "LOCKED")
+        self.assertFalse(state["reconciliation_required"])
+        self.assertTrue(state["real_trading_locked"])
+        self.assertFalse(state["live_auto_trade"])
+        self.assertEqual(state["armed_until"], 0.0)
+        self.assertFalse(state["emergency"]["active"])
+        self.assertTrue(any(event["kind"] == "RECONCILIATION_CLEAN" for event in state["events"]))
+
+    def test_genuine_unknown_execution_remains_locked_after_clean_snapshot(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        lock_live_execution(state, "UNKNOWN_ORDER_STATE", unknown=True, client_id="V25_ENTRY_unknown")
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot())), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+        self.assertTrue(state["emergency"]["active"])
+        self.assertTrue(state["real_trading_locked"])
+        self.assertFalse(any(event["kind"] == "RECONCILIATION_CLEAN" for event in state["events"]))
+
+    def test_incomplete_algo_snapshot_does_not_clear_stale_unknown(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot(open_algo_orders_available=False, algo_orders_quality="UNKNOWN"))), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+        self.assertTrue(state["emergency"]["active"])
+
+    def test_malformed_open_order_does_not_clear_stale_unknown(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot(open_orders=[None]))), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+        self.assertTrue(state["emergency"]["active"])
+
+    def test_malformed_position_does_not_clear_stale_unknown(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot(positions=[{}]))), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            with self.assertRaises(KeyError):
+                asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+        self.assertTrue(state["emergency"]["active"])
+
+    def test_malformed_algo_order_does_not_clear_stale_unknown(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot(open_algo_orders=[{}], algo_orders_quality="VALID_ORDERS"))), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+        self.assertTrue(state["emergency"]["active"])
+
+    def test_invalid_or_missing_wallet_balance_does_not_clear_stale_unknown(self):
+        for overrides in ({"wallet_balance": None}, {"wallet_balance": "100.0"}, {"available_balance": None}):
+            with self.subTest(overrides=overrides):
+                state = initial_state()
+                state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+                state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+                application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+                client = SimpleNamespace(time_offset_ms=0)
+
+                with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                        patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot(**overrides))), \
+                        patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                        patch.object(v25_execution, "persist_state"):
+                    asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+                self.assertEqual(state["execution_state"], "UNKNOWN")
+                self.assertTrue(state["reconciliation_required"])
+                self.assertTrue(state["emergency"]["active"])
+
+    def test_open_v25_client_order_identity_does_not_clear_stale_unknown(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot(open_orders=[{"clientOrderId": "PTBLV_ENTRY_unresolved"}]))), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+        self.assertTrue(state["emergency"]["active"])
+
+    def test_manual_emergency_is_never_cleared_by_clean_reconciliation(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        state["emergency"].update({"active": True, "reason": "MANUAL_EMERGENCY_STOP"})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot())), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+        self.assertTrue(state["emergency"]["active"])
+        self.assertFalse(state["live_auto_trade"])
+        self.assertEqual(state["armed_until"], 0.0)
+
+    def test_exact_orphan_recovery_keeps_unknown_order_reconciled_behavior(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot())), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=1)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "LOCKED")
+        self.assertFalse(state["reconciliation_required"])
+        self.assertFalse(state["emergency"]["active"])
+        self.assertEqual(state["emergency"]["reason"], "UNKNOWN_ORDER_RECONCILED")
+        self.assertTrue(any(event["kind"] == "UNKNOWN_ORDER_RECONCILED" for event in state["events"]))
+        self.assertFalse(any(event["kind"] == "RECONCILIATION_CLEAN" for event in state["events"]))
 
     def test_credential_resolution_failure_records_stage(self):
         state = initial_state()
