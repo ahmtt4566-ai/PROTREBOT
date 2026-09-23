@@ -656,7 +656,8 @@ def is_armed(state: dict[str, Any]) -> bool:
     active = float(state.get("armed_until") or 0) > time.time()
     if not active:
         state["armed_until"] = 0.0
-        state["real_trading_locked"] = True
+        if not auto_session_is_active(state):
+            state["real_trading_locked"] = True
     return active
 
 

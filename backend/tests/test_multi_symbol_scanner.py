@@ -12,10 +12,18 @@ BACKEND = Path(__file__).parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from app.execution_core import HARD_MAX_POSITIONS, evaluate_entry_gates, sanitize_execution_policy  # noqa: E402
-from app.v25_execution import Confirmation, automation_telemetry, automatic_cycle, execution_loop, initial_state, public_status, rank_market_tickers, v25_auto_start, v25_auto_stop  # noqa: E402
+from app.v25_execution import Confirmation, automation_telemetry, automatic_cycle, execution_loop, initial_state, is_armed, public_status, rank_market_tickers, v25_auto_start, v25_auto_stop  # noqa: E402
 
 
 class MultiSymbolScannerTests(unittest.TestCase):
+    def test_expired_manual_arm_does_not_relock_active_auto_session(self):
+        state = initial_state()
+        state["real_trading_locked"] = False
+        state["auto"].update({"enabled": True, "session_until": time.time() + 3600})
+
+        self.assertFalse(is_armed(state))
+        self.assertFalse(state["real_trading_locked"])
+
     def test_scanner_filters_contract_status_assets_liquidity_and_activity(self):
         exchange_info = {"symbols": [
             {"symbol": "BTCUSDT", "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT"},
