@@ -44,7 +44,7 @@ type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MAR
 
 export type SharedLiveStatus = LiveStatus
 export type SharedConnectionStatus = ConnectionStatus
-type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: () => Promise<void>}
+type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
 
 const V25 = `${API_BASE}/v25`
 const CONNECTIONS = `${API_BASE}/exchange-connections`
@@ -125,7 +125,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const refresh = async (quiet = true) => {
     if (onRefreshStatus) {
       try {
-        await onRefreshStatus()
+        await onRefreshStatus(!quiet)
       } catch (error) {
         if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
       }

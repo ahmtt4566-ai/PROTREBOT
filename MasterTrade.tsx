@@ -195,12 +195,14 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     return () => { controller.abort(); window.clearInterval(timer) }
   }, [draft.market, interval])
 
-  const refreshAccountData = async () => {
+  const refreshAccountData = async (forceLiveSnapshot = false) => {
     if (accountRefreshInFlight.current) return false
     accountRefreshInFlight.current = true
     try {
       const response = await Promise.all([
-        fetch(`${API_BASE}/v25/status`),
+        forceLiveSnapshot
+          ? fetch(`${API_BASE}/v25/connect/read-only`, {method: 'POST'})
+          : fetch(`${API_BASE}/v25/status`),
         fetch(`${API_BASE}/exchange-connections/status`),
         fetch(`${API_BASE}/v21/journal?limit=200`),
         fetch(`${API_BASE}/v21/performance?period=all`),
@@ -797,7 +799,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           </aside>
         </div>
 
-        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={() => refreshAccountData().then(() => undefined)} />
+        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
 
         <div className="masterTradeDataGrid">
           <section className="masterTradePanel riskMonitorPanel">
