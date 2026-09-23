@@ -202,6 +202,20 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(status["recovery_ready"])
         self.assertEqual(status["recovery_error"], "PostgreSQL recovery pending.")
 
+    def test_public_status_does_not_disarm_live_arm_when_auto_trade_is_off(self):
+        state = initial_state()
+        state["armed_until"] = time.time() + 300
+        state["real_trading_locked"] = False
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+
+        with patch.object(v25_execution, "consent_status", return_value={"active": True, "fingerprint": "fingerprint"}), \
+            patch.object(v25_execution, "readiness", return_value={"ready": True, "score": 1, "gates": [], "demo_certificate": {}}):
+            status = v25_execution.public_status(application)
+
+        self.assertTrue(status["armed"])
+        self.assertFalse(status["real_trading_locked"])
+        self.assertFalse(state["auto"]["enabled"])
+
     def test_live_stream_uses_supervised_vault_credentials(self):
         state = initial_state()
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))

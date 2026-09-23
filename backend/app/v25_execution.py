@@ -658,6 +658,11 @@ def auto_session_active(state: dict[str, Any]) -> bool:
     return active
 
 
+def auto_session_is_active(state: dict[str, Any]) -> bool:
+    """Read auto-session status without changing the live execution lock."""
+    return bool(state["auto"].get("enabled")) and float(state["auto"].get("session_until") or 0) > time.time()
+
+
 class BinanceLiveClient:
     def __init__(self, http: httpx.AsyncClient, api_key: str, secret_key: str, *, require_credentials: bool = True) -> None:
         if require_credentials and (len(api_key) < 10 or len(secret_key) < 10):
@@ -1922,7 +1927,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
             "last_skip_reason": state["auto"].get("last_skip_reason"),
             "last_cycle_stage": state["auto"].get("last_cycle_stage"),
         },
-        "auto_session_until": datetime.fromtimestamp(float(state["auto"].get("session_until") or 0), timezone.utc).isoformat() if auto_session_active(state) else None,
+        "auto_session_until": datetime.fromtimestamp(float(state["auto"].get("session_until") or 0), timezone.utc).isoformat() if auto_session_is_active(state) else None,
         "policy": state["policy"],
         "policy_digest": policy_digest(state["policy"]),
         "policy_acknowledged": state.get("policy_ack_digest") == policy_digest(state["policy"]),
