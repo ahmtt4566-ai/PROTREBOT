@@ -94,6 +94,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .v26MarketPicker span, .v26MarketPicker em { color: var(--text-muted); font-size: 10px; font-style: normal; }
 .v26Intervals { display: flex; gap: 5px; }
 .v26Intervals button { width: 38px; height: 34px; }
+.v26MarketError { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid rgba(239,68,68,.42); border-radius: 8px; background: rgba(127,29,29,.16); color: #fca5a5; font-size: 12px; font-weight: 700; }
+.v26MarketError button { min-height: 30px; padding: 0 10px; border-color: rgba(239,68,68,.55); background: transparent; color: #fecaca; font-size: 11px; font-weight: 800; }
+.v26MarketError button:disabled { cursor: wait; }
 .v26Loading, .executionLoading, .v27Loading { display: grid; place-items: center; gap: 8px; min-height: 150px; margin-top: 12px; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); color: var(--text-muted); text-align: center; }
 .v26Loading b, .executionLoading b, .v27Loading b { color: var(--text); font-size: 14px; }
 .v26Loading span, .executionLoading span, .v27Loading span { max-width: 620px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
@@ -284,20 +287,39 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .v27Metrics { grid-template-columns: repeat(3, minmax(0,1fr)); }
 }
 @media (max-width: 700px) {
-  .v26App { padding: 10px 10px 76px; }
-  .v26Header, .v26ModeBar, .v27OpsHero { display: block; }
-  .v26HeaderActions, .v26ModeBar aside, .v27OpsActions { margin-top: 12px; }
+  body { min-width: 0; overflow-x: hidden; }
+  .v26App { width: 100%; box-sizing: border-box; min-width: 0; padding: 8px 8px 76px; }
+  .v26Header { min-width: 0; min-height: 64px; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 12px; }
+  .v26Brand { min-width: 0; gap: 8px; }
+  .v26Brand > span { flex: 0 0 34px; width: 34px; height: 34px; font-size: 18px; }
+  .v26Brand b { min-width: 0; overflow: hidden; font-size: 14px; letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }
+  .v26Brand small { min-width: 0; overflow: hidden; font-size: 6px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+  .v26HeaderActions { min-width: 0; gap: 5px; margin-top: 0; }
+  .v26HeaderActions .v26MasterTradeButton, .v26HeaderActions .v26SubscriptionBadge { display: none; }
+  .v26HeaderActions .v26Refresh { width: 34px; min-width: 34px; height: 34px; padding: 0; font-size: 0; }
+  .v26HeaderActions .v26Refresh svg, .v26HeaderActions .mobileMenuButton svg, .v26HeaderActions .v26NotificationButton svg { width: 16px; height: 16px; }
+  .v26HeaderActions .mobileMenuButton, .v26HeaderActions .v26NotificationButton { width: 34px; min-width: 34px; height: 34px; padding: 0; }
+  .v26ModeBar, .v27OpsHero { display: block; }
+  .v26ModeBar aside, .v27OpsActions { margin-top: 12px; }
   .v21ExecutiveSummary { grid-template-columns: 1fr; }
   .v21SummaryMetrics { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .v21SummaryBlock { border-top: 1px solid var(--border); border-left: 0; }
   .demoHeroStatus { grid-template-columns: 1fr; }
   .demoSetupCard { align-items: flex-start; flex-direction: column; }
   .demoSetupCard button { width: 100%; }
-  .v26Nav { grid-template-columns: repeat(2, minmax(0,1fr)); }
-  .v26Nav button { min-height: 52px; }
+  .v26Nav { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 5px; margin-top: 8px; padding: 5px; }
+  .v26Nav button { min-width: 0; min-height: 48px; gap: 6px; padding: 7px 6px; }
+  .v26Nav button > svg { width: 15px; height: 15px; padding: 5px; }
+  .v26Nav b { overflow: hidden; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
   .v26Nav small { display: none; }
   .v26ModeBar h1 { font-size: 19px; }
-  .v26MarketPicker, .demoAccountStrip, .v27Pulse, .v27Metrics, .executionPulse { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .v26MarketBar { grid-template-columns: minmax(0,1fr); gap: 7px; }
+  .v26MarketPicker { min-width: 0; grid-template-columns: minmax(0,1fr); }
+  .v26MarketTitle { min-width: 0; }
+  .v26MarketTitle strong { max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .v26Intervals { justify-content: stretch; }
+  .v26Intervals button { flex: 1; min-width: 0; }
+  .demoAccountStrip, .v27Pulse, .v27Metrics, .executionPulse { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .demoCommandBar { grid-template-columns: 1fr 1fr; }
   .demoCommandBar > label { grid-column: 1 / -1; }
   .executionHero { display: block; }
@@ -307,6 +329,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .webAccessCard, .appRecoveryCard { padding: 22px; }
   .terminalMobileNav { position: fixed; z-index: 20; right: 10px; bottom: 10px; left: 10px; display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; padding: 6px; }
   .terminalMobileNav button { min-height: 42px; padding: 6px 3px; font-size: 10px; }
+  .v26MarketError { font-size: 11px; }
 }
 @media (max-width: 430px) {
   .v26Nav, .demoCommandBar, .executionActionBar, .executionFields, .demoFieldGrid { grid-template-columns: 1fr; }
@@ -4466,6 +4489,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .preTradeCheckGrid b { font-size: 8px; letter-spacing: .05em; }
 .preTradeCheckGrid em { grid-column: 2; overflow: hidden; color: var(--terminal-muted); font-size: 8px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .check-pass b { color: var(--terminal-positive); }
+.check-fail b { color: var(--terminal-negative); }
 .check-locked b { color: var(--terminal-warning); }
 .check-unavailable b { color: var(--terminal-muted); }
 
@@ -4476,4 +4500,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .triggerSummary > div:last-child { grid-column: 1 / -1; }
   .triggerConditionGrid { grid-template-columns: repeat(2, 1fr); }
   .triggerPreviewGrid, .preTradeCheckGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 430px) {
+  .v26HeaderActions .v26Refresh { width: auto; min-width: 40px; min-height: 36px; height: 36px; padding: 0 8px; font-size: 9px; gap: 5px; white-space: nowrap; }
+}
+
+@media (max-width: 360px) {
+  .v26HeaderActions .v26Refresh { width: 36px; min-width: 36px; height: 36px; padding: 0; font-size: 0; gap: 0; justify-content: center; }
+  .v26HeaderActions .v26Refresh svg { width: 17px; height: 17px; margin: 0; }
 }

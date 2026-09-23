@@ -33,7 +33,7 @@ export type ScoreBreakdown = { analysis: number; liquidity: number; volatility: 
 
 export type TriggerLifecycle = 'WAITING' | 'ARMED' | 'TRIGGERED' | 'CONFIRMED' | 'INVALIDATED' | 'EXPIRED'
 export type TriggerCondition = { key: string; label: string; passed: boolean; available: boolean; detail: string }
-export type PreTradeCheck = { label: string; status: 'PASS' | 'LOCKED' | 'UNAVAILABLE'; detail: string }
+export type PreTradeCheck = { label: string; status: 'PASS' | 'FAIL' | 'LOCKED' | 'UNAVAILABLE'; detail: string }
 export type TriggerMonitor = {
   lifecycle: TriggerLifecycle
   available: boolean
@@ -160,10 +160,10 @@ export function buildTriggerMonitor(
   const waitingMessage = lifecycle === 'CONFIRMED' ? `${direction} TRIGGER REACHED` : triggerPrice === null ? 'WAITING — trigger price unavailable' : `${lifecycle === 'ARMED' ? 'ARMED' : 'WAITING'} — ${distancePct === null ? '--' : `${distancePct.toFixed(2)}%`} TO ${direction} TRIGGER`
   const preTradeChecks: PreTradeCheck[] = [
     { label: 'Market data', status: 'PASS', detail: 'Current snapshot available' },
-    { label: 'Signal freshness', status: freshnessPassed ? 'PASS' : 'UNAVAILABLE', detail: decision.freshness || '--' },
-    { label: 'MTF confirmation', status: mtfPassed ? 'PASS' : 'UNAVAILABLE', detail: decision.mtfScore === null ? '--' : `${decision.mtfConfirmed}/${decision.mtfTotal}` },
-    { label: 'Liquidity', status: volumePassed ? 'PASS' : 'UNAVAILABLE', detail: finite(analysis.volume_ratio) ? `${analysis.volume_ratio.toFixed(2)}x volume` : '--' },
-    { label: 'Risk/Reward', status: rrPassed ? 'PASS' : 'UNAVAILABLE', detail: decision.riskReward === null ? '--' : `1:${decision.riskReward.toFixed(2)}` },
+    { label: 'Signal freshness', status: decision.freshness === null ? 'UNAVAILABLE' : freshnessPassed ? 'PASS' : 'FAIL', detail: decision.freshness || '--' },
+    { label: 'MTF confirmation', status: decision.mtfScore === null ? 'UNAVAILABLE' : mtfPassed ? 'PASS' : 'FAIL', detail: decision.mtfScore === null ? '--' : `${decision.mtfConfirmed}/${decision.mtfTotal}` },
+    { label: 'Liquidity', status: finite(analysis.volume_ratio) ? (volumePassed ? 'PASS' : 'FAIL') : 'UNAVAILABLE', detail: finite(analysis.volume_ratio) ? `${analysis.volume_ratio.toFixed(2)}x volume` : '--' },
+    { label: 'Risk/Reward', status: decision.riskReward === null ? 'UNAVAILABLE' : rrPassed ? 'PASS' : 'FAIL', detail: decision.riskReward === null ? '--' : `1:${decision.riskReward.toFixed(2)}` },
     { label: 'Stop Loss', status: finite(analysis.stop_loss) ? 'PASS' : 'UNAVAILABLE', detail: finite(analysis.stop_loss) ? String(analysis.stop_loss) : '--' },
     { label: 'Position limit', status: 'UNAVAILABLE', detail: 'Existing account gate decides' },
     { label: 'Duplicate symbol', status: 'UNAVAILABLE', detail: 'Existing account gate decides' },
