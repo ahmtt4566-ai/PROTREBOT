@@ -1461,6 +1461,33 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
         self.assertNotIn(self.API_KEY, events_text)
         self.assertNotIn(self.SECRET_KEY, events_text)
 
+    def test_background_reconciliation_rejects_truthy_empty_credential_tuple(self):
+        state = initial_state()
+        state["recovery_loaded"] = True
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+
+        async def stop_after_skip(_seconds):
+            raise asyncio.CancelledError
+
+        with patch.object(v25_execution, "auto_session_credentials", new=AsyncMock(return_value=("", ""))), \
+                patch.object(v25_execution, "reconcile", new=AsyncMock()) as reconcile, \
+                patch.object(v25_execution.asyncio, "sleep", new=stop_after_skip):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v25_execution.execution_loop(application))
+
+        reconcile.assert_not_awaited()
+        self.assertEqual(state["auto"]["last_skip_reason"], "no_credentials")
+
+    def test_background_client_preserves_activated_live_credential_pair(self):
+        application = SimpleNamespace(state=SimpleNamespace(http=object()))
+        client = v25_execution.client_for_with_credentials(
+            application,
+            (self.API_KEY, self.SECRET_KEY),
+        )
+        self.assertEqual(client.api_key, self.API_KEY)
+        self.assertEqual(client.secret_key, self.SECRET_KEY)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

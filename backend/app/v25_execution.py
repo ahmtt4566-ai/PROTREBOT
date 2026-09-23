@@ -575,6 +575,14 @@ def live_credentials_status(request: Request | None = None) -> tuple[str, str, s
     return api_key, secret_key, fingerprint if len(secret_key) >= 10 else None
 
 
+def usable_live_credentials(credentials: tuple[str, str] | None) -> bool:
+    return bool(
+        credentials
+        and len(credentials) == 2
+        and all(isinstance(value, str) and len(value) >= 10 for value in credentials)
+    )
+
+
 def update_account_snapshot(state: dict[str, Any], snapshot: dict[str, Any], *, session_binding: str | None = None) -> None:
     state["snapshot"] = snapshot
     if session_binding is not None:
@@ -1790,14 +1798,14 @@ async def auto_session_credentials(
         str(authorization.get("fingerprint") or ""),
         force_refresh=force_refresh,
     )
-    if not credentials or not consent_status(state, credentials=credentials).get("active"):
+    if not usable_live_credentials(credentials) or not consent_status(state, credentials=credentials).get("active"):
         return "", ""
     return credentials
 
 
 async def fresh_auto_submission_credentials(application: Any, state: dict[str, Any]) -> tuple[str, str]:
     credentials = await auto_session_credentials(application, state, force_refresh=True)
-    if not credentials:
+    if not usable_live_credentials(credentials):
         return "", ""
     if (
         state.get("real_trading_locked") is not False
@@ -1980,7 +1988,7 @@ async def execute_live_order(
         raise HTTPException(423, "Canlı yürütme kilitli; acil durum veya belirsiz emir uzlaştırması tamamlanmadı.")
     if source == "V25_AUTO" and credentials is None:
         credentials = await auto_session_credentials(application, state)
-        if not credentials:
+        if not usable_live_credentials(credentials):
             raise HTTPException(423, "Canlı API bağlantısı aktif değil; otomasyon credential doğrulaması başarısız.")
     if not readiness_for(application, state, request, credentials)["ready"]:
         raise HTTPException(423, "Canlı yayın kapıları tamamlanmadı; emir gönderilmedi.")
@@ -2138,7 +2146,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         return
     if credentials is None:
         credentials = await auto_session_credentials(application, state)
-    if not credentials:
+    if not usable_live_credentials(credentials):
         state["auto"]["last_skip_reason"] = "no_credentials"
         state["auto"]["last_cycle_stage"] = "skipped"
         automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")
@@ -2358,7 +2366,7 @@ async def execution_loop(application: Any) -> None:
                 continue
             automation_telemetry("AUTOMATION_LOOP running", reason="loop_running")
             credentials = await auto_session_credentials(application, application.state.v25_execution)
-            if not credentials:
+            if not usable_live_credentials(credentials):
                 application.state.v25_execution["auto"]["last_skip_reason"] = "no_credentials"
                 application.state.v25_execution["auto"]["last_cycle_stage"] = "skipped"
                 automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")
