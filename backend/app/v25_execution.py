@@ -2621,6 +2621,22 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
     return public_status(request.app, request)
 
 
+@router.post("/consent/revoke")
+async def v25_revoke_web_consent(request: Request, body: Confirmation) -> dict[str, Any]:
+    user = execution_owner(request)
+    if body.confirmation.strip().upper() != "24 SAATLİK CONSENTİ KALDIR":
+        raise HTTPException(422, "Onay için 24 SAATLİK CONSENTİ KALDIR yazın.")
+    state = request.app.state.v25_execution
+    state["web_consent"] = {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None}
+    state["live_session_authorization"] = None
+    state["armed_until"] = 0.0
+    state["auto"]["enabled"] = False
+    state["auto"]["session_until"] = 0.0
+    add_event(state, "LIVE_WEB_CONSENT_REVOKED", "24 saatlik canlı risk izni kaldırıldı; LIVE kilidi kapatıldı.", actor=user["id"])
+    persist_state(state)
+    return public_status(request.app, request)
+
+
 @router.post("/order/test")
 async def v25_order_test(request: Request, body: LiveOrderRequest) -> dict[str, Any]:
     user = execution_owner(request)

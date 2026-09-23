@@ -252,6 +252,14 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setConfirmText('')
   }
 
+  const revokeConsent = () => {
+    setConfirm({title: 'LIVE consent kaldırma', message: '24 saatlik LIVE risk izni, ARM penceresi ve Auto Trade yetkisi kaldırılacak. Binance pozisyonlarına veya emirlerine dokunulmaz.', expected: '24 SAATLİK CONSENTİ KALDIR', action: async () => {
+      await call(V25, '/consent/revoke', {method: 'POST', body: JSON.stringify({confirmation: '24 SAATLİK CONSENTİ KALDIR'})})
+      setArmPendingSync(false)
+    }})
+    setConfirmText('')
+  }
+
   const acknowledgePolicy = () => {
     setConfirm({title: 'LIVE risk limitleri onayı', message: 'Mevcut backend risk limitlerini ve policy digest’ini açıkça onaylayın. Limitler değişirse bu acknowledgement geçersiz olur.', expected: 'RİSK LİMİTLERİNİ ONAYLIYORUM', action: async () => {
       await call(V25, '/policy/acknowledge', {method: 'POST', body: JSON.stringify({confirmation: 'RİSK LİMİTLERİNİ ONAYLIYORUM'})})
@@ -373,7 +381,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     <section className="masterTradeLiveSection masterTradeLiveConfirmations" aria-label="LIVE Safety Confirmations">
       <header><div><span className="masterTradeLiveKicker">LIVE SAFETY CONFIRMATIONS</span><h3>Complete the release prerequisites</h3></div><strong className={readinessReady ? 'ready' : 'blocked'}>{readinessReady ? 'READY' : 'REQUIRED'}</strong></header>
       <div className="masterTradeLiveGrid masterTradeLiveConfirmationGrid">
-        <article><div><span className="masterTradeLiveKicker">24 HOUR CONSENT</span><h4>{status?.consent?.active ? 'Risk consent active' : 'LIVE işlem için 24 saatlik risk onayı gerekli.'}</h4><small>{status?.consent?.active ? `Valid until ${date(status.consent.expires_at)}` : 'This confirmation is bound to the current LIVE account and expires automatically.'}</small></div><strong className={status?.consent?.active ? 'ready' : 'blocked'}>{status?.consent?.active ? 'PASS' : 'PENDING'}</strong><button type="button" className="masterTradeLiveSecondary" onClick={grantConsent} disabled={Boolean(busy) || status?.consent?.active === true}>{status?.consent?.active ? '24 HOUR CONSENT ACTIVE' : '24 SAAT İZİN VER'}</button></article>
+        <article><div><span className="masterTradeLiveKicker">24 HOUR CONSENT</span><h4>{status?.consent?.active ? 'Risk consent active' : 'LIVE işlem için 24 saatlik risk onayı gerekli.'}</h4><small>{status?.consent?.active ? `Valid until ${date(status.consent.expires_at)}` : 'This confirmation is bound to the current LIVE account and expires automatically.'}</small></div><strong className={status?.consent?.active ? 'ready' : 'blocked'}>{status?.consent?.active ? 'PASS' : 'PENDING'}</strong><button type="button" className="masterTradeLiveSecondary" onClick={grantConsent} disabled={Boolean(busy) || status?.consent?.active === true}>{status?.consent?.active ? '24 HOUR CONSENT ACTIVE' : '24 SAAT İZİN VER'}</button>{status?.consent?.active && <button type="button" className="masterTradeLiveSecondary masterTradeLiveRevokeButton" onClick={revokeConsent} disabled={Boolean(busy)}>REVOKE CONSENT</button>}</article>
         <article><div><span className="masterTradeLiveKicker">POLICY ACKNOWLEDGEMENT</span><h4>{status?.policy_acknowledged ? 'Risk policy acknowledged' : 'Risk limitleri için politika onayı gerekli.'}</h4><small>{status?.policy_acknowledged ? 'The current policy digest is acknowledged.' : 'Policy acknowledgement is invalidated when risk limits change.'}</small></div><strong className={status?.policy_acknowledged ? 'ready' : 'blocked'}>{status?.policy_acknowledged ? 'PASS' : 'PENDING'}</strong><button type="button" className="masterTradeLiveSecondary" onClick={acknowledgePolicy} disabled={Boolean(busy) || status?.policy_acknowledged === true}>{status?.policy_acknowledged ? 'POLICY ACKNOWLEDGED' : 'LİMİTLERİ ONAYLA'}</button></article>
       </div>
       <p className="masterTradeLiveOperationalNote">Consent ve policy acknowledgement tamamlandıktan sonra diğer backend readiness gate’leri ayrıca geçilmelidir. ARM LIVE bu koşullar tamamlanmadan çağrılmaz.</p>
