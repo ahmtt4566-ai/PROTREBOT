@@ -2297,7 +2297,11 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             signal = item["signal"]
             symbol = candidate["symbol"]
             intent_id = item["intent_id"]
-            spread = await spread_bps(client, symbol)
+            try:
+                spread = await spread_bps(client, symbol)
+            except LiveExchangeError as exc:
+                state["auto"]["last_decision"] = f"{symbol}: BEKLE · piyasa verisi reddedildi: {exc}"
+                continue
             guard = evaluate_entry_gates(symbol=symbol, signal=signal, snapshot=snapshot, policy=state["policy"], daily=daily, spread_bps=spread, armed=True, allowed_symbols=[symbol])
             if not guard["passed"]:
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · {guard['reason']}"
@@ -2311,7 +2315,11 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 margin_usdt=risk["margin_usdt"], leverage=risk["leverage"], stop_loss=signal["stop_loss"],
                 tp1=signal["tp1"], tp2=signal["tp2"], tp3=signal["tp3"], intent_id=intent_id,
             )
-            await execute_live_order(application, body, source="V25_AUTO", allowed_symbols=[symbol], credentials=credentials)
+            try:
+                await execute_live_order(application, body, source="V25_AUTO", allowed_symbols=[symbol], credentials=credentials)
+            except LiveExchangeError as exc:
+                state["auto"]["last_decision"] = f"{symbol}: BEKLE · emir risk kontrolünden geçmedi: {exc}"
+                continue
             executed_symbols.append(symbol)
             state["auto"]["last_decision"] = f"{symbol} {signal['direction']} canlı işlem açıldı; Stop/TP doğrulandı."
             snapshot = await account_snapshot(client)
