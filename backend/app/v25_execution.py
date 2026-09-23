@@ -1371,12 +1371,12 @@ async def live_user_stream_loop(application: Any) -> None:
         listen_key = ""
         client: BinanceLiveClient | None = None
         try:
-            _, secret, fingerprint = live_credentials_status()
-            if not fingerprint or len(secret) < 10:
+            credentials = await live_stream_credentials(application, state)
+            if not usable_live_credentials(credentials):
                 state["stream"].update({"status": "ANAHTAR BEKLİYOR", "transport": "REST UZLAŞTIRMA"})
                 await asyncio.sleep(5)
                 continue
-            client = client_for(application)
+            client = client_for_with_credentials(application, credentials)
             response = await client.api_key_request("POST", "/fapi/v1/listenKey")
             listen_key = str((response or {}).get("listenKey") or "")
             if not listen_key:
@@ -1424,6 +1424,11 @@ async def live_user_stream_loop(application: Any) -> None:
                     await client.api_key_request("DELETE", "/fapi/v1/listenKey")
                 except Exception:
                     pass
+
+
+async def live_stream_credentials(application: Any, state: dict[str, Any]) -> tuple[str, str]:
+    """Resolve the active supervised vault session for the private Binance stream."""
+    return await auto_session_credentials(application, state)
 
 
 def _iso_epoch_ms(value: Any) -> int:

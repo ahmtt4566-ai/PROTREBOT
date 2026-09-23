@@ -202,6 +202,17 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(status["recovery_ready"])
         self.assertEqual(status["recovery_error"], "PostgreSQL recovery pending.")
 
+    def test_live_stream_uses_supervised_vault_credentials(self):
+        state = initial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        credentials = ("api-key-123456", "secret-key-123456")
+
+        with patch.object(v25_execution, "auto_session_credentials", new=AsyncMock(return_value=credentials)) as resolver:
+            resolved = asyncio.run(v25_execution.live_stream_credentials(application, state))
+
+        self.assertEqual(resolved, credentials)
+        resolver.assert_awaited_once_with(application, state)
+
     def test_public_status_exposes_only_sanitized_reconciliation_diagnostic_fields(self):
         state = initial_state()
         state["events"].insert(0, {
