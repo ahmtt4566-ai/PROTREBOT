@@ -637,7 +637,10 @@ def consent_status(
 
 
 def execution_owner(request: Request) -> dict[str, Any]:
-    """Use the web owner gate when present, otherwise retain desktop auth."""
+    """Use the same owner identity as the exchange session vault."""
+    member = getattr(request.state, "member", None)
+    if member and member.get("role") == "OWNER":
+        return member
     if bool(getattr(request.state, "web_owner_authenticated", False)):
         return {"id": "WEB_OWNER", "role": "OWNER"}
     return authenticated_user(request, owner=True)
