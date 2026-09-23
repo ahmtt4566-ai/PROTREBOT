@@ -622,6 +622,99 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertEqual(state["execution_state"], "UNKNOWN")
         self.assertTrue(state["reconciliation_required"])
 
+    def test_reconciliation_failure_records_sanitized_diagnostic_before_order_submission(self):
+        state = initial_state()
+        state["recovery_loaded"] = True
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        submit = AsyncMock()
+
+        async def fail_reconcile(*args, **kwargs):
+            raise RuntimeError("api_key=abc123 secret=super-secret signature=deadbeef")
+
+        async def stop_after_failure(_seconds):
+            raise asyncio.CancelledError
+
+        with patch.multiple(
+            v25_execution,
+            auto_session_credentials=AsyncMock(return_value=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")),
+            reconcile=fail_reconcile,
+            submit_entry=submit,
+            persist_state=lambda current: None,
+            automation_telemetry=lambda *args, **kwargs: None,
+        ), patch.object(v25_execution.asyncio, "sleep", new=stop_after_failure):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v25_execution.execution_loop(application))
+
+        self.assertTrue(state["real_trading_locked"])
+        self.assertTrue(state["reconciliation_required"])
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["emergency"]["active"])
+        self.assertEqual(state["emergency"]["reason"], "RECONCILIATION_FAILURE")
+        self.assertTrue(any(event.get("reason") == "RECONCILIATION_FAILURE" for event in state["events"]))
+        diagnostic = next(event for event in state["events"] if event["kind"] == "RECONCILIATION_FAILURE_DIAGNOSTIC")
+        self.assertEqual(diagnostic["exception_type"], "RuntimeError")
+        self.assertEqual(diagnostic["reconciliation_stage"], "account_reconciliation")
+        self.assertTrue(diagnostic["source"])
+        self.assertTrue(diagnostic["function"])
+        self.assertGreater(diagnostic["line"], 0)
+        self.assertIn("[REDACTED]", diagnostic["exception_message"])
+        serialized = json.dumps(sanitized_state(state))
+        for secret in ("abc123", "super-secret", "deadbeef"):
+            self.assertNotIn(secret, serialized)
+            self.assertNotIn(secret, state["connection"]["last_error"])
+        submit.assert_not_awaited()
+
+    def test_credential_resolution_failure_records_stage(self):
+        state = initial_state()
+        state["recovery_loaded"] = True
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+
+        async def fail_credentials(*args, **kwargs):
+            raise RuntimeError("credential lookup failed")
+
+        async def stop_after_failure(_seconds):
+            raise asyncio.CancelledError
+
+        with patch.multiple(
+            v25_execution,
+            auto_session_credentials=fail_credentials,
+            persist_state=lambda current: None,
+            automation_telemetry=lambda *args, **kwargs: None,
+        ), patch.object(v25_execution.asyncio, "sleep", new=stop_after_failure):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v25_execution.execution_loop(application))
+
+        diagnostic = next(event for event in state["events"] if event["kind"] == "RECONCILIATION_FAILURE_DIAGNOSTIC")
+        self.assertEqual(diagnostic["reconciliation_stage"], "credential_resolution")
+
+    def test_automatic_cycle_failure_records_stage(self):
+        state = initial_state()
+        state["recovery_loaded"] = True
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+
+        async def fail_cycle(*args, **kwargs):
+            raise RuntimeError("synthetic automatic cycle failure")
+
+        async def stop_after_failure(_seconds):
+            raise asyncio.CancelledError
+
+        with patch.multiple(
+            v25_execution,
+            auto_session_credentials=AsyncMock(return_value=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")),
+            reconcile=AsyncMock(),
+            automatic_cycle=fail_cycle,
+            persist_state=lambda current: None,
+            automation_telemetry=lambda *args, **kwargs: None,
+        ), patch.object(v25_execution.asyncio, "sleep", new=stop_after_failure):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v25_execution.execution_loop(application))
+
+        diagnostic = next(event for event in state["events"] if event["kind"] == "RECONCILIATION_FAILURE_DIAGNOSTIC")
+        self.assertEqual(diagnostic["reconciliation_stage"], "automatic_cycle")
+
     def test_auto_trade_dry_run_reaches_submit_boundary_without_exchange_mutation(self):
         class FakeTransport:
             def __init__(self):

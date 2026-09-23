@@ -18,7 +18,9 @@ import json
 import logging
 import math
 import os
+import re
 import time
+import traceback
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -378,6 +380,15 @@ def persist_state(state: dict[str, Any]) -> None:
 
 
 V25_SNAPSHOT_KEY = "v25_live:state"
+
+_SENSITIVE_EXCEPTION_VALUE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|secret(?:[_-]?key)?|authorization|token|signature|password|credential(?:s)?)\b\s*[:=]\s*)([^\s,;}\]]+)"
+)
+
+
+def sanitized_exception_message(exc: BaseException) -> str:
+    message = str(exc)[:240]
+    return _SENSITIVE_EXCEPTION_VALUE.sub(r"\1[REDACTED]", message)[:240]
 
 
 async def _persist_state_snapshot(application: Any, payload: dict[str, Any]) -> None:
@@ -2203,6 +2214,7 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
 async def execution_loop(application: Any) -> None:
     backoff = 5
     while True:
+        reconciliation_stage = "credential_resolution"
         try:
             recovery_loaded = application.state.v25_execution.get("recovery_loaded", not bool(os.getenv("DATABASE_URL", "").strip()))
             database_unavailable = bool(os.getenv("DATABASE_URL", "").strip()) and getattr(application.state, "db_pool", None) is None
@@ -2219,8 +2231,10 @@ async def execution_loop(application: Any) -> None:
                 automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")
                 await asyncio.sleep(5)
                 continue
+            reconciliation_stage = "account_reconciliation"
             async with application.state.v25_execution["lock"]:
                 await reconcile(application, credentials=credentials)
+            reconciliation_stage = "automatic_cycle"
             await automatic_cycle(application, credentials=credentials)
             backoff = 5
             await asyncio.sleep(RECONCILE_SECONDS)
@@ -2236,9 +2250,22 @@ async def execution_loop(application: Any) -> None:
         except Exception as exc:
             automation_telemetry("AUTOMATION_SKIP reason=reconcile_failed", reason="reconcile_failed")
             state = application.state.v25_execution
+            safe_message = sanitized_exception_message(exc)
             state["connected"] = False
-            state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
+            state["connection"].update({"last_checked": now_iso(), "last_error": safe_message})
             lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
+            frame = traceback.extract_tb(exc.__traceback__)[-1] if exc.__traceback__ else None
+            add_event(
+                state,
+                "RECONCILIATION_FAILURE_DIAGNOSTIC",
+                "Reconciliation failure diagnostic metadata recorded.",
+                exception_type=type(exc).__name__,
+                exception_message=safe_message,
+                source=os.path.basename(frame.filename) if frame else os.path.basename(__file__),
+                function=frame.name if frame else "execution_loop",
+                line=frame.lineno if frame else 0,
+                reconciliation_stage=reconciliation_stage,
+            )
             await asyncio.sleep(backoff)
             backoff = min(60, backoff * 2)
 
