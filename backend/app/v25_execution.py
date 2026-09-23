@@ -2519,6 +2519,9 @@ async def connect_read_only_for_request(application: Any, request: Request, *, a
                 "user_id": str(actor or ""),
                 "fingerprint": fingerprint or "",
             }
+            if not state.get("reconciliation_required") and not unresolved_execution_evidence(state):
+                state["recovery_ready"] = True
+                state["recovery_error"] = None
             state["connected"] = True
             state["connection"].update({"last_checked": now_iso(), "last_error": None, "clock_offset_ms": client.time_offset_ms})
             add_event(state, "READ_ONLY_CONNECTED", "Canlı hesap salt-okunur bağlantısı doğrulandı; emir gönderilmedi.", actor=actor)
