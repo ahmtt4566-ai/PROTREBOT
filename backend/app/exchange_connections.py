@@ -298,6 +298,17 @@ async def session_credentials_for_identity(
         """,
         session_value, user_id, normalized,
     )
+    if not row and user_id == "WEB_OWNER":
+        row = await pool.fetchrow(
+            """
+            SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active
+            FROM protrebot_exchange_session_vault
+            WHERE session_id = $1 AND mode = $2 AND active = TRUE
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            session_value, normalized,
+        )
     if not row or str(row.get("fingerprint") or "") != fingerprint:
         return "", ""
     try:
