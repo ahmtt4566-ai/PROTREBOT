@@ -1988,7 +1988,14 @@ async def live_candles(client: BinanceLiveClient, symbol: str, interval: str, li
     return candles, last_open_time
 
 
-async def canonical_live_decision(application: Any, client: BinanceLiveClient, symbol: str, interval: str, primary_candles: list[dict[str, float]] | None = None) -> dict[str, Any]:
+async def canonical_live_decision(
+    application: Any,
+    client: BinanceLiveClient,
+    symbol: str,
+    interval: str,
+    primary_candles: list[dict[str, float]] | None = None,
+    policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Run the side-effect-free canonical decision before live account gates."""
     from .main import canonical_historical_decision
 
@@ -2008,6 +2015,9 @@ async def canonical_live_decision(application: Any, client: BinanceLiveClient, s
         frames,
         decision_time,
         required_intervals=("15m", "1h", "4h"),
+        historical_policy_override={
+            "confidence_threshold": int((policy or {}).get("min_confidence", 78)),
+        },
     )
 
 
@@ -2236,7 +2246,14 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             if len(candles) < 220:
                 continue
             analyzed_symbols.append(symbol)
-            canonical = await canonical_live_decision(application, client, symbol, state["policy"]["interval"], candles)
+            canonical = await canonical_live_decision(
+                application,
+                client,
+                symbol,
+                state["policy"]["interval"],
+                candles,
+                state["policy"],
+            )
             signal = canonical.get("analysis") or {}
             intent_id = f"auto-{symbol}-{state['policy']['interval']}-{candle_id}"
             if intent_id in state["intents"]:
@@ -2266,13 +2283,14 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "selected_symbols_count": len(selected_symbols),
             "selected_candidates": selected_symbols,
             "positions_open": len(snapshot.get("positions", [])),
-            "position_capacity": 5,
+            "position_capacity": int(state["policy"]["max_positions"]),
         }
         logger.info(
-            "MULTI_SYMBOL_SCAN signals found: %s selected candidates: %s positions open: %s/5",
+            "MULTI_SYMBOL_SCAN signals found: %s selected candidates: %s positions open: %s/%s",
             len(signals),
             ",".join(selected_symbols) or "NONE",
             len(snapshot.get("positions", [])),
+            int(state["policy"]["max_positions"]),
         )
         for item in selected:
             candidate = item["candidate"]
