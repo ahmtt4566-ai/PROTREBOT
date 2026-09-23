@@ -121,6 +121,10 @@ def key_fingerprint(api_key: str) -> str:
     return f"SHA256:{digest[:12]}"
 
 
+def normalize_fingerprint(value: str) -> str:
+    return str(value or "").strip().upper().removeprefix("SHA256:")
+
+
 def _master_secret() -> str:
     # A dedicated key is optional.  The existing owner access token is already
     # required in the hosted build and lets the user configure the vault fully
@@ -281,7 +285,7 @@ async def session_credentials_for_identity(
     if not force_refresh and (
         meta.get("active")
         and str(meta.get("user_id") or "") == user_id
-        and key_fingerprint(cached[0]) == fingerprint
+        and normalize_fingerprint(key_fingerprint(cached[0])) == normalize_fingerprint(fingerprint)
         and cached[1]
     ):
         return cached
@@ -310,7 +314,7 @@ async def session_credentials_for_identity(
             """,
             session_value, normalized,
         )
-    if not row or str(row.get("fingerprint") or "") != fingerprint:
+    if not row or normalize_fingerprint(str(row.get("fingerprint") or "")) != normalize_fingerprint(fingerprint):
         logger.warning(
             "LIVE credential resolution failed: %s expected=%s stored=%s",
             "identity_miss" if not row else "fingerprint_mismatch",
