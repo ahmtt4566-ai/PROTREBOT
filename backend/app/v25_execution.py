@@ -392,8 +392,8 @@ def initial_state() -> dict[str, Any]:
         "real_trading_locked": True,
         "live_auto_trade": False,
         "emergency": {"active": False, "triggered_at": None, "reason": None},
-        # Web consent is deliberately memory-only. A deployment or process
-        # restart revokes it even though the audit event remains persisted.
+        # Consent persists only as a fingerprint-bound, expiring record. The
+        # execution authority itself remains process-bound and is never restored.
         "web_consent": {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None},
         "duplicate_blocks": 0,
         "protection_repairs": 0,
@@ -411,6 +411,16 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
         return base
     base["policy"] = sanitize_execution_policy(payload.get("policy"))
     base["policy_ack_digest"] = payload.get("policy_ack_digest") if payload.get("policy_ack_digest") == policy_digest(base["policy"]) else None
+    consent = payload.get("web_consent")
+    if isinstance(consent, dict):
+        expires_at = float(consent.get("expires_at_epoch") or 0)
+        fingerprint = str(consent.get("key_fingerprint") or "").strip()
+        if expires_at > time.time() and fingerprint:
+            base["web_consent"] = {
+                "accepted_at": str(consent.get("accepted_at") or "")[:64] or None,
+                "expires_at_epoch": expires_at,
+                "key_fingerprint": fingerprint[:128],
+            }
     for key in ("events", "plans", "intents", "duplicate_blocks", "protection_repairs"):
         if key in payload and isinstance(payload[key], type(base[key])):
             base[key] = payload[key]

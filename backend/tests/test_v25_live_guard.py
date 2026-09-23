@@ -362,6 +362,20 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(restored["live_auto_trade"])
         self.assertFalse(restored["auto"]["enabled"])
 
+    def test_unexpired_web_consent_survives_state_restore_but_expired_consent_does_not(self):
+        active = {
+            "accepted_at": "2026-09-23T18:00:00+00:00",
+            "expires_at_epoch": time.time() + 3600,
+            "key_fingerprint": "fingerprint-1",
+        }
+        restored = sanitized_state({"web_consent": active})
+        self.assertEqual(restored["web_consent"], active)
+
+        expired = dict(active, expires_at_epoch=time.time() - 1)
+        expired_restored = sanitized_state({"web_consent": expired})
+        self.assertEqual(expired_restored["web_consent"]["expires_at_epoch"], 0.0)
+        self.assertIsNone(expired_restored["web_consent"]["key_fingerprint"])
+
     def test_hard_total_exposure_and_active_plan_gates_fail_closed(self):
         self.assertEqual(HARD_MAX_TOTAL_EXPOSURE_USDT, 250.0)
         kwargs = dict(
