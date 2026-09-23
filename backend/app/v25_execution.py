@@ -95,6 +95,7 @@ LIVE_WS_BASE = "wss://fstream.binance.com/private"
 LIVE_ARM_SECONDS = 24 * 60 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
 RECONCILE_SECONDS = 10
+ANALYSIS_TIMEOUT_SECONDS = 15
 MAX_EVENTS = 500
 MAX_PLANS = 250
 PROVENANCE_STATES = {"NO_PROVENANCE", "PROVISIONAL", "CONFIRMED", "BROKEN"}
@@ -145,11 +146,12 @@ BACKUP_PATH = DATA_DIR / "v25_execution_state.backup.json"
 
 
 class LiveExchangeError(RuntimeError):
-    def __init__(self, message: str, *, http_status: int = 502, exchange_code: int | None = None, unknown_execution: bool = False) -> None:
+    def __init__(self, message: str, *, http_status: int = 502, exchange_code: int | None = None, unknown_execution: bool = False, timed_out: bool = False) -> None:
         super().__init__(message)
         self.http_status = http_status
         self.exchange_code = exchange_code
         self.unknown_execution = unknown_execution
+        self.timed_out = timed_out
 
 
 class LiveRateLimitError(LiveExchangeError):
@@ -754,7 +756,7 @@ class BinanceLiveClient:
                 response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
                 rate_limit.observe(response)
         except httpx.TimeoutException as exc:
-            raise LiveExchangeError("Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.", unknown_execution=True) from exc
+            raise LiveExchangeError("Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.", unknown_execution=True, timed_out=True) from exc
         except httpx.RequestError as exc:
             raise LiveExchangeError("Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.", unknown_execution=True) from exc
         if response.status_code >= 400:
@@ -2005,7 +2007,10 @@ async def canonical_live_decision(
     frames: dict[str, list[dict[str, float]]] = {interval: primary_candles} if primary_candles is not None else {}
     for timeframe in (interval, "1h", "4h"):
         if timeframe not in frames:
-            frames[timeframe], _ = await live_candles(client, symbol, timeframe)
+            frames[timeframe], _ = await asyncio.wait_for(
+                live_candles(client, symbol, timeframe),
+                timeout=ANALYSIS_TIMEOUT_SECONDS,
+            )
     fifteen = frames.get("15m", frames.get(interval, []))
     if len(fifteen) < 2:
         return {"decision": "WAIT", "symbol": symbol, "entry_eligible": False, "reason": "INSUFFICIENT_CLOSED_CANDLES"}
@@ -2240,21 +2245,50 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         signals: list[dict[str, Any]] = []
         analyzed_symbols: list[str] = []
         rejected_risk_symbols: list[str] = []
+        analysis_timeout_symbols: list[str] = []
         state["auto"]["last_cycle_stage"] = "deep_analysis"
         for candidate in candidates:
             symbol = candidate["symbol"]
-            candles, candle_id = await live_candles(client, symbol, state["policy"]["interval"])
+            try:
+                candles, candle_id = await asyncio.wait_for(
+                    live_candles(client, symbol, state["policy"]["interval"]),
+                    timeout=ANALYSIS_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                analysis_timeout_symbols.append(symbol)
+                logger.warning("MULTI_SYMBOL_SCAN candidate timeout during candles: %s", symbol)
+                continue
+            except LiveExchangeError as exc:
+                if not exc.timed_out:
+                    raise
+                analysis_timeout_symbols.append(symbol)
+                logger.warning("MULTI_SYMBOL_SCAN candidate exchange timeout during candles: %s", symbol)
+                continue
             if len(candles) < 220:
                 continue
             analyzed_symbols.append(symbol)
-            canonical = await canonical_live_decision(
-                application,
-                client,
-                symbol,
-                state["policy"]["interval"],
-                candles,
-                state["policy"],
-            )
+            try:
+                canonical = await asyncio.wait_for(
+                    canonical_live_decision(
+                        application,
+                        client,
+                        symbol,
+                        state["policy"]["interval"],
+                        candles,
+                        state["policy"],
+                    ),
+                    timeout=ANALYSIS_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                analysis_timeout_symbols.append(symbol)
+                logger.warning("MULTI_SYMBOL_SCAN candidate timeout during deep analysis: %s", symbol)
+                continue
+            except LiveExchangeError as exc:
+                if not exc.timed_out:
+                    raise
+                analysis_timeout_symbols.append(symbol)
+                logger.warning("MULTI_SYMBOL_SCAN candidate exchange timeout during deep analysis: %s", symbol)
+                continue
             signal = canonical.get("analysis") or {}
             intent_id = f"auto-{symbol}-{state['policy']['interval']}-{candle_id}"
             if intent_id in state["intents"]:
@@ -2287,6 +2321,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "deep_analysis_symbols": analyzed_symbols,
             "signals_found": len(signals),
             "rejected_risk_symbols": rejected_risk_symbols,
+            "analysis_timeout_symbols": analysis_timeout_symbols,
             "selected_symbols": selected_symbols,
             "selected_symbols_count": len(selected_symbols),
             "selected_candidates": selected_symbols,

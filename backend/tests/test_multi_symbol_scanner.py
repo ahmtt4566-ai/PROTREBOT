@@ -107,6 +107,36 @@ class MultiSymbolScannerTests(unittest.TestCase):
         self.assertEqual(canonical.await_count, 3)
         self.assertEqual(state["auto"]["last_scan_stats"]["deep_analysis_symbols"], ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
 
+    def test_automatic_cycle_skips_timed_out_candidate_and_completes(self):
+        import asyncio
+
+        state = initial_state()
+        state["auto"].update({"enabled": True, "session_until": time.time() + 3600})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(last_scan_eligible_count=2)
+        candidates = [{"symbol": symbol} for symbol in ("BTCUSDT", "ETHUSDT")]
+        candles = [{"time": index, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 1} for index in range(220)]
+
+        async def timeout_then_success(_client, symbol, _interval):
+            if symbol == "BTCUSDT":
+                raise asyncio.TimeoutError
+            return candles, 123
+
+        with patch("app.v25_execution.readiness_for", return_value={"ready": True}), \
+            patch("app.v25_execution.client_for_with_credentials", return_value=client), \
+                patch("app.v25_execution.account_snapshot", new=AsyncMock(return_value={"positions": [], "open_orders": []})), \
+                patch("app.v25_execution.live_daily_metrics", return_value={"entries": 0, "realized_pnl": 0, "unverified_closures": 0}), \
+                patch("app.v25_execution.scan_market_candidates", new=AsyncMock(return_value=candidates)), \
+                patch("app.v25_execution.live_candles", new=AsyncMock(side_effect=timeout_then_success)), \
+                patch("app.v25_execution.canonical_live_decision", new=AsyncMock(return_value={"decision": "WAIT", "entry_eligible": False})), \
+                patch("app.v25_execution.persist_state"):
+            asyncio.run(automatic_cycle(application, credentials=("api-key-123456", "secret-key-123456")))
+
+        self.assertEqual(state["auto"]["cycles"], 1)
+        self.assertEqual(state["auto"]["last_cycle_stage"], "completed")
+        self.assertFalse(state["auto"]["busy"])
+        self.assertEqual(state["auto"]["last_scan_stats"]["analysis_timeout_symbols"], ["BTCUSDT"])
+
     def test_scanner_respects_multiple_policy_symbols(self):
         exchange_info = {"symbols": [
             {"symbol": symbol, "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT"}
