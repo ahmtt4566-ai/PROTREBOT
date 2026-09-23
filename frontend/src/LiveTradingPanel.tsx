@@ -174,12 +174,13 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const emergency = Boolean(status?.emergency?.active)
   const recoveryRequired = Boolean(emergency || status?.reconciliation_required || status?.recovery_error || status?.execution_state === 'UNKNOWN')
   const protectionGate = status?.readiness?.gates?.find(gate => /protection|koruma/i.test(`${gate.key} ${gate.label}`))
-  const protectionState = recoveryRequired ? 'BLOCKED' : protectionGate ? protectionGate.passed ? 'READY' : 'REQUIRED' : 'UNKNOWN'
-  const protectionReady = protectionState === 'READY'
   const recoveryState = recoveryRequired ? 'REQUIRED' : status?.recovery_ready === true ? 'READY' : 'UNKNOWN'
   const readinessReady = status?.readiness?.ready === true
   const riskGate = status?.readiness?.gates?.find(gate => /risk|policy|limit|safety|guven/i.test(`${gate.key} ${gate.label}`)) || {passed: false}
   const activePlans = status?.plans?.filter(plan => !['CLOSED', 'CANCELLED', 'CLOSED_CONFIRMED'].includes(String(plan.status || '').toUpperCase())).length ?? 0
+  const noActivePositionOrPlan = (status?.account?.positions || []).length === 0 && activePlans === 0
+  const protectionState = recoveryRequired ? 'BLOCKED' : noActivePositionOrPlan ? 'READY' : protectionGate ? protectionGate.passed ? 'READY' : 'REQUIRED' : 'UNKNOWN'
+  const protectionReady = protectionState === 'READY'
   const exposure = (status?.account?.positions || []).reduce((sum, item) => sum + Math.abs(Number(item.notional || item.positionAmt || 0)), 0)
   const executionLocked = status === null || status.real_trading_locked !== false
   const gateState = (patterns: RegExp[]) => {
@@ -189,7 +190,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
   const connectionReady = status !== null && connections !== null && connected
   const connectionState = status === null || connections === null ? 'UNKNOWN' : connected ? 'CONNECTED' : 'NOT CONNECTED'
-  const armState = status === null ? 'UNKNOWN' : status.armed ? 'READY' : 'LOCKED'
+  const armState = status === null ? 'UNKNOWN' : status.armed && !executionLocked ? 'READY' : 'LOCKED'
   const riskState = riskGate ? riskGate.passed ? 'READY' : 'BLOCKED' : gateState([/risk/i, /policy/i, /limit/i, /safety/i, /guven/i])
   const exposureGate = gateState([/exposure/i, /notional/i])
   const exposureState = exposureGate !== 'UNKNOWN' ? exposureGate : status === null ? 'UNKNOWN' : exposure === 0 ? 'READY' : 'BLOCKED'
@@ -308,6 +309,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (key === 'STOP') return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT ACTIVE' : 'UNKNOWN'
     return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT SET' : 'UNKNOWN'
   }
+  const liveArmed = Boolean(status?.armed && !executionLocked)
   const blocker = status === null
     ? 'LIVE status is not available.'
     : emergency
@@ -320,10 +322,9 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
             ? 'Complete the required LIVE readiness checks before arming.'
             : status.consent?.active !== true
               ? '24-hour LIVE risk consent is required.'
-              : !status.armed
+              : !liveArmed
                 ? 'Canlı işlem onayı bekleniyor.'
                 : 'No LIVE blocker.'
-  const liveArmed = Boolean(status?.armed && !executionLocked)
   const liveState = status === null ? 'UNKNOWN' : emergency || recoveryRequired ? 'BLOCKED' : status.live_auto_trade ? 'RUNNING' : liveArmed ? 'ARMED' : readinessReady ? 'READY' : 'LOCKED'
   const positionValue = (key: string) => currentPosition ? text(currentPosition[key]) : 'NOT AVAILABLE'
   const activeConfirm = confirm
