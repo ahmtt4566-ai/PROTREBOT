@@ -632,7 +632,7 @@ def consent_status(
         "accepted_at": payload.get("accepted_at") if active else None,
         "expires_at": datetime.fromtimestamp(expires, timezone.utc).isoformat() if active else None,
         "fingerprint": fingerprint,
-        "storage": "SUNUCU_BELLEĞİ" if payload is web_payload and active else "WINDOWS_DPAPI" if active else "YOK",
+        "storage": "SUNUCU_KALICI" if payload is web_payload and active else "WINDOWS_DPAPI" if active else "YOK",
     }
 
 
@@ -2567,7 +2567,7 @@ async def v25_policy_ack(request: Request, body: Confirmation) -> dict[str, Any]
 
 @router.post("/consent")
 async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any]:
-    """Create a fingerprint-bound, memory-only 24 hour live consent."""
+    """Create a fingerprint-bound, expiring 24-hour live consent."""
     user = execution_owner(request)
     if body.confirmation.strip().upper() != "CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM":
         raise HTTPException(422, "Onay için CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM yazın.")
@@ -2583,7 +2583,7 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
     state["armed_until"] = 0.0
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
-    add_event(state, "LIVE_WEB_CONSENT", "24 saatlik canlı risk izni verildi; sunucu yeniden başlarsa izin iptal olur.", actor=user["id"])
+    add_event(state, "LIVE_WEB_CONSENT", "24 saatlik canlı risk izni verildi; süre veya API key fingerprint değişene kadar korunur.", actor=user["id"])
     persist_state(state)
     return public_status(request.app, request)
 
