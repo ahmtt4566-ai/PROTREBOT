@@ -227,6 +227,21 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(resolved, credentials)
         resolver.assert_awaited_once_with(application, state)
 
+    def test_background_credentials_fall_back_to_connected_live_session(self):
+        state = initial_state()
+        state["live_session_authorization"] = {
+            "session_id": "session-1", "user_id": "WEB_OWNER", "fingerprint": "fingerprint",
+        }
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        credentials = ("api-key-123456", "secret-key-123456")
+
+        with patch.object(v25_execution, "session_credentials_for_identity", new=AsyncMock(return_value=credentials)) as resolver, \
+            patch.object(v25_execution, "consent_status", return_value={"active": True}):
+            resolved = asyncio.run(v25_execution.auto_session_credentials(application, state))
+
+        self.assertEqual(resolved, credentials)
+        resolver.assert_awaited_once_with(application, "session-1", "WEB_OWNER", "LIVE", "fingerprint", force_refresh=False)
+
     def test_public_status_exposes_only_sanitized_reconciliation_diagnostic_fields(self):
         state = initial_state()
         state["events"].insert(0, {

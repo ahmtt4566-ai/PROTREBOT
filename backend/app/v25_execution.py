@@ -382,6 +382,7 @@ def initial_state() -> dict[str, Any]:
         },
         "snapshot": None,
         "snapshot_session_id": None,
+        "live_session_authorization": {"session_id": "", "user_id": "", "fingerprint": ""},
         "events": [],
         "plans": {},
         "intents": {},
@@ -1799,7 +1800,9 @@ async def auto_session_credentials(
 ) -> tuple[str, str]:
     authorization = state.get("auto_authorization") or {}
     if float(authorization.get("expires_at_epoch") or 0) <= time.time():
-        return "", ""
+        authorization = state.get("live_session_authorization") or {}
+        if not all(str(authorization.get(key) or "").strip() for key in ("session_id", "user_id", "fingerprint")):
+            return "", ""
     credentials = await session_credentials_for_identity(
         application,
         str(authorization.get("session_id") or ""),
@@ -2499,7 +2502,13 @@ async def connect_read_only_for_request(application: Any, request: Request, *, a
         async with state["lock"]:
             client = client_for(application, request)
             snapshot = await account_snapshot(client)
+            _, _, fingerprint = live_credentials_status(request)
             update_account_snapshot(state, snapshot, session_binding=session_id(request))
+            state["live_session_authorization"] = {
+                "session_id": session_id(request),
+                "user_id": str(actor or ""),
+                "fingerprint": fingerprint or "",
+            }
             state["connected"] = True
             state["connection"].update({"last_checked": now_iso(), "last_error": None, "clock_offset_ms": client.time_offset_ms})
             add_event(state, "READ_ONLY_CONNECTED", "Canlı hesap salt-okunur bağlantısı doğrulandı; emir gönderilmedi.", actor=actor)
