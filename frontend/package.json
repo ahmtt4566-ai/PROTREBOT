@@ -5,19 +5,21 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "build": "node -e \"const path=require('path');const packagePath=require.resolve('typescript/package.json');process.argv=['node','tsc',...process.argv.slice(1)];require(path.join(path.dirname(packagePath),'bin/tsc'))\" -- -b && node --input-type=module -e \"import {createRequire} from 'node:module';import {dirname,join} from 'node:path';import {pathToFileURL} from 'node:url';const require=createRequire(import.meta.url);const packagePath=require.resolve('vite/package.json');process.argv=['node','vite',...process.argv.slice(1)];await import(pathToFileURL(join(dirname(packagePath),'bin/vite.js')).href)\" -- build",
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.3",
-    "vite": "8.1.5",
-    "typescript": "7.0.2",
+    "lightweight-charts": "5.2.0",
+    "lucide-react": "1.25.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "lightweight-charts": "5.2.0",
-    "lucide-react": "1.25.0"
+    "typescript": "7.0.2",
+    "vite": "8.1.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3"
   },

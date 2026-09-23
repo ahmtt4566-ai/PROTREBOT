@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries, type IPriceLine } from 'lightweight-charts'
-import { Activity, CircleDollarSign, Cloud, KeyRound, LockKeyhole, RadioTower, RefreshCw, ShieldCheck, TestTube2 } from 'lucide-react'
+import { Activity, ArrowUp, CircleDollarSign, Cloud, KeyRound, LockKeyhole, RadioTower, RefreshCw, ShieldCheck, TestTube2 } from 'lucide-react'
 import { API_BASE } from './api'
 
 const BinanceDemo = lazy(() => import('./BinanceDemo'))
+const LiveTradingPanel = lazy(() => import('./LiveTradingPanel'))
 const ExecutionCenter = lazy(() => import('./ExecutionCenter'))
 const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
 const ExchangeConnections = lazy(() => import('./ExchangeConnections'))
@@ -43,7 +44,7 @@ function TestnetMarketChart({symbol,interval,onAnalysis,showLevels=true,showEma=
     volume.priceScale().applyOptions({scaleMargins:{top:.82,bottom:0}})
     const ema20 = chart.addSeries(LineSeries,{color:'#16a560',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'EMA20'})
     const ema50 = chart.addSeries(LineSeries,{color:'#f3a712',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'EMA50'})
-    const ema200 = chart.addSeries(LineSeries,{color:'#8063d9',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'EMA200'})
+    const ema200 = chart.addSeries(LineSeries,{color:'#6f91ad',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'EMA200'})
 
     const applyAnalysis = (analysis:Analysis) => {
       ema20.setData(showEma ? analysis.series.ema20.map(point => ({time:point.time as never,value:point.value})) : [])
@@ -97,7 +98,7 @@ function TestnetMarketChart({symbol,interval,onAnalysis,showLevels=true,showEma=
 }
 
 export default function TestnetFirstApp() {
-  const [view,setView] = useState<View>('testnet')
+  const [view,setView] = useState<View>('live')
   const [markets,setMarkets] = useState<Market[]>([])
   const [symbol,setSymbol] = useState('BTCUSDT')
   const [marketQuery,setMarketQuery] = useState('')
@@ -105,6 +106,8 @@ export default function TestnetFirstApp() {
   const [analysis,setAnalysis] = useState<Analysis|null>(null)
   const [health,setHealth] = useState<Health|null>(null)
   const [loading,setLoading] = useState(false)
+  const [mobileNavVisible,setMobileNavVisible] = useState(true)
+  const [showBackTop,setShowBackTop] = useState(false)
 
   const refresh = async () => {
     setLoading(true)
@@ -129,9 +132,29 @@ export default function TestnetFirstApp() {
     return () => window.clearInterval(timer)
   },[])
 
-  return <main className="v26App">
+  useEffect(() => {
+    let previousY = window.scrollY
+    const onScroll = () => {
+      const currentY = window.scrollY
+      if (currentY < 24) setMobileNavVisible(true)
+      else if (Math.abs(currentY - previousY) > 4) setMobileNavVisible(currentY < previousY)
+      setShowBackTop(currentY > 320)
+      previousY = currentY
+    }
+    window.addEventListener('scroll',onScroll,{passive:true})
+    return () => window.removeEventListener('scroll',onScroll)
+  },[])
+
+  const goHome = () => {
+    setView('testnet')
+    window.scrollTo({top:0,behavior:'smooth'})
+  }
+
+  const scrollToTop = () => window.scrollTo({top:0,behavior:'smooth'})
+
+  return <main className="v26App" onCopy={event => {if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) event.preventDefault()}} onCut={event => {if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) event.preventDefault()}} onContextMenu={event => event.preventDefault()} onDragStart={event => event.preventDefault()}>
     <header className="v26Header">
-      <div className="v26Brand"><span>X</span><div><b>PROTREBOT ELITE X</b><small>V28 · IN-APP EXCHANGE VAULT</small></div></div>
+      <div className="v26Brand" role="button" tabIndex={0} onClick={goHome} onKeyDown={event => {if(event.key === 'Enter' || event.key === ' ') goHome()}}><span>X</span><div><b>PROTREBOT ELITE X</b><small>V28 · IN-APP EXCHANGE VAULT</small></div></div>
       <div className="v26HeaderSignals">
         <span className="ok"><i/>SUNUCU CANLI</span>
         <span className="ok"><i/>TESTNET ANA MOD</span>
@@ -141,12 +164,14 @@ export default function TestnetFirstApp() {
       <button className="v26Refresh" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'YENİLENİYOR' : 'YENİLE'}</button>
     </header>
 
-    <nav className="v26Nav">
+    <nav className={`v26Nav${mobileNavVisible ? '' : ' mobileNavHidden'}`}>
       <button className={view === 'testnet' ? 'active' : ''} onClick={() => setView('testnet')}><TestTube2/><span><b>TESTNET KOMUTA</b><small>Binance Futures Demo · Ana çalışma alanı</small></span></button>
       <button className={view === 'ops' ? 'active' : ''} onClick={() => setView('ops')}><Cloud/><span><b>OPERASYON & KANIT</b><small>Karar, pozisyon ve kalıcı PostgreSQL kaydı</small></span></button>
       <button className={view === 'live' ? 'active liveTab' : ''} onClick={() => setView('live')}><ShieldCheck/><span><b>CANLI HAZIRLIK</b><small>API yoksa kesin kilitli · Gerçek kanal</small></span></button>
       <button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><KeyRound/><span><b>BORSA BAĞLANTILARI</b><small>Testnet & Gerçek API kasası</small></span></button>
     </nav>
+
+    <button className={`mobileBackTop${showBackTop ? ' visible' : ''}`} onClick={scrollToTop} aria-label="En yukarı çık"><ArrowUp/></button>
 
     <section className="v26ModeBar">
       <div><small>AKTİF ÇALIŞMA ALANI</small><h1>{view === 'testnet' ? 'Binance Futures Demo Merkezi' : view === 'ops' ? 'Bulut Operasyon ve Kanıt Merkezi' : view === 'live' ? 'Gerçek Futures Hazırlık Merkezi' : 'Borsa Bağlantıları ve Şifreli Kasa'}</h1><p>{view === 'testnet' ? 'Gerçek Binance motoruna en yakın test ortamı; sanal bakiye, gerçek emir akışı ve borsa yanıtları.' : view === 'ops' ? 'Otonom taramanın son kararı, pozisyonlar ve yeniden başlatmaya dayanıklı PostgreSQL kanıt defteri.' : view === 'live' ? 'Gerçek hesap bağlantısı salt-okunur başlar; emir yetkisi bağımsız ve süreli risk kilitleriyle korunur.' : 'Testnet ve gerçek hesap API anahtarlarını programdan test et, şifreli kaydet, aktifleştir veya anında kapat.'}</p></div>
@@ -167,7 +192,7 @@ export default function TestnetFirstApp() {
       </Suspense>
     </>}
 
-    {view === 'live' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Canlı güvenlik merkezi hazırlanıyor…</div>}><ExecutionCenter/></Suspense>}
+    {view === 'live' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Canlı güvenlik merkezi hazırlanıyor…</div>}><LiveTradingPanel active symbol={symbol} analysis={analysis} masterTrade={import.meta.env.MODE === 'test'}/></Suspense>}
 
     {view === 'ops' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Bulut operasyon merkezi hazırlanıyor…</div>}><CloudOpsCenter/></Suspense>}
 
