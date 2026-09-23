@@ -1808,22 +1808,26 @@ async def auto_session_credentials(
     *,
     force_refresh: bool = False,
 ) -> tuple[str, str]:
-    authorization = state.get("auto_authorization") or {}
-    if float(authorization.get("expires_at_epoch") or 0) <= time.time():
-        authorization = state.get("live_session_authorization") or {}
-        if not all(str(authorization.get(key) or "").strip() for key in ("session_id", "user_id", "fingerprint")):
-            return "", ""
-    credentials = await session_credentials_for_identity(
-        application,
-        str(authorization.get("session_id") or ""),
-        str(authorization.get("user_id") or ""),
-        "LIVE",
-        str(authorization.get("fingerprint") or ""),
-        force_refresh=force_refresh,
-    )
-    if not usable_live_credentials(credentials) or not consent_status(state, credentials=credentials).get("active"):
-        return "", ""
-    return credentials
+    authorizations = [state.get("auto_authorization") or {}, state.get("live_session_authorization") or {}]
+    attempted: set[tuple[str, str, str]] = set()
+    for index, authorization in enumerate(authorizations):
+        if index == 0 and float(authorization.get("expires_at_epoch") or 0) <= time.time():
+            continue
+        identity = tuple(str(authorization.get(key) or "").strip() for key in ("session_id", "user_id", "fingerprint"))
+        if not all(identity) or identity in attempted:
+            continue
+        attempted.add(identity)
+        credentials = await session_credentials_for_identity(
+            application,
+            identity[0],
+            identity[1],
+            "LIVE",
+            identity[2],
+            force_refresh=force_refresh,
+        )
+        if usable_live_credentials(credentials) and consent_status(state, credentials=credentials).get("active"):
+            return credentials
+    return "", ""
 
 
 async def fresh_auto_submission_credentials(application: Any, state: dict[str, Any]) -> tuple[str, str]:
