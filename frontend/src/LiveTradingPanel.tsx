@@ -336,7 +336,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
               : !liveArmed
                 ? 'Canlı işlem onayı bekleniyor.'
                 : 'No LIVE blocker.'
-  const liveState = status === null ? 'UNKNOWN' : emergency || recoveryRequired ? 'BLOCKED' : status.live_auto_trade ? 'RUNNING' : liveArmed ? 'ARMED' : readinessReady ? 'READY' : 'LOCKED'
+  const autoStatusLabel = status === null ? 'UNKNOWN' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : 'OFF'
+  const liveState = status === null ? 'UNKNOWN' : emergency || recoveryRequired ? 'BLOCKED' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : liveArmed ? 'ARMED' : readinessReady ? 'READY' : 'LOCKED'
   const positionValue = (key: string) => currentPosition ? text(currentPosition[key]) : 'NOT AVAILABLE'
   const activeConfirm = confirm
   const confirmationModal = activeConfirm && typeof document !== 'undefined' ? createPortal(
@@ -353,7 +354,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
   const activity = (status?.events || []).slice(-8).reverse()
   const latestSignal = activity.find(event => /SIGNAL|ENTRY|ORDER|SCAN|CANDIDATE/i.test(String(event.kind || '')))
-  const signalStatus = status?.live_auto_trade ? 'RUNNING' : latestSignal ? text(latestSignal.kind).replaceAll('_', ' ') : 'WAITING'
+  const signalStatus = status?.live_auto_trade ? autoStatusLabel : latestSignal ? text(latestSignal.kind).replaceAll('_', ' ') : 'WAITING'
   const scannerStatus = status?.scanner?.last_cycle_stage || (status?.scanner?.last_scan_at ? 'WAITING FOR NEXT SCAN' : 'WAITING')
   const candidateCount = status?.scanner?.selected_symbols_count ?? status?.scanner?.candidate_count ?? 0
   const automationReason = status?.auto?.last_error || status?.auto?.last_skip_reason || status?.scanner?.last_skip_reason || status?.auto?.last_decision || blocker
@@ -370,7 +371,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   if (masterTrade) return <section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
     <header className={`masterTradeLiveHeader ${liveState.toLowerCase()}`}>
       <div className="masterTradeLiveTitle"><span className="masterTradeLiveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE AUTO TRADE</h2><p>Binance Futures Mainnet · V25 backend control</p></div>
-      <div className="masterTradeLiveHeadline"><span className="liveStateDot" /><strong>{liveState}</strong><small>{status?.live_auto_trade ? 'AUTO TRADE IS RUNNING' : 'AUTO TRADE IS OFF'}</small></div>
+      <div className="masterTradeLiveHeadline"><span className="liveStateDot" /><strong>{liveState}</strong><small>{status?.live_auto_trade ? executionLocked ? 'SCANNER ACTIVE · LIVE ORDERS LOCKED' : 'AUTO TRADE IS RUNNING' : 'AUTO TRADE IS OFF'}</small></div>
       <div className="masterTradeLiveChips"><span>Market Data <b>{marketDataConnected ? 'CONNECTED' : status === null ? 'UNKNOWN' : 'DISCONNECTED'}</b></span><span>Live Account <b>{connected ? 'CONNECTED' : 'DISCONNECTED'}</b></span><span>Risk <b>{riskState}</b></span><span>Exposure <b>{exposureState}</b></span><span>Protection <b>{protectionState}</b></span></div>
     </header>
 
