@@ -312,8 +312,10 @@ async def session_credentials_for_identity(
         )
     if not row or str(row.get("fingerprint") or "") != fingerprint:
         logger.warning(
-            "LIVE credential resolution failed: %s",
+            "LIVE credential resolution failed: %s expected=%s stored=%s",
             "identity_miss" if not row else "fingerprint_mismatch",
+            fingerprint,
+            str(row.get("fingerprint") or "") if row else "",
         )
         return "", ""
     try:
