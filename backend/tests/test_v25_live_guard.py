@@ -198,6 +198,37 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertTrue(status["reconciliation_required"])
         self.assertEqual(status["execution_state"], "UNKNOWN")
 
+    def test_public_status_exposes_only_sanitized_reconciliation_diagnostic_fields(self):
+        state = initial_state()
+        state["events"].insert(0, {
+            "kind": "RECONCILIATION_FAILURE_DIAGNOSTIC",
+            "exception_type": "LiveExchangeError",
+            "exception_message": "api_key=abc123 secret=super-secret",
+            "reconciliation_stage": "account_reconciliation",
+            "source": "v25_execution.py",
+            "function": "_request",
+            "line": 700,
+            "created_at": "2026-09-23T12:00:00+00:00",
+            "authorization": "Bearer should-not-appear",
+        })
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+
+        with patch.object(v25_execution, "consent_status", return_value={}), \
+            patch.object(v25_execution, "readiness", return_value={"ready": False, "score": 0, "gates": [], "demo_certificate": {}}):
+            diagnostic = v25_execution.public_status(application)["reconciliation_diagnostic"]
+
+        self.assertEqual(set(diagnostic), {"exception_type", "exception_message", "reconciliation_stage", "source", "function", "line", "timestamp"})
+        self.assertEqual(diagnostic["exception_type"], "LiveExchangeError")
+        self.assertEqual(diagnostic["reconciliation_stage"], "account_reconciliation")
+        self.assertEqual(diagnostic["source"], "v25_execution.py")
+        self.assertEqual(diagnostic["function"], "_request")
+        self.assertEqual(diagnostic["line"], 700)
+        self.assertEqual(diagnostic["timestamp"], "2026-09-23T12:00:00+00:00")
+        self.assertIn("[REDACTED]", diagnostic["exception_message"])
+        serialized = json.dumps(diagnostic)
+        for secret in ("abc123", "super-secret", "Bearer should-not-appear"):
+            self.assertNotIn(secret, serialized)
+
     def test_close_reason_mapping_covers_all_explicit_close_intents(self):
         self.assertEqual(close_reason_for_intent("manual-close-plan"), "MANUAL")
         self.assertEqual(close_reason_for_intent("protection-plan"), "STOP")

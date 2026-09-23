@@ -500,9 +500,26 @@ _SENSITIVE_EXCEPTION_VALUE = re.compile(
 )
 
 
-def sanitized_exception_message(exc: BaseException) -> str:
+def sanitized_exception_message(exc: BaseException | str) -> str:
     message = str(exc)[:240]
     return _SENSITIVE_EXCEPTION_VALUE.sub(r"\1[REDACTED]", message)[:240]
+
+
+def latest_reconciliation_diagnostic(state: dict[str, Any]) -> dict[str, Any] | None:
+    events = state.get("events") if isinstance(state.get("events"), list) else []
+    for event in events:
+        if not isinstance(event, dict) or event.get("kind") != "RECONCILIATION_FAILURE_DIAGNOSTIC":
+            continue
+        return {
+            "exception_type": str(event.get("exception_type") or "")[:120],
+            "exception_message": sanitized_exception_message(str(event.get("exception_message") or "")),
+            "reconciliation_stage": str(event.get("reconciliation_stage") or "")[:120],
+            "source": str(event.get("source") or "")[:160],
+            "function": str(event.get("function") or "")[:160],
+            "line": int(event.get("line") or 0),
+            "timestamp": event.get("created_at"),
+        }
+    return None
 
 
 async def _persist_state_snapshot(application: Any, payload: dict[str, Any]) -> None:
@@ -1894,6 +1911,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "policy": state["policy"],
         "policy_digest": policy_digest(state["policy"]),
         "policy_acknowledged": state.get("policy_ack_digest") == policy_digest(state["policy"]),
+        "reconciliation_diagnostic": latest_reconciliation_diagnostic(state),
         "readiness": release,
         "account": {"wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"), "unrealized_pnl": snapshot.get("unrealized_pnl"), "positions": snapshot.get("positions", []), "open_orders": snapshot.get("open_orders", []), "open_algo_orders": snapshot.get("open_algo_orders", []), "hedge_mode": snapshot.get("hedge_mode")},
         "daily": live_daily_metrics(state),
