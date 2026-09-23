@@ -2306,7 +2306,11 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             if not guard["passed"]:
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · {guard['reason']}"
                 continue
-            risk = risk_sized_order(float(signal["entry"]), float(signal["stop_loss"]), state["policy"])
+            try:
+                risk = risk_sized_order(float(signal["entry"]), float(signal["stop_loss"]), state["policy"])
+            except ValueError as exc:
+                state["auto"]["last_decision"] = f"{symbol}: BEKLE · risk hesabı reddedildi: {exc}"
+                continue
             if risk["margin_usdt"] < 5:
                 state["auto"]["last_decision"] = f"{symbol}: Binance minimum güvenli marjin eşiği altında; BEKLE."
                 continue
