@@ -1110,13 +1110,16 @@ def _state_from_demo_payload(
     origin: str,
     status: str,
     persistence_action: str,
+    *,
+    normalize_plans: bool = True,
 ) -> dict[str, Any]:
     plans = payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
-    for plan in plans.values():
-        if isinstance(plan, dict):
-            ensure_plan_provenance_fields(plan)
-            if plan.get("provenance_state") == ProvenanceState.CONFIRMED.value:
-                observe_plan_provenance(plan, restored=True)
+    if normalize_plans:
+        for plan in plans.values():
+            if isinstance(plan, dict):
+                ensure_plan_provenance_fields(plan)
+                if plan.get("provenance_state") == ProvenanceState.CONFIRMED.value:
+                    observe_plan_provenance(plan, restored=True)
     state = {
         "connected": bool(payload.get("connected")),
         "armed_until": payload.get("armed_until", 0),
@@ -1218,7 +1221,12 @@ def persist_runtime(state: dict[str, Any]) -> None:
                 import asyncio
                 loop = asyncio.get_running_loop()
                 if loop.is_running():
-                    loop.create_task(_persist_demo_snapshot_db(app, user_id, snapshot))
+                    task = loop.create_task(_persist_demo_snapshot_db(app, user_id, snapshot))
+                    pending = getattr(app.state, "_binance_demo_persistence_tasks", None)
+                    if not isinstance(pending, dict):
+                        pending = {}
+                        app.state._binance_demo_persistence_tasks = pending
+                    pending.setdefault(user_id, []).append(task)
                     return
             except RuntimeError:
                 pass
@@ -1245,6 +1253,16 @@ def persist_runtime(state: dict[str, Any]) -> None:
     temporary = STATE_PATH.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(STATE_PATH)
+
+
+async def persist_runtime_and_wait(state: dict[str, Any]) -> None:
+    persist_runtime(state)
+    user_id = str(state.get("_user_id") or "").strip()
+    app = _state_application(state)
+    pending = getattr(getattr(app, "state", None), "_binance_demo_persistence_tasks", {}) if app is not None else {}
+    tasks = pending.pop(user_id, []) if user_id and isinstance(pending, dict) else []
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _persist_demo_snapshot_db(application: Any, user_id: str, payload: dict[str, Any]) -> None:
@@ -1282,19 +1300,19 @@ def load_runtime(user_id: str | None = None, *, application: Any | None = None) 
             except Exception:
                 file_state = _load_file_demo_state(user_id)
                 if file_state is not None:
-                    return _state_from_demo_payload(file_state, user_id, application, "file_fallback", "restored", "available")
-                return _state_from_demo_payload({}, user_id, application, "unknown", "restore_failed", "persistence_suppressed")
+                    return _state_from_demo_payload(file_state, user_id, application, "file_fallback", "restored", "available", normalize_plans=False)
+                return _state_from_demo_payload({}, user_id, application, "unknown", "restore_failed", "persistence_suppressed", normalize_plans=False)
             if row is not None:
                 payload = row["payload"] if isinstance(row, dict) else row
                 if _is_valid_demo_payload(payload):
-                    return _state_from_demo_payload(payload, user_id, application, "postgres", "restored", "available")
-                return _state_from_demo_payload({}, user_id, application, "postgres", "restore_failed", "persistence_suppressed")
-            return _state_from_demo_payload({}, user_id, application, "postgres", "no_snapshot", "initialized_empty")
+                    return _state_from_demo_payload(payload, user_id, application, "postgres", "restored", "available", normalize_plans=False)
+                return _state_from_demo_payload({}, user_id, application, "postgres", "restore_failed", "persistence_suppressed", normalize_plans=False)
+            return _state_from_demo_payload({}, user_id, application, "postgres", "no_snapshot", "initialized_empty", normalize_plans=False)
         if user_id:
             file_state = _load_file_demo_state(user_id)
             if file_state is not None:
-                return _state_from_demo_payload(file_state, user_id, application, "file_fallback", "restored", "available")
-            return _state_from_demo_payload({}, user_id, application, "unknown", "restore_failed", "persistence_suppressed")
+                return _state_from_demo_payload(file_state, user_id, application, "file_fallback", "restored", "available", normalize_plans=False)
+            return _state_from_demo_payload({}, user_id, application, "unknown", "restore_failed", "persistence_suppressed", normalize_plans=False)
     try:
         payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -1339,9 +1357,14 @@ def state_for(request: Request) -> dict[str, Any]:
             persisted = load_runtime(user_id, application=app)
             base = copy.deepcopy(_default_demo_state(app))
             restore_failed = isinstance(persisted, dict) and persisted.get("_restore_status") == "restore_failed"
+            persisted_plans = dict(persisted.get("plans", {})) if isinstance(persisted, dict) else {}
+            if not restore_failed:
+                for plan in persisted_plans.values():
+                    if isinstance(plan, dict):
+                        ensure_plan_provenance_fields(plan)
             state = {
                 **base,
-                "plans": dict(base.get("plans", {}) if restore_failed else (persisted.get("plans", {}) if isinstance(persisted, dict) else {})),
+                "plans": dict(base.get("plans", {}) if restore_failed else persisted_plans),
                 "events": list(base.get("events", []) if restore_failed else ((persisted.get("events", [])) if isinstance(persisted, dict) and isinstance(persisted.get("events"), list) else [])),
                 "connected": bool(base.get("connected", False) if restore_failed else (persisted or {}).get("connected", base.get("connected", False))),
                 "armed_until": base.get("armed_until", 0) if restore_failed else (persisted or {}).get("armed_until", base.get("armed_until", 0)),
@@ -2429,13 +2452,17 @@ def _protection_classification(
     required_ids: set[int] | None = None,
     plans: list[dict[str, Any]] | None = None,
 ) -> tuple[str, list[int], list[int]]:
-    if snapshot.get("open_algo_orders_available") is not True:
+    if snapshot.get("open_algo_orders_available") is False:
         return "UNKNOWN", [], []
     protection_ids = set() if "protection_ids" not in plan else _plan_protection_ids(plan)
-    if not protection_ids or not _protection_ownership_metadata_valid(plan):
-        return "UNKNOWN", [], []
     orders = snapshot.get("open_algo_orders")
     if not isinstance(orders, list):
+        return "UNKNOWN", [], []
+    if not protection_ids:
+        if snapshot.get("open_algo_orders_available") is True:
+            return "UNKNOWN", [], []
+        return ("MISSING", [], []) if not orders else ("UNKNOWN", [], [])
+    if not _protection_ownership_metadata_valid(plan):
         return "UNKNOWN", [], []
     expected_symbol = str(plan.get("symbol") or "").upper()
     if not expected_symbol:
@@ -2470,7 +2497,9 @@ def _protection_classification(
             status = str(order.get("status") or "").upper()
             side = str(order.get("side") or "").upper()
             if not order_type or not status or not side:
-                return "UNKNOWN", [], []
+                if algo_id in protection_ids:
+                    return "UNKNOWN", [], []
+                continue
             parsed_orders.append((algo_id, order))
 
     active_statuses = {"NEW", "WORKING", "PENDING_NEW", "PARTIALLY_FILLED"}
@@ -2570,20 +2599,30 @@ def classify_demo_ownership(
 
     for plan in active_plans:
         plan_id = str(plan.get("id") or "").strip()
-        matching_indexes = [
+        explicit_matching_indexes = [
             index for index, position in enumerate(positions)
             if index not in used_position_indexes
             and _symbol_matches(position.get("symbol"), normalize_symbol(str(plan.get("symbol") or "")))
             and _direct_position_identity_match(plan, position)
         ]
+        protection_status, matched_ids, unmatched_ids = _protection_classification(
+            plan, snapshot, plans=active_plans
+        )
+        matching_indexes = explicit_matching_indexes
+        protection_ids = _plan_protection_ids(plan) if "protection_ids" in plan else None
+        if not matching_indexes and protection_status == "MATCHED" and protection_ids:
+            slot_indexes = [
+                index for index, position in enumerate(positions)
+                if index not in used_position_indexes
+                and _native_id_free_position_slot_match(plan, position)
+            ]
+            if len(slot_indexes) == 1:
+                matching_indexes = slot_indexes
         if matching_indexes:
             position_index = matching_indexes[0]
             position = positions[position_index]
             used_plan_ids.add(plan_id)
             used_position_indexes.add(position_index)
-            protection_status, matched_ids, unmatched_ids = _protection_classification(
-                plan, snapshot, plans=active_plans
-            )
             classification = (
                 "PROTECTION_UNKNOWN"
                 if protection_status == "UNKNOWN"
@@ -3709,7 +3748,9 @@ async def demo_disarm(request: Request) -> dict[str, Any]:
     state = state_for(request)
     state["armed_until"] = 0
     add_event(state, "DEMO EMİR KİLİDİ KAPANDI", "Yeni Demo giriş emirleri durduruldu; koruma emirleri çalışmaya devam eder.")
-    return public_status(state)
+    result = public_status(state)
+    result["configured"] = credentials_configured(request)
+    return result
 
 
 @router.post("/order/test")
@@ -3871,7 +3912,7 @@ async def execute_demo_order(
             }
             plan.update(provenance_entry_fields(expected_quantity=spec["quantity"]))
             state.setdefault("plans", {})[plan_id] = plan
-            persist_runtime(state)
+            await persist_runtime_and_wait(state)
             submit_started = time.monotonic()
             trace_log("submit_entry.start", request_id, entry_client_order_id=client_order_id, symbol=spec["symbol"], side=spec["side"], quantity=spec["quantity"])
             try:
@@ -3912,7 +3953,7 @@ async def execute_demo_order(
                 expected_quantity=spec["quantity"],
             ))
             plan["status"] = "DOLUM BEKLİYOR"
-            persist_runtime(state)
+            await persist_runtime_and_wait(state)
             add_event(
                 state,
                 "KALDIRAÇ DOĞRULANDI",

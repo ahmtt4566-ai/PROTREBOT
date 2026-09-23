@@ -175,6 +175,7 @@ def lock_live_execution(
     state["auto"].update({"enabled": False, "session_until": 0.0})
     state["execution_state"] = "UNKNOWN" if unknown else "LOCKED"
     state["reconciliation_required"] = bool(unknown)
+    state.setdefault("emergency", {"active": False, "triggered_at": None, "reason": ""})
     state["emergency"].update({"active": True, "triggered_at": now_iso(), "reason": reason})
     add_event(
         state,

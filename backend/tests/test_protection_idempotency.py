@@ -18,6 +18,7 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             "user_id": "user-a",
             "symbol": symbol,
             "direction": "LONG",
+            "provenance_state": "CONFIRMED",
             "status": "DOLUM BEKLİYOR",
             "position_status": "PENDING",
             "stop_loss": "90",
@@ -63,10 +64,20 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             async def signed(self, method, path, params=None):
                 if path == "/fapi/v3/positionRisk":
                     return [{"symbol": "BTCUSDT", "positionAmt": "1"}]
+                if path == "/fapi/v1/openAlgoOrders":
+                    return [
+                        {"symbol": "BTCUSDT", "algoId": 101, "orderType": "STOP_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                        {"symbol": "BTCUSDT", "algoId": 102, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                        {"symbol": "BTCUSDT", "algoId": 103, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                        {"symbol": "BTCUSDT", "algoId": 104, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    ]
                 raise AssertionError((method, path, params))
 
         with patch.object(binance_demo, "post_algo", new=AsyncMock(side_effect=[
-            {"algoId": 101}, {"algoId": 102}, {"algoId": 103}, {"algoId": 104},
+            {"algoId": 101, "symbol": "BTCUSDT", "type": "STOP_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 102, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 103, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 104, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
         ])):
             await binance_demo.install_protection(FakeClient(), state, plan)
 
@@ -74,7 +85,38 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(plan["position_status"], "OPEN")
         self.assertEqual(plan["protection_ids"], [101, 102, 103, 104])
 
-    async def test_malformed_truthy_protection_ids_do_not_skip_install(self):
+    async def test_final_snapshot_runs_outside_passed_state_lock(self):
+        plan = self.plan()
+        state = {"plans": {plan["id"]: plan}}
+        state_lock = asyncio.Lock()
+        await state_lock.acquire()
+
+        async def signed(method, path, params=None):
+            if path == "/fapi/v3/positionRisk":
+                return [{"symbol": "BTCUSDT", "positionAmt": "1"}]
+            if path == "/fapi/v1/openAlgoOrders":
+                self.assertFalse(state_lock.locked())
+                return [
+                    {"symbol": "BTCUSDT", "algoId": 101, "orderType": "STOP_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    {"symbol": "BTCUSDT", "algoId": 102, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    {"symbol": "BTCUSDT", "algoId": 103, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    {"symbol": "BTCUSDT", "algoId": 104, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                ]
+            raise AssertionError((method, path, params))
+
+        client = SimpleNamespace(signed=signed)
+        with patch.object(binance_demo, "post_algo", new=AsyncMock(side_effect=[
+            {"algoId": 101, "symbol": "BTCUSDT", "type": "STOP_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 102, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 103, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 104, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
+        ])), patch.object(binance_demo, "persist_runtime"):
+            await binance_demo._install_protection(client, state, plan, state_lock=state_lock)
+
+        self.assertTrue(state_lock.locked())
+        state_lock.release()
+
+    async def test_malformed_truthy_protection_ids_fail_closed(self):
         plan = self.plan()
         plan["protection_ids"] = ["not-an-id"]
         state = {"plans": {plan["id"]: plan}}
@@ -82,7 +124,7 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(binance_demo, "_install_protection", new=AsyncMock()) as install_mock:
             await binance_demo.install_protection(None, state, plan)
 
-        install_mock.assert_awaited_once()
+        install_mock.assert_not_awaited()
 
     async def test_different_plans_install_independently(self):
         first_plan = self.plan("plan-a", "BTCUSDT")
@@ -182,8 +224,8 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
 
         client.signed = signed
         post_results = iter([
-            {"algoId": 101},
-            {"algoId": 102},
+            {"algoId": 101, "symbol": "BTCUSDT", "type": "STOP_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 102, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
             binance_demo.BinanceDemoError("TP2 unavailable"),
         ])
 
@@ -287,13 +329,26 @@ class ProtectionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             if path == "/fapi/v3/positionRisk":
                 position_calls += 1
                 return [{"symbol": "BTCUSDT", "positionAmt": "1"}]
+            if path == "/fapi/v1/openAlgoOrders":
+                return [
+                    {"symbol": "BTCUSDT", "algoId": 1, "orderType": "STOP_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    {"symbol": "BTCUSDT", "algoId": 2, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    {"symbol": "BTCUSDT", "algoId": 3, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                    {"symbol": "BTCUSDT", "algoId": 4, "orderType": "TAKE_PROFIT_MARKET", "side": "SELL", "algoStatus": "NEW"},
+                ]
             raise AssertionError((method, path, params))
 
         client.signed = signed
 
         async def post_algo(_client, params):
             params_seen.append(dict(params))
-            return {"algoId": len(params_seen)}
+            return {
+                "algoId": len(params_seen),
+                "symbol": params["symbol"],
+                "type": params["type"],
+                "side": params["side"],
+                "status": "NEW",
+            }
 
         with patch.object(binance_demo, "post_algo", new=post_algo), \
                 patch.object(binance_demo, "persist_runtime"):

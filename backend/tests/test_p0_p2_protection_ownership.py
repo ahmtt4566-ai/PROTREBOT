@@ -124,6 +124,94 @@ class P0P2ProtectionOwnershipTests(unittest.IsolatedAsyncioTestCase):
                 await binance_demo._install_protection(client, state, plan)
         return plan, before_invalid
 
+    async def run_final_snapshot_verification(self, final_payload, *, extra_plans=None):
+        plan = self.initial_install_plan()
+        plan["status"] = "DOLUM BEKLİYOR"
+        plan["position_status"] = "PENDING"
+        plans = {plan["id"]: plan}
+        for extra_plan in extra_plans or ():
+            plans[extra_plan["id"]] = extra_plan
+        state = {"plans": plans, "events": []}
+        position_calls = 0
+
+        async def signed(method, path, params=None):
+            nonlocal position_calls
+            if path == "/fapi/v3/positionRisk":
+                position_calls += 1
+                return [{"symbol": "BTCUSDT", "positionAmt": "1"}]
+            if path == "/fapi/v1/openAlgoOrders":
+                if isinstance(final_payload, BaseException):
+                    raise final_payload
+                return final_payload
+            raise AssertionError((method, path, params))
+
+        responses = [
+            {"algoId": 101, "symbol": "BTCUSDT", "type": "STOP_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 102, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 103, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
+            {"algoId": 104, "symbol": "BTCUSDT", "type": "TAKE_PROFIT_MARKET", "side": "SELL", "status": "NEW"},
+        ]
+        response_index = 0
+
+        async def post_algo(_client, _params):
+            nonlocal response_index
+            response = responses[response_index]
+            response_index += 1
+            return response
+
+        abort = AsyncMock(side_effect=binance_demo.BinanceDemoError("test abort"))
+        client = SimpleNamespace(signed=signed)
+        with patch.object(binance_demo, "post_algo", new=post_algo), \
+                patch.object(binance_demo, "_abort_protection_installation", new=abort), \
+                patch.object(binance_demo, "persist_runtime"):
+            if isinstance(final_payload, list) and len(final_payload) == 4 and not extra_plans:
+                await binance_demo._install_protection(client, state, plan)
+            else:
+                with self.assertRaises(binance_demo.BinanceDemoError):
+                    await binance_demo._install_protection(client, state, plan)
+        return plan, abort
+
+    def final_orders(self, ids=(101, 102, 103, 104)):
+        order_types = ["STOP_MARKET", "TAKE_PROFIT_MARKET", "TAKE_PROFIT_MARKET", "TAKE_PROFIT_MARKET"]
+        return [
+            {"algoId": algo_id, "symbol": "BTCUSDT", "orderType": order_type, "side": "SELL", "algoStatus": "NEW"}
+            for algo_id, order_type in zip(ids, order_types)
+        ]
+
+    async def test_initial_install_final_snapshot_missing_id_fails_safe(self):
+        plan, abort = await self.run_final_snapshot_verification(self.final_orders(ids=(101, 102, 103)))
+        abort.assert_awaited_once()
+        self.assertEqual(plan["status"], "DOLUM BEKLİYOR")
+        self.assertNotEqual(plan.get("protection_status"), "KORUMA AKTİF")
+
+    async def test_initial_install_final_snapshot_unavailable_fails_safe(self):
+        plan, abort = await self.run_final_snapshot_verification(
+            binance_demo.BinanceDemoError("snapshot unavailable")
+        )
+        abort.assert_awaited_once()
+        self.assertEqual(plan["status"], "DOLUM BEKLİYOR")
+        self.assertNotEqual(plan.get("protection_status"), "KORUMA AKTİF")
+
+    async def test_initial_install_final_snapshot_malformed_fails_safe(self):
+        plan, abort = await self.run_final_snapshot_verification([{"algoId": 101}])
+        abort.assert_awaited_once()
+        self.assertEqual(plan["status"], "DOLUM BEKLİYOR")
+
+    async def test_initial_install_final_snapshot_shared_id_fails_safe(self):
+        other = self.plan(protection_ids=[101], stop_algo_id=101)
+        plan, abort = await self.run_final_snapshot_verification(
+            self.final_orders(), extra_plans=[other]
+        )
+        abort.assert_awaited_once()
+        self.assertEqual(plan["status"], "DOLUM BEKLİYOR")
+
+    async def test_initial_install_final_snapshot_all_ids_matched_opens_plan(self):
+        plan, abort = await self.run_final_snapshot_verification(self.final_orders())
+        abort.assert_not_awaited()
+        self.assertEqual(set(plan["protection_ids"]), {101, 102, 103, 104})
+        self.assertEqual(plan["status"], "OPEN")
+        self.assertEqual(plan["protection_status"], "KORUMA AKTİF")
+
     async def test_initial_install_wrong_status_does_not_mutate_ownership(self):
         plan, before = await self.run_initial_install_with_responses([
             {"algoId": 201, "symbol": "BTCUSDT", "type": "STOP_MARKET", "side": "SELL", "status": "CANCELED"},
@@ -452,7 +540,7 @@ class P0P2ProtectionOwnershipTests(unittest.IsolatedAsyncioTestCase):
                 "entry_price": 100, "mark_price": 120,
             }],
         }
-        client = SimpleNamespace(signed=AsyncMock(return_value={}))
+        client = SimpleNamespace(signed=AsyncMock(side_effect=[{}, []]))
         response = {"algoId": 303, "symbol": "BTCUSDT", "type": "STOP_MARKET", "side": "SELL", "status": "NEW"}
         with patch.object(v21_demo, "symbol_rules", new=AsyncMock(return_value={"tick": 1})), \
                 patch.object(v21_demo, "post_algo", new=AsyncMock(return_value=response)) as post_algo, \
@@ -460,8 +548,10 @@ class P0P2ProtectionOwnershipTests(unittest.IsolatedAsyncioTestCase):
             changed = await v21_demo.improve_dynamic_stops(application, snapshot, client=client)
         self.assertTrue(changed)
         post_algo.assert_awaited_once()
-        client.signed.assert_awaited_once_with(
+        self.assertEqual(client.signed.await_args_list[0].args,
+            (
             "DELETE", "/fapi/v1/algoOrder", {"symbol": "BTCUSDT", "algoId": 101}
+            )
         )
         self.assertEqual(plan["protection_ids"], [303])
         self.assertEqual(plan["stop_algo_id"], 303)

@@ -61,6 +61,7 @@ from .binance_demo import (
     _protection_classification,
     _single_plan_algo_id,
     _owned_protection_orders,
+    _algo_id,
     _plan_protection_ids,
     _validate_new_protection_identity,
     validate_entry_risk,
@@ -1415,6 +1416,27 @@ async def ensure_stop_protection(application: Any, snapshot: dict[str, Any], *, 
             continue
         if protection_state == "UNKNOWN":
             continue
+        if protection_state == "MISSING":
+            known_ids = _plan_protection_ids(plan)
+            foreign_protective = []
+            for order in snapshot.get("open_algo_orders", []):
+                if not isinstance(order, dict) or _algo_id(order) in known_ids:
+                    continue
+                if str(order.get("symbol") or "").upper() != symbol.upper():
+                    continue
+                if str(order.get("type") or "").upper() != "STOP_MARKET":
+                    continue
+                try:
+                    trigger = float(order.get("trigger_price") or order.get("triggerPrice"))
+                except (TypeError, ValueError):
+                    continue
+                if trigger > 0:
+                    foreign_protective.append(trigger)
+            if foreign_protective:
+                if position.get("direction") == "LONG" and max(foreign_protective) >= float(plan.get("stop_loss") or 0):
+                    continue
+                if position.get("direction") != "LONG" and min(foreign_protective) <= float(plan.get("stop_loss") or 0):
+                    continue
         params = {
             "algoType": "CONDITIONAL", "symbol": symbol,
             "side": "SELL" if position.get("direction") == "LONG" else "BUY",
@@ -1455,10 +1477,17 @@ async def ensure_stop_protection(application: Any, snapshot: dict[str, Any], *, 
         current_ids = set() if "protection_ids" not in plan else _plan_protection_ids(plan)
         if current_ids is None:
             continue
-        if stop_algo_id is not None and stop_algo_id in current_ids:
+        malformed_foreign = any(
+            isinstance(order, dict)
+            and _algo_id(order) not in current_ids
+            and str(order.get("symbol") or "").upper() == symbol.upper()
+            and not all(order.get(key) for key in ("type", "status", "side"))
+            for order in snapshot.get("open_algo_orders", [])
+        )
+        if stop_algo_id is not None and stop_algo_id in current_ids and not malformed_foreign:
             plan["protection_ids"] = [new_id if algo_id == stop_algo_id else algo_id for algo_id in current_ids]
         else:
-            plan["protection_ids"] = [*current_ids, new_id]
+            plan["protection_ids"] = sorted({*current_ids, new_id})
         plan["stop_algo_id"] = new_id
         plan["status"] = "KORUMA ONARILDI"
         state["protection_repairs"] += 1
@@ -1525,8 +1554,26 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
             else set(),
             plans=active_plans,
         )
-        if protection_state != "MATCHED":
+        if protection_state not in {"MATCHED", "MISSING"}:
             continue
+        if protection_state == "MISSING":
+            known_ids = _plan_protection_ids(plan)
+            foreign_levels = []
+            for order in snapshot.get("open_algo_orders", []):
+                if not isinstance(order, dict) or _algo_id(order) in known_ids:
+                    continue
+                if str(order.get("symbol") or "").upper() != symbol.upper():
+                    continue
+                if str(order.get("type") or "").upper() != "STOP_MARKET":
+                    continue
+                try:
+                    foreign_levels.append(float(order.get("trigger_price") or order.get("triggerPrice")))
+                except (TypeError, ValueError):
+                    continue
+            if direction == "LONG" and any(level >= desired for level in foreign_levels):
+                continue
+            if direction != "LONG" and any(level <= desired for level in foreign_levels):
+                continue
         active_stops = _owned_protection_orders(
             plan,
             snapshot,
@@ -1554,6 +1601,8 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
             changed = True
             continue
         async with protection_lock(plan):
+            if plan.get("protection_status") == "CRITICAL / AMBIGUOUS":
+                continue
             current_stop = float(plan.get("stop_loss") or 0)
             still_improves = desired > current_stop + float(rules["tick"]) if direction == "LONG" else desired < current_stop - float(rules["tick"])
             if not still_improves:

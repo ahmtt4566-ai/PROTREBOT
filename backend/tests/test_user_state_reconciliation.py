@@ -33,6 +33,7 @@ class UserStateReconciliationTests(unittest.TestCase):
             "user_id": user_id,
             "symbol": symbol,
             "direction": "LONG",
+            "provenance_state": "CONFIRMED",
             "status": "OPEN",
             "position_status": "OPEN",
             "entry_price": entry_price,
@@ -58,6 +59,16 @@ class UserStateReconciliationTests(unittest.TestCase):
         state = v21_demo.initial_state()
         state.update({"_user_id": user_id, "_app": self.application})
         return state
+
+    @staticmethod
+    def stop_response(algo_id, symbol="BRUSDT", side="SELL"):
+        return {
+            "algoId": algo_id,
+            "symbol": symbol,
+            "type": "STOP_MARKET",
+            "side": side,
+            "status": "NEW",
+        }
 
     def test_user_specific_plan_is_found_by_scoped_reconciliation(self):
         plan = self.plan()
@@ -202,12 +213,12 @@ class UserStateReconciliationTests(unittest.TestCase):
             return {"tick": Decimal("0.1")}
 
         with patch.object(v21_demo, "symbol_rules", new=rules), \
-                patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 202})), \
+                patch.object(v21_demo, "post_algo", new=AsyncMock(return_value=self.stop_response(202))), \
                 patch.object(v21_demo, "persist_runtime"), \
                 patch.object(v21_demo, "record_event"):
             changed = asyncio.run(v21_demo.improve_dynamic_stops(
                 self.application,
-                {"positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": "110", "direction": "LONG"}]},
+                {"positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": "110", "direction": "LONG"}], "open_algo_orders": []},
                 demo_state=demo_state,
                 v21_state=v21_state,
                 client=client,
@@ -238,12 +249,12 @@ class UserStateReconciliationTests(unittest.TestCase):
                 return {"tick": Decimal("0.1")}
 
             with patch.object(v21_demo, "symbol_rules", new=rules), \
-                    patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 202})), \
+                    patch.object(v21_demo, "post_algo", new=AsyncMock(return_value=self.stop_response(202, side="BUY" if plan["direction"] == "SHORT" else "SELL"))), \
                     patch.object(v21_demo, "persist_runtime"), \
                     patch.object(v21_demo, "record_event"):
                 changed = asyncio.run(v21_demo.improve_dynamic_stops(
                     self.application,
-                    {"positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": "90", "direction": "SHORT"}]},
+                    {"positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": "90", "direction": "SHORT"}], "open_algo_orders": []},
                     demo_state=demo_state,
                     v21_state=v21_state,
                     client=client,
@@ -262,14 +273,14 @@ class UserStateReconciliationTests(unittest.TestCase):
             client = SimpleNamespace(signed=AsyncMock())
             if delete_fails:
                 client.signed.side_effect = binance_demo.BinanceDemoError("delete failed")
-            post = AsyncMock(return_value={"algoId": 202})
+            post = AsyncMock(return_value=self.stop_response(202))
 
             async def rules(_client, _symbol):
                 return {"tick": Decimal("0.1")}
 
             snapshot = {
                 "positions": [{"symbol": "BRUSDT", "entry_price": "100", "mark_price": "110", "direction": "LONG"}],
-                "open_algo_orders": [{"symbol": "BRUSDT", "type": "STOP_MARKET", "algo_id": 101, "trigger_price": "90"}],
+                "open_algo_orders": [{"symbol": "BRUSDT", "type": "STOP_MARKET", "side": "SELL", "status": "NEW", "algo_id": 101, "trigger_price": "90"}],
             }
             with patch.object(v21_demo, "symbol_rules", new=rules), \
                     patch.object(v21_demo, "post_algo", new=post), \
@@ -278,7 +289,7 @@ class UserStateReconciliationTests(unittest.TestCase):
                 results = await asyncio.gather(*(
                     v21_demo.improve_dynamic_stops(self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client),
                     v21_demo.improve_dynamic_stops(self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client),
-                ))
+                ), return_exceptions=True)
             return plan, post, client, results
 
         plan, post, client, results = asyncio.run(run_case(False))
@@ -289,7 +300,7 @@ class UserStateReconciliationTests(unittest.TestCase):
 
         plan, post, client, _results = asyncio.run(run_case(True))
         self.assertEqual(post.await_count, 1)
-        self.assertEqual(plan["stop_algo_id"], 202)
+        self.assertEqual(plan["stop_algo_id"], 101)
         self.assertEqual(set(plan["protection_ids"]), {101, 202})
 
     def test_better_active_stop_is_reused_for_long_and_short(self):
@@ -300,7 +311,7 @@ class UserStateReconciliationTests(unittest.TestCase):
             v21_state = self.user_v21_state("user-a")
             v21_state["settings"].update({"breakeven_enabled": False, "trailing_enabled": False})
             client = SimpleNamespace(signed=AsyncMock(return_value={}))
-            post = AsyncMock(return_value={"algoId": 202})
+            post = AsyncMock(return_value=self.stop_response(202))
 
             async def rules(_client, _symbol):
                 return {"tick": Decimal("0.1")}
@@ -546,10 +557,10 @@ class UserStateReconciliationTests(unittest.TestCase):
         client = SimpleNamespace(signed=AsyncMock(), public_get=AsyncMock())
         snapshot = {"positions": [{
             "symbol": "BRUSDT", "direction": "LONG", "entry_price": "100", "mark_price": "110",
-        }]}
+        }], "open_algo_orders": []}
 
         with patch.object(v21_demo, "symbol_rules", new=AsyncMock(return_value={"tick": 1})) as rules_mock, \
-            patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 202})) as post_mock, \
+            patch.object(v21_demo, "post_algo", new=AsyncMock(return_value=self.stop_response(202))) as post_mock, \
             patch.object(v21_demo, "persist_runtime") as persist_mock:
             changed = asyncio.run(v21_demo.improve_dynamic_stops(
                 self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client,
@@ -575,7 +586,7 @@ class UserStateReconciliationTests(unittest.TestCase):
             "open_algo_orders": [],
         }
 
-        with patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 303})), \
+        with patch.object(v21_demo, "post_algo", new=AsyncMock(return_value=self.stop_response(303))), \
                 patch.object(v21_demo, "persist_runtime") as persist_mock:
             changed = asyncio.run(v21_demo.ensure_stop_protection(
                 self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client,
@@ -597,7 +608,7 @@ class UserStateReconciliationTests(unittest.TestCase):
             "open_algo_orders": [],
         }
 
-        with patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 404})) as repair_mock, \
+        with patch.object(v21_demo, "post_algo", new=AsyncMock(return_value=self.stop_response(404))) as repair_mock, \
                 patch.object(v21_demo, "persist_runtime"):
             changed = asyncio.run(v21_demo.ensure_stop_protection(
                 self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client,
@@ -638,7 +649,7 @@ class UserStateReconciliationTests(unittest.TestCase):
             "open_algo_orders": [{"symbol": "BRUSDT", "type": "STOP_MARKET", "algoId": 999}],
         }
 
-        with patch.object(v21_demo, "post_algo", new=AsyncMock(return_value={"algoId": 303})) as repair_mock, \
+        with patch.object(v21_demo, "post_algo", new=AsyncMock(return_value=self.stop_response(303))) as repair_mock, \
                 patch.object(v21_demo, "persist_runtime"):
             changed = asyncio.run(v21_demo.ensure_stop_protection(
                 self.application, snapshot, demo_state=demo_state, v21_state=v21_state, client=client,

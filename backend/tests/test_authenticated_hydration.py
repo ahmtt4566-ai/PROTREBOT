@@ -129,6 +129,25 @@ class AuthenticatedHydrationTests(unittest.TestCase):
         self.assertTrue(restored["_persistence_blocked"])
         self.pool.execute.assert_not_called()
 
+    def test_runtime_persistence_is_tracked_until_db_write_completes(self):
+        self.pool.execute = AsyncMock()
+        state = {
+            "_user_id": "user-a",
+            "_app": self.application,
+            "plans": {self.plan["id"]: self.plan},
+            "events": [],
+        }
+
+        async def persist_and_wait():
+            binance_demo.persist_runtime(state)
+            tasks = self.application.state._binance_demo_persistence_tasks["user-a"]
+            await asyncio.gather(*tasks)
+
+        asyncio.run(persist_and_wait())
+
+        self.pool.execute.assert_awaited_once()
+        self.assertEqual(self.pool.execute.await_args.args[1], "binance_demo:user:user-a")
+
     def test_authenticated_request_hydrates_once_and_binds_current_session(self):
         current_session = session_id(self.request)
         with patch.object(main, "ensure_session_cache", new=AsyncMock()), \

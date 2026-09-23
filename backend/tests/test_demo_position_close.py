@@ -57,6 +57,7 @@ class DemoPositionCloseTests(unittest.TestCase):
             "id": "plan-a",
             "user_id": "user-a",
             "symbol": "BRUSDT",
+            "provenance_state": "CONFIRMED",
             "position_status": "OPEN",
             "status": "OPEN",
             "protection_ids": [],
@@ -72,6 +73,23 @@ class DemoPositionCloseTests(unittest.TestCase):
             ("GET", "/fapi/v3/positionRisk"),
             ("POST", "/fapi/v1/order"),
         ])
+
+    def test_non_confirmed_plan_close_keeps_local_lifecycle_unchanged(self):
+        plan = {
+            "id": "plan-a",
+            "user_id": "user-a",
+            "symbol": "BRUSDT",
+            "provenance_state": "PROVISIONAL",
+            "position_status": "OPEN",
+            "status": "OPEN",
+            "protection_ids": [],
+        }
+
+        result = self.run_close(plan=plan)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(plan["position_status"], "OPEN")
+        self.assertEqual(plan["status"], "OPEN")
 
     def test_existing_position_without_plan_closes_successfully(self):
         result = self.run_close()

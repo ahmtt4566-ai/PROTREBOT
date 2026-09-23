@@ -142,6 +142,53 @@ class SharedMTFDecisionTests(unittest.TestCase):
         self.assertEqual(result["reason"], "INSUFFICIENT_CLOSED_CANDLES")
         self.assertIn("1h: 49/50 closed candles", result["reasons"][0])
 
+    def test_canonical_decision_fails_closed_when_only_4h_is_insufficient(self):
+        primary = [{
+            "time": idx * 900,
+            "open": 100.0 + idx * 0.05,
+            "high": 101.0 + idx * 0.05,
+            "low": 99.0 + idx * 0.05,
+            "close": 100.5 + idx * 0.05,
+            "volume": 1000.0,
+        } for idx in range(220)]
+        decision_time = primary[-1]["time"] + 900
+        one_h = [{
+            "time": decision_time - (50 - idx) * 3600,
+            "open": 100.0 + idx * 0.10,
+            "high": 101.0 + idx * 0.10,
+            "low": 99.0 + idx * 0.10,
+            "close": 100.5 + idx * 0.10,
+            "volume": 5000.0,
+        } for idx in range(50)]
+        four_h = [{
+            "time": decision_time - (49 - idx) * 14400,
+            "open": 100.0 + idx * 0.15,
+            "high": 101.0 + idx * 0.15,
+            "low": 99.0 + idx * 0.15,
+            "close": 100.5 + idx * 0.15,
+            "volume": 20000.0,
+        } for idx in range(49)]
+        one_d = [{
+            "time": decision_time - (50 - idx) * 86400,
+            "open": 100.0 + idx * 0.20,
+            "high": 101.0 + idx * 0.20,
+            "low": 99.0 + idx * 0.20,
+            "close": 100.5 + idx * 0.20,
+            "volume": 50000.0,
+        } for idx in range(50)]
+        frames = {"15m": primary, "1h": one_h, "4h": four_h, "1d": one_d}
+        signal = {
+            "direction": "LONG", "confidence": 85.0, "trend": "LONG",
+            "radar": {"trap_score": 10, "breakout_quality": 80.0, "trap_level": "LOW"},
+            "entry": 100.0, "stop_loss": 97.5, "tp1": 105.0,
+        }
+        with patch.object(main_module, "analyze", return_value=signal):
+            result = canonical_historical_decision("BTCUSDT", frames, decision_time)
+        self.assertEqual(result["decision"], "WAIT")
+        self.assertFalse(result["entry_eligible"])
+        self.assertEqual(result["reason"], "INSUFFICIENT_CLOSED_CANDLES")
+        self.assertIn("4h: 49/50 closed candles", result["reasons"][0])
+
     def test_canonical_decision_threshold_override_uses_candidate_values(self):
         frames, decision_time = self._aligned_frames()
         signal = {
