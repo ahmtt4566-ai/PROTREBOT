@@ -594,6 +594,10 @@ def usable_live_credentials(credentials: tuple[str, str] | None) -> bool:
     )
 
 
+def normalize_consent_fingerprint(value: str | None) -> str:
+    return str(value or "").strip().upper().removeprefix("SHA256:")
+
+
 def update_account_snapshot(state: dict[str, Any], snapshot: dict[str, Any], *, session_binding: str | None = None) -> None:
     state["snapshot"] = snapshot
     if session_binding is not None:
@@ -617,14 +621,14 @@ def consent_status(
     payload = next(
         (
             candidate for candidate in candidates
-            if candidate.get("key_fingerprint") == fingerprint
+            if normalize_consent_fingerprint(candidate.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
             and float(candidate.get("expires_at_epoch") or 0) > time.time()
         ),
         {},
     )
     expires = float(payload.get("expires_at_epoch") or 0)
     active = bool(
-        api_key and fingerprint and payload.get("key_fingerprint") == fingerprint
+        api_key and fingerprint and normalize_consent_fingerprint(payload.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
         and expires > time.time()
     )
     return {
