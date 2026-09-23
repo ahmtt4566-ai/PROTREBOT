@@ -2239,6 +2239,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         )
         signals: list[dict[str, Any]] = []
         analyzed_symbols: list[str] = []
+        rejected_risk_symbols: list[str] = []
         state["auto"]["last_cycle_stage"] = "deep_analysis"
         for candidate in candidates:
             symbol = candidate["symbol"]
@@ -2261,6 +2262,12 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 continue
             if canonical.get("decision") not in {"BUY", "SELL"} or not canonical.get("entry_eligible"):
                 continue
+            entry_price = float(signal.get("entry") or 0)
+            stop_price = float(signal.get("stop_loss") or 0)
+            stop_distance_pct = abs(entry_price - stop_price) / entry_price * 100 if entry_price > 0 and stop_price > 0 else float("inf")
+            if stop_distance_pct > float(state["policy"]["max_stop_distance_pct"]):
+                rejected_risk_symbols.append(f"{symbol}:%{stop_distance_pct:.2f}")
+                continue
             signals.append({"candidate": candidate, "signal": signal, "intent_id": intent_id})
         signals.sort(key=lambda item: (float(item["candidate"].get("opportunity_score") or 0), int(item["signal"].get("confidence") or 0)), reverse=True)
         selected = signals[:3]
@@ -2279,6 +2286,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "deep_analysis_candidates": len(candidates),
             "deep_analysis_symbols": analyzed_symbols,
             "signals_found": len(signals),
+            "rejected_risk_symbols": rejected_risk_symbols,
             "selected_symbols": selected_symbols,
             "selected_symbols_count": len(selected_symbols),
             "selected_candidates": selected_symbols,
