@@ -229,7 +229,7 @@ export default function ExchangeConnections() {
 
     <section className={`exchangeSafety ${selected.toLowerCase()}`}>
       <ShieldCheck/>
-      <div><small>{selected === 'TESTNET' ? 'TESTNET İŞLEM ZİNCİRİ' : 'GERÇEK PARA GÜVENLİK ZİNCİRİ'}</small><h3>{selected === 'TESTNET' ? 'Aktivasyon bağlantıyı açar; 10 dakikalık Demo emir kilidi yine ayrıdır.' : 'Aktivasyon yalnızca hesabı salt-okunur bağlar; gerçek emir göndermez.'}</h3><p>{selected === 'TESTNET' ? 'Demo Komuta ekranındaki bağlantı, bakiye, pozisyon, Stop ve TP haritası bu anahtarı kullanır.' : 'Gerçek emir için Demo kanıtı, 24 saatlik risk izni, limit onayı ve yalnızca 5 dakikalık son kilit ayrıca geçmelidir.'}</p></div>
+      <div><small>{selected === 'TESTNET' ? 'TESTNET İŞLEM ZİNCİRİ' : 'GERÇEK PARA GÜVENLİK ZİNCİRİ'}</small><h3>{selected === 'TESTNET' ? 'Aktivasyon bağlantıyı açar; 10 dakikalık Demo emir kilidi yine ayrıdır.' : 'Aktivasyon yalnızca hesabı salt-okunur bağlar; gerçek emir göndermez.'}</h3><p>{selected === 'TESTNET' ? 'Demo Komuta ekranındaki bağlantı, bakiye, pozisyon, Stop ve TP haritası bu anahtarı kullanır.' : 'Gerçek emir için Demo kanıtı, 24 saatlik risk izni, limit onayı ve 24 saatlik son kilit ayrıca geçmelidir.'}</p></div>
       <ul><li><CheckCircle2/>Para çekme/transfer izni gerekli değildir</li><li><CheckCircle2/>Secret yanıtta yok</li><li><CheckCircle2/>Test emri yok</li><li><CheckCircle2/>Aktivasyon emir açmaz</li></ul>
     </section>
   </div>

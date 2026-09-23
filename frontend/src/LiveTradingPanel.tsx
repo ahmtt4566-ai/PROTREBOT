@@ -195,7 +195,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const exposureState = exposureGate !== 'UNKNOWN' ? exposureGate : status === null ? 'UNKNOWN' : exposure === 0 ? 'READY' : 'BLOCKED'
   const activePlanState = status === null ? 'UNKNOWN' : activePlans ? 'CONFLICT' : 'READY'
   const emergencyState = status === null ? 'UNKNOWN' : emergency ? 'ACTIVE' : 'CLEAR'
-  const autoReady = Boolean(status && connections && connectionReady && armState === 'READY' && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
+  const autoReady = Boolean(status && connections && connectionReady && armState === 'READY' && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState !== 'BLOCKED' && recoveryState === 'READY' && emergencyState === 'CLEAR')
   const policy = policyDraft || status?.policy || {}
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)

@@ -92,7 +92,7 @@ def automation_telemetry(message: str, *, reason: str | None = None) -> None:
 
 LIVE_REST_BASE = "https://fapi.binance.com"
 LIVE_WS_BASE = "wss://fstream.binance.com/private"
-LIVE_ARM_SECONDS = 5 * 60
+LIVE_ARM_SECONDS = 24 * 60 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
 RECONCILE_SECONDS = 10
 MAX_EVENTS = 500
@@ -1983,7 +1983,7 @@ async def execute_live_order(
         if not auto_session_active(state):
             raise HTTPException(423, "Bir saatlik gözetimli canlı otomasyon oturumu kapalı veya süresi doldu.")
     elif not is_armed(state):
-        raise HTTPException(423, "5 dakikalık canlı emir kilidi kapalı veya süresi doldu.")
+        raise HTTPException(423, "24 saatlik canlı emir kilidi kapalı veya süresi doldu.")
     if live_execution_blocked(state):
         raise HTTPException(423, "Canlı yürütme kilitli; acil durum veya belirsiz emir uzlaştırması tamamlanmadı.")
     if source == "V25_AUTO" and credentials is None:
@@ -2586,7 +2586,7 @@ async def v25_arm(request: Request, body: Confirmation) -> dict[str, Any]:
         raise HTTPException(423, f"Canlı kilit açılamadı: {pending} bekleniyor.")
     state["armed_until"] = time.time() + LIVE_ARM_SECONDS
     state["real_trading_locked"] = False
-    add_event(state, "LIVE_ARM", "Canlı yeni giriş izni 5 dakika için açıldı.", actor=user["id"])
+    add_event(state, "LIVE_ARM", "Canlı yeni giriş izni 24 saat için açıldı.", actor=user["id"])
     return public_status(request.app, request)
 
 
@@ -2633,7 +2633,7 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
         "fingerprint": fingerprint if api_key and secret_key else "",
         "expires_at_epoch": state["auto"]["session_until"],
     }
-    add_event(state, "LIVE_AUTO_START", "Canlı otomasyon 5 dakikalık kilit içinden bir saatlik gözetimli oturum için açıldı.", actor=user["id"])
+    add_event(state, "LIVE_AUTO_START", "Canlı otomasyon 24 saatlik ARM penceresi içinden bir saatlik gözetimli oturum için açıldı.", actor=user["id"])
     persist_state(state)
     return public_status(request.app, request)
 

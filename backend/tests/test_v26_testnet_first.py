@@ -34,7 +34,7 @@ class V26TestnetFirstContracts(unittest.TestCase):
         self.assertIn("BINANCE_LIVE_API_KEY", CREDENTIALS)
         self.assertIn("BINANCE_LIVE_SECRET_KEY", CREDENTIALS)
         self.assertIn("CANLI ─░┼ŞLEM R─░SK─░N─░ 24 SAAT KABUL ED─░YORUM", EXECUTION)
-        self.assertIn("LIVE_ARM_SECONDS = 5 * 60", EXECUTION)
+        self.assertIn("LIVE_ARM_SECONDS = 24 * 60 * 60", EXECUTION)
         self.assertIn('"web_consent": {"accepted_at": None', EXECUTION)
 
 

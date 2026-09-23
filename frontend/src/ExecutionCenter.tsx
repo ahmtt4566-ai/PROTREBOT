@@ -176,9 +176,9 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
     void run('ack','/policy/acknowledge',{confirmation:phrase},'Risk limitleri onaylandı. Limit değişirse onay sıfırlanır.')
   }
   const arm = () => {
-    const phrase = window.prompt('5 dakikalık canlı emir kilidini açmak için aynen yazın: CANLI EMİR RİSKİNİ KABUL EDİYORUM')
+    const phrase = window.prompt('24 saatlik canlı emir kilidini açmak için aynen yazın: CANLI EMİR RİSKİNİ KABUL EDİYORUM')
     if (!phrase) return
-    void run('arm','/arm',{confirmation:phrase},'Canlı yeni giriş kilidi yalnızca 5 dakika için açıldı.')
+    void run('arm','/arm',{confirmation:phrase},'Canlı yeni giriş kilidi 24 saat için açıldı.')
   }
   const startAuto = () => {
     const phrase = window.prompt('Bir saatlik canlı otomasyonu başlatmak için aynen yazın: CANLI OTOMATİK')

@@ -1285,7 +1285,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("in known_ids", EXECUTION_SOURCE)
 
     def test_real_entries_require_readiness_and_short_lived_arm(self):
-        self.assertIn("LIVE_ARM_SECONDS = 5 * 60", EXECUTION_SOURCE)
+        self.assertIn("LIVE_ARM_SECONDS = 24 * 60 * 60", EXECUTION_SOURCE)
         self.assertIn('if not is_armed(state)', EXECUTION_SOURCE)
         self.assertIn('if not readiness_for(application, state, credentials=credentials)["ready"]', EXECUTION_SOURCE)
         self.assertIn("30 gün / 100 Demo işlem kanıtı", CORE_SOURCE)
