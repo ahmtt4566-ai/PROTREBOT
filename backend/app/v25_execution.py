@@ -2666,10 +2666,18 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     state["real_trading_locked"] = False
     state["armed_until"] = 0.0
     api_key, secret_key, fingerprint = live_credentials_status(request)
+    live_authorization = state.get("live_session_authorization") or {}
+    if not fingerprint and all(str(live_authorization.get(key) or "").strip() for key in ("session_id", "user_id", "fingerprint")):
+        live_authorization = dict(live_authorization)
+        fingerprint = str(live_authorization["fingerprint"])
+    else:
+        live_authorization = {
+            "session_id": session_id(request),
+            "user_id": str(user["id"]),
+            "fingerprint": fingerprint if api_key and secret_key else "",
+        }
     state["auto_authorization"] = {
-        "session_id": session_id(request),
-        "user_id": str(user["id"]),
-        "fingerprint": fingerprint if api_key and secret_key else "",
+        **live_authorization,
         "expires_at_epoch": state["auto"]["session_until"],
     }
     add_event(state, "LIVE_AUTO_START", "Canlı otomasyon 24 saatlik ARM penceresi içinden bir saatlik gözetimli oturum için açıldı.", actor=user["id"])
