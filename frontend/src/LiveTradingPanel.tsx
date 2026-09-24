@@ -290,6 +290,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (!nextOrder.symbol.endsWith('USDT') || values.some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)) {
       setNotice({kind: 'error', text: 'LIVE order için symbol, margin, leverage, Stop ve TP seviyelerini geçerli girin.'}); return
     }
+    const leverage = Number(nextOrder.leverage)
+    if (!Number.isInteger(leverage) || leverage < 1 || leverage > 50) {
+      setNotice({kind: 'error', text: 'LIVE leverage 1x ile 50x arasında tam sayı olmalı.'}); return
+    }
     const availableBalance = Number(status?.account?.available_balance)
     if (Number.isFinite(availableBalance) && availableBalance > 0 && Number(nextOrder.margin_usdt) > availableBalance) {
       setNotice({kind: 'error', text: `Seçilen marjin ${Number(nextOrder.margin_usdt).toFixed(2)} USDT; kullanılabilir bakiye yalnızca ${availableBalance.toFixed(2)} USDT.`}); return
