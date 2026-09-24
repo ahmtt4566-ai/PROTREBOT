@@ -40,7 +40,7 @@ type Candle = { time: number; open: number; high: number; low: number; close: nu
 type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; adx?: number; atr?: number; support?: number; resistance?: number; radar?: { trap_score?: number; breakout_quality?: number; entry_timing?: string }; volume_ratio?: number; normalized_signal?: string }
 type AccountPlan = { symbol?: string; stop_loss?: string; targets?: string[]; margin_usdt?: number; created_at?: string }
 type AccountPosition = { symbol: string; position_side?: 'BOTH' | 'LONG' | 'SHORT'; direction?: TradeSide; quantity?: number; entry_price?: number; mark_price?: number; liquidation_price?: number; unrealized_pnl?: number; leverage?: number | null; margin_type?: string | null; stop_loss?: number; tp1?: number; age?: string }
-type AccountOrder = { symbol?: string; side?: string; type?: string; price?: number; quantity?: number; status?: string; reduce_only?: boolean }
+type AccountOrder = { symbol?: string; side?: string; type?: string; price?: number; trigger_price?: number; quantity?: number; status?: string; reduce_only?: boolean }
 type AccountSnapshot = { wallet_balance?: number; available_balance?: number; margin_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; plans?: AccountPlan[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number; max_margin_usdt?: number } }
 type PerformanceSnapshot = { total_trades: number; wins: number; losses: number; win_rate: number; total_profit: number; total_loss: number; net_profit: number; average_trade: number; best_trade: number; worst_trade: number; profit_factor: number | null; average_win: number | null; average_loss: number | null; losing_streak: number; max_drawdown: number; history_quality: string }
 type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[]; analysis: Analysis | null; mtf: MtfAnalysis[]; account: AccountSnapshot | null; currentPrice: number | null; priceUpdatedAt: string | null; marketUpdatedAt: string | null; accountUpdatedAt: string | null; marketError: string; accountError: string }
@@ -616,7 +616,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const marketAgeSeconds = snapshot?.marketUpdatedAt ? Math.max(0, (Date.now() - new Date(snapshot.marketUpdatedAt).getTime()) / 1000) : null
   const persistentTradeHistoryText = 'localStorage trade history persistence enabled; live trading remains locked.'
   const priceAgeSeconds = snapshot?.priceUpdatedAt ? Math.max(0, (Date.now() - new Date(snapshot.priceUpdatedAt).getTime()) / 1000) : null
-  const dataHealth = !snapshot ? 'NO DATA' : snapshot.marketError ? 'ERROR' : priceAgeSeconds !== null && priceAgeSeconds <= 8 ? 'LIVE' : 'STALE'
+  const dataHealth = !snapshot ? 'NO DATA' : snapshot.marketError ? 'ERROR' : priceAgeSeconds !== null && priceAgeSeconds <= 20 ? 'LIVE' : 'STALE'
   const riskMetrics = [
     { label: 'Daily PnL', value: dailyPerformance ? `${dailyPerformance.net_profit >= 0 ? '+' : ''}$${fmtCompact(dailyPerformance.net_profit)}` : '--', tone: 'muted' },
     { label: 'Daily Risk', value: '--', tone: 'muted' },
@@ -991,7 +991,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                           <td>{order.symbol || '--'}</td>
                           <td className={order.side === 'BUY' || order.side === 'LONG' ? 'positive' : 'negative'}>{order.side || '--'}</td>
                           <td>{order.type || '--'}</td>
-                          <td>${fmtNum(order.price)}</td>
+                          <td>${fmtNum(order.price || order.trigger_price)}</td>
                           <td>{fmtNum(order.quantity)}</td>
                           <td><span className="statusBadge open">{order.status || '--'}</span></td>
                           <td>{order.reduce_only === undefined ? '--' : order.reduce_only ? 'REDUCE ONLY' : 'NO'}</td>

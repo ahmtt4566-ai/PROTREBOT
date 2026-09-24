@@ -98,6 +98,7 @@ LIVE_ARM_SECONDS = 24 * 60 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
 LIVE_CONSENT_GRACE_SECONDS = 15 * 60
 RECONCILE_SECONDS = 10
+MONITORING_CREDENTIALS_STALE_SECONDS = 90
 ANALYSIS_TIMEOUT_SECONDS = 15
 try:
     TRANSIENT_RECONCILIATION_RECOVERY_SECONDS = max(1.0, min(300.0, float(os.getenv("PROTREBOT_TRANSIENT_RECONCILIATION_RECOVERY_SECONDS", "60"))))
@@ -577,6 +578,10 @@ def initial_state() -> dict[str, Any]:
         "reconciliation_required": False,
         "transient_reconciliation": None,
         "transient_market_data": None,
+        # Order-submission failures are surfaced separately from connection
+        # health so a rejected order never overwrites the connectivity diagnostic.
+        "last_order_error": None,
+        "monitoring_credentials_stale_since": None,
     }
 
 
@@ -587,6 +592,13 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     base["policy"] = sanitize_execution_policy(payload.get("policy"))
     base["policy"]["mtf_allow_either_timeframe"] = configured_mtf_allow_either_timeframe()
     base["policy_ack_digest"] = payload.get("policy_ack_digest") if payload.get("policy_ack_digest") == policy_digest(base["policy"]) else None
+    last_order_error = payload.get("last_order_error")
+    if isinstance(last_order_error, dict) and last_order_error.get("created_at"):
+        base["last_order_error"] = {
+            "message": str(last_order_error.get("message") or "")[:240],
+            "symbol": str(last_order_error.get("symbol") or "")[:32] or None,
+            "created_at": str(last_order_error.get("created_at") or "")[:64],
+        }
     authorization = payload.get("live_session_authorization")
     if isinstance(authorization, dict):
         base["live_session_authorization"] = {
@@ -1992,6 +2004,44 @@ async def recover_orphan_plans(client: BinanceLiveClient, state: dict[str, Any],
     return recovered_count
 
 
+async def cleanup_orphan_protection_orders(
+    client: BinanceLiveClient,
+    state: dict[str, Any],
+    positions: dict[str, dict[str, Any]],
+    open_algos: list[dict[str, Any]],
+) -> int:
+    """Cancel V25-owned Stop/TP algos left on the exchange with no matching
+    position and no tracked plan (e.g. after a plan record was lost on restart)."""
+    active_plan_symbols = {
+        str(plan.get("symbol") or "").upper() for plan in state.get("plans", {}).values()
+        if plan.get("status") not in {"KAPANDI", "İPTAL"}
+    }
+    cancelled = 0
+    for row in open_algos:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper()
+        client_algo_id = str(row.get("client_algo_id") or "")
+        algo_id = row.get("algo_id")
+        if not symbol or not algo_id or not client_algo_id.startswith(LIVE_CLIENT_PREFIX):
+            continue
+        if symbol in positions or symbol in active_plan_symbols:
+            continue
+        try:
+            await client.signed("DELETE", "/fapi/v1/algoOrder", {"symbol": symbol, "algoId": algo_id})
+        except LiveExchangeError:
+            continue
+        cancelled += 1
+        add_event(
+            state,
+            "ORPHAN_PROTECTION_CLEANUP",
+            f"{symbol} için pozisyonu ve plan kaydı olmayan sahipsiz V25 koruma emri iptal edildi.",
+            symbol=symbol,
+            algo_id=int(algo_id),
+        )
+    return cancelled
+
+
 def demo_certificate(application: Any) -> dict[str, Any]:
     state = getattr(application.state, "v21_demo", None)
     if not state:
@@ -2242,6 +2292,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "policy_digest": policy_digest(state["policy"]),
         "policy_acknowledged": state.get("policy_ack_digest") == policy_digest(state["policy"]),
         "reconciliation_diagnostic": latest_reconciliation_diagnostic(state),
+        "last_order_error": state.get("last_order_error"),
         "readiness": release,
         "account": {"wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"), "unrealized_pnl": snapshot.get("unrealized_pnl"), "positions": snapshot.get("positions", []), "open_orders": snapshot.get("open_orders", []), "open_algo_orders": snapshot.get("open_algo_orders", []), "hedge_mode": snapshot.get("hedge_mode")},
         "daily": live_daily_metrics(state),
@@ -2475,7 +2526,7 @@ async def execute_live_order(
                     symbol=normalize_symbol(body.symbol),
                     source=source,
                 )
-            state["connection"]["last_error"] = str(exc)[:240]
+            state["last_order_error"] = {"message": str(exc)[:240], "symbol": normalize_symbol(body.symbol), "created_at": now_iso()}
             persist_state(state)
             raise safe_exchange_error(exc) from exc
         except Exception as exc:
@@ -2488,7 +2539,7 @@ async def execute_live_order(
                 symbol=body.symbol,
                 client_id=body.intent_id,
             )
-            state["connection"]["last_error"] = safe_message
+            state["last_order_error"] = {"message": safe_message, "symbol": str(body.symbol or "")[:32], "created_at": now_iso()}
             add_event(
                 state,
                 "LIVE_ORDER_EXCEPTION_DIAGNOSTIC",
@@ -2849,6 +2900,7 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
         state["reconciliation_required"] = False
         state["emergency"].update({"active": False, "reason": "UNKNOWN_ORDER_RECONCILED"})
         add_event(state, "UNKNOWN_ORDER_RECONCILED", "Belirsiz canlı emir exact kimlik ve parametrelerle uzlaştırıldı; yeniden arm gerekiyor.", recovery_state="LOCKED")
+    await cleanup_orphan_protection_orders(client, state, positions, open_algos)
     for plan in state.get("plans", {}).values():
         if plan.get("status") in {"KAPANDI", "İPTAL"}:
             continue
@@ -2960,12 +3012,25 @@ async def execution_loop(application: Any) -> None:
                     persist_state(state)
                     await asyncio.sleep(5)
                     continue
+                monitoring_stale_since = state.get("monitoring_credentials_stale_since")
+                now_epoch = time.time()
+                if monitoring_stale_since is None:
+                    state["monitoring_credentials_stale_since"] = now_epoch
+                elif state.get("connected") and now_epoch - float(monitoring_stale_since) > MONITORING_CREDENTIALS_STALE_SECONDS:
+                    state["connected"] = False
+                    state["connection"].update({
+                        "last_checked": now_iso(),
+                        "last_error": "Canlı hesap izleme oturum yetkisi süresi doldu; hesabı yeniden bağlayın.",
+                    })
+                    add_event(state, "LIVE_MONITORING_CREDENTIALS_STALE", "Canlı hesap izleme oturumu yenilenemedi; manuel yeniden bağlantı gerekiyor.")
+                    persist_state(state)
                 application.state.v25_execution["auto"]["last_skip_reason"] = "no_credentials"
                 application.state.v25_execution["auto"]["last_cycle_stage"] = "skipped"
                 automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")
                 await asyncio.sleep(5)
                 continue
             reconciliation_stage = "account_reconciliation"
+            application.state.v25_execution["monitoring_credentials_stale_since"] = None
             async with application.state.v25_execution["lock"]:
                 await reconcile(application, credentials=credentials)
             reconciliation_stage = "automatic_cycle"
