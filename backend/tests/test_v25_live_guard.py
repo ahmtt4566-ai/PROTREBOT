@@ -1232,6 +1232,16 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertEqual(transport.production_mutations, 0)
         self.assertEqual(state.get("dry_run_protection_checks"), 1)
         self.assertEqual(state["auto"]["last_scan_stats"]["executed_symbols_count"], 0)
+        rejection_counts = state["auto"]["last_scan_stats"]["rejection_reason_counts"]
+        self.assertEqual(set(rejection_counts), {"signal_wait_or_invalid", "entry_ineligible", "stop_distance", "spread"})
+        self.assertEqual(state["auto"]["last_scan_stats"]["rejection_reason_breakdown"], {
+            "signal_wait_or_invalid": {},
+            "entry_ineligible": {},
+            "stop_distance": {},
+            "spread": {},
+        })
+        self.assertEqual(state["auto"]["last_scan_stats"]["signal_thresholds"]["min_confidence"], state["policy"]["min_confidence"])
+        self.assertEqual(state["auto"]["last_scan_stats"]["signal_thresholds"]["max_stop_distance_pct"], state["policy"]["max_stop_distance_pct"])
         self.assertEqual(audit["symbol"], "BTCUSDT")
         self.assertEqual(audit["side"], "BUY")
         self.assertEqual(audit["position_side"], "BOTH")

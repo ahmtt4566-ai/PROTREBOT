@@ -2028,6 +2028,9 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
             "candidate_symbols": scan_stats.get("candidate_symbols", scan_stats.get("selected_candidates", [])),
             "deep_analysis_symbols": scan_stats.get("deep_analysis_symbols", []),
             "candidate_count": scan_stats.get("candidate_count", scan_stats.get("deep_analysis_candidates", 0)),
+            "rejection_reason_counts": scan_stats.get("rejection_reason_counts", {}),
+            "rejection_reason_breakdown": scan_stats.get("rejection_reason_breakdown", {}),
+            "signal_thresholds": scan_stats.get("signal_thresholds", {}),
             "deep_analysis_count": scan_stats.get("deep_analysis_count", len(scan_stats.get("deep_analysis_symbols", []))),
             "selected_symbols": scan_stats.get("selected_symbols", scan_stats.get("selected_candidates", [])),
             "selected_symbols_count": scan_stats.get("selected_symbols_count", len(scan_stats.get("selected_symbols", scan_stats.get("selected_candidates", [])))),
@@ -2321,6 +2324,41 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         analyzed_symbols: list[str] = []
         rejected_risk_symbols: list[str] = []
         analysis_timeout_symbols: list[str] = []
+        rejection_reason_counts = {
+            "signal_wait_or_invalid": 0,
+            "entry_ineligible": 0,
+            "stop_distance": 0,
+            "spread": 0,
+        }
+        rejection_reason_breakdown = {
+            "signal_wait_or_invalid": {},
+            "entry_ineligible": {},
+            "stop_distance": {},
+            "spread": {},
+        }
+        signal_thresholds = {
+            "min_confidence": int(state["policy"]["min_confidence"]),
+            "canonical_max_trap_score": 35,
+            "entry_gate_max_trap_score": int(state["policy"]["max_trap_score"]),
+            "min_breakout_quality": 50,
+            "direction_score_margin": 10,
+            "adx_score_min": 20,
+            "rsi_long_range": [52, 72],
+            "rsi_short_range": [28, 48],
+            "volume_ratio_min": 1.05,
+            "mtf_required_timeframes": ["1h", "4h"],
+            "mtf_minimum_closed_candles": 50,
+            "short_mtf_alignment_max": 80,
+            "primary_minimum_closed_candles": 220,
+            "max_stop_distance_pct": float(state["policy"]["max_stop_distance_pct"]),
+            "max_spread_bps": float(state["policy"]["max_spread_bps"]),
+        }
+
+        def count_rejection(category: str, reason: str) -> None:
+            rejection_reason_counts[category] += 1
+            reasons = rejection_reason_breakdown[category]
+            reasons[reason] = int(reasons.get(reason, 0)) + 1
+
         state["auto"]["last_cycle_stage"] = "deep_analysis"
         for candidate in candidates:
             symbol = candidate["symbol"]
@@ -2369,12 +2407,39 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             if intent_id in state["intents"]:
                 state["duplicate_blocks"] += 1
                 continue
-            if canonical.get("decision") not in {"BUY", "SELL"} or not canonical.get("entry_eligible"):
+            raw_direction = str(signal.get("direction") or "BEKLE").upper()
+            if raw_direction not in {"LONG", "SHORT"}:
+                signal_reason = "DIRECTION_SCORE_MARGIN_NOT_MET" if signal else str(canonical.get("reason") or "SIGNAL_WAIT")
+                count_rejection("signal_wait_or_invalid", signal_reason)
+                continue
+            if not canonical.get("entry_eligible"):
+                detailed_reasons = []
+                confidence = float(signal.get("confidence") or 0)
+                trap_score = float((signal.get("radar") or {}).get("trap_score") or 0)
+                breakout_quality = float((signal.get("radar") or {}).get("breakout_quality") or 0)
+                if confidence < float(signal_thresholds["min_confidence"]):
+                    detailed_reasons.append("CONFIDENCE_BELOW_MIN")
+                if trap_score > float(signal_thresholds["canonical_max_trap_score"]):
+                    detailed_reasons.append("TRAP_SCORE_ABOVE_MAX")
+                if breakout_quality < float(signal_thresholds["min_breakout_quality"]):
+                    detailed_reasons.append("BREAKOUT_QUALITY_BELOW_MIN")
+                mtf = canonical.get("mtf") if isinstance(canonical.get("mtf"), dict) else {}
+                if mtf and not mtf.get("higher_timeframe_confirmation", True):
+                    detailed_reasons.append("MTF_HIGHER_TIMEFRAME_MISMATCH")
+                if mtf.get("blocked_by_short_filter"):
+                    detailed_reasons.append("MTF_SHORT_ALIGNMENT_FILTER")
+                if not detailed_reasons and isinstance(canonical.get("reasons"), list):
+                    detailed_reasons = [str(reason) for reason in canonical["reasons"]]
+                if not detailed_reasons:
+                    detailed_reasons = [str(canonical.get("reason") or "ENTRY_INELIGIBLE")]
+                for reason in detailed_reasons:
+                    count_rejection("entry_ineligible", str(reason))
                 continue
             entry_price = float(signal.get("entry") or 0)
             stop_price = float(signal.get("stop_loss") or 0)
             stop_distance_pct = abs(entry_price - stop_price) / entry_price * 100 if entry_price > 0 and stop_price > 0 else float("inf")
             if stop_distance_pct > float(state["policy"]["max_stop_distance_pct"]):
+                count_rejection("stop_distance", "STOP_DISTANCE_ABOVE_MAX")
                 rejected_risk_symbols.append(f"{symbol}:%{stop_distance_pct:.2f}")
                 continue
             signals.append({"candidate": candidate, "signal": signal, "intent_id": intent_id})
@@ -2392,6 +2457,9 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "eligible_symbols": getattr(client, "last_scan_eligible_count", 0),
             "candidate_symbols": [item["symbol"] for item in candidates],
             "candidate_count": len(signals),
+            "rejection_reason_counts": rejection_reason_counts,
+            "rejection_reason_breakdown": rejection_reason_breakdown,
+            "signal_thresholds": signal_thresholds,
             "deep_analysis_candidates": len(candidates),
             "deep_analysis_symbols": analyzed_symbols,
             "signals_found": len(signals),
@@ -2421,6 +2489,8 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · piyasa verisi reddedildi: {exc}"
                 continue
             guard = evaluate_entry_gates(symbol=symbol, signal=signal, snapshot=snapshot, policy=state["policy"], daily=daily, spread_bps=spread, armed=True, allowed_symbols=[symbol])
+            if any(not gate["passed"] and gate["key"] == "spread" for gate in guard.get("gates", [])):
+                count_rejection("spread", "SPREAD_ABOVE_MAX")
             if not guard["passed"]:
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · {guard['reason']}"
                 continue
