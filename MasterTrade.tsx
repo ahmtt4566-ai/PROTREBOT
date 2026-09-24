@@ -35,6 +35,7 @@ type TradeHistoryRow = {
 }
 
 type MarketRow = { symbol: string; display: string; price: number; change: number; volume: number; status?: string; contractType?: string; quoteAsset?: string; filters?: unknown[] }
+type ScannerCandidate = { symbol: string; direction: string; confidence: number; final_decision_score: number; opportunity_score: number; smart_score: number }
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number }
 type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; adx?: number; atr?: number; support?: number; resistance?: number; radar?: { trap_score?: number; breakout_quality?: number; entry_timing?: string }; volume_ratio?: number; normalized_signal?: string }
 type AccountPlan = { symbol?: string; stop_loss?: string; targets?: string[]; margin_usdt?: number; created_at?: string }
@@ -97,6 +98,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [liveConnections, setLiveConnections] = useState<SharedConnectionStatus | null>(null)
   const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(null)
   const [markets, setMarkets] = useState<MarketRow[]>([])
+  const [scannerCandidates, setScannerCandidates] = useState<ScannerCandidate[]>([])
   const [marketQuery, setMarketQuery] = useState('')
   const [marketLoading, setMarketLoading] = useState(true)
   const [marketError, setMarketError] = useState('')
@@ -159,6 +161,24 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     const timer = window.setInterval(() => void refreshMarkets(), 3000)
     return () => { active = false; controller.abort(); window.clearInterval(timer) }
   }, [draft.market])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    const refreshScanner = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=5`, { signal: controller.signal })
+        if (!response.ok) throw new Error('Scanner data unavailable')
+        const payload = await response.json() as { results?: ScannerCandidate[] }
+        if (active) setScannerCandidates(Array.isArray(payload.results) ? payload.results : [])
+      } catch (error) {
+        if (active && !(error instanceof Error && error.name === 'AbortError')) setScannerCandidates([])
+      }
+    }
+    void refreshScanner()
+    const timer = window.setInterval(() => void refreshScanner(), 60000)
+    return () => { active = false; controller.abort(); window.clearInterval(timer) }
+  }, [interval])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -1023,7 +1043,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <span className="livePill">LIVE</span>
             </div>
 
-            <div className="scannerList"><div className="emptyState">NO CURRENT OPPORTUNITY SNAPSHOT</div></div>
+            <div className="scannerList">{scannerCandidates.length ? scannerCandidates.map((candidate, index) => <article key={candidate.symbol}><span className="scannerScore">#{index + 1}</span><div><strong>{candidate.symbol}</strong><small>{candidate.direction} · Confidence {fmtDecisionNumber(candidate.confidence)}%</small></div><strong>{fmtDecisionNumber(candidate.final_decision_score)}<small> / 100 FINAL DECISION</small></strong></article>) : <div className="emptyState">NO CURRENT OPPORTUNITY SNAPSHOT</div>}</div>
           </section>
 
           <section className="masterTradePanel activityPanel compactPanel">
