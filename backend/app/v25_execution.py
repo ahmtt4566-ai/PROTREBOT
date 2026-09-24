@@ -60,6 +60,7 @@ from .credential_store import load_live_consent
 from .execution_core import (
     DEFAULT_EXECUTION_POLICY,
     configured_min_confidence,
+    configured_mtf_allow_either_timeframe,
     LIVE_CLIENT_PREFIX,
     V25_VERSION,
     credential_fingerprint,
@@ -535,6 +536,7 @@ def summarize_mtf_relaxation(records: Any, *, min_confidence: float = 80.0) -> d
 def initial_state() -> dict[str, Any]:
     default_policy = dict(DEFAULT_EXECUTION_POLICY)
     default_policy["min_confidence"] = configured_min_confidence()
+    default_policy["mtf_allow_either_timeframe"] = configured_mtf_allow_either_timeframe()
     return {
         "version": V25_VERSION,
         "policy": default_policy,
@@ -582,6 +584,7 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return base
     base["policy"] = sanitize_execution_policy(payload.get("policy"))
+    base["policy"]["mtf_allow_either_timeframe"] = configured_mtf_allow_either_timeframe()
     base["policy_ack_digest"] = payload.get("policy_ack_digest") if payload.get("policy_ack_digest") == policy_digest(base["policy"]) else None
     consent = payload.get("web_consent")
     if isinstance(consent, dict):
