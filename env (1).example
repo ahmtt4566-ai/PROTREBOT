@@ -14,6 +14,9 @@ PROTREBOT_EXECUTION_MODE=TESTNET_FIRST
 PROTREBOT_PAPER_ENABLED=false
 PROTREBOT_LIVE_CHANNEL_ENABLED=true
 PROTREBOT_DEPLOYMENT_TIER=FREE_PREVIEW
+PROTREBOT_MIN_CONFIDENCE=80
+# false: 1h ve 4h ikisi de eşleşmeli; true: 1h veya 4h eşleşmesi yeterli.
+PROTREBOT_MTF_ALLOW_EITHER_TIMEFRAME=false
 
 # İlk yayında boş bırakın. Canlı kanal ayrı güvenlik kapıları tamamlanmadan açılmaz.
 BINANCE_LIVE_API_KEY=

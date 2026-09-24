@@ -104,6 +104,8 @@ except (TypeError, ValueError):
 MAX_EVENTS = 500
 MAX_PLANS = 250
 MAX_CONFIDENCE_REJECTION_HISTORY = 20
+MTF_HISTORY_SECONDS = 48 * 60 * 60
+MAX_MTF_HISTORY_RECORDS = 100_000
 PROVENANCE_STATES = {"NO_PROVENANCE", "PROVISIONAL", "CONFIRMED", "BROKEN"}
 PROTECTION_STATES = {"MATCHED", "MISSING", "UNKNOWN"}
 MARKET_SCAN_LIMIT = 100
@@ -478,6 +480,58 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def prune_mtf_decision_history(records: Any, *, now_epoch: float | None = None) -> list[dict[str, Any]]:
+    """Keep timestamped MTF decisions inside the rolling persistence window."""
+    if not isinstance(records, list):
+        return []
+    cutoff = (time.time() if now_epoch is None else float(now_epoch)) - MTF_HISTORY_SECONDS
+    kept: list[dict[str, Any]] = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        try:
+            timestamp_epoch = float(item.get("timestamp_epoch"))
+        except (TypeError, ValueError):
+            continue
+        if timestamp_epoch < cutoff:
+            continue
+        entry_direction = str(item.get("entry_direction") or "BEKLE").upper()
+        if entry_direction not in {"LONG", "SHORT", "BEKLE"}:
+            entry_direction = "BEKLE"
+        kept.append({
+            "timestamp": str(item.get("timestamp") or "")[:64],
+            "timestamp_epoch": timestamp_epoch,
+            "symbol": str(item.get("symbol") or "")[:32],
+            "confidence": float(item.get("confidence") or 0),
+            "entry_direction": entry_direction,
+            "1h_direction": str(item.get("1h_direction") or "BEKLE")[:16],
+            "4h_direction": str(item.get("4h_direction") or "BEKLE")[:16],
+            "mtf_mismatch": bool(item.get("mtf_mismatch")),
+        })
+    return kept[-MAX_MTF_HISTORY_RECORDS:]
+
+
+def summarize_mtf_relaxation(records: Any, *, min_confidence: float = 80.0) -> dict[str, Any]:
+    """Estimate which high-confidence strict MTF rejections pass an OR gate."""
+    rows = prune_mtf_decision_history(records)
+    high_confidence = [
+        row for row in rows
+        if row["entry_direction"] in {"LONG", "SHORT"} and row["confidence"] >= min_confidence
+    ]
+    strict_rejections = [row for row in high_confidence if row["mtf_mismatch"]]
+    rescued = [
+        row for row in strict_rejections
+        if row["1h_direction"] == row["entry_direction"] or row["4h_direction"] == row["entry_direction"]
+    ]
+    return {
+        "min_confidence": min_confidence,
+        "high_confidence_signals": len(high_confidence),
+        "strict_mtf_rejections": len(strict_rejections),
+        "rescued_by_or_gate": len(rescued),
+        "rescue_rate": round(len(rescued) / len(strict_rejections), 4) if strict_rejections else 0.0,
+    }
+
+
 def initial_state() -> dict[str, Any]:
     default_policy = dict(DEFAULT_EXECUTION_POLICY)
     default_policy["min_confidence"] = configured_min_confidence()
@@ -499,6 +553,7 @@ def initial_state() -> dict[str, Any]:
         "snapshot_session_id": None,
         "live_session_authorization": {"session_id": "", "user_id": "", "fingerprint": ""},
         "events": [],
+        "mtf_decision_history": [],
         "plans": {},
         "intents": {},
         "armed_until": 0.0,
@@ -541,6 +596,7 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     for key in ("events", "plans", "intents", "duplicate_blocks", "protection_repairs"):
         if key in payload and isinstance(payload[key], type(base[key])):
             base[key] = payload[key]
+    base["mtf_decision_history"] = prune_mtf_decision_history(payload.get("mtf_decision_history"))
     if isinstance(payload.get("emergency"), dict):
         base["emergency"] = {
             "active": bool(payload["emergency"].get("active")),
@@ -2198,7 +2254,8 @@ async def canonical_live_decision(
         decision_time,
         required_intervals=("15m", "1h", "4h"),
         historical_policy_override={
-            "confidence_threshold": int((policy or {}).get("min_confidence", 78)),
+            "confidence_threshold": int((policy or {}).get("min_confidence", configured_min_confidence())),
+            "mtf_allow_either_timeframe": bool((policy or {}).get("mtf_allow_either_timeframe", False)),
         },
     )
 
@@ -2453,6 +2510,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "rsi_short_range": [28, 48],
             "volume_ratio_min": 1.05,
             "mtf_required_timeframes": ["1h", "4h"],
+            "mtf_allow_either_timeframe": bool(state["policy"].get("mtf_allow_either_timeframe", False)),
             "mtf_minimum_closed_candles": 50,
             "short_mtf_alignment_max": 80,
             "primary_minimum_closed_candles": 220,
@@ -2509,11 +2567,25 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 logger.warning("MULTI_SYMBOL_SCAN candidate exchange timeout during deep analysis: %s", symbol)
                 continue
             signal = canonical.get("analysis") or {}
+            mtf = canonical.get("mtf") if isinstance(canonical.get("mtf"), dict) else {}
+            timeframe_rows = mtf.get("timeframes") if isinstance(mtf.get("timeframes"), dict) else {}
+            raw_direction = str(signal.get("direction") or "BEKLE").upper()
+            mtf_history = state.setdefault("mtf_decision_history", [])
+            mtf_history.append({
+                "timestamp": now_iso(),
+                "timestamp_epoch": time.time(),
+                "symbol": symbol,
+                "confidence": float(signal.get("confidence") or 0),
+                "entry_direction": raw_direction,
+                "1h_direction": str((timeframe_rows.get("1h") or {}).get("direction") or "BEKLE"),
+                "4h_direction": str((timeframe_rows.get("4h") or {}).get("direction") or "BEKLE"),
+                "mtf_mismatch": bool(raw_direction in {"LONG", "SHORT"} and not mtf.get("higher_timeframe_confirmation", False)),
+            })
+            state["mtf_decision_history"] = prune_mtf_decision_history(mtf_history)
             intent_id = f"auto-{symbol}-{state['policy']['interval']}-{candle_id}"
             if intent_id in state["intents"]:
                 state["duplicate_blocks"] += 1
                 continue
-            raw_direction = str(signal.get("direction") or "BEKLE").upper()
             if raw_direction not in {"LONG", "SHORT"}:
                 signal_reason = "DIRECTION_SCORE_MARGIN_NOT_MET" if signal else str(canonical.get("reason") or "SIGNAL_WAIT")
                 count_rejection("signal_wait_or_invalid", signal_reason)
@@ -2529,7 +2601,6 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                     detailed_reasons.append("TRAP_SCORE_ABOVE_MAX")
                 if breakout_quality < float(signal_thresholds["min_breakout_quality"]):
                     detailed_reasons.append("BREAKOUT_QUALITY_BELOW_MIN")
-                mtf = canonical.get("mtf") if isinstance(canonical.get("mtf"), dict) else {}
                 if mtf and not mtf.get("higher_timeframe_confirmation", True):
                     detailed_reasons.append("MTF_HIGHER_TIMEFRAME_MISMATCH")
                 if mtf.get("blocked_by_short_filter"):
@@ -2874,6 +2945,24 @@ async def shutdown_v25_execution(application: Any) -> None:
 async def v25_status(request: Request) -> dict[str, Any]:
     execution_owner(request)
     return public_status(request.app, request)
+
+
+@router.get("/mtf/history")
+async def v25_mtf_history(request: Request, hours: int = Query(default=48, ge=24, le=48)) -> dict[str, Any]:
+    """Return the persisted MTF decisions and the non-production OR simulation."""
+    execution_owner(request)
+    state = request.app.state.v25_execution
+    cutoff = time.time() - hours * 60 * 60
+    history = [
+        row for row in prune_mtf_decision_history(state.get("mtf_decision_history"))
+        if float(row.get("timestamp_epoch") or 0) >= cutoff
+    ]
+    return {
+        "window_hours": hours,
+        "records": history,
+        "or_gate_simulation": summarize_mtf_relaxation(history, min_confidence=float(state["policy"]["min_confidence"])),
+        "production_gate_unchanged": True,
+    }
 
 
 @router.get("/market/candles")

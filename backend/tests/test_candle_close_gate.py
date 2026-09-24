@@ -32,16 +32,16 @@ class CandleCloseGateThresholdTests(unittest.TestCase):
             return asyncio.run(candle_close_gate("BTCUSDT", "15m"))
 
     def test_breakout_quality_between_50_and_54_passes_with_canonical_threshold(self):
-        gate = self._run(current_confidence=78, current_breakout_quality=52)
+        gate = self._run(current_confidence=80, current_breakout_quality=52)
         self.assertTrue(gate["entry_allowed"])
 
     def test_breakout_quality_below_50_still_fails(self):
-        gate = self._run(current_confidence=78, current_breakout_quality=49)
+        gate = self._run(current_confidence=80, current_breakout_quality=49)
         self.assertFalse(gate["entry_allowed"])
 
-    def test_confidence_boundary_remains_78(self):
-        below = self._run(current_confidence=77, current_breakout_quality=80)
-        at_boundary = self._run(current_confidence=78, current_breakout_quality=80)
+    def test_confidence_boundary_is_unified_at_80(self):
+        below = self._run(current_confidence=79, current_breakout_quality=80)
+        at_boundary = self._run(current_confidence=80, current_breakout_quality=80)
         self.assertFalse(below["entry_allowed"])
         self.assertTrue(at_boundary["entry_allowed"])
 

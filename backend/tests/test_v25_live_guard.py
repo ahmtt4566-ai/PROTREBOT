@@ -22,6 +22,7 @@ from app.execution_core import (  # noqa: E402
     HARD_MAX_POSITIONS,
     HARD_MAX_TOTAL_EXPOSURE_USDT,
     credential_fingerprint,
+    configured_mtf_allow_either_timeframe,
     configured_min_confidence,
     daily_execution_metrics,
     evaluate_entry_gates,
@@ -33,7 +34,7 @@ from app.execution_core import (  # noqa: E402
 )
 from app import v25_execution  # noqa: E402
 from app.binance_demo import BinanceDemoError  # noqa: E402
-from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, rank_market_tickers, sanitized_state, submit_entry, validate_protection_readiness  # noqa: E402
+from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, prune_mtf_decision_history, rank_market_tickers, sanitized_state, submit_entry, summarize_mtf_relaxation, validate_protection_readiness  # noqa: E402
 
 
 EXECUTION_SOURCE = (BACKEND / "app" / "v25_execution.py").read_text(encoding="utf-8")
@@ -380,6 +381,21 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(restored["live_auto_trade"])
         self.assertFalse(restored["auto"]["enabled"])
 
+    def test_mtf_history_rolls_and_or_gate_simulation_counts_rescued_signals(self):
+        now = time.time()
+        rows = [
+            {"timestamp": "now", "timestamp_epoch": now, "symbol": "A", "confidence": 85, "entry_direction": "LONG", "1h_direction": "LONG", "4h_direction": "SHORT", "mtf_mismatch": True},
+            {"timestamp": "now", "timestamp_epoch": now, "symbol": "B", "confidence": 79, "entry_direction": "SHORT", "1h_direction": "SHORT", "4h_direction": "LONG", "mtf_mismatch": True},
+            {"timestamp": "old", "timestamp_epoch": now - 49 * 3600, "symbol": "C", "confidence": 90, "entry_direction": "LONG", "1h_direction": "LONG", "4h_direction": "SHORT", "mtf_mismatch": True},
+        ]
+        self.assertEqual(len(prune_mtf_decision_history(rows, now_epoch=now)), 2)
+        restored = sanitized_state({"mtf_decision_history": rows})
+        self.assertEqual(len(restored["mtf_decision_history"]), 2)
+        summary = summarize_mtf_relaxation(restored["mtf_decision_history"])
+        self.assertEqual(summary["high_confidence_signals"], 1)
+        self.assertEqual(summary["strict_mtf_rejections"], 1)
+        self.assertEqual(summary["rescued_by_or_gate"], 1)
+
     def test_unexpired_web_consent_survives_state_restore_but_expired_consent_does_not(self):
         active = {
             "accepted_at": "2026-09-23T18:00:00+00:00",
@@ -439,6 +455,16 @@ class V25LiveGuardCoreTests(unittest.TestCase):
             self.assertEqual(configured_min_confidence(), 91)
             self.assertEqual(sanitize_execution_policy({})["min_confidence"], 91)
             self.assertEqual(sanitize_execution_policy({"min_confidence": 84})["min_confidence"], 84)
+
+    def test_mtf_either_timeframe_mode_is_explicitly_configurable(self):
+        with patch.dict("os.environ", {"PROTREBOT_MTF_ALLOW_EITHER_TIMEFRAME": "false"}, clear=False):
+            self.assertFalse(configured_mtf_allow_either_timeframe())
+            self.assertFalse(sanitize_execution_policy({})["mtf_allow_either_timeframe"])
+
+        with patch.dict("os.environ", {"PROTREBOT_MTF_ALLOW_EITHER_TIMEFRAME": "true"}, clear=False):
+            self.assertTrue(configured_mtf_allow_either_timeframe())
+            self.assertTrue(sanitize_execution_policy({})["mtf_allow_either_timeframe"])
+            self.assertFalse(sanitize_execution_policy({"mtf_allow_either_timeframe": False})["mtf_allow_either_timeframe"])
 
     def test_risk_sizing_respects_loss_margin_and_leverage(self):
         policy = sanitize_execution_policy({"max_margin_per_trade": 25, "max_loss_per_trade": 3, "max_leverage": 2})

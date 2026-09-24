@@ -56,7 +56,7 @@ from .v27_cloud_ops import (
     router as v27_cloud_router,
     shutdown_v27_cloud,
 )
-from .execution_core import evaluate_entry_gates, risk_sized_order
+from .execution_core import configured_min_confidence, configured_mtf_allow_either_timeframe, evaluate_entry_gates, risk_sized_order
 from .paper_autonomy import (
     PAPER_AUTONOMY_VERSION,
     autonomy_policy,
@@ -145,6 +145,7 @@ def shared_mtf_decision(
     timeframe_results: dict[str, dict],
     short_filter: bool = True,
     short_alignment_max: float = SHORT_MTF_ALIGNMENT_MAX,
+    allow_either_timeframe: bool = False,
 ) -> dict:
     """Pure MTF gate that evaluates already-computed timeframe opinions without fetching data.
 
@@ -185,9 +186,12 @@ def shared_mtf_decision(
             "higher_timeframe_confirmation": False,
         }
 
+    timeframe_matches = {
+        interval: timeframe_map[interval]["direction"] == entry_direction
+        for interval in ("1h", "4h")
+    }
     higher_timeframe_confirmation = (
-        timeframe_map["1h"]["direction"] == entry_direction
-        and timeframe_map["4h"]["direction"] == entry_direction
+        any(timeframe_matches.values()) if allow_either_timeframe else all(timeframe_matches.values())
     )
     alignment = round(
         float(timeframe_map["15m"]["confidence"]) * 0.25
@@ -220,7 +224,7 @@ def shared_mtf_decision(
 
     if entry_direction == "LONG":
         verdict = "GÜÇLÜ ONAY"
-        reason = "15m, 1h ve 4h aynı LONG yönünü doğruluyor."
+        reason = "15m, 1h veya 4h LONG yönünü doğruluyor." if allow_either_timeframe else "15m, 1h ve 4h aynı LONG yönünü doğruluyor."
         long_permission = True
         short_permission = False
         blocked_by_short_filter = False
@@ -240,7 +244,7 @@ def shared_mtf_decision(
             direction = "SHORT"
         else:
             verdict = "GÜÇLÜ ONAY"
-            reason = "15m, 1h ve 4h aynı SHORT yönünü doğruluyor."
+            reason = "15m, 1h veya 4h SHORT yönünü doğruluyor." if allow_either_timeframe else "15m, 1h ve 4h aynı SHORT yönünü doğruluyor."
             long_permission = False
             short_permission = True
             blocked_by_short_filter = False
@@ -262,7 +266,11 @@ def shared_mtf_decision(
     }
 
 
-HISTORICAL_POLICY_DEFAULT = {"confidence_threshold": 78, "breakout_quality_threshold": 50}
+HISTORICAL_POLICY_DEFAULT = {
+    "confidence_threshold": configured_min_confidence(),
+    "breakout_quality_threshold": 50,
+    "mtf_allow_either_timeframe": configured_mtf_allow_either_timeframe(),
+}
 ALLOWED_HISTORICAL_POLICY_KEYS = set(HISTORICAL_POLICY_DEFAULT)
 
 
@@ -348,6 +356,7 @@ def canonical_historical_decision(
                 interval: {"direction": analyze(closed[interval])["direction"], "confidence": analyze(closed[interval])["confidence"]}
                 for interval in ("1h", "4h")
             },
+            allow_either_timeframe=bool(effective_policy["mtf_allow_either_timeframe"]),
         )
         entry_eligible = quality_ok and mtf["entry_permission"]
     else:
@@ -1689,6 +1698,7 @@ def simulate_strategy(
                 timeframe_results=timeframe_results,
                 short_filter=short_filter,
                 short_alignment_max=SHORT_MTF_ALIGNMENT_MAX,
+                allow_either_timeframe=configured_mtf_allow_either_timeframe(),
             )
             mtf_direction = mtf_decision["direction"]
             mtf_alignment = mtf_decision["alignment"]
@@ -6851,6 +6861,7 @@ async def paper_bot_cycle() -> None:
                 },
                 short_filter=True,
                 short_alignment_max=SHORT_MTF_ALIGNMENT_MAX,
+                allow_either_timeframe=configured_mtf_allow_either_timeframe(),
             )
             consensus_opposes = paper_mtf_decision["direction"] in {"LONG", "SHORT"} and paper_mtf_decision["direction"] != candidate["direction"]
             consensus_allowed = (

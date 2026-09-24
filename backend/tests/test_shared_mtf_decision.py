@@ -91,10 +91,10 @@ class SharedMTFDecisionTests(unittest.TestCase):
         self.assertIsNotNone(result["risk"])
         self.assertAlmostEqual(result["risk"]["stop_distance_pct"], 2.0)
 
-    def test_canonical_decision_default_thresholds_remain_78_and_55(self):
+    def test_canonical_decision_default_thresholds_use_configured_confidence_and_55(self):
         frames, decision_time = self._aligned_frames()
         signal = {
-            "direction": "LONG", "confidence": 78.0, "trend": "LONG",
+            "direction": "LONG", "confidence": 80.0, "trend": "LONG",
             "radar": {"trap_score": 10, "breakout_quality": 55.0, "trap_level": "LOW"},
             "entry": 100.0, "stop_loss": 97.5, "tp1": 105.0,
         }
@@ -102,6 +102,8 @@ class SharedMTFDecisionTests(unittest.TestCase):
             result = canonical_historical_decision("BTCUSDT", frames, decision_time)
         self.assertTrue(result["entry_eligible"])
         self.assertEqual(result["decision"], "BUY")
+        self.assertEqual(result["analysis"]["confidence"], 80)
+        self.assertEqual(main_module.HISTORICAL_POLICY_DEFAULT["confidence_threshold"], 80)
 
     def test_canonical_decision_fails_closed_when_higher_timeframes_are_still_warming_up(self):
         primary = [{
@@ -333,19 +335,33 @@ class SharedMTFDecisionTests(unittest.TestCase):
 
     def test_long_with_1h_disagreement_blocked(self):
         timeframe_results, confidence_15m = self._payload("LONG", 81.0, one_h="SHORT")
-        result = shared_mtf_decision("BTCUSDT", "LONG", confidence_15m, timeframe_results)
+        result = shared_mtf_decision("BTCUSDT", "LONG", confidence_15m, timeframe_results, allow_either_timeframe=False)
         self.assertEqual(result["direction"], "BEKLE")
         self.assertFalse(result["entry_permission"])
         self.assertEqual(result["verdict"], "UYUMSUZ")
         self.assertIn("1h", result["reason"])
 
+    def test_long_with_1h_disagreement_allowed_when_either_timeframe_is_enabled(self):
+        timeframe_results, confidence_15m = self._payload("LONG", 81.0, one_h="SHORT")
+        result = shared_mtf_decision("BTCUSDT", "LONG", confidence_15m, timeframe_results, allow_either_timeframe=True)
+        self.assertEqual(result["direction"], "LONG")
+        self.assertTrue(result["entry_permission"])
+        self.assertFalse(result["blocked_by_short_filter"])
+
     def test_short_with_4h_disagreement_blocked(self):
         timeframe_results, confidence_15m = self._payload("SHORT", 83.0, four_h="LONG")
-        result = shared_mtf_decision("BTCUSDT", "SHORT", confidence_15m, timeframe_results)
+        result = shared_mtf_decision("BTCUSDT", "SHORT", confidence_15m, timeframe_results, allow_either_timeframe=False)
         self.assertEqual(result["direction"], "BEKLE")
         self.assertFalse(result["entry_permission"])
         self.assertEqual(result["verdict"], "UYUMSUZ")
         self.assertIn("4h", result["reason"])
+
+    def test_short_either_timeframe_still_respects_alignment_filter(self):
+        timeframe_results, confidence_15m = self._payload("SHORT", 90.0, four_h="LONG")
+        result = shared_mtf_decision("BTCUSDT", "SHORT", confidence_15m, timeframe_results, allow_either_timeframe=True, short_filter=True, short_alignment_max=80.0)
+        self.assertEqual(result["direction"], "SHORT")
+        self.assertFalse(result["entry_permission"])
+        self.assertTrue(result["blocked_by_short_filter"])
 
     def test_invalid_entry_direction_blocked(self):
         timeframe_results, confidence_15m = self._payload("BEKLE", 70.0)
