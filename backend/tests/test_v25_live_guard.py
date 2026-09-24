@@ -646,6 +646,32 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
                 asyncio.run(client._request("POST", "/fapi/v1/order", {}, signed=False))
             self.assertTrue(raised.exception.unknown_execution)
 
+    def test_request_network_error_records_persistent_diagnostic_metadata(self):
+        class FakeHttp:
+            timeout = httpx.Timeout(30, connect=10, read=30, write=10, pool=30)
+
+            async def request(self, *args, **kwargs):
+                raise httpx.ConnectError("reset")
+
+        state = initial_state()
+        state["connection"]["retry_count"] = 2
+        client = BinanceLiveClient(
+            FakeHttp(),
+            "TEST_KEY_PLACEHOLDER",
+            "TEST_SECRET_PLACEHOLDER",
+            diagnostic_state=state,
+        )
+        with self.assertRaises(LiveExchangeError):
+            asyncio.run(client._request("GET", "/fapi/v3/account", {}, signed=True))
+
+        diagnostic = next(event for event in state["events"] if event["kind"] == "LIVE_REQUEST_ERROR")
+        self.assertEqual(diagnostic["endpoint"], "/fapi/v3/account")
+        self.assertEqual(diagnostic["exception_type"], "LiveExchangeError")
+        self.assertEqual(diagnostic["httpx_error_type"], "ConnectError")
+        self.assertEqual(diagnostic["retry_count"], 2)
+        self.assertEqual(diagnostic["request_attempt"], 1)
+        self.assertEqual(diagnostic["timeout_seconds"], {"connect": 10, "read": 30, "write": 10, "pool": 30})
+
     def test_rate_limit_retry_after_uses_header_and_records_endpoint_weight(self):
         class Response:
             def __init__(self):
@@ -814,6 +840,47 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertEqual(state["armed_until"], 0.0)
         self.assertFalse(state["emergency"]["active"])
         self.assertTrue(any(event["kind"] == "RECONCILIATION_CLEAN" for event in state["events"]))
+
+    def test_clean_reconciliation_auto_recovers_active_session_within_window(self):
+        state = initial_state()
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300})
+        state["live_auto_trade"] = True
+        v25_execution.lock_reconciliation_failure(state)
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot())), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertFalse(state["real_trading_locked"])
+        self.assertTrue(state["live_auto_trade"])
+        self.assertTrue(state["auto"]["enabled"])
+        self.assertFalse(state["reconciliation_required"])
+        self.assertTrue(any(event["kind"] == "AUTO_RECOVERED_FROM_TRANSIENT_RECONCILIATION" for event in state["events"]))
+
+    def test_clean_reconciliation_does_not_auto_recover_after_window(self):
+        state = initial_state()
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300})
+        state["live_auto_trade"] = True
+        v25_execution.lock_reconciliation_failure(state)
+        state["transient_reconciliation"]["failed_at_epoch"] -= v25_execution.TRANSIENT_RECONCILIATION_RECOVERY_SECONDS + 1
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot())), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertTrue(state["real_trading_locked"])
+        self.assertFalse(state["live_auto_trade"])
+        self.assertFalse(state["auto"]["enabled"])
+        self.assertTrue(any(event["kind"] == "RECONCILIATION_CLEAN" for event in state["events"]))
+        self.assertFalse(any(event["kind"] == "AUTO_RECOVERED_FROM_TRANSIENT_RECONCILIATION" for event in state["events"]))
 
     def test_genuine_unknown_execution_remains_locked_after_clean_snapshot(self):
         state = initial_state()

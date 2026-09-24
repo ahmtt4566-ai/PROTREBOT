@@ -96,6 +96,10 @@ LIVE_ARM_SECONDS = 24 * 60 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
 RECONCILE_SECONDS = 10
 ANALYSIS_TIMEOUT_SECONDS = 15
+try:
+    TRANSIENT_RECONCILIATION_RECOVERY_SECONDS = max(1.0, min(300.0, float(os.getenv("PROTREBOT_TRANSIENT_RECONCILIATION_RECOVERY_SECONDS", "60"))))
+except (TypeError, ValueError):
+    TRANSIENT_RECONCILIATION_RECOVERY_SECONDS = 60.0
 MAX_EVENTS = 500
 MAX_PLANS = 250
 PROVENANCE_STATES = {"NO_PROVENANCE", "PROVISIONAL", "CONFIRMED", "BROKEN"}
@@ -245,6 +249,14 @@ def unresolved_execution_evidence(state: dict[str, Any]) -> bool:
 
 def lock_reconciliation_failure(state: dict[str, Any]) -> None:
     """Fail closed after reconciliation without claiming an unknown order."""
+    auto = state.get("auto") if isinstance(state.get("auto"), dict) else {}
+    session_until = float(auto.get("session_until") or 0)
+    auto_session_was_active = bool(auto.get("enabled")) and session_until > time.time()
+    state["transient_reconciliation"] = {
+        "failed_at_epoch": time.time(),
+        "auto_session_was_active": auto_session_was_active,
+        "auto_session_until": session_until if auto_session_was_active else 0.0,
+    } if auto_session_was_active else None
     lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=False)
     state["armed_until"] = 0.0
     state["real_trading_locked"] = True
@@ -297,14 +309,37 @@ def clear_clean_reconciliation_state(state: dict[str, Any], snapshot: dict[str, 
             return False
     if unresolved_execution_evidence(state):
         return False
+    transient = state.get("transient_reconciliation") if isinstance(state.get("transient_reconciliation"), dict) else None
+    failed_at = float(transient.get("failed_at_epoch") or 0) if transient else 0.0
+    recovery_deadline = failed_at + TRANSIENT_RECONCILIATION_RECOVERY_SECONDS
+    auto_session_until = float(transient.get("auto_session_until") or 0) if transient else 0.0
+    auto_recovered = bool(
+        transient
+        and transient.get("auto_session_was_active") is True
+        and failed_at > 0
+        and time.time() <= recovery_deadline
+        and auto_session_until > time.time()
+    )
     state["execution_state"] = "LOCKED"
     state["reconciliation_required"] = False
-    state["real_trading_locked"] = True
+    state["real_trading_locked"] = not auto_recovered
     state["live_auto_trade"] = False
     state["armed_until"] = 0.0
     state["auto"].update({"enabled": False, "session_until": 0.0})
     state["emergency"].update({"active": False, "reason": "RECONCILIATION_CLEAN"})
     add_event(state, "RECONCILIATION_CLEAN", "Tam ve temiz canlı hesap uzlaştırması tamamlandı; canlı işlem kilidi korunuyor.")
+    if auto_recovered:
+        state["real_trading_locked"] = False
+        state["live_auto_trade"] = True
+        state["auto"].update({"enabled": True, "session_until": auto_session_until, "last_skip_reason": None, "last_error": None})
+        add_event(
+            state,
+            "AUTO_RECOVERED_FROM_TRANSIENT_RECONCILIATION",
+            "Geçici reconciliation kesintisi temiz snapshot ile pencere içinde düzeldi; Auto Trade devam ediyor.",
+            recovery_window_seconds=TRANSIENT_RECONCILIATION_RECOVERY_SECONDS,
+            failed_at_epoch=failed_at,
+        )
+    state["transient_reconciliation"] = None
     return True
 
 
@@ -404,6 +439,7 @@ def initial_state() -> dict[str, Any]:
         "recovery_error": None,
         "execution_state": "LOCKED",
         "reconciliation_required": False,
+        "transient_reconciliation": None,
     }
 
 
@@ -435,6 +471,13 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     if payload.get("execution_state") in {"LOCKED", "UNKNOWN"}:
         base["execution_state"] = payload["execution_state"]
     base["reconciliation_required"] = bool(payload.get("reconciliation_required"))
+    transient = payload.get("transient_reconciliation")
+    if isinstance(transient, dict):
+        base["transient_reconciliation"] = {
+            "failed_at_epoch": float(transient.get("failed_at_epoch") or 0),
+            "auto_session_was_active": bool(transient.get("auto_session_was_active")),
+            "auto_session_until": float(transient.get("auto_session_until") or 0),
+        }
     base["events"] = base["events"][:MAX_EVENTS]
     if len(base["plans"]) > MAX_PLANS:
         rows = sorted(base["plans"].items(), key=lambda item: item[1].get("created_at", ""), reverse=True)[:MAX_PLANS]
@@ -685,12 +728,13 @@ def auto_session_is_active(state: dict[str, Any]) -> bool:
 
 
 class BinanceLiveClient:
-    def __init__(self, http: httpx.AsyncClient, api_key: str, secret_key: str, *, require_credentials: bool = True) -> None:
+    def __init__(self, http: httpx.AsyncClient, api_key: str, secret_key: str, *, require_credentials: bool = True, diagnostic_state: dict[str, Any] | None = None) -> None:
         if require_credentials and (len(api_key) < 10 or len(secret_key) < 10):
             raise LiveExchangeError("Canlı API bağlantısı aktif değil. Borsa Bağlantıları bölümünden gerçek hesap anahtarını kaydedip salt-okunur bağlantıyı aktifleştirin.", http_status=412)
         self.http = http
         self.api_key = api_key
         self.secret_key = secret_key
+        self.diagnostic_state = diagnostic_state
         self.time_offset_ms = 0
         self.last_time_sync = 0.0
         self._clock_lock = asyncio.Lock()
@@ -757,8 +801,10 @@ class BinanceLiveClient:
                 response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
                 rate_limit.observe(response)
         except httpx.TimeoutException as exc:
+            self._record_request_error(method, path, exc, timed_out=True)
             raise LiveExchangeError("Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.", unknown_execution=True, timed_out=True) from exc
         except httpx.RequestError as exc:
+            self._record_request_error(method, path, exc)
             raise LiveExchangeError("Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.", unknown_execution=True) from exc
         if response.status_code >= 400:
             try:
@@ -791,6 +837,34 @@ class BinanceLiveClient:
         except (ValueError, json.JSONDecodeError):
             return {}
 
+    def _record_request_error(self, method: str, path: str, error: BaseException, *, timed_out: bool = False) -> None:
+        state = self.diagnostic_state
+        if not isinstance(state, dict):
+            return
+        timeout = getattr(self.http, "timeout", None)
+        timeout_config = {
+            "connect": getattr(timeout, "connect", None),
+            "read": getattr(timeout, "read", None),
+            "write": getattr(timeout, "write", None),
+            "pool": getattr(timeout, "pool", None),
+        }
+        connection = state.get("connection") if isinstance(state.get("connection"), dict) else {}
+        add_event(
+            state,
+            "LIVE_REQUEST_ERROR",
+            "Binance canlı API isteği başarısız oldu; yeni emir gönderilmedi.",
+            method=method.upper(),
+            endpoint=path,
+            exception_type="LiveExchangeError",
+            httpx_error_type=type(error).__name__,
+            error_message=sanitized_exception_message(str(error)),
+            timed_out=timed_out,
+            timeout_seconds=timeout_config,
+            retry_count=int(connection.get("retry_count") or 0),
+            request_attempt=1,
+            retry_policy="NO_PER_REQUEST_RETRY",
+        )
+
 
 def client_for(
     application: Any,
@@ -798,7 +872,7 @@ def client_for(
     credentials: tuple[str, str] | None = None,
 ) -> BinanceLiveClient:
     api_key, secret_key = credentials or live_credentials_status(request)[:2]
-    return BinanceLiveClient(application.state.http, api_key, secret_key)
+    return BinanceLiveClient(application.state.http, api_key, secret_key, diagnostic_state=getattr(application.state, "v25_execution", None))
 
 
 def client_for_with_credentials(
@@ -813,7 +887,7 @@ def client_for_with_credentials(
 
 def public_client_for(application: Any) -> BinanceLiveClient:
     """Public Futures market data remains visible before API setup."""
-    return BinanceLiveClient(application.state.http, "", "", require_credentials=False)
+    return BinanceLiveClient(application.state.http, "", "", require_credentials=False, diagnostic_state=getattr(application.state, "v25_execution", None))
 
 
 def safe_exchange_error(exc: LiveExchangeError | BinanceDemoError) -> HTTPException:
@@ -2502,6 +2576,7 @@ async def execution_loop(application: Any) -> None:
             reconciliation_stage = "automatic_cycle"
             await automatic_cycle(application, credentials=credentials)
             backoff = 5
+            application.state.v25_execution["connection"]["retry_count"] = 0
             await asyncio.sleep(RECONCILE_SECONDS)
         except asyncio.CancelledError:
             raise
@@ -2510,7 +2585,9 @@ async def execution_loop(application: Any) -> None:
             state = application.state.v25_execution
             state["connected"] = False
             state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
+            state["connection"]["retry_count"] = int(state["connection"].get("retry_count") or 0) + 1
             lock_reconciliation_failure(state)
+            persist_state(state)
             await asyncio.sleep(rate_limit_backoff_seconds(exc, backoff))
             backoff = min(60, backoff * 2) if exc.retry_after is None else 5
         except Exception as exc:
@@ -2519,6 +2596,7 @@ async def execution_loop(application: Any) -> None:
             safe_message = sanitized_exception_message(exc)
             state["connected"] = False
             state["connection"].update({"last_checked": now_iso(), "last_error": safe_message})
+            state["connection"]["retry_count"] = int(state["connection"].get("retry_count") or 0) + 1
             if unresolved_execution_evidence(state):
                 lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
             else:
@@ -2535,6 +2613,7 @@ async def execution_loop(application: Any) -> None:
                 line=frame.lineno if frame else 0,
                 reconciliation_stage=reconciliation_stage,
             )
+            persist_state(state)
             await asyncio.sleep(backoff)
             backoff = min(60, backoff * 2)
 
