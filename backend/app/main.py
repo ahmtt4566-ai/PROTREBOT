@@ -4162,6 +4162,18 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
             volatility_pct = abs(candles[-1]["high"] - candles[-1]["low"]) / max(candles[-1]["close"], 1e-9) * 100
             volatility_fit = 1.0 if volatility_pct < 3 else .55
             smart_score = round(min(100.0, max(0.0, result["confidence"] * .30 + mtf_fit * .20 + (18 if aligned else 7) + rsi_fit * 14 + min(12, result["volume_ratio"] * 6) + min(10, result["risk_reward"] / 3 * 10) * volatility_fit)), 1)
+            confidence_score = max(0.0, min(100.0, float(result["confidence"])))
+            liquidity_score = max(0.0, min(100.0, float(result["volume_ratio"]) / 1.5 * 100.0))
+            volatility_score = max(0.0, min(100.0, 100.0 - max(0.0, volatility_pct - 3.0) * 25.0))
+            matching_timeframes = sum(item.get("direction") == result["direction"] for item in mtf["timeframes"])
+            mtf_score = matching_timeframes / max(1, len(mtf["timeframes"])) * 100.0
+            freshness_score = max(0.0, min(100.0, 100.0 - max(0.0, time.time() - candles[-1]["time"]) / 7200.0 * 100.0))
+            risk_reward_score = max(0.0, min(100.0, float(result["risk_reward"]) / 3.0 * 100.0))
+            final_decision_score = round(
+                confidence_score * .45 + liquidity_score * .15 + volatility_score * .10
+                + mtf_score * .15 + freshness_score * .10 + risk_reward_score * .05,
+                1,
+            )
             risk_pct = abs(result["entry"] - result["stop_loss"]) / result["entry"] * 100
             potential_tp3_pct = abs(result["tp3"] - result["entry"]) / result["entry"] * 100
             previous_volume = sum(candle["volume"] for candle in candles[-21:-1]) / max(1, len(candles[-21:-1]))
@@ -4183,6 +4195,8 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
                 "support": result["support"], "resistance": result["resistance"],
                 "volume_ratio": round(float(result["volume_ratio"]), 2),
                 "risk_reward": result["risk_reward"], "smart_score": smart_score,
+                "opportunity_score": final_decision_score,
+                "final_decision_score": final_decision_score,
                 "risk_pct": round(risk_pct, 2), "potential_tp3_pct": round(potential_tp3_pct, 2),
                 "mtf_direction": mtf["direction"], "mtf_alignment": mtf["alignment"],
                 "mtf_timeframes": mtf["timeframes"], "anomaly": anomaly,
@@ -4194,7 +4208,7 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
 
     inspected = await asyncio.gather(*(inspect(market) for market in market_list))
     results = [item for item in inspected if item is not None]
-    results.sort(key=lambda item: item["volume"], reverse=True)
+    results.sort(key=lambda item: (item["final_decision_score"], item["confidence"], item["smart_score"]), reverse=True)
     paper = app.state.paper
     history_changed = False
     async with paper["lock"]:

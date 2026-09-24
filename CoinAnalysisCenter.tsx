@@ -3,7 +3,7 @@ import { BarChart3, Check, ChevronDown, ChevronUp, Filter, RefreshCw, Search, X 
 import { API_BASE } from './api'
 
 type Direction = 'LONG'|'SHORT'|'BEKLE'
-type Row = {symbol:string;display:string;price:number;change:number;volume:number;volume_ratio:number;volume_change_pct:number;volatility_pct:number;rsi:number;ema20:number;ema50:number;ema200:number;trend:string;direction:Direction;confidence:number;smart_score:number;entry:number;stop_loss:number;tp1:number;tp2:number;tp3:number;support:number;resistance:number;risk_reward:number;risk_pct:number;potential_tp3_pct:number;mtf_direction:string;mtf_alignment:number;mtf_timeframes:{timeframe:string;direction:string;confidence:number}[];anomaly:{kind:string;label:string;strength:number}|null}
+type Row = {symbol:string;display:string;price:number;change:number;volume:number;volume_ratio:number;volume_change_pct:number;volatility_pct:number;rsi:number;ema20:number;ema50:number;ema200:number;trend:string;direction:Direction;confidence:number;smart_score:number;opportunity_score:number;final_decision_score:number;entry:number;stop_loss:number;tp1:number;tp2:number;tp3:number;support:number;resistance:number;risk_reward:number;risk_pct:number;potential_tp3_pct:number;mtf_direction:string;mtf_alignment:number;mtf_timeframes:{timeframe:string;direction:string;confidence:number}[];anomaly:{kind:string;label:string;strength:number}|null}
 type Consensus = {direction:string;alignment:number;timeframes:{timeframe:string;direction:string;confidence:number}[]}
 type SignalHistoryItem = {id:string;symbol:string;timestamp:string;signal:Direction;score:number;entry:number;stop:number;tp1:number;tp2:number;tp3:number;timeframe:string;mtf:string;risk_reward:number;status:string}
 type SignalPerformance = {available:boolean;message?:string;total_signals?:number;tp1_hit_rate?:number;tp2_hit_rate?:number;tp3_hit_rate?:number;stop_rate?:number;average_risk_reward?:number}
@@ -25,7 +25,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const [filters,setFilters] = useState<FilterState>(emptyFilters)
   const [draftFilters,setDraftFilters] = useState<FilterState>(emptyFilters)
   const [filterOpen,setFilterOpen] = useState(false)
-  const [sort,setSort] = useState<keyof Row>('smart_score')
+  const [sort,setSort] = useState<keyof Row>('final_decision_score')
   const [ascending,setAscending] = useState(false)
   const [loading,setLoading] = useState(false)
   const [error,setError] = useState('')
@@ -70,12 +70,13 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
     const volatilityMatch = filters.volatility === 'ANY' || (filters.volatility === 'LOW' && row.volatility_pct < 1) || (filters.volatility === 'NORMAL' && row.volatility_pct >= 1 && row.volatility_pct < 3) || (filters.volatility === 'HIGH' && row.volatility_pct >= 3)
     return signalMatch && strengthMatch && trendMatch && mtfMatch && volatilityMatch && row.rsi >= filters.rsiMin && row.rsi <= filters.rsiMax && (filters.volume === 'ANY' || (filters.volume === 'INCREASING' && row.volume_ratio >= 1.05) || (filters.volume === 'STRONG' && row.volume_ratio >= 1.25)) && (!filters.ema20 || row.price > row.ema20) && (!filters.ema20_50 || row.ema20 > row.ema50) && (!filters.ema50_200 || row.ema50 > row.ema200) && row.risk_reward >= filters.minRR
   }
-  const visible = useMemo(() => rows.filter(row => row.display.toUpperCase().includes(debouncedQuery) && matches(row)).sort((left,right) => { const a = left[sort]; const b = right[sort]; return (a < b ? -1 : a > b ? 1 : 0) * (ascending ? 1 : -1) }),[rows,debouncedQuery,filters,sort,ascending])
+  const rankRows = (left:Row,right:Row) => right.final_decision_score - left.final_decision_score || right.confidence - left.confidence || right.smart_score - left.smart_score
+  const visible = useMemo(() => rows.filter(row => row.display.toUpperCase().includes(debouncedQuery) && matches(row)).sort((left,right) => sort === 'final_decision_score' ? rankRows(left,right) * (ascending ? -1 : 1) : ((left[sort] < right[sort] ? -1 : left[sort] > right[sort] ? 1 : 0) * (ascending ? 1 : -1))),[rows,debouncedQuery,filters,sort,ascending])
   const active = rows.find(row => row.symbol === selected) || visible[0]
-  const topLong = useMemo(() => rows.filter(row => row.direction === 'LONG').sort((left,right) => right.smart_score - left.smart_score).slice(0,5),[rows])
-  const topShort = useMemo(() => rows.filter(row => row.direction === 'SHORT').sort((left,right) => right.smart_score - left.smart_score).slice(0,5),[rows])
+  const topLong = useMemo(() => rows.filter(row => row.direction === 'LONG').sort(rankRows).slice(0,5),[rows])
+  const topShort = useMemo(() => rows.filter(row => row.direction === 'SHORT').sort(rankRows).slice(0,5),[rows])
   const anomalies = useMemo(() => rows.filter(row => row.anomaly).sort((left,right) => (right.anomaly?.strength || 0) - (left.anomaly?.strength || 0)).slice(0,5),[rows])
-  const featured = useMemo(() => [...topLong,...topShort].slice(0,5),[topLong,topShort])
+  const featured = useMemo(() => [...rows].filter(row => row.direction !== 'BEKLE').sort(rankRows).slice(0,5),[rows])
   const summary = useMemo(() => ({long:rows.filter(row => row.direction === 'LONG').length,short:rows.filter(row => row.direction === 'SHORT').length,watch:rows.filter(row => row.direction === 'BEKLE').length}),[rows])
   const chooseSort = (key:keyof Row) => { if (sort === key) setAscending(value => !value); else { setSort(key); setAscending(false) } }
   const sortIcon = (key:keyof Row) => sort === key ? ascending ? <ChevronUp/> : <ChevronDown/> : null
