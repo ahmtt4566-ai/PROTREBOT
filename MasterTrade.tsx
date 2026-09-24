@@ -167,7 +167,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     let active = true
     const refreshScanner = async () => {
       try {
-        const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=100`, { signal: controller.signal })
+        const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=40`, { signal: controller.signal })
         if (!response.ok) throw new Error('Scanner data unavailable')
         const payload = await response.json() as { results?: ScannerCandidate[] }
         if (active) setScannerCandidates(Array.isArray(payload.results) ? payload.results : [])
