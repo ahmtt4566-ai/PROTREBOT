@@ -1218,6 +1218,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             time_offset_ms = 0
 
         snapshot = complete_reconciliation_snapshot()
+        snapshot["multi_assets_mode"] = True
         candles = [{"time": index, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for index in range(220)]
         spec = {
             "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "close_side": "SELL", "order_type": "MARKET",
@@ -1228,6 +1229,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         analysis = {"direction": "LONG", "confidence": 90, "radar": {"trap_score": 1}, "entry": 100, "stop_loss": 98, "tp1": 102, "tp2": 104, "tp3": 106}
         ready = {"ready": True, "score": 100, "gates": []}
         submit = AsyncMock(return_value={"status": "NEW", "orderId": 12345})
+        isolated_margin = AsyncMock()
         with patch.multiple(
             v25_execution,
             client_for_with_credentials=lambda application, credentials, request=None: FakeClient(),
@@ -1240,7 +1242,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
             evaluate_entry_gates=lambda **kwargs: {"passed": True, "gates": []},
             build_live_spec=AsyncMock(return_value=spec),
-            set_live_isolated_margin=AsyncMock(),
+            set_live_isolated_margin=isolated_margin,
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 2, "margin_type": "isolated"}),
             submit_entry=submit,
             install_protection=AsyncMock(),
@@ -1249,6 +1251,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             asyncio.run(v25_execution.automatic_cycle(application, credentials=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")))
 
         submit.assert_awaited_once()
+        isolated_margin.assert_not_awaited()
         self.assertEqual(state["auto"]["last_scan_stats"]["executed_symbols"], ["BTCUSDT"])
 
     def test_auto_trade_dry_run_reaches_submit_boundary_without_exchange_mutation(self):

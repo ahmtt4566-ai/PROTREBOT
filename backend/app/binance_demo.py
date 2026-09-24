@@ -1878,6 +1878,7 @@ async def _account_snapshot(
         "available_balance": float(account.get("availableBalance", 0)),
         "margin_balance": float(account.get("totalMarginBalance", 0)),
         "unrealized_pnl": float(account.get("totalUnrealizedProfit", 0)),
+        "multi_assets_mode": bool(account.get("multiAssetsMargin", False)),
         "positions": open_positions,
         "_provenance_positions": provenance_positions,
         "open_orders": open_orders,

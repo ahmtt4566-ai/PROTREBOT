@@ -2320,7 +2320,8 @@ async def execute_live_order(
                 raise LiveExchangeError("Canlı hesap kullanılabilir bakiyesi seçilen marjinden düşük.", http_status=409)
             spec = await build_live_spec(client, body, state["policy"], allowed_symbols=allowed_symbols)
             validate_protection_readiness(spec, state["policy"])
-            await set_live_isolated_margin(client, spec["symbol"])
+            if not snapshot.get("multi_assets_mode", False):
+                await set_live_isolated_margin(client, spec["symbol"])
             leverage_audit = await apply_live_verified_leverage(client, spec["symbol"], spec["leverage"])
             intent_id = body.intent_id or f"manual-{uuid.uuid4().hex}"
             client_id = client_id_for("ENTRY", intent_id)
