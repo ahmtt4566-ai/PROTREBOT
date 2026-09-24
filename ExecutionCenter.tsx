@@ -281,11 +281,24 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
       return
     }
     if (!validOrderForm()) return
-    const phrase = window.prompt('Bu işlem GERÇEK PARA kullanabilir. Göndermek için aynen yazın: CANLI EMİR GÖNDER')
-    if (!phrase) return
+    const payload = orderPayload('ui-live')
+    const details = [
+      `Parite: ${payload.symbol}`,
+      `Yön: ${payload.direction}`,
+      `Emir tipi: ${payload.order_type}`,
+      `Marjin: ${money(Number(payload.margin_usdt))} USDT`,
+      `Kaldıraç: ${payload.leverage}x`,
+      `Stop: ${money(Number(payload.stop_loss))} USDT`,
+      `TP1: ${money(Number(payload.tp1))} USDT`,
+      `TP2: ${money(Number(payload.tp2))} USDT`,
+      `TP3: ${money(Number(payload.tp3))} USDT`,
+      `Limit fiyatı: ${payload.order_type === 'LIMIT' ? money(Number(payload.limit_price)) : 'MARKET'}`,
+    ].join('\n')
+    const phrase = window.prompt(`Bu işlem GERÇEK PARA kullanabilir.\n\nCanlı emir detayları:\n${details}\n\nGöndermek için aynen yazın: CANLI EMİR GÖNDER`)
+    if (!phrase || phrase.trim() !== 'CANLI EMİR GÖNDER') return
     setBusy('live-order')
     try {
-      const result = await call<{ok:boolean;plan:Plan}>('/order',{method:'POST',body:JSON.stringify({...orderPayload('ui-live'),confirmation:phrase})})
+      const result = await call<{ok:boolean;plan:Plan}>('/order',{method:'POST',body:JSON.stringify({...payload,confirmation:phrase.trim()})})
       setChartSymbol(result.plan.symbol);setChartPlanId(result.plan.id)
       setNotice(`${result.plan.symbol} ${result.plan.direction} canlı emir kabul edildi; Stop/TP koruması denetleniyor.`);setNoticeKind('ok')
       await refresh(true)
@@ -357,14 +370,14 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
           <label>Zaman dilimi<select value={policy.interval} onChange={e => setPolicy({...policy,interval:e.target.value})}><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select></label>
           <label>Maks. marjin / işlem<input type="number" min="5" max="100" value={policy.max_margin_per_trade} onChange={e => setPolicy({...policy,max_margin_per_trade:Number(e.target.value)})}/><span>USDT</span></label>
           <label>Maks. kayıp / işlem<input type="number" min="0.5" max="25" step="0.5" value={policy.max_loss_per_trade} onChange={e => setPolicy({...policy,max_loss_per_trade:Number(e.target.value)})}/><span>USDT</span></label>
-          <label>Maks. kaldıraç<select value={policy.max_leverage} onChange={e => setPolicy({...policy,max_leverage:Number(e.target.value)})}><option value="1">1x</option><option value="2">2x</option><option value="3">3x</option></select></label>
+          <label>Maks. kaldıraç<input type="number" min="1" max="50" value={policy.max_leverage} onChange={e => setPolicy({...policy,max_leverage:Number(e.target.value)})}/></label>
           <label>Maks. pozisyon<input type="number" min="1" max="3" value={policy.max_positions} onChange={e => setPolicy({...policy,max_positions:Number(e.target.value)})}/></label>
           <label>Günlük kayıp kilidi<input type="number" min="5" max="100" value={policy.daily_loss_limit} onChange={e => setPolicy({...policy,daily_loss_limit:Number(e.target.value)})}/><span>USDT</span></label>
           <label>Günlük işlem sınırı<input type="number" min="1" max="12" value={policy.daily_trade_limit} onChange={e => setPolicy({...policy,daily_trade_limit:Number(e.target.value)})}/></label>
           <label>Min. karar güveni<input type="number" min="70" max="95" value={policy.min_confidence} onChange={e => setPolicy({...policy,min_confidence:Number(e.target.value)})}/><span>%</span></label>
           <label>Maks. tuzak skoru<input type="number" min="10" max="60" value={policy.max_trap_score} onChange={e => setPolicy({...policy,max_trap_score:Number(e.target.value)})}/><span>%</span></label>
           <label>Maks. spread<input type="number" min="0.5" max="25" step="0.5" value={policy.max_spread_bps} onChange={e => setPolicy({...policy,max_spread_bps:Number(e.target.value)})}/><span>bp</span></label>
-          <label>Maks. Stop mesafesi<input type="number" min="0.25" max="5" step="0.25" value={policy.max_stop_distance_pct} onChange={e => setPolicy({...policy,max_stop_distance_pct:Number(e.target.value)})}/><span>%</span></label>
+          <label>Maks. Stop mesafesi<input type="number" min="0.25" max="4.5" step="0.25" value={policy.max_stop_distance_pct} onChange={e => setPolicy({...policy,max_stop_distance_pct:Number(e.target.value)})}/><span>%</span></label>
         </div>
         <div className="directionChecks"><label><input type="checkbox" checked={policy.allow_long} onChange={e => setPolicy({...policy,allow_long:e.target.checked})}/> LONG izinli</label><label><input type="checkbox" checked={policy.allow_short} onChange={e => setPolicy({...policy,allow_short:e.target.checked})}/> SHORT izinli</label><span>Politika izi: {status.policy_digest}</span></div>
         <button className="savePolicy" onClick={savePolicy} disabled={!!busy}><Save/>{busy === 'policy' ? 'KAYDEDİLİYOR…' : 'LİMİTLERİ KAYDET'}</button>

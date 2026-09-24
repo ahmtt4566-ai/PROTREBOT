@@ -120,7 +120,7 @@ class PolicyUpdate(BaseModel):
     allow_short: bool | None = None
     max_margin_per_trade: float | None = Field(default=None, ge=5, le=100)
     max_loss_per_trade: float | None = Field(default=None, ge=0.5, le=25)
-    max_leverage: int | None = Field(default=None, ge=1, le=3)
+    max_leverage: int | None = Field(default=None, ge=1, le=50)
     max_positions: int | None = Field(default=None, ge=1, le=3)
     daily_loss_limit: float | None = Field(default=None, ge=5, le=100)
     daily_trade_limit: int | None = Field(default=None, ge=1, le=12)

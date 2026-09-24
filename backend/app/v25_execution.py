@@ -430,7 +430,7 @@ class PolicyUpdate(BaseModel):
     allow_short: bool | None = None
     max_margin_per_trade: float | None = Field(default=None, ge=5, le=100)
     max_loss_per_trade: float | None = Field(default=None, ge=0.5, le=25)
-    max_leverage: int | None = Field(default=None, ge=1, le=3)
+    max_leverage: int | None = Field(default=None, ge=1, le=50)
     max_positions: int | None = Field(default=None, ge=1, le=5)
     max_total_exposure_usdt: float | None = Field(default=None, ge=25, le=250)
     daily_loss_limit: float | None = Field(default=None, ge=5, le=100)
@@ -3148,11 +3148,14 @@ async def v25_policy(request: Request, body: PolicyUpdate) -> dict[str, Any]:
     state = request.app.state.v25_execution
     updates = body.model_dump(exclude_none=True)
     state["policy"] = sanitize_execution_policy({**state["policy"], **updates})
-    state["policy_ack_digest"] = None
-    state["armed_until"] = 0.0
+    if consent_status(state, request).get("active"):
+        state["policy_ack_digest"] = policy_digest(state["policy"])
+    else:
+        state["policy_ack_digest"] = None
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
-    add_event(state, "POLICY_CHANGED", "Canlı risk limitleri değişti; onay ve emir kilidi sıfırlandı.", actor=user["id"])
+    state["live_auto_trade"] = False
+    add_event(state, "POLICY_CHANGED", "Canlı risk limitleri değişti; aktif 24 saatlik izin korunurken otomasyon durduruldu.", actor=user["id"])
     persist_state(state)
     return public_status(request.app, request)
 
@@ -3189,6 +3192,7 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
         "expires_at_epoch": time.time() + (24 * 60 * 60),
         "key_fingerprint": fingerprint,
     }
+    state["policy_ack_digest"] = policy_digest(state["policy"])
     state["armed_until"] = 0.0
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
