@@ -181,7 +181,9 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         if (!nextCandles.length || !nextAnalysis) throw new Error('Market data unavailable')
         setSnapshot({ symbol: draft.market, timeframe: interval, candles: nextCandles, analysis: nextAnalysis, mtf: nextMtf, account: accountRef.current, currentPrice: nextCandles[nextCandles.length - 1]?.close ?? null, priceUpdatedAt: new Date().toISOString(), marketUpdatedAt: new Date().toISOString(), accountUpdatedAt: null, marketError: '', accountError: '' })
         const latest = nextCandles[nextCandles.length - 1]
-        if (latest) setDraft(current => ({ ...current, entry: latest.close }))
+        if (latest) setDraft(current => current.stopLoss > 0 && current.tp1 > 0 && current.tp2 > 0 && current.tp3 > 0
+          ? current
+          : { ...current, entry: latest.close })
         setDataError('')
       } catch (error) {
         if (error instanceof Error && error.name !== 'AbortError') { setDataError('DATA STALE / DATA UNAVAILABLE'); setSnapshot(current => current ? { ...current, marketError: 'DATA STALE / DATA UNAVAILABLE' } : current) }
