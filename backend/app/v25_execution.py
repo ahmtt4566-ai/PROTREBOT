@@ -2322,7 +2322,12 @@ async def execute_live_order(
             validate_protection_readiness(spec, state["policy"])
             if not snapshot.get("multi_assets_mode", False):
                 await set_live_isolated_margin(client, spec["symbol"])
-            leverage_audit = await apply_live_verified_leverage(client, spec["symbol"], spec["leverage"])
+            leverage_audit = await apply_live_verified_leverage(
+                client,
+                spec["symbol"],
+                spec["leverage"],
+                expected_margin_type="CROSSED" if snapshot.get("multi_assets_mode", False) else "ISOLATED",
+            )
             intent_id = body.intent_id or f"manual-{uuid.uuid4().hex}"
             client_id = client_id_for("ENTRY", intent_id)
             existing_exposure = sum(

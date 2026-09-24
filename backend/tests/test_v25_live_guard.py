@@ -33,7 +33,7 @@ from app.execution_core import (  # noqa: E402
     sanitize_execution_policy,
 )
 from app import v25_execution  # noqa: E402
-from app.binance_demo import BinanceDemoError  # noqa: E402
+from app.binance_demo import BinanceDemoError, verify_symbol_configuration  # noqa: E402
 from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, prune_mtf_decision_history, rank_market_tickers, sanitized_state, submit_entry, summarize_mtf_relaxation, validate_protection_readiness  # noqa: E402
 
 
@@ -1851,6 +1851,15 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
 
 
 class V25MarginModeCompatibilityTests(unittest.TestCase):
+    def test_multi_assets_configuration_accepts_crossed_margin(self):
+        result = verify_symbol_configuration(
+            [{"symbol": "BTCUSDT", "leverage": 2, "marginType": "CROSSED"}],
+            "BTCUSDT",
+            2,
+            expected_margin_type="CROSSED",
+        )
+        self.assertEqual(result["margin_type"], "crossed")
+
     def test_multi_assets_margin_error_is_treated_as_non_applicable(self):
         client = SimpleNamespace(
             signed=AsyncMock(side_effect=LiveExchangeError("multi-assets", exchange_code=-4168))

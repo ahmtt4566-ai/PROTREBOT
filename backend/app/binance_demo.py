@@ -1630,8 +1630,13 @@ def verify_leverage_response(payload: Any, symbol: str, requested: int) -> dict[
     }
 
 
-def verify_symbol_configuration(payload: Any, symbol: str, requested: int) -> dict[str, Any]:
-    """Verify leverage and isolated margin from the account symbol configuration."""
+def verify_symbol_configuration(
+    payload: Any,
+    symbol: str,
+    requested: int,
+    expected_margin_type: str = "ISOLATED",
+) -> dict[str, Any]:
+    """Verify leverage and the account-compatible margin mode."""
     row = next((item for item in response_rows(payload) if str(item.get("symbol") or "").upper() == symbol), None)
     if row is None:
         raise BinanceDemoError(f"{symbol} hesap yapılandırması Binance Demo'dan doğrulanamadı; emir gönderilmedi.", http_status=409)
@@ -1640,16 +1645,17 @@ def verify_symbol_configuration(payload: Any, symbol: str, requested: int) -> di
     except (TypeError, ValueError):
         applied = 0
     margin_type = str(row.get("marginType") or "").upper()
-    if applied != requested or margin_type != "ISOLATED":
+    expected_margin_type = str(expected_margin_type or "ISOLATED").upper()
+    if applied != requested or margin_type != expected_margin_type:
         raise BinanceDemoError(
-            f"{symbol} güvenlik ayarı uyuşmadı: istenen {requested}x ISOLATED, uygulanan {applied or 'belirsiz'}x {margin_type or 'belirsiz'}; emir gönderilmedi.",
+            f"{symbol} güvenlik ayarı uyuşmadı: istenen {requested}x {expected_margin_type}, uygulanan {applied or 'belirsiz'}x {margin_type or 'belirsiz'}; emir gönderilmedi.",
             http_status=409,
         )
     return {
         "symbol": symbol,
         "requested_leverage": requested,
         "applied_leverage": applied,
-        "margin_type": "isolated",
+        "margin_type": expected_margin_type.lower(),
         "max_notional_value": str(row.get("maxNotionalValue") or ""),
         "leverage_verified": True,
         "configuration_source": "BINANCE_SYMBOL_CONFIG",
