@@ -1101,11 +1101,16 @@ async def set_live_isolated_margin(client: BinanceLiveClient, symbol: str) -> No
             raise
 
 
-async def apply_live_verified_leverage(client: BinanceLiveClient, symbol: str, requested: int) -> dict[str, Any]:
+async def apply_live_verified_leverage(
+    client: BinanceLiveClient,
+    symbol: str,
+    requested: int,
+    expected_margin_type: str = "ISOLATED",
+) -> dict[str, Any]:
     response = await client.signed("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": requested})
     verify_leverage_response(response, symbol, requested)
     configuration = await client.signed("GET", "/fapi/v1/symbolConfig", {"symbol": symbol})
-    return verify_symbol_configuration(configuration, symbol, requested)
+    return verify_symbol_configuration(configuration, symbol, requested, expected_margin_type=expected_margin_type)
 
 
 async def ticker_price(client: BinanceLiveClient, symbol: str) -> Decimal:
