@@ -287,6 +287,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (!nextOrder.symbol.endsWith('USDT') || values.some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)) {
       setNotice({kind: 'error', text: 'LIVE order için symbol, margin, leverage, Stop ve TP seviyelerini geçerli girin.'}); return
     }
+    const allowedSymbols = Array.isArray(policy.allowed_symbols) ? policy.allowed_symbols.map(value => String(value).toUpperCase()) : []
+    if (allowedSymbols.length && !allowedSymbols.includes(nextOrder.symbol.toUpperCase())) {
+      setNotice({kind: 'error', text: `${nextOrder.symbol} canlı risk politikasında izinli değil. BTCUSDT, ETHUSDT, SOLUSDT veya BNBUSDT seçin.`}); return
+    }
     const availableBalance = Number(status?.account?.available_balance)
     if (Number.isFinite(availableBalance) && availableBalance > 0 && Number(nextOrder.margin_usdt) > availableBalance) {
       setNotice({kind: 'error', text: `Seçilen marjin ${Number(nextOrder.margin_usdt).toFixed(2)} USDT; kullanılabilir bakiye yalnızca ${availableBalance.toFixed(2)} USDT.`}); return
