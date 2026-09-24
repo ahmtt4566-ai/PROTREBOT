@@ -350,7 +350,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       : draft.tp3 < draft.tp2 && draft.tp2 < draft.tp1 && draft.tp1 < draft.entry && draft.entry < draft.stopLoss
     if (!levelsValid) return draft.side === 'LONG' ? 'LONG için SL < Entry < TP1 < TP2 < TP3 olmalı.' : 'SHORT için TP3 < TP2 < TP1 < Entry < SL olmalı.'
     const stopDistancePct = Math.abs(draft.entry - draft.stopLoss) / draft.entry * 100
-    if (stopDistancePct > 4.5) return `Stop mesafesi %${stopDistancePct.toFixed(2)}. Analizi yenileyin; LIVE üst sınır %5.00.`
+    if (stopDistancePct > 4.5) return `Stop mesafesi %${stopDistancePct.toFixed(2)}. Analizi yenileyin; LIVE üst sınır %4.50.`
     return ''
   }
 
@@ -476,7 +476,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       }))
       setAnalysisSyncedAt(new Date().toLocaleTimeString('en-GB'))
       if (!analysisSide) setAnalysisFillError(`Analiz BEKLE durumunda; manuel ${nextSide} seçimi için geçerli koruma seviyeleri dolduruldu.`)
-      else if (stopLoss !== analyzedStopLoss) setAnalysisFillError('Stop mesafesi LIVE %5 sınırına göre %4.5 olarak daraltıldı.')
+      else if (stopLoss !== analyzedStopLoss) setAnalysisFillError('Stop mesafesi LIVE %4.50 sınırına göre daraltıldı.')
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return
       setAnalysisFillError(error instanceof Error ? error.message : 'Analysis unavailable.')

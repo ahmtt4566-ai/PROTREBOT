@@ -47,7 +47,7 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "mtf_allow_either_timeframe": DEFAULT_MTF_ALLOW_EITHER_TIMEFRAME,
     "max_trap_score": 35,
     "max_spread_bps": 8.0,
-    "max_stop_distance_pct": 5.0,
+    "max_stop_distance_pct": 4.5,
     "fee_bps_per_side": 5.0,
     "slippage_bps_per_side": 3.0,
     "minimum_net_reward_usdt": 0.25,
@@ -124,7 +124,7 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
     base["mtf_allow_either_timeframe"] = bool(source.get("mtf_allow_either_timeframe", configured_mtf_allow_either_timeframe()))
     base["max_trap_score"] = _integer(source.get("max_trap_score"), 35, 10, 60)
     base["max_spread_bps"] = _number(source.get("max_spread_bps"), 8, 0.5, 25)
-    base["max_stop_distance_pct"] = _number(source.get("max_stop_distance_pct"), 5.0, 0.25, 5)
+    base["max_stop_distance_pct"] = _number(source.get("max_stop_distance_pct"), 4.5, 0.25, 4.5)
     base["fee_bps_per_side"] = _number(source.get("fee_bps_per_side"), 5, 0, 25)
     base["slippage_bps_per_side"] = _number(source.get("slippage_bps_per_side"), 3, 0, 30)
     base["minimum_net_reward_usdt"] = _number(source.get("minimum_net_reward_usdt"), 0.25, 0, 25)
