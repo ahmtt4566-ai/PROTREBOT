@@ -96,6 +96,7 @@ LIVE_REST_BASE = "https://fapi.binance.com"
 LIVE_WS_BASE = "wss://fstream.binance.com/private"
 LIVE_ARM_SECONDS = 24 * 60 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
+LIVE_CONSENT_GRACE_SECONDS = 15 * 60
 RECONCILE_SECONDS = 10
 ANALYSIS_TIMEOUT_SECONDS = 15
 try:
@@ -590,7 +591,7 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     if isinstance(consent, dict):
         expires_at = float(consent.get("expires_at_epoch") or 0)
         fingerprint = str(consent.get("key_fingerprint") or "").strip()
-        if expires_at > time.time() and fingerprint:
+        if expires_at + LIVE_CONSENT_GRACE_SECONDS > time.time() and fingerprint:
             base["web_consent"] = {
                 "accepted_at": str(consent.get("accepted_at") or "")[:64] or None,
                 "expires_at_epoch": expires_at,
@@ -801,26 +802,37 @@ def consent_status(
     local_payload = load_live_consent()
     web_payload = state.get("web_consent", {}) if isinstance(state, dict) else {}
     candidates = [payload for payload in (web_payload, local_payload) if isinstance(payload, dict)]
-    payload = next(
-        (
-            candidate for candidate in candidates
-            if normalize_consent_fingerprint(candidate.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
-            and float(candidate.get("expires_at_epoch") or 0) > time.time()
-        ),
-        {},
-    )
+    matching = [
+        candidate for candidate in candidates
+        if normalize_consent_fingerprint(candidate.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
+        and float(candidate.get("expires_at_epoch") or 0) > 0
+    ]
+    now = time.time()
+    payload = next((candidate for candidate in matching if float(candidate.get("expires_at_epoch") or 0) > now), None)
+    if payload is None:
+        payload = next((candidate for candidate in matching if float(candidate.get("expires_at_epoch") or 0) + LIVE_CONSENT_GRACE_SECONDS > now), {})
     expires = float(payload.get("expires_at_epoch") or 0)
+    grace_until = expires + LIVE_CONSENT_GRACE_SECONDS if expires else 0.0
     active = bool(
         api_key and fingerprint and normalize_consent_fingerprint(payload.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
-        and expires > time.time()
+        and expires > now
     )
+    grace_active = bool(not active and api_key and fingerprint and expires <= now < grace_until)
     return {
         "active": active,
-        "accepted_at": payload.get("accepted_at") if active else None,
-        "expires_at": datetime.fromtimestamp(expires, timezone.utc).isoformat() if active else None,
+        "accepted_at": payload.get("accepted_at") if active or grace_active else None,
+        "expires_at": datetime.fromtimestamp(expires, timezone.utc).isoformat() if active or grace_active else None,
+        "grace_active": grace_active,
+        "grace_until": datetime.fromtimestamp(grace_until, timezone.utc).isoformat() if grace_active else None,
+        "reauthorization_required": not active,
         "fingerprint": fingerprint,
-        "storage": "SUNUCU_KALICI" if payload is web_payload and active else "WINDOWS_DPAPI" if active else "YOK",
+        "storage": "SUNUCU_KALICI" if payload is web_payload and (active or grace_active) else "WINDOWS_DPAPI" if active or grace_active else "YOK",
     }
+
+
+def consent_grace_expired(state: dict[str, Any]) -> bool:
+    expires = float((state.get("web_consent") or {}).get("expires_at_epoch") or 0)
+    return bool(expires and time.time() >= expires + LIVE_CONSENT_GRACE_SECONDS)
 
 
 def execution_owner(request: Request) -> dict[str, Any]:
@@ -2075,7 +2087,8 @@ async def auto_session_credentials(
             identity[2],
             force_refresh=force_refresh,
         )
-        if usable_live_credentials(credentials) and consent_status(state, credentials=credentials).get("active"):
+        consent = consent_status(state, credentials=credentials)
+        if usable_live_credentials(credentials) and (consent.get("active") or consent.get("grace_active")):
             return credentials
     return "", ""
 
@@ -2083,6 +2096,8 @@ async def auto_session_credentials(
 async def fresh_auto_submission_credentials(application: Any, state: dict[str, Any]) -> tuple[str, str]:
     credentials = await auto_session_credentials(application, state, force_refresh=True)
     if not usable_live_credentials(credentials):
+        return "", ""
+    if not consent_status(state, credentials=credentials).get("active"):
         return "", ""
     if (
         state.get("real_trading_locked") is not False
@@ -2464,6 +2479,15 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         state["auto"]["last_skip_reason"] = "no_credentials"
         state["auto"]["last_cycle_stage"] = "skipped"
         automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")
+        return
+    consent = consent_status(state, credentials=credentials)
+    if consent.get("grace_active"):
+        if state["auto"].get("last_skip_reason") != "consent_reauthorization_required":
+            add_event(state, "LIVE_CONSENT_REAUTH_REQUIRED", "24 saatlik canlı izin sona erdi; 15 dakika içinde yeniden onay gerekli. Açık pozisyon korunuyor.")
+        state["auto"]["last_skip_reason"] = "consent_reauthorization_required"
+        state["auto"]["last_cycle_stage"] = "skipped"
+        state["auto"]["last_decision"] = "Yeniden onay bekleniyor; yeni Auto Trade girişleri durduruldu, açık pozisyon korunuyor."
+        automation_telemetry("AUTOMATION_SKIP reason=consent_reauthorization_required", reason="consent_reauthorization_required")
         return
     if not readiness_for(application, state, credentials=credentials)["ready"]:
         state["auto"]["last_skip_reason"] = "not_ready"
@@ -2877,6 +2901,16 @@ async def execution_loop(application: Any) -> None:
                 )
                 automation_telemetry(refresh_event, reason=refresh_event)
             if not usable_live_credentials(credentials):
+                state = application.state.v25_execution
+                if state["auto"].get("enabled") and consent_grace_expired(state):
+                    state["auto"].update({"enabled": False, "session_until": 0.0, "last_skip_reason": "consent_expired", "last_cycle_stage": "skipped", "last_decision": "24 saatlik canlı izin sona erdi; yeni girişler durduruldu."})
+                    state["live_auto_trade"] = False
+                    state["real_trading_locked"] = True
+                    state["armed_until"] = 0.0
+                    add_event(state, "LIVE_CONSENT_GRACE_EXPIRED", "15 dakikalık yeniden onay süresi doldu; Auto Trade kapatıldı, açık pozisyon korunuyor.")
+                    persist_state(state)
+                    await asyncio.sleep(5)
+                    continue
                 application.state.v25_execution["auto"]["last_skip_reason"] = "no_credentials"
                 application.state.v25_execution["auto"]["last_cycle_stage"] = "skipped"
                 automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")

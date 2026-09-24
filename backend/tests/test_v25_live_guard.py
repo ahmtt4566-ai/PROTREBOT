@@ -396,7 +396,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(summary["strict_mtf_rejections"], 1)
         self.assertEqual(summary["rescued_by_or_gate"], 1)
 
-    def test_unexpired_web_consent_survives_state_restore_but_expired_consent_does_not(self):
+    def test_web_consent_survives_restore_through_grace_only(self):
         active = {
             "accepted_at": "2026-09-23T18:00:00+00:00",
             "expires_at_epoch": time.time() + 3600,
@@ -405,7 +405,11 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         restored = sanitized_state({"web_consent": active})
         self.assertEqual(restored["web_consent"], active)
 
-        expired = dict(active, expires_at_epoch=time.time() - 1)
+        grace = dict(active, expires_at_epoch=time.time() - 1)
+        grace_restored = sanitized_state({"web_consent": grace})
+        self.assertEqual(grace_restored["web_consent"], grace)
+
+        expired = dict(active, expires_at_epoch=time.time() - v25_execution.LIVE_CONSENT_GRACE_SECONDS - 1)
         expired_restored = sanitized_state({"web_consent": expired})
         self.assertEqual(expired_restored["web_consent"]["expires_at_epoch"], 0.0)
         self.assertIsNone(expired_restored["web_consent"]["key_fingerprint"])
@@ -1866,6 +1870,20 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
         self.assertEqual(resolver.await_args_list[1].kwargs, {"force_refresh": True})
         self.assertTrue(any(event["kind"] == "CREDENTIAL_REFRESH_RETRY_FAILED" for event in state["events"]))
         self.assertEqual(state["auto"]["last_skip_reason"], "no_credentials")
+
+    def test_automatic_cycle_blocks_new_entries_during_consent_grace(self):
+        state = initial_state()
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        credentials = ("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")
+        with patch.object(v25_execution, "consent_status", return_value={"active": False, "grace_active": True}), \
+                patch.object(v25_execution, "readiness_for") as readiness:
+            asyncio.run(v25_execution.automatic_cycle(application, credentials=credentials))
+
+        readiness.assert_not_called()
+        self.assertTrue(state["auto"]["enabled"])
+        self.assertEqual(state["auto"]["last_skip_reason"], "consent_reauthorization_required")
+        self.assertTrue(any(event["kind"] == "LIVE_CONSENT_REAUTH_REQUIRED" for event in state["events"]))
 
     def test_background_client_preserves_activated_live_credential_pair(self):
         application = SimpleNamespace(state=SimpleNamespace(http=object()))
