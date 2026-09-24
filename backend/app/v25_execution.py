@@ -2863,6 +2863,20 @@ async def execution_loop(application: Any) -> None:
             automation_telemetry("AUTOMATION_LOOP running", reason="loop_running")
             credentials = await auto_session_credentials(application, application.state.v25_execution)
             if not usable_live_credentials(credentials):
+                credentials = await auto_session_credentials(
+                    application,
+                    application.state.v25_execution,
+                    force_refresh=True,
+                )
+                refresh_succeeded = usable_live_credentials(credentials)
+                refresh_event = "CREDENTIAL_REFRESH_RETRY_SUCCEEDED" if refresh_succeeded else "CREDENTIAL_REFRESH_RETRY_FAILED"
+                add_event(
+                    application.state.v25_execution,
+                    refresh_event,
+                    "İlk credential çözümlemesi boş döndü; tek zorunlu yenileme denemesi tamamlandı.",
+                )
+                automation_telemetry(refresh_event, reason=refresh_event)
+            if not usable_live_credentials(credentials):
                 application.state.v25_execution["auto"]["last_skip_reason"] = "no_credentials"
                 application.state.v25_execution["auto"]["last_cycle_stage"] = "skipped"
                 automation_telemetry("AUTOMATION_SKIP reason=no_credentials", reason="no_credentials")

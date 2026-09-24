@@ -1822,7 +1822,30 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
         self.assertNotIn(self.API_KEY, events_text)
         self.assertNotIn(self.SECRET_KEY, events_text)
 
-    def test_background_reconciliation_rejects_truthy_empty_credential_tuple(self):
+    def test_background_credential_refresh_retry_recovers_once(self):
+        state = initial_state()
+        state["recovery_loaded"] = True
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        credentials = ("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")
+
+        async def stop_after_cycle(_seconds):
+            raise asyncio.CancelledError
+
+        resolver = AsyncMock(side_effect=[("", ""), credentials])
+        with patch.object(v25_execution, "auto_session_credentials", new=resolver), \
+                patch.object(v25_execution, "reconcile", new=AsyncMock()), \
+                patch.object(v25_execution, "automatic_cycle", new=AsyncMock()), \
+                patch.object(v25_execution.asyncio, "sleep", new=stop_after_cycle):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(v25_execution.execution_loop(application))
+
+        self.assertEqual(resolver.await_count, 2)
+        self.assertEqual(resolver.await_args_list[0].kwargs, {})
+        self.assertEqual(resolver.await_args_list[1].kwargs, {"force_refresh": True})
+        self.assertTrue(any(event["kind"] == "CREDENTIAL_REFRESH_RETRY_SUCCEEDED" for event in state["events"]))
+
+    def test_background_credential_refresh_retry_still_fails_closed(self):
         state = initial_state()
         state["recovery_loaded"] = True
         state["lock"] = asyncio.Lock()
@@ -1831,13 +1854,17 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
         async def stop_after_skip(_seconds):
             raise asyncio.CancelledError
 
-        with patch.object(v25_execution, "auto_session_credentials", new=AsyncMock(return_value=("", ""))), \
+        resolver = AsyncMock(return_value=("", ""))
+        with patch.object(v25_execution, "auto_session_credentials", new=resolver), \
                 patch.object(v25_execution, "reconcile", new=AsyncMock()) as reconcile, \
                 patch.object(v25_execution.asyncio, "sleep", new=stop_after_skip):
             with self.assertRaises(asyncio.CancelledError):
                 asyncio.run(v25_execution.execution_loop(application))
 
         reconcile.assert_not_awaited()
+        self.assertEqual(resolver.await_count, 2)
+        self.assertEqual(resolver.await_args_list[1].kwargs, {"force_refresh": True})
+        self.assertTrue(any(event["kind"] == "CREDENTIAL_REFRESH_RETRY_FAILED" for event in state["events"]))
         self.assertEqual(state["auto"]["last_skip_reason"], "no_credentials")
 
     def test_background_client_preserves_activated_live_credential_pair(self):
