@@ -35,7 +35,7 @@ type TradeHistoryRow = {
 }
 
 type MarketRow = { symbol: string; display: string; price: number; change: number; volume: number; status?: string; contractType?: string; quoteAsset?: string; filters?: unknown[] }
-type ScannerCandidate = { symbol: string; direction: string; confidence: number; final_decision_score: number; opportunity_score: number; smart_score: number }
+type ScannerCandidate = { symbol: string; direction: string; confidence: number; final_decision_score: number; opportunity_score: number; smart_score: number; price?: number; change?: number; volume?: number; display?: string }
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number }
 type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; adx?: number; atr?: number; support?: number; resistance?: number; radar?: { trap_score?: number; breakout_quality?: number; entry_timing?: string }; volume_ratio?: number; normalized_signal?: string }
 type AccountPlan = { symbol?: string; stop_loss?: string; targets?: string[]; margin_usdt?: number; created_at?: string }
@@ -167,7 +167,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     let active = true
     const refreshScanner = async () => {
       try {
-        const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=5`, { signal: controller.signal })
+        const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=100`, { signal: controller.signal })
         if (!response.ok) throw new Error('Scanner data unavailable')
         const payload = await response.json() as { results?: ScannerCandidate[] }
         if (active) setScannerCandidates(Array.isArray(payload.results) ? payload.results : [])
@@ -505,8 +505,24 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     }
   }
 
+  const rankedWatchlistMarkets = scannerCandidates
+    .map(candidate => {
+      const market = markets.find(item => item.symbol === candidate.symbol)
+      return {
+        symbol: candidate.symbol,
+        display: candidate.display || market?.display || candidate.symbol.replace(/USDT$/, '/USDT'),
+        price: candidate.price ?? market?.price ?? 0,
+        change: candidate.change ?? market?.change ?? 0,
+        volume: candidate.volume ?? market?.volume ?? 0,
+        direction: candidate.direction,
+        confidence: candidate.confidence,
+        finalDecisionScore: candidate.final_decision_score,
+        smartScore: candidate.smart_score,
+      }
+    })
+    .sort((left, right) => right.finalDecisionScore - left.finalDecisionScore || right.confidence - left.confidence || right.smartScore - left.smartScore)
   const normalizedMarketQuery = marketQuery.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
-  const filteredMarkets = markets.filter(market => {
+  const filteredMarkets = rankedWatchlistMarkets.filter(market => {
     if (!normalizedMarketQuery) return true
     const display = market.display.toUpperCase().replace(/[^A-Z0-9]/g, '')
     return market.symbol.includes(normalizedMarketQuery) || display.includes(normalizedMarketQuery) || market.symbol.replace(/USDT$/, '').includes(normalizedMarketQuery)
@@ -631,20 +647,20 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 <span className="panelEyebrow">MARKET WATCH</span>
                 <h3>Live Markets</h3>
               </div>
-              <span className="marketCount">{markets.length || '--'}</span>
+              <span className="marketCount">{rankedWatchlistMarkets.length || '--'}</span>
             </div>
 
             <label className="marketSearch"><span>SEARCH MARKETS</span><input aria-label="Search markets" placeholder="BTC, ETH, SOL..." value={marketQuery} onChange={event => setMarketQuery(event.target.value)} /><button type="button" aria-label="Clear market search" onClick={() => setMarketQuery('')} disabled={!marketQuery}>×</button></label>
             <div className="watchlistList">
-              {marketLoading ? <div className="marketEmpty">Loading markets...</div> : marketError ? <div className="marketEmpty error">{marketError}</div> : filteredMarkets.length === 0 ? <div className="marketEmpty"><strong>No markets found</strong><span>Try another symbol or market name.</span></div> : filteredMarkets.map(item => (
+              {marketLoading ? <div className="marketEmpty">Loading markets...</div> : marketError ? <div className="marketEmpty error">{marketError}</div> : filteredMarkets.length === 0 ? <div className="marketEmpty"><strong>No markets found</strong><span>Try another symbol or market name.</span></div> : filteredMarkets.map((item, index) => (
                 <button key={item.symbol} type="button" className={item.symbol === draft.market ? 'watchlistItem active' : 'watchlistItem'} onClick={() => selectMarket(item.symbol)}>
                   <div className="watchlistMeta">
-                    <b>{item.symbol}</b>
-                    <span>{item.change >= 0 ? '+' : ''}{item.change.toFixed(2)}%</span>
+                    <b>#{index + 1} {item.symbol}</b>
+                    <span>FINAL {fmtDecisionNumber(item.finalDecisionScore)}/100</span>
                   </div>
                   <div className="watchlistStats">
                     <strong>${item.price.toLocaleString('en-US', { maximumFractionDigits: 6 })}</strong>
-                    <em className={item.change >= 0 ? 'positive' : 'negative'}>{item.change >= 0 ? 'LONG' : 'SHORT'}</em>
+                    <em className={item.direction === 'LONG' ? 'positive' : 'negative'}>{item.direction} {fmtDecisionNumber(item.confidence)}%</em>
                   </div>
                 </button>
               ))}
