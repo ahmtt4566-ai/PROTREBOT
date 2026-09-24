@@ -75,6 +75,19 @@ const fmtSignalAge = (seconds: number | null) => {
 }
 
 const MTF_INTERVALS = ['1m', '5m', '15m', '1h', '4h']
+const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 15000) => {
+  const controller = new AbortController()
+  const parentAbort = () => controller.abort()
+  init.signal?.addEventListener('abort', parentAbort, { once: true })
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    window.clearTimeout(timeout)
+    init.signal?.removeEventListener('abort', parentAbort)
+  }
+}
+
 const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   const responses = await Promise.all(MTF_INTERVALS.map(timeframe => fetch(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal })))
   const values = await Promise.all(responses.map(async (response, index) => {
@@ -128,6 +141,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [lastHistorySyncAt, setLastHistorySyncAt] = useState<string | null>(null)
   const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null)
   const marketRefreshInFlight = useRef(false)
+  const scannerRefreshInFlight = useRef(false)
   const accountRefreshInFlight = useRef(false)
   const candles = snapshot?.candles ?? []
   const analysis = snapshot?.analysis ?? null
@@ -142,7 +156,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       if (!active || marketRefreshInFlight.current) return
       marketRefreshInFlight.current = true
       try {
-        const response = await fetch(`${API_BASE}/markets?limit=500`, { signal: controller.signal })
+        const response = await fetchWithTimeout(`${API_BASE}/markets?limit=500`, { signal: controller.signal })
         if (!response.ok) throw new Error('Market data unavailable')
         const items = await response.json() as MarketRow[]
         if (!active) return
@@ -158,7 +172,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       }
     }
     void refreshMarkets()
-    const timer = window.setInterval(() => void refreshMarkets(), 3000)
+    const timer = window.setInterval(() => void refreshMarkets(), 15000)
     return () => { active = false; controller.abort(); window.clearInterval(timer) }
   }, [draft.market])
 
@@ -166,13 +180,17 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     const controller = new AbortController()
     let active = true
     const refreshScanner = async () => {
+      if (!active || scannerRefreshInFlight.current) return
+      scannerRefreshInFlight.current = true
       try {
-        const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=40`, { signal: controller.signal })
+        const response = await fetchWithTimeout(`${API_BASE}/analysis-universe?interval=${interval}&limit=40`, { signal: controller.signal }, 15000)
         if (!response.ok) throw new Error('Scanner data unavailable')
         const payload = await response.json() as { results?: ScannerCandidate[] }
         if (active) setScannerCandidates(Array.isArray(payload.results) ? payload.results : [])
       } catch (error) {
-        if (active && !(error instanceof Error && error.name === 'AbortError')) setScannerCandidates([])
+        if (active && !(error instanceof Error && error.name === 'AbortError')) setMarketError('MARKET ANALYSIS DELAYED · RAW MARKETS ACTIVE')
+      } finally {
+        scannerRefreshInFlight.current = false
       }
     }
     void refreshScanner()
@@ -505,7 +523,19 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     }
   }
 
-  const rankedWatchlistMarkets = scannerCandidates
+  const watchlistCandidates: ScannerCandidate[] = scannerCandidates.length ? scannerCandidates : markets.map(market => ({
+    symbol: market.symbol,
+    display: market.display,
+    price: market.price,
+    change: market.change,
+    volume: market.volume,
+    direction: 'WATCH',
+    confidence: 0,
+    final_decision_score: 0,
+    opportunity_score: 0,
+    smart_score: 0,
+  }))
+  const rankedWatchlistMarkets = watchlistCandidates
     .map(candidate => {
       const market = markets.find(item => item.symbol === candidate.symbol)
       return {
@@ -652,18 +682,21 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
             <label className="marketSearch"><span>SEARCH MARKETS</span><input aria-label="Search markets" placeholder="BTC, ETH, SOL..." value={marketQuery} onChange={event => setMarketQuery(event.target.value)} /><button type="button" aria-label="Clear market search" onClick={() => setMarketQuery('')} disabled={!marketQuery}>×</button></label>
             <div className="watchlistList">
-              {marketLoading ? <div className="marketEmpty">Loading markets...</div> : marketError ? <div className="marketEmpty error">{marketError}</div> : filteredMarkets.length === 0 ? <div className="marketEmpty"><strong>No markets found</strong><span>Try another symbol or market name.</span></div> : filteredMarkets.map((item, index) => (
-                <button key={item.symbol} type="button" className={item.symbol === draft.market ? 'watchlistItem active' : 'watchlistItem'} onClick={() => selectMarket(item.symbol)}>
-                  <div className="watchlistMeta">
-                    <b>#{index + 1} {item.symbol}</b>
-                    <span>FINAL {fmtDecisionNumber(item.finalDecisionScore)}/100</span>
-                  </div>
-                  <div className="watchlistStats">
-                    <strong>${item.price.toLocaleString('en-US', { maximumFractionDigits: 6 })}</strong>
-                    <em className={item.direction === 'LONG' ? 'positive' : 'negative'}>{item.direction} {fmtDecisionNumber(item.confidence)}%</em>
-                  </div>
-                </button>
-              ))}
+              {marketLoading && !watchlistCandidates.length ? <div className="marketEmpty">Loading markets...</div> : filteredMarkets.length === 0 ? marketError ? <div className="marketEmpty error">{marketError}</div> : <div className="marketEmpty"><strong>No markets found</strong><span>Try another symbol or market name.</span></div> : <>
+                {marketError && <div className="marketStaleNotice">{marketError}</div>}
+                {filteredMarkets.map((item, index) => (
+                  <button key={item.symbol} type="button" className={item.symbol === draft.market ? 'watchlistItem active' : 'watchlistItem'} onClick={() => selectMarket(item.symbol)}>
+                    <div className="watchlistMeta">
+                      <b>#{index + 1} {item.symbol}</b>
+                      <span>{scannerCandidates.length ? `FINAL ${fmtDecisionNumber(item.finalDecisionScore)}/100` : 'FINAL DECISION PENDING'}</span>
+                    </div>
+                    <div className="watchlistStats">
+                      <strong>${item.price.toLocaleString('en-US', { maximumFractionDigits: 6 })}</strong>
+                      <em className={item.direction === 'LONG' ? 'positive' : item.direction === 'SHORT' ? 'negative' : 'muted'}>{item.direction} {scannerCandidates.length ? `${fmtDecisionNumber(item.confidence)}%` : 'RAW MARKET'}</em>
+                    </div>
+                  </button>
+                ))}
+              </>}
             </div>
           </aside>
 
