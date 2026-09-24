@@ -2304,7 +2304,7 @@ async def execute_live_order(
     if source == "V25_AUTO":
         if not auto_session_active(state):
             raise HTTPException(423, "Bir saatlik gözetimli canlı otomasyon oturumu kapalı veya süresi doldu.")
-    elif not is_armed(state):
+    elif source != "MANUAL" and not is_armed(state):
         raise HTTPException(423, "24 saatlik canlı emir kilidi kapalı veya süresi doldu.")
     if live_execution_blocked(state):
         raise HTTPException(423, "Canlı yürütme kilitli; acil durum veya belirsiz emir uzlaştırması tamamlanmadı.")
@@ -2319,7 +2319,7 @@ async def execute_live_order(
         try:
             client = client_for_with_credentials(application, credentials, request)
             snapshot = await account_snapshot(client)
-            if state.get("real_trading_locked") is not False:
+            if source != "MANUAL" and state.get("real_trading_locked") is not False:
                 raise LiveExchangeError("Gerçek işlem kilidi kapalı; açık canlı onay olmadan emir gönderilmedi.", http_status=423)
             if source == "V25_AUTO" and state.get("live_auto_trade") is not True:
                 raise LiveExchangeError("Canlı otomasyon açık değil; otomatik emir gönderilmedi.", http_status=423)
