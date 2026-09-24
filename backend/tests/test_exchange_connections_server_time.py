@@ -284,6 +284,39 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
         submit_entry.assert_not_awaited()
 
+    def test_background_resolves_single_owner_fingerprint_match_after_session_rotation(self):
+        api_key = "api-key-123456"
+        fingerprint = exchange_connections.key_fingerprint(api_key)
+
+        class Pool:
+            async def fetchrow(self, *_args):
+                return None
+
+            async def fetch(self, *_args):
+                return [{
+                    "session_id": "rotated-session",
+                    "user_id": "owner-a",
+                    "mode": "LIVE",
+                    "encrypted_payload": b"encrypted",
+                    "fingerprint": fingerprint,
+                    "active": True,
+                }]
+
+            async def execute(self, *_args):
+                return None
+
+        pool = Pool()
+        application = SimpleNamespace(state=SimpleNamespace(
+            db_pool=pool,
+            exchange_vault={"ready": True, "pool_id": id(pool)},
+        ))
+        with patch.object(exchange_connections, "decrypt_credentials", return_value=(api_key, "secret-key-123456")):
+            credentials = asyncio.run(exchange_connections.session_credentials_for_identity(
+                application, "expired-session", "owner-a", "LIVE", fingerprint,
+            ))
+
+        self.assertEqual(credentials, (api_key, "secret-key-123456"))
+
 
 if __name__ == "__main__":
     unittest.main()

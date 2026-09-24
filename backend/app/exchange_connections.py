@@ -304,16 +304,21 @@ async def session_credentials_for_identity(
         session_value, user_id, normalized,
     )
     if not row:
-        row = await pool.fetchrow(
+        # A browser session token may rotate after the live monitor has been
+        # persisted. Recover only when the original owner and key fingerprint
+        # still identify a single active LIVE vault record.
+        rows = await pool.fetch(
             """
             SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active
             FROM protrebot_exchange_session_vault
-            WHERE session_id = $1 AND mode = $2 AND active = TRUE
+            WHERE user_id = $1 AND mode = $2 AND active = TRUE AND fingerprint = $3
             ORDER BY updated_at DESC
-            LIMIT 1
+            LIMIT 2
             """,
-            session_value, normalized,
+            user_id, normalized, f"SHA256:{normalize_fingerprint(fingerprint)}",
         )
+        if len(rows) == 1:
+            row = rows[0]
     if not row or normalize_fingerprint(str(row.get("fingerprint") or "")) != normalize_fingerprint(fingerprint):
         logger.warning(
             "LIVE credential resolution failed: %s expected=%s stored=%s",
