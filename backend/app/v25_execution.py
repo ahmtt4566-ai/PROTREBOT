@@ -1253,7 +1253,14 @@ async def build_live_spec(
     stop = round_tick(Decimal(str(order.stop_loss)), rules["tick"])
     targets = [round_tick(Decimal(str(value)), rules["tick"]) for value in (order.tp1, order.tp2, order.tp3)]
     validate_levels(order.direction, entry if order.order_type == "LIMIT" else current, stop, targets)
-    risk = risk_sized_order(float(entry), float(stop), {**settings, "max_margin_per_trade": order.margin_usdt, "max_leverage": order.leverage})
+    try:
+        risk = risk_sized_order(
+            float(entry),
+            float(stop),
+            {**settings, "max_margin_per_trade": order.margin_usdt, "max_leverage": order.leverage},
+        )
+    except ValueError as exc:
+        raise LiveExchangeError(f"Canlı Stop riski geçersiz: {exc}", http_status=422) from exc
     if risk["estimated_stop_loss_usdt"] > settings["max_loss_per_trade"] + 1e-6:
         raise LiveExchangeError("Tahmini Stop kaybı işlem başına risk limitini aşıyor.", http_status=422)
     notional = Decimal(str(risk["notional_usdt"]))

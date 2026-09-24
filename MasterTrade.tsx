@@ -343,6 +343,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     if (!Number.isFinite(draft.leverage) || draft.leverage < 1 || draft.leverage > 3) return 'LIVE leverage must be between 1x and 3x.'
     if (draft.margin * draft.leverage > 200) return 'LIVE position size exceeds the configured safety limit.'
     if (![draft.entry, draft.stopLoss, draft.tp1, draft.tp2, draft.tp3].every(value => Number.isFinite(value) && value > 0)) return 'Entry, Stop Loss ve TP1–TP3 alanlarını güncel analizden doldurun.'
+    const levelsValid = draft.side === 'LONG'
+      ? draft.stopLoss < draft.entry && draft.entry < draft.tp1 && draft.tp1 < draft.tp2 && draft.tp2 < draft.tp3
+      : draft.tp3 < draft.tp2 && draft.tp2 < draft.tp1 && draft.tp1 < draft.entry && draft.entry < draft.stopLoss
+    if (!levelsValid) return draft.side === 'LONG' ? 'LONG için SL < Entry < TP1 < TP2 < TP3 olmalı.' : 'SHORT için TP3 < TP2 < TP1 < Entry < SL olmalı.'
+    const stopDistancePct = Math.abs(draft.entry - draft.stopLoss) / draft.entry * 100
+    if (stopDistancePct > 4.5) return `Stop mesafesi %${stopDistancePct.toFixed(2)}. Analizi yenileyin; LIVE üst sınır %5.00.`
     return ''
   }
 
@@ -443,11 +449,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       const directionText = String(nextAnalysis.normalized_signal || nextAnalysis.direction || '').toUpperCase()
       const nextSide: TradeSide | null = /SHORT|SELL/.test(directionText) ? 'SHORT' : /LONG|BUY/.test(directionText) ? 'LONG' : null
       const entry = nextAnalysis.entry
-      const stopLoss = nextAnalysis.stop_loss
+      const analyzedStopLoss = nextAnalysis.stop_loss
       const targets = [nextAnalysis.tp1, nextAnalysis.tp2, nextAnalysis.tp3]
-      if (!nextSide || ![entry, stopLoss, ...targets].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+      if (!nextSide || ![entry, analyzedStopLoss, ...targets].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0)) {
         throw new Error('Güncel analizde geçerli yön, Entry, Stop Loss ve TP seviyeleri bulunamadı.')
       }
+      const stopLimit = nextSide === 'LONG' ? entry * 0.955 : entry * 1.045
+      const stopLoss = nextSide === 'LONG' ? Math.max(analyzedStopLoss, stopLimit) : Math.min(analyzedStopLoss, stopLimit)
       const orderedTargets = [...targets].sort((left, right) => nextSide === 'LONG' ? left - right : right - left)
       const levelsValid = nextSide === 'LONG'
         ? stopLoss < entry && entry < orderedTargets[0] && orderedTargets[0] < orderedTargets[1] && orderedTargets[1] < orderedTargets[2]
@@ -464,6 +472,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         tp3: orderedTargets[2],
       }))
       setAnalysisSyncedAt(new Date().toLocaleTimeString('en-GB'))
+      if (stopLoss !== analyzedStopLoss) setAnalysisFillError('Stop mesafesi LIVE %5 sınırına göre %4.5 olarak daraltıldı.')
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return
       setAnalysisFillError(error instanceof Error ? error.message : 'Analysis unavailable.')
@@ -793,7 +802,15 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 </button>
                 {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
                 {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
-                <button type="button" className="primaryOrderButton" onClick={() => { setManualOrderRequest(current => current + 1); document.getElementById('master-trade-live-terminal')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>LIVE ORDER</button>
+                <button type="button" className="primaryOrderButton" onClick={() => {
+                  const validationError = validateOrderDraft()
+                  if (validationError) {
+                    setAnalysisFillError(validationError)
+                    return
+                  }
+                  setManualOrderRequest(current => current + 1)
+                  document.getElementById('master-trade-live-terminal')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }}>LIVE ORDER</button>
                 <small className="orderLockReason">LIVE ORDER, Stop Loss ve TP korumalarıyla birlikte onay ekranını açar.</small>
               </div>
             </div>
