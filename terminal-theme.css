@@ -2021,19 +2021,6 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   color: var(--terminal-warning);
 }
 
-.masterTradeRoute .masterTradeSafetyBanner > div {
-  display: flex;
-  flex: 1 1 420px;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  min-width: 0;
-}
-
-.masterTradeRoute .masterTradeQuickCloseButton {
-  flex: 0 0 auto;
-}
-
 .masterTradeRoute .masterTradeSafetyBanner strong {
   font-size: 10px;
   letter-spacing: 0.12em;

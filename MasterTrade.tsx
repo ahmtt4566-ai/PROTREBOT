@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
@@ -667,20 +667,9 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
         <div className="masterTradeWorkspace">
           <div className="masterTradeSafetyBanner" role="status">
-            <div>
-              <strong>LIVE TRADING LOCKED</strong>
-              <span>LIVE ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY CONTROLLED</span>
-              <em>{persistentTradeHistoryText}</em>
-            </div>
-            {openPositions.length > 0 && (
-              <button
-                type="button"
-                className="dangerBtn masterTradeQuickCloseButton"
-                onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position: openPositions[0] }) }}
-              >
-                CLOSE POSITION
-              </button>
-            )}
+            <strong>LIVE TRADING LOCKED</strong>
+            <span>LIVE ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY CONTROLLED</span>
+            <em>{persistentTradeHistoryText}</em>
           </div>
           <aside className="masterTradePanel watchlistPanel">
             <div className="panelHeader">
@@ -965,7 +954,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td>${fmtNum(stopLoss)}</td>
                       <td>${fmtNum(target)}</td>
                       <td><span className="statusBadge open">OPEN</span></td>
-                      <td><div className="positionActions"><button type="button" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'DETAILS', position }) }}>DETAILS</button><button type="button" className="dangerAction" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position }) }}>CLOSE</button></div></td>
+                      <td><div className="positionActions"><button type="button" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'DETAILS', position }) }}>DETAILS</button><button type="button" className="dangerAction positionCloseButton" aria-label={`Close ${position.symbol} position`} onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position }) }}><XCircle size={14} aria-hidden="true" /> CLOSE POSITION</button></div></td>
                     </tr>
                     )
                   }) : <tr><td colSpan={13} className="emptyState">{snapshot?.accountError || 'NO OPEN POSITIONS'}</td></tr>}
