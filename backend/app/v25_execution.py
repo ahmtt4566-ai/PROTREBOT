@@ -102,6 +102,7 @@ except (TypeError, ValueError):
     TRANSIENT_RECONCILIATION_RECOVERY_SECONDS = 60.0
 MAX_EVENTS = 500
 MAX_PLANS = 250
+MAX_CONFIDENCE_REJECTION_HISTORY = 20
 PROVENANCE_STATES = {"NO_PROVENANCE", "PROVISIONAL", "CONFIRMED", "BROKEN"}
 PROTECTION_STATES = {"MATCHED", "MISSING", "UNKNOWN"}
 MARKET_SCAN_LIMIT = 100
@@ -424,7 +425,7 @@ def initial_state() -> dict[str, Any]:
         "plans": {},
         "intents": {},
         "armed_until": 0.0,
-        "auto": {"enabled": False, "busy": False, "cycles": 0, "last_scan": None, "last_scan_stats": None, "last_skip_reason": None, "last_cycle_stage": "idle", "last_decision": "Kullanıcı onayı bekleniyor.", "last_error": None, "session_until": 0.0},
+        "auto": {"enabled": False, "busy": False, "cycles": 0, "last_scan": None, "last_scan_stats": None, "confidence_rejection_history": [], "last_skip_reason": None, "last_cycle_stage": "idle", "last_decision": "Kullanıcı onayı bekleniyor.", "last_error": None, "session_until": 0.0},
             "auto_authorization": {"session_id": "", "user_id": "", "fingerprint": "", "expires_at_epoch": 0.0},
         "real_trading_locked": True,
         "live_auto_trade": False,
@@ -2030,6 +2031,9 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
             "candidate_count": scan_stats.get("candidate_count", scan_stats.get("deep_analysis_candidates", 0)),
             "rejection_reason_counts": scan_stats.get("rejection_reason_counts", {}),
             "rejection_reason_breakdown": scan_stats.get("rejection_reason_breakdown", {}),
+            "confidence_below_min_scores": scan_stats.get("confidence_below_min_scores", []),
+            "confidence_below_min_distribution": scan_stats.get("confidence_below_min_distribution", {}),
+            "confidence_below_min_history": state["auto"].get("confidence_rejection_history", []),
             "signal_thresholds": scan_stats.get("signal_thresholds", {}),
             "deep_analysis_count": scan_stats.get("deep_analysis_count", len(scan_stats.get("deep_analysis_symbols", []))),
             "selected_symbols": scan_stats.get("selected_symbols", scan_stats.get("selected_candidates", [])),
@@ -2336,6 +2340,13 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "stop_distance": {},
             "spread": {},
         }
+        confidence_below_min_scores: list[dict[str, Any]] = []
+        confidence_below_min_distribution = {
+            "below_70": 0,
+            "70-75": 0,
+            "75-80": 0,
+            "80-86": 0,
+        }
         signal_thresholds = {
             "min_confidence": int(state["policy"]["min_confidence"]),
             "canonical_max_trap_score": 35,
@@ -2432,6 +2443,27 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                     detailed_reasons = [str(reason) for reason in canonical["reasons"]]
                 if not detailed_reasons:
                     detailed_reasons = [str(canonical.get("reason") or "ENTRY_INELIGIBLE")]
+                if "CONFIDENCE_BELOW_MIN" in detailed_reasons:
+                    confidence_below_min_scores.append({
+                        "symbol": symbol,
+                        "confidence": round(confidence, 4),
+                        "threshold": float(signal_thresholds["min_confidence"]),
+                    })
+                    if confidence < 70:
+                        confidence_bucket = "below_70"
+                    elif confidence < 75:
+                        confidence_bucket = "70-75"
+                    elif confidence < 80:
+                        confidence_bucket = "75-80"
+                    else:
+                        confidence_bucket = "80-86"
+                    confidence_below_min_distribution[confidence_bucket] += 1
+                    logger.info(
+                        "CONFIDENCE_BELOW_MIN symbol=%s confidence=%.4f threshold=%.4f",
+                        symbol,
+                        confidence,
+                        float(signal_thresholds["min_confidence"]),
+                    )
                 for reason in detailed_reasons:
                     count_rejection("entry_ineligible", str(reason))
                 continue
@@ -2459,6 +2491,8 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "candidate_count": len(signals),
             "rejection_reason_counts": rejection_reason_counts,
             "rejection_reason_breakdown": rejection_reason_breakdown,
+            "confidence_below_min_scores": confidence_below_min_scores,
+            "confidence_below_min_distribution": confidence_below_min_distribution,
             "signal_thresholds": signal_thresholds,
             "deep_analysis_candidates": len(candidates),
             "deep_analysis_symbols": analyzed_symbols,
@@ -2471,6 +2505,13 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "positions_open": len(snapshot.get("positions", [])),
             "position_capacity": int(state["policy"]["max_positions"]),
         }
+        state["auto"].setdefault("confidence_rejection_history", []).append({
+            "cycle": int(state["auto"].get("cycles") or 0) + 1,
+            "scan_at": state["auto"].get("last_scan"),
+            "scores": confidence_below_min_scores,
+            "distribution": confidence_below_min_distribution,
+        })
+        state["auto"]["confidence_rejection_history"] = state["auto"]["confidence_rejection_history"][-MAX_CONFIDENCE_REJECTION_HISTORY:]
         logger.info(
             "MULTI_SYMBOL_SCAN signals found: %s selected candidates: %s positions open: %s/%s",
             len(signals),

@@ -1252,6 +1252,57 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertFalse(audit["lock_state"])
         self.assertFalse(any("secret" in str(key).lower() or "token" in str(key).lower() for key in audit))
 
+    def test_confidence_rejections_expose_exact_scores_and_distribution(self):
+        state = initial_state()
+        state.update({"recovery_ready": True, "connected": True, "snapshot": {"available_balance": 100.0, "positions": [], "open_orders": [], "hedge_mode": False}})
+        state["real_trading_locked"] = False
+        state["live_auto_trade"] = True
+        state["armed_until"] = time.time() + 300
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300, "last_scan": None})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        state["_app"] = application
+        symbols_and_confidence = {"AAAUSDT": 72.5, "BBBUSDT": 77.5, "CCCUSDT": 83.0}
+        candles = [{"time": index, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for index in range(220)]
+
+        async def canonical_for_symbol(_application, _client, symbol, _interval, _candles, _policy):
+            return {
+                "decision": "WAIT",
+                "entry_eligible": False,
+                "analysis": {
+                    "direction": "LONG",
+                    "confidence": symbols_and_confidence[symbol],
+                    "radar": {"trap_score": 1, "breakout_quality": 100},
+                },
+                "mtf": {"higher_timeframe_confirmation": True},
+            }
+
+        with patch.multiple(
+            v25_execution,
+            client_for_with_credentials=lambda *args, **kwargs: SimpleNamespace(last_scan_eligible_count=3),
+            account_snapshot=AsyncMock(return_value=state["snapshot"]),
+            scan_market_candidates=AsyncMock(return_value=[{"symbol": symbol, "opportunity_score": 99} for symbol in symbols_and_confidence]),
+            live_candles=AsyncMock(return_value=(candles, 123)),
+            canonical_live_decision=canonical_for_symbol,
+            readiness_for=lambda *args, **kwargs: {"ready": True},
+            auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
+            persist_state=lambda current: None,
+        ):
+            asyncio.run(v25_execution.automatic_cycle(application, credentials=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")))
+
+        stats = state["auto"]["last_scan_stats"]
+        self.assertEqual(stats["confidence_below_min_scores"], [
+            {"symbol": "AAAUSDT", "confidence": 72.5, "threshold": 86.0},
+            {"symbol": "BBBUSDT", "confidence": 77.5, "threshold": 86.0},
+            {"symbol": "CCCUSDT", "confidence": 83.0, "threshold": 86.0},
+        ])
+        self.assertEqual(stats["confidence_below_min_distribution"], {
+            "below_70": 0,
+            "70-75": 1,
+            "75-80": 1,
+            "80-86": 1,
+        })
+        self.assertEqual(state["auto"]["confidence_rejection_history"][-1]["cycle"], 1)
+
     def test_mock_100_symbol_universe_ranks_unique_top_three_without_btc_fallback(self):
         symbols = [f"COIN{index}USDT" for index in range(120)]
         symbols[0] = "BTCUSDT"
