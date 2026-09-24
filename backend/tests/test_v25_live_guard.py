@@ -22,6 +22,7 @@ from app.execution_core import (  # noqa: E402
     HARD_MAX_POSITIONS,
     HARD_MAX_TOTAL_EXPOSURE_USDT,
     credential_fingerprint,
+    configured_min_confidence,
     daily_execution_metrics,
     evaluate_entry_gates,
     policy_digest,
@@ -428,6 +429,17 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         second = sanitize_execution_policy({"max_margin_per_trade": 30})
         self.assertNotEqual(policy_digest(first), policy_digest(second))
 
+    def test_default_min_confidence_is_configurable(self):
+        with patch.dict("os.environ", {"PROTREBOT_MIN_CONFIDENCE": "80"}, clear=False):
+            self.assertEqual(configured_min_confidence(), 80)
+            self.assertEqual(sanitize_execution_policy({})["min_confidence"], 80)
+            self.assertEqual(v25_execution.initial_state()["policy"]["min_confidence"], 80)
+
+        with patch.dict("os.environ", {"PROTREBOT_MIN_CONFIDENCE": "91"}, clear=False):
+            self.assertEqual(configured_min_confidence(), 91)
+            self.assertEqual(sanitize_execution_policy({})["min_confidence"], 91)
+            self.assertEqual(sanitize_execution_policy({"min_confidence": 84})["min_confidence"], 84)
+
     def test_risk_sizing_respects_loss_margin_and_leverage(self):
         policy = sanitize_execution_policy({"max_margin_per_trade": 25, "max_loss_per_trade": 3, "max_leverage": 2})
         order = risk_sized_order(100, 98, policy)
@@ -671,6 +683,67 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertEqual(diagnostic["retry_count"], 2)
         self.assertEqual(diagnostic["request_attempt"], 1)
         self.assertEqual(diagnostic["timeout_seconds"], {"connect": 10, "read": 30, "write": 10, "pool": 30})
+
+    def test_transient_market_data_get_failure_is_recoverable_but_order_paths_are_not(self):
+        class FakeHttp:
+            timeout = httpx.Timeout(30, connect=10, read=30, write=10, pool=30)
+
+            async def request(self, method, url, **kwargs):
+                raise httpx.RemoteProtocolError("server disconnected")
+
+        state = initial_state()
+        client = BinanceLiveClient(
+            FakeHttp(),
+            "TEST_KEY_PLACEHOLDER",
+            "TEST_SECRET_PLACEHOLDER",
+            diagnostic_state=state,
+        )
+        with self.assertRaises(LiveExchangeError) as market_data_error:
+            asyncio.run(client._request("GET", "/fapi/v1/klines", {}, signed=False))
+        self.assertFalse(market_data_error.exception.unknown_execution)
+        self.assertTrue(market_data_error.exception.transient_read_failure)
+        self.assertTrue(next(event for event in state["events"] if event["kind"] == "LIVE_REQUEST_ERROR")["transient_read_failure"])
+
+        with self.assertRaises(LiveExchangeError) as order_read_error:
+            asyncio.run(client._request("GET", "/fapi/v1/order", {}, signed=True))
+        self.assertTrue(order_read_error.exception.unknown_execution)
+        self.assertFalse(order_read_error.exception.transient_read_failure)
+
+    def test_successful_safe_get_recovers_transient_market_data_failure_without_rearm(self):
+        class Response:
+            status_code = 200
+
+            def json(self):
+                return {"serverTime": 1}
+
+        class FakeHttp:
+            async def request(self, *args, **kwargs):
+                return Response()
+
+        state = initial_state()
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300})
+        state["real_trading_locked"] = False
+        state["live_auto_trade"] = True
+        failure = LiveExchangeError(
+            "temporary market data failure",
+            transient_read_failure=True,
+            request_method="GET",
+            request_path="/fapi/v1/klines",
+        )
+        self.assertTrue(v25_execution.mark_transient_market_data_failure(state, failure))
+        self.assertTrue(state["real_trading_locked"])
+        client = BinanceLiveClient(
+            FakeHttp(),
+            "TEST_KEY_PLACEHOLDER",
+            "TEST_SECRET_PLACEHOLDER",
+            diagnostic_state=state,
+        )
+        asyncio.run(client._request("GET", "/fapi/v1/klines", {}, signed=False))
+        self.assertFalse(state["real_trading_locked"])
+        self.assertTrue(state["live_auto_trade"])
+        self.assertTrue(state["auto"]["enabled"])
+        self.assertIsNone(state["transient_market_data"])
+        self.assertTrue(any(event["kind"] == "AUTO_RECOVERED_FROM_TRANSIENT_MARKET_DATA" for event in state["events"]))
 
     def test_rate_limit_retry_after_uses_header_and_records_endpoint_weight(self):
         class Response:
@@ -1291,15 +1364,14 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
 
         stats = state["auto"]["last_scan_stats"]
         self.assertEqual(stats["confidence_below_min_scores"], [
-            {"symbol": "AAAUSDT", "confidence": 72.5, "threshold": 86.0},
-            {"symbol": "BBBUSDT", "confidence": 77.5, "threshold": 86.0},
-            {"symbol": "CCCUSDT", "confidence": 83.0, "threshold": 86.0},
+            {"symbol": "AAAUSDT", "confidence": 72.5, "threshold": 80.0},
+            {"symbol": "BBBUSDT", "confidence": 77.5, "threshold": 80.0},
         ])
         self.assertEqual(stats["confidence_below_min_distribution"], {
             "below_70": 0,
             "70-75": 1,
             "75-80": 1,
-            "80-86": 1,
+            "80-86": 0,
         })
         self.assertEqual(state["auto"]["confidence_rejection_history"][-1]["cycle"], 1)
 

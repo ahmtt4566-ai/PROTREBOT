@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,6 +24,8 @@ HARD_MAX_DAILY_LOSS_USDT = 100.0
 HARD_MAX_DAILY_TRADES = 12
 HARD_MAX_CONSECUTIVE_LOSSES = 10
 HARD_MAX_TOTAL_EXPOSURE_USDT = 250.0
+DEFAULT_MIN_CONFIDENCE = 80
+MIN_CONFIDENCE_ENV = "PROTREBOT_MIN_CONFIDENCE"
 
 
 DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
@@ -38,7 +41,7 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "daily_loss_limit": 10.0,
     "daily_trade_limit": 3,
     "consecutive_loss_limit": 3,
-    "min_confidence": 86,
+    "min_confidence": DEFAULT_MIN_CONFIDENCE,
     "max_trap_score": 35,
     "max_spread_bps": 8.0,
     "max_stop_distance_pct": 5.0,
@@ -66,6 +69,10 @@ def _integer(value: Any, default: int, low: int, high: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return min(high, max(low, parsed))
+
+
+def configured_min_confidence() -> int:
+    return _integer(os.getenv(MIN_CONFIDENCE_ENV), DEFAULT_MIN_CONFIDENCE, 70, 95)
 
 
 def normalize_live_symbol(value: str) -> str:
@@ -101,7 +108,7 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
     base["daily_loss_limit"] = _number(source.get("daily_loss_limit"), 10, 5, HARD_MAX_DAILY_LOSS_USDT)
     base["daily_trade_limit"] = _integer(source.get("daily_trade_limit"), 3, 1, HARD_MAX_DAILY_TRADES)
     base["consecutive_loss_limit"] = _integer(source.get("consecutive_loss_limit"), 3, 1, HARD_MAX_CONSECUTIVE_LOSSES)
-    base["min_confidence"] = _integer(source.get("min_confidence"), 86, 70, 95)
+    base["min_confidence"] = _integer(source.get("min_confidence"), configured_min_confidence(), 70, 95)
     base["max_trap_score"] = _integer(source.get("max_trap_score"), 35, 10, 60)
     base["max_spread_bps"] = _number(source.get("max_spread_bps"), 8, 0.5, 25)
     base["max_stop_distance_pct"] = _number(source.get("max_stop_distance_pct"), 5.0, 0.25, 5)

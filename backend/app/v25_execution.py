@@ -59,6 +59,7 @@ from .binance_demo import (
 from .credential_store import load_live_consent
 from .execution_core import (
     DEFAULT_EXECUTION_POLICY,
+    configured_min_confidence,
     LIVE_CLIENT_PREFIX,
     V25_VERSION,
     credential_fingerprint,
@@ -151,12 +152,15 @@ BACKUP_PATH = DATA_DIR / "v25_execution_state.backup.json"
 
 
 class LiveExchangeError(RuntimeError):
-    def __init__(self, message: str, *, http_status: int = 502, exchange_code: int | None = None, unknown_execution: bool = False, timed_out: bool = False) -> None:
+    def __init__(self, message: str, *, http_status: int = 502, exchange_code: int | None = None, unknown_execution: bool = False, timed_out: bool = False, transient_read_failure: bool = False, request_method: str | None = None, request_path: str | None = None) -> None:
         super().__init__(message)
         self.http_status = http_status
         self.exchange_code = exchange_code
         self.unknown_execution = unknown_execution
         self.timed_out = timed_out
+        self.transient_read_failure = transient_read_failure
+        self.request_method = request_method
+        self.request_path = request_path
 
 
 class LiveRateLimitError(LiveExchangeError):
@@ -344,6 +348,77 @@ def clear_clean_reconciliation_state(state: dict[str, Any], snapshot: dict[str, 
     return True
 
 
+TRANSIENT_READ_PATHS = PUBLIC_PATHS | {
+    "/fapi/v3/account",
+    "/fapi/v3/positionRisk",
+    "/fapi/v1/symbolConfig",
+    "/fapi/v1/openOrders",
+    "/fapi/v1/openAlgoOrders",
+    "/fapi/v1/positionSide/dual",
+}
+TRANSIENT_READ_ERRORS = (
+    httpx.RemoteProtocolError,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    httpx.PoolTimeout,
+)
+
+
+def is_transient_read_request(method: str, path: str, error: BaseException | None = None) -> bool:
+    return method.upper() == "GET" and path in TRANSIENT_READ_PATHS and (error is None or isinstance(error, TRANSIENT_READ_ERRORS))
+
+
+def mark_transient_market_data_failure(state: dict[str, Any], error: LiveExchangeError) -> bool:
+    if not error.transient_read_failure:
+        return False
+    auto = state.get("auto") if isinstance(state.get("auto"), dict) else {}
+    session_until = float(auto.get("session_until") or 0)
+    if not bool(auto.get("enabled")) or session_until <= time.time():
+        return False
+    state["transient_market_data"] = {
+        "failed_at_epoch": time.time(),
+        "auto_session_until": session_until,
+        "method": error.request_method,
+        "endpoint": error.request_path,
+        "error_type": type(error.__cause__).__name__ if error.__cause__ else None,
+    }
+    lock_live_execution(state, "TRANSIENT_MARKET_DATA_FAILURE", unknown=False)
+    state["armed_until"] = 0.0
+    state["execution_state"] = "LOCKED"
+    state["reconciliation_required"] = False
+    return True
+
+
+def recover_transient_market_data(state: dict[str, Any], method: str, path: str) -> bool:
+    if not isinstance(state, dict):
+        return False
+    transient = state.get("transient_market_data") if isinstance(state.get("transient_market_data"), dict) else None
+    if not transient or not is_transient_read_request(method, path):
+        return False
+    session_until = float(transient.get("auto_session_until") or 0)
+    if time.time() > float(transient.get("failed_at_epoch") or 0) + TRANSIENT_RECONCILIATION_RECOVERY_SECONDS or session_until <= time.time():
+        state["transient_market_data"] = None
+        return False
+    if unresolved_execution_evidence(state):
+        return False
+    state["execution_state"] = "LOCKED"
+    state["reconciliation_required"] = False
+    state["real_trading_locked"] = False
+    state["live_auto_trade"] = True
+    state["auto"].update({"enabled": True, "session_until": session_until, "last_skip_reason": None, "last_error": None})
+    state["emergency"].update({"active": False, "reason": "TRANSIENT_MARKET_DATA_RECOVERED"})
+    add_event(
+        state,
+        "AUTO_RECOVERED_FROM_TRANSIENT_MARKET_DATA",
+        "Geçici market-data GET kesintisi sonraki başarılı okuma ile düzeldi; Auto Trade devam ediyor.",
+        endpoint=transient.get("endpoint"),
+        failed_at_epoch=transient.get("failed_at_epoch"),
+    )
+    state["transient_market_data"] = None
+    return True
+
+
 class PolicyUpdate(BaseModel):
     allowed_symbols: list[str] | None = None
     interval: Literal["1m", "5m", "15m", "1h", "4h"] | None = None
@@ -404,9 +479,11 @@ def now_iso() -> str:
 
 
 def initial_state() -> dict[str, Any]:
+    default_policy = dict(DEFAULT_EXECUTION_POLICY)
+    default_policy["min_confidence"] = configured_min_confidence()
     return {
         "version": V25_VERSION,
-        "policy": dict(DEFAULT_EXECUTION_POLICY),
+        "policy": default_policy,
         "policy_ack_digest": None,
         "connected": False,
         "connection": {"last_checked": None, "last_error": None, "clock_offset_ms": None},
@@ -441,6 +518,7 @@ def initial_state() -> dict[str, Any]:
         "execution_state": "LOCKED",
         "reconciliation_required": False,
         "transient_reconciliation": None,
+        "transient_market_data": None,
     }
 
 
@@ -802,11 +880,26 @@ class BinanceLiveClient:
                 response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
                 rate_limit.observe(response)
         except httpx.TimeoutException as exc:
-            self._record_request_error(method, path, exc, timed_out=True)
-            raise LiveExchangeError("Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.", unknown_execution=True, timed_out=True) from exc
+            transient_read_failure = is_transient_read_request(method, path, exc)
+            self._record_request_error(method, path, exc, timed_out=True, transient_read_failure=transient_read_failure)
+            raise LiveExchangeError(
+                "Canlı market-data okuması geçici olarak başarısız oldu." if transient_read_failure else "Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.",
+                unknown_execution=not transient_read_failure,
+                timed_out=True,
+                transient_read_failure=transient_read_failure,
+                request_method=method,
+                request_path=path,
+            ) from exc
         except httpx.RequestError as exc:
-            self._record_request_error(method, path, exc)
-            raise LiveExchangeError("Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.", unknown_execution=True) from exc
+            transient_read_failure = is_transient_read_request(method, path, exc)
+            self._record_request_error(method, path, exc, transient_read_failure=transient_read_failure)
+            raise LiveExchangeError(
+                "Canlı market-data okuması geçici olarak başarısız oldu." if transient_read_failure else "Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.",
+                unknown_execution=not transient_read_failure,
+                transient_read_failure=transient_read_failure,
+                request_method=method,
+                request_path=path,
+            ) from exc
         if response.status_code >= 400:
             try:
                 body = response.json()
@@ -833,12 +926,13 @@ class BinanceLiveClient:
             if unknown:
                 message = "Emir yürütme sonucu belirsiz; benzersiz emir kimliğiyle sorgulanacak, kör tekrar yapılmayacak."
             raise LiveExchangeError(message, http_status=429 if response.status_code in {429, 418} else 502, exchange_code=int(code) if isinstance(code, int) else None, unknown_execution=unknown)
+        recover_transient_market_data(self.diagnostic_state, method, path)
         try:
             return response.json()
         except (ValueError, json.JSONDecodeError):
             return {}
 
-    def _record_request_error(self, method: str, path: str, error: BaseException, *, timed_out: bool = False) -> None:
+    def _record_request_error(self, method: str, path: str, error: BaseException, *, timed_out: bool = False, transient_read_failure: bool = False) -> None:
         state = self.diagnostic_state
         if not isinstance(state, dict):
             return
@@ -864,6 +958,7 @@ class BinanceLiveClient:
             retry_count=int(connection.get("retry_count") or 0),
             request_attempt=1,
             retry_policy="NO_PER_REQUEST_RETRY",
+            transient_read_failure=transient_read_failure,
         )
 
 
@@ -2701,6 +2796,16 @@ async def execution_loop(application: Any) -> None:
             persist_state(state)
             await asyncio.sleep(rate_limit_backoff_seconds(exc, backoff))
             backoff = min(60, backoff * 2) if exc.retry_after is None else 5
+        except LiveExchangeError as exc:
+            if exc.transient_read_failure:
+                state = application.state.v25_execution
+                if mark_transient_market_data_failure(state, exc):
+                    state["connected"] = False
+                    state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
+                    persist_state(state)
+                    await asyncio.sleep(1)
+                    continue
+            raise
         except Exception as exc:
             automation_telemetry("AUTOMATION_SKIP reason=reconcile_failed", reason="reconcile_failed")
             state = application.state.v25_execution
