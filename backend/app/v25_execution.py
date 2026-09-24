@@ -2845,12 +2845,20 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
     for plan in state.get("plans", {}).values():
         if plan.get("status") in {"KAPANDI", "İPTAL"}:
             continue
+        symbol = plan.get("symbol")
+        position = positions.get(symbol)
+        if not live_plan_can_mutate(plan) and position is not None and confirm_live_plan_provenance(plan, position):
+            add_event(
+                state,
+                "LIVE_PLAN_PROVENANCE_CONFIRMED",
+                f"{symbol} canlı pozisyonu giriş emri ve miktarıyla doğrulandı; koruma yönetimi etkin.",
+                symbol=str(symbol),
+                plan_id=plan.get("id"),
+            )
         if not live_plan_can_mutate(plan):
             state["reconciliation_required"] = True
             lock_live_execution(state, "LIVE_PLAN_PROVENANCE_UNKNOWN", unknown=True, symbol=str(plan.get("symbol") or ""))
             continue
-        symbol = plan.get("symbol")
-        position = positions.get(symbol)
         if position is None:
             if plan.get("status") == "DOLUM BEKLİYOR":
                 entry = await find_order(client, symbol, str(plan.get("entry_client_order_id") or ""))
