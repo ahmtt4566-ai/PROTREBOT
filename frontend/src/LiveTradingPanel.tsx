@@ -83,7 +83,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [credentials, setCredentials] = useState({apiKey: '', secretKey: '', accepted: false})
   const [order, setOrder] = useState<OrderDraft>(initialOrder(symbol))
   const [policyDraft, setPolicyDraft] = useState<LivePolicy | null>(null)
-  const [confirm, setConfirm] = useState<{title: string;message: string;expected: string;action: () => Promise<void>} | null>(null)
+  const [confirm, setConfirm] = useState<{title: string;message: string;expected?: string;simple?: boolean;action: () => Promise<void>} | null>(null)
   const [confirmText, setConfirmText] = useState('')
   const [busy, setBusy] = useState('')
   const [armPendingSync, setArmPendingSync] = useState(false)
@@ -286,14 +286,14 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (!order.symbol.endsWith('USDT') || values.some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)) {
       setNotice({kind: 'error', text: 'LIVE order için symbol, margin, leverage, Stop ve TP seviyelerini geçerli girin.'}); return
     }
-    setConfirm({title: 'REVIEW LIVE ORDER', message: `${order.symbol} ${order.direction} ${order.order_type} · ${order.margin_usdt} USDT margin · gerçek Binance emri için ikinci açık onay gerekir.`, expected: 'CANLI EMİR GÖNDER', action: async () => {
+    setConfirm({title: 'İŞLEM BAŞLATILACAK', message: `${order.symbol} ${order.direction} ${order.order_type} işlemi gerçek Binance hesabında açılacak. Stop Loss ve TP korumaları emirle birlikte kurulacak. Emin misiniz?`, simple: true, action: async () => {
       await call(V25, '/order', {method: 'POST', body: JSON.stringify({...order, margin_usdt: Number(order.margin_usdt), leverage: Number(order.leverage), limit_price: order.order_type === 'LIMIT' ? Number(order.limit_price) : null, stop_loss: Number(order.stop_loss), tp1: Number(order.tp1), tp2: Number(order.tp2), tp3: Number(order.tp3), confirmation: 'CANLI EMİR GÖNDER', intent_id: `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`})})
     }})
     setConfirmText('')
   }
 
   const confirmAction = () => {
-    if (!confirm || confirmText.trim().toUpperCase() !== confirm.expected) return
+    if (!confirm || (!confirm.simple && confirmText.trim().toUpperCase() !== confirm.expected)) return
     const action = confirm.action
     setConfirm(null); setConfirmText('')
     void run('confirmed', action, 'LIVE backend safety zinciri işlemi tamamlandı.')
@@ -341,7 +341,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const positionValue = (key: string) => currentPosition ? text(currentPosition[key]) : 'NOT AVAILABLE'
   const activeConfirm = confirm
   const confirmationModal = activeConfirm && typeof document !== 'undefined' ? createPortal(
-    <div className="liveConfirmBackdrop"><section className="liveConfirm" role="dialog" aria-modal="true"><h2>{activeConfirm.title}</h2><p>{activeConfirm.message}</p><label>TYPE TO CONFIRM<input autoFocus value={confirmText} onChange={event => setConfirmText(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') confirmAction()}} placeholder={activeConfirm.expected}/></label><div><button type="button" onClick={() => {setConfirm(null);setConfirmText('')}}>CANCEL</button><button type="button" disabled={confirmText.trim().toUpperCase() !== activeConfirm.expected} onClick={confirmAction}>CONFIRM</button></div></section></div>,
+    <div className="liveConfirmBackdrop"><section className="liveConfirm" role="dialog" aria-modal="true"><h2>{activeConfirm.title}</h2><p>{activeConfirm.message}</p>{!activeConfirm.simple && <label>TYPE TO CONFIRM<input autoFocus value={confirmText} onChange={event => setConfirmText(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') confirmAction()}} placeholder={activeConfirm.expected}/></label>}<div><button type="button" onClick={() => {setConfirm(null);setConfirmText('')}}>{activeConfirm.simple ? 'HAYIR' : 'CANCEL'}</button><button type="button" disabled={!activeConfirm.simple && confirmText.trim().toUpperCase() !== activeConfirm.expected} onClick={confirmAction}>{activeConfirm.simple ? 'EVET' : 'CONFIRM'}</button></div></section></div>,
     document.body,
   ) : null
 
