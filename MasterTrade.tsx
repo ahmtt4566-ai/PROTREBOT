@@ -667,9 +667,20 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
         <div className="masterTradeWorkspace">
           <div className="masterTradeSafetyBanner" role="status">
-            <strong>LIVE TRADING LOCKED</strong>
-            <span>LIVE ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY CONTROLLED</span>
-            <em>{persistentTradeHistoryText}</em>
+            <div>
+              <strong>LIVE TRADING LOCKED</strong>
+              <span>LIVE ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY CONTROLLED</span>
+              <em>{persistentTradeHistoryText}</em>
+            </div>
+            {openPositions.length > 0 && (
+              <button
+                type="button"
+                className="dangerBtn masterTradeQuickCloseButton"
+                onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position: openPositions[0] }) }}
+              >
+                CLOSE POSITION
+              </button>
+            )}
           </div>
           <aside className="masterTradePanel watchlistPanel">
             <div className="panelHeader">
