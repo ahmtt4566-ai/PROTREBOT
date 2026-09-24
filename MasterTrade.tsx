@@ -977,14 +977,14 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td><strong>{position.symbol}</strong><span className="positionAge">{position.age || '--'}</span></td>
                       <td><span className={position.direction === 'LONG' ? 'positive' : 'negative'}>{position.direction || '--'}</span></td>
                       <td>{fmtNum(position.quantity, 2)}</td>
-                      <td>${fmtNum(position.entry_price)}</td>
-                      <td>${fmtNum(position.mark_price)}</td>
+                      <td>${fmtMarketPrice(position.entry_price)}</td>
+                      <td>${fmtMarketPrice(position.mark_price)}</td>
                       <td>{position.leverage ? `${position.leverage}x` : '--'}</td>
                       <td>{plan?.margin_usdt === undefined ? '--' : `$${fmtCompact(plan.margin_usdt)}`}</td>
                       <td className={(position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{position.unrealized_pnl === undefined ? '--' : `${position.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(position.unrealized_pnl)}`}</td>
                       <td>--</td>
-                      <td>${fmtNum(stopLoss)}</td>
-                      <td>${fmtNum(target)}</td>
+                      <td>${fmtMarketPrice(stopLoss)}</td>
+                      <td>${fmtMarketPrice(target)}</td>
                       <td><span className="statusBadge open">OPEN</span></td>
                       <td><div className="positionActions"><button type="button" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'DETAILS', position }) }}>DETAILS</button><button type="button" className="dangerAction positionCloseButton" aria-label={`Close ${position.symbol} position`} onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position }) }}><XCircle size={14} aria-hidden="true" /> CLOSE POSITION</button></div></td>
                     </tr>
@@ -1023,7 +1023,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                           <td>{order.symbol || '--'}</td>
                           <td className={order.side === 'BUY' || order.side === 'LONG' ? 'positive' : 'negative'}>{order.side || '--'}</td>
                           <td>{order.type || '--'}</td>
-                          <td>${fmtNum(order.price || order.trigger_price)}</td>
+                          <td>${fmtMarketPrice(order.price || order.trigger_price)}</td>
                           <td>{fmtNum(order.quantity)}</td>
                           <td><span className="statusBadge open">{order.status || '--'}</span></td>
                           <td>{order.reduce_only === undefined ? '--' : order.reduce_only ? 'REDUCE ONLY' : 'NO'}</td>
@@ -1169,15 +1169,15 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <div><small>Direction</small><b>{positionAction.position.direction || '--'}</b></div>
               <div><small>Status</small><b>OPEN</b></div>
               <div><small>Quantity</small><b>{fmtNum(positionAction.position.quantity, 6)}</b></div>
-              <div><small>Entry Price</small><b>${fmtNum(positionAction.position.entry_price)}</b></div>
-              <div><small>Mark Price</small><b>${fmtNum(positionAction.position.mark_price)}</b></div>
+              <div><small>Entry Price</small><b>${fmtMarketPrice(positionAction.position.entry_price)}</b></div>
+              <div><small>Mark Price</small><b>${fmtMarketPrice(positionAction.position.mark_price)}</b></div>
               <div><small>Leverage</small><b>{positionAction.position.leverage ? `${positionAction.position.leverage}x` : '--'}</b></div>
               <div><small>Margin</small><b>--</b></div>
               <div><small>Liquidation</small><b>${fmtNum(positionAction.position.liquidation_price)}</b></div>
               <div><small>Unrealized PnL</small><b className={(positionAction.position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{positionAction.position.unrealized_pnl === undefined ? '--' : `${positionAction.position.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(positionAction.position.unrealized_pnl)}`}</b></div>
               <div><small>PnL %</small><b>--</b></div>
-              <div><small>Stop Loss</small><b>${fmtNum(positionAction.position.stop_loss)}</b></div>
-              <div><small>TP1</small><b>${fmtNum(positionAction.position.tp1)}</b></div>
+              <div><small>Stop Loss</small><b>${fmtMarketPrice(positionAction.position.stop_loss)}</b></div>
+              <div><small>TP1</small><b>${fmtMarketPrice(positionAction.position.tp1)}</b></div>
               <div><small>TP2</small><b>--</b></div>
               <div><small>TP3</small><b>--</b></div>
             </div>
