@@ -447,12 +447,13 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       const nextAnalysis = payload
       const nextMtf = await fetchMtfAnalyses(draft.market)
       const directionText = String(nextAnalysis.normalized_signal || nextAnalysis.direction || '').toUpperCase()
-      const nextSide: TradeSide | null = /SHORT|SELL/.test(directionText) ? 'SHORT' : /LONG|BUY/.test(directionText) ? 'LONG' : null
+      const analysisSide: TradeSide | null = /SHORT|SELL/.test(directionText) ? 'SHORT' : /LONG|BUY/.test(directionText) ? 'LONG' : null
+      const nextSide: TradeSide = analysisSide || draft.side
       const entry = nextAnalysis.entry
       const analyzedStopLoss = nextAnalysis.stop_loss
       const targets = [nextAnalysis.tp1, nextAnalysis.tp2, nextAnalysis.tp3]
-      if (!nextSide || ![entry, analyzedStopLoss, ...targets].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0)) {
-        throw new Error('Güncel analizde geçerli yön, Entry, Stop Loss ve TP seviyeleri bulunamadı.')
+      if (![entry, analyzedStopLoss, ...targets].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+        throw new Error('Güncel analizde Entry, Stop Loss ve TP seviyeleri bulunamadı.')
       }
       const stopLimit = nextSide === 'LONG' ? entry * 0.955 : entry * 1.045
       const stopLoss = nextSide === 'LONG' ? Math.max(analyzedStopLoss, stopLimit) : Math.min(analyzedStopLoss, stopLimit)
@@ -472,7 +473,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         tp3: orderedTargets[2],
       }))
       setAnalysisSyncedAt(new Date().toLocaleTimeString('en-GB'))
-      if (stopLoss !== analyzedStopLoss) setAnalysisFillError('Stop mesafesi LIVE %5 sınırına göre %4.5 olarak daraltıldı.')
+      if (!analysisSide) setAnalysisFillError(`Analiz BEKLE durumunda; manuel ${nextSide} seçimi için geçerli koruma seviyeleri dolduruldu.`)
+      else if (stopLoss !== analyzedStopLoss) setAnalysisFillError('Stop mesafesi LIVE %5 sınırına göre %4.5 olarak daraltıldı.')
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return
       setAnalysisFillError(error instanceof Error ? error.message : 'Analysis unavailable.')
