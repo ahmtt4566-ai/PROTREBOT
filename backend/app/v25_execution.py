@@ -2099,8 +2099,10 @@ async def auto_session_credentials(
             identity[2],
             force_refresh=force_refresh,
         )
-        consent = consent_status(state, credentials=credentials)
-        if usable_live_credentials(credentials) and (consent.get("active") or consent.get("grace_active")):
+        # Monitoring must continue for an existing protected position after
+        # entry consent expires. Entry paths independently require active
+        # consent through readiness_for/fresh_auto_submission_credentials.
+        if usable_live_credentials(credentials):
             return credentials
     return "", ""
 
