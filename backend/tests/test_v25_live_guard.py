@@ -73,6 +73,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(policy["max_margin_per_trade"], 25.0)
         self.assertEqual(policy["max_stop_distance_pct"], 5.0)
         self.assertEqual(policy["atr_stop_multiplier"], 1.5)
+        self.assertEqual(policy["max_total_exposure_usdt"], 350.0)
 
     def test_atr_stop_cap_narrows_and_widens_with_hard_bounds(self):
         policy = initial_state()["policy"]
@@ -503,7 +504,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(state["auto"]["enabled"])
 
     def test_hard_total_exposure_and_active_plan_gates_fail_closed(self):
-        self.assertEqual(HARD_MAX_TOTAL_EXPOSURE_USDT, 250.0)
+        self.assertEqual(HARD_MAX_TOTAL_EXPOSURE_USDT, 350.0)
         kwargs = dict(
             symbol="BTCUSDT",
             signal={"direction": "LONG", "confidence": 100, "radar": {"trap_score": 1}},
