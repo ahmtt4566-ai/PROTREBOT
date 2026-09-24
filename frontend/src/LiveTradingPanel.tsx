@@ -287,6 +287,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (!nextOrder.symbol.endsWith('USDT') || values.some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)) {
       setNotice({kind: 'error', text: 'LIVE order için symbol, margin, leverage, Stop ve TP seviyelerini geçerli girin.'}); return
     }
+    const availableBalance = Number(status?.account?.available_balance)
+    if (Number.isFinite(availableBalance) && availableBalance > 0 && Number(nextOrder.margin_usdt) > availableBalance) {
+      setNotice({kind: 'error', text: `Seçilen marjin ${Number(nextOrder.margin_usdt).toFixed(2)} USDT; kullanılabilir bakiye yalnızca ${availableBalance.toFixed(2)} USDT.`}); return
+    }
     setConfirm({title: 'İŞLEM BAŞLATILACAK', message: `${nextOrder.symbol} ${nextOrder.direction} ${nextOrder.order_type} işlemi gerçek Binance hesabında açılacak. Stop Loss ve TP korumaları emirle birlikte kurulacak. Emin misiniz?`, simple: true, action: async () => {
       await call(V25, '/order', {method: 'POST', body: JSON.stringify({...nextOrder, margin_usdt: Number(nextOrder.margin_usdt), leverage: Number(nextOrder.leverage), limit_price: nextOrder.order_type === 'LIMIT' ? Number(nextOrder.limit_price) : null, stop_loss: Number(nextOrder.stop_loss), tp1: Number(nextOrder.tp1), tp2: Number(nextOrder.tp2), tp3: Number(nextOrder.tp3), confirmation: 'CANLI EMİR GÖNDER', intent_id: `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`})})
     }})
