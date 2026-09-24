@@ -1093,12 +1093,18 @@ async def live_symbol_rules(client: BinanceLiveClient, symbol: str, order_type: 
     }
 
 
-async def set_live_isolated_margin(client: BinanceLiveClient, symbol: str) -> None:
+async def set_live_isolated_margin(client: BinanceLiveClient, symbol: str) -> str:
     try:
         await client.signed("POST", "/fapi/v1/marginType", {"symbol": symbol, "marginType": "ISOLATED"})
+        return "ISOLATED"
     except LiveExchangeError as exc:
-        if exc.exchange_code not in {-4046, -4168}:
+        if exc.exchange_code == -4046:
+            return "ISOLATED"
+        if exc.exchange_code == -4168:
+            return "CROSSED"
+        if exc.exchange_code is not None:
             raise
+        raise
 
 
 async def apply_live_verified_leverage(
@@ -2325,13 +2331,14 @@ async def execute_live_order(
                 raise LiveExchangeError("Canlı hesap kullanılabilir bakiyesi seçilen marjinden düşük.", http_status=409)
             spec = await build_live_spec(client, body, state["policy"], allowed_symbols=allowed_symbols)
             validate_protection_readiness(spec, state["policy"])
-            if not snapshot.get("multi_assets_mode", False):
-                await set_live_isolated_margin(client, spec["symbol"])
+            expected_margin_type = "CROSSED" if snapshot.get("multi_assets_mode", False) else "ISOLATED"
+            if expected_margin_type == "ISOLATED":
+                expected_margin_type = await set_live_isolated_margin(client, spec["symbol"])
             leverage_audit = await apply_live_verified_leverage(
                 client,
                 spec["symbol"],
                 spec["leverage"],
-                expected_margin_type="CROSSED" if snapshot.get("multi_assets_mode", False) else "ISOLATED",
+                expected_margin_type=expected_margin_type,
             )
             intent_id = body.intent_id or f"manual-{uuid.uuid4().hex}"
             client_id = client_id_for("ENTRY", intent_id)

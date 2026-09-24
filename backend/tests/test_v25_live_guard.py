@@ -1864,7 +1864,8 @@ class V25MarginModeCompatibilityTests(unittest.TestCase):
         client = SimpleNamespace(
             signed=AsyncMock(side_effect=LiveExchangeError("multi-assets", exchange_code=-4168))
         )
-        asyncio.run(v25_execution.set_live_isolated_margin(client, "BTCUSDT"))
+        result = asyncio.run(v25_execution.set_live_isolated_margin(client, "BTCUSDT"))
+        self.assertEqual(result, "CROSSED")
 
     def test_unknown_margin_error_still_fails_closed(self):
         client = SimpleNamespace(
