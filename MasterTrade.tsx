@@ -115,6 +115,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [chartHoverIndex, setChartHoverIndex] = useState<number | null>(null)
   const [showChartLevels, setShowChartLevels] = useState(true)
   const [showChartVolume, setShowChartVolume] = useState(true)
+  const [manualOrderRequest, setManualOrderRequest] = useState(0)
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 2, margin: 50, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
   const [positionAction, setPositionAction] = useState<{ mode: 'DETAILS' | 'REDUCE' | 'CLOSE'; position: AccountPosition } | null>(null)
   const [positionActionBusy, setPositionActionBusy] = useState(false)
@@ -792,14 +793,14 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 </button>
                 {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
                 {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
-                <button type="button" className="primaryOrderButton" onClick={() => document.getElementById('master-trade-live-terminal')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>LIVE ORDER</button>
-                <small className="orderLockReason">Use the V25 LIVE terminal below after backend readiness gates pass.</small>
+                <button type="button" className="primaryOrderButton" onClick={() => { setManualOrderRequest(current => current + 1); document.getElementById('master-trade-live-terminal')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>LIVE ORDER</button>
+                <small className="orderLockReason">LIVE ORDER, Stop Loss ve TP korumalarıyla birlikte onay ekranını açar.</small>
               </div>
             </div>
           </aside>
         </div>
 
-        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
+        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} manualOrderRequest={manualOrderRequest} manualOrderDraft={{symbol: draft.market, direction: draft.side, order_type: 'MARKET', margin_usdt: String(draft.margin), leverage: String(draft.leverage), limit_price: String(draft.entry), stop_loss: String(draft.stopLoss), tp1: String(draft.tp1), tp2: String(draft.tp2), tp3: String(draft.tp3)}} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
 
         <div className="masterTradeDataGrid">
           <section className="masterTradePanel riskMonitorPanel">

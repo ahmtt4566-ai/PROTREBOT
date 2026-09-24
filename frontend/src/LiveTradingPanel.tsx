@@ -44,7 +44,7 @@ type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MAR
 
 export type SharedLiveStatus = LiveStatus
 export type SharedConnectionStatus = ConnectionStatus
-type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
+type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>; manualOrderDraft?: Partial<OrderDraft>; manualOrderRequest?: number}
 
 const V25 = `${API_BASE}/v25`
 const CONNECTIONS = `${API_BASE}/exchange-connections`
@@ -76,7 +76,7 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
-export default function LiveTradingPanel({active, symbol, analysis, masterTrade, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
+export default function LiveTradingPanel({active, symbol, analysis, masterTrade, sharedStatus, sharedConnections, onRefreshStatus, manualOrderDraft, manualOrderRequest}: Props) {
   const [localStatus, setLocalStatus] = useState<LiveStatus | null>(null)
   const [localConnections, setLocalConnections] = useState<ConnectionStatus | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
@@ -282,16 +282,23 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
 
   const fillAnalysis = () => setOrder(current => ({...current, direction: analysis?.direction === 'SHORT' ? 'SHORT' : 'LONG', limit_price: text(analysis?.entry).replace('—', ''), stop_loss: text(analysis?.stop_loss).replace('—', ''), tp1: text(analysis?.tp1).replace('—', ''), tp2: text(analysis?.tp2).replace('—', ''), tp3: text(analysis?.tp3).replace('—', '')}))
-  const reviewOrder = () => {
-    const values = [order.margin_usdt, order.leverage, order.stop_loss, order.tp1, order.tp2, order.tp3]
-    if (!order.symbol.endsWith('USDT') || values.some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)) {
+  const reviewOrder = (nextOrder = order) => {
+    const values = [nextOrder.margin_usdt, nextOrder.leverage, nextOrder.stop_loss, nextOrder.tp1, nextOrder.tp2, nextOrder.tp3]
+    if (!nextOrder.symbol.endsWith('USDT') || values.some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)) {
       setNotice({kind: 'error', text: 'LIVE order için symbol, margin, leverage, Stop ve TP seviyelerini geçerli girin.'}); return
     }
-    setConfirm({title: 'İŞLEM BAŞLATILACAK', message: `${order.symbol} ${order.direction} ${order.order_type} işlemi gerçek Binance hesabında açılacak. Stop Loss ve TP korumaları emirle birlikte kurulacak. Emin misiniz?`, simple: true, action: async () => {
-      await call(V25, '/order', {method: 'POST', body: JSON.stringify({...order, margin_usdt: Number(order.margin_usdt), leverage: Number(order.leverage), limit_price: order.order_type === 'LIMIT' ? Number(order.limit_price) : null, stop_loss: Number(order.stop_loss), tp1: Number(order.tp1), tp2: Number(order.tp2), tp3: Number(order.tp3), confirmation: 'CANLI EMİR GÖNDER', intent_id: `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`})})
+    setConfirm({title: 'İŞLEM BAŞLATILACAK', message: `${nextOrder.symbol} ${nextOrder.direction} ${nextOrder.order_type} işlemi gerçek Binance hesabında açılacak. Stop Loss ve TP korumaları emirle birlikte kurulacak. Emin misiniz?`, simple: true, action: async () => {
+      await call(V25, '/order', {method: 'POST', body: JSON.stringify({...nextOrder, margin_usdt: Number(nextOrder.margin_usdt), leverage: Number(nextOrder.leverage), limit_price: nextOrder.order_type === 'LIMIT' ? Number(nextOrder.limit_price) : null, stop_loss: Number(nextOrder.stop_loss), tp1: Number(nextOrder.tp1), tp2: Number(nextOrder.tp2), tp3: Number(nextOrder.tp3), confirmation: 'CANLI EMİR GÖNDER', intent_id: `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`})})
     }})
     setConfirmText('')
   }
+
+  useEffect(() => {
+    if (!manualOrderRequest || !manualOrderDraft) return
+    const nextOrder = {...order, ...manualOrderDraft}
+    setOrder(nextOrder)
+    reviewOrder(nextOrder)
+  }, [manualOrderRequest])
 
   const confirmAction = () => {
     if (!confirm || (!confirm.simple && confirmText.trim().toUpperCase() !== confirm.expected)) return
