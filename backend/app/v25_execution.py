@@ -439,7 +439,7 @@ class PolicyUpdate(BaseModel):
     min_confidence: int | None = Field(default=None, ge=70, le=95)
     max_trap_score: int | None = Field(default=None, ge=10, le=60)
     max_spread_bps: float | None = Field(default=None, ge=0.5, le=25)
-    max_stop_distance_pct: float | None = Field(default=None, ge=0.25, le=4.5)
+    max_stop_distance_pct: float | None = Field(default=None, ge=0.25, le=5)
     fee_bps_per_side: float | None = Field(default=None, ge=0, le=25)
     slippage_bps_per_side: float | None = Field(default=None, ge=0, le=30)
     minimum_net_reward_usdt: float | None = Field(default=None, ge=0, le=25)
