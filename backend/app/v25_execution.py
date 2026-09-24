@@ -587,6 +587,13 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     base["policy"] = sanitize_execution_policy(payload.get("policy"))
     base["policy"]["mtf_allow_either_timeframe"] = configured_mtf_allow_either_timeframe()
     base["policy_ack_digest"] = payload.get("policy_ack_digest") if payload.get("policy_ack_digest") == policy_digest(base["policy"]) else None
+    authorization = payload.get("live_session_authorization")
+    if isinstance(authorization, dict):
+        base["live_session_authorization"] = {
+            "session_id": str(authorization.get("session_id") or "")[:128],
+            "user_id": str(authorization.get("user_id") or "")[:128],
+            "fingerprint": str(authorization.get("fingerprint") or "")[:128],
+        }
     consent = payload.get("web_consent")
     if isinstance(consent, dict):
         expires_at = float(consent.get("expires_at_epoch") or 0)
@@ -628,8 +635,6 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
         if not isinstance(plan, dict):
             continue
         plan.setdefault("provenance_state", "NO_PROVENANCE")
-        if plan.get("provenance_state") == "CONFIRMED":
-            plan["provenance_state"] = "PROVISIONAL"
         if plan.get("provenance_state") not in PROVENANCE_STATES:
             plan["provenance_state"] = "BROKEN"
         plan.setdefault("protection_state", "UNKNOWN")
