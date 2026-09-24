@@ -1850,5 +1850,20 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
         self.assertEqual(client.secret_key, self.SECRET_KEY)
 
 
+class V25MarginModeCompatibilityTests(unittest.TestCase):
+    def test_multi_assets_margin_error_is_treated_as_non_applicable(self):
+        client = SimpleNamespace(
+            signed=AsyncMock(side_effect=LiveExchangeError("multi-assets", exchange_code=-4168))
+        )
+        asyncio.run(v25_execution.set_live_isolated_margin(client, "BTCUSDT"))
+
+    def test_unknown_margin_error_still_fails_closed(self):
+        client = SimpleNamespace(
+            signed=AsyncMock(side_effect=LiveExchangeError("unexpected", exchange_code=-2019))
+        )
+        with self.assertRaises(LiveExchangeError):
+            asyncio.run(v25_execution.set_live_isolated_margin(client, "BTCUSDT"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

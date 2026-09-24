@@ -1097,7 +1097,7 @@ async def set_live_isolated_margin(client: BinanceLiveClient, symbol: str) -> No
     try:
         await client.signed("POST", "/fapi/v1/marginType", {"symbol": symbol, "marginType": "ISOLATED"})
     except LiveExchangeError as exc:
-        if exc.exchange_code != -4046:
+        if exc.exchange_code not in {-4046, -4168}:
             raise
 
 
