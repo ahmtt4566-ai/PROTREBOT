@@ -373,9 +373,14 @@ def runtime(request: Request) -> dict[str, Any]:
 
 def bearer(request: Request) -> str:
     value = request.headers.get("authorization", "")
+    if value.lower().startswith("bearer "):
+        return value.split(" ", 1)[1].strip()
+    session_token = request.headers.get("x-protrebot-session", "").strip()
+    if session_token:
+        return session_token
     if not value.lower().startswith("bearer "):
         raise HTTPException(401, "Oturum gerekli")
-    return value.split(" ", 1)[1].strip()
+    raise HTTPException(401, "Oturum gerekli")
 
 
 def authenticated_user(request: Request, *, owner: bool = False) -> dict[str, Any]:

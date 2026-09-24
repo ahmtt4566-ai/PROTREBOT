@@ -109,6 +109,9 @@ export function installAuthorizedFetch(): void {
     if (userToken && apiRequestPath(input) && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${userToken}`)
     }
+    if (userToken && apiRequestPath(input) && !headers.has('X-ProTreBot-Session')) {
+      headers.set('X-ProTreBot-Session', userToken)
+    }
     return originalFetch(input, {...init, headers})
   }
 }

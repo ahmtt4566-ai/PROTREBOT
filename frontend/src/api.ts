@@ -69,6 +69,10 @@ export function installAuthorizedFetch(): void {
     if (token && isOwnerProtectedApiRequest(input) && !headers.has('X-ProTreBot-Session')) {
       headers.set('X-ProTreBot-Session', ownerSessionId())
     }
+    const userToken = userSessionToken()
+    if (userToken && apiRequestPath(input) && !headers.has('X-ProTreBot-Session')) {
+      headers.set('X-ProTreBot-Session', userToken)
+    }
     return originalFetch(input, {...init, headers})
   }
 }
