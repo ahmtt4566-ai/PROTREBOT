@@ -1082,7 +1082,7 @@ async def lifespan(app: FastAPI):
     await init_v27_cloud(app)
     await restore_health_snapshot(app)
     app.state.infrastructure_task = asyncio.create_task(infrastructure_loop(app))
-    app.state.runtime_tasks = [app.state.infrastructure_task]
+    app.state.runtime_tasks = [app.state.infrastructure_task, asyncio.create_task(analysis_universe_warm_loop())]
     if PAPER_ENABLED:
         app.state.runtime_tasks.extend([
             asyncio.create_task(paper_bot_loop(app)),
@@ -4116,6 +4116,16 @@ async def smart_scan(limit: int = Query(18, ge=6, le=30), interval: str = "15m")
     results = results[:limit]
     SCAN_CACHE[key] = (time.monotonic(), results)
     return {"cached": False, "results": results}
+
+
+async def analysis_universe_warm_loop() -> None:
+    # Keeps ANALYSIS_UNIVERSE_CACHE warm so client requests avoid the expensive on-demand scan.
+    while True:
+        try:
+            await analysis_universe(interval="15m", limit=100)
+        except Exception:
+            pass
+        await asyncio.sleep(45)
 
 
 @app.get("/api/analysis-universe")
