@@ -47,6 +47,7 @@ type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[
 type AccountSyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'DATA_UNAVAILABLE'
 type TradeHistorySyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'UNAVAILABLE'
 type CloseLifecycleState = 'IDLE' | 'CLOSING' | 'CLOSED' | 'CLOSE_FAILED' | 'HISTORY_SYNC_FAILED' | 'ACCOUNT_SYNC_FAILED' | 'SYNC_FAILED'
+type BackendRiskPreview = { estimated_stop_loss_usdt?: number; stop_distance_pct?: number; notional_usdt?: number; margin_usdt?: number; max_stop_distance_pct?: number; capped?: boolean }
 
 const fmtNum = (value: number | null | undefined, decimals = 2) =>
   value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
@@ -132,6 +133,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [showChartVolume, setShowChartVolume] = useState(true)
   const [manualOrderRequest, setManualOrderRequest] = useState(0)
   const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 2, margin: 10, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
+  const [backendRiskPreview, setBackendRiskPreview] = useState<BackendRiskPreview | null>(null)
+  const [backendRiskPreviewError, setBackendRiskPreviewError] = useState('')
   const [positionAction, setPositionAction] = useState<{ mode: 'DETAILS' | 'REDUCE' | 'CLOSE'; position: AccountPosition } | null>(null)
   const [positionActionBusy, setPositionActionBusy] = useState(false)
   const [positionActionError, setPositionActionError] = useState('')
@@ -343,17 +346,45 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     return () => { controller.abort(); window.clearInterval(timer) }
   }, [accountRefreshNonce])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      if (!(draft.entry > 0) || !(draft.stopLoss > 0) || !(draft.margin >= 5) || !(draft.leverage >= 1)) {
+        setBackendRiskPreview(null)
+        return
+      }
+      try {
+        const response = await fetchWithTimeout(`${API_BASE}/v25/risk/preview`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({entry: draft.entry, stop_loss: draft.stopLoss, margin_usdt: draft.margin, leverage: draft.leverage, atr: analysis?.atr}),
+          signal: controller.signal,
+        })
+        const payload = await response.json().catch(() => ({})) as BackendRiskPreview & {detail?: string}
+        if (!response.ok) throw new Error(payload.detail || 'Backend risk preview unavailable')
+        setBackendRiskPreview(payload)
+        setBackendRiskPreviewError('')
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          setBackendRiskPreview(null)
+          setBackendRiskPreviewError(error instanceof Error ? error.message : 'Backend risk preview unavailable')
+        }
+      }
+    }, 250)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [analysis?.atr, draft.entry, draft.stopLoss, draft.margin, draft.leverage])
+
   const riskPreview = useMemo(() => {
     const entry = Number(draft.entry)
     const stop = Number(draft.stopLoss)
     const distance = Math.max(1, Math.abs(entry - stop))
-    const riskUsd = entry > 0 && stop > 0 ? (Math.max(0, draft.margin) * (Math.abs(entry - stop) / entry)) * 0.7 : 0
+    const riskUsd = backendRiskPreview?.estimated_stop_loss_usdt ?? null
     const tp = Number(draft.tp1)
     const reward = Math.abs(tp - entry) * Number(draft.quantity)
     const rr = entry > 0 && stop > 0 && tp > 0 && Number(draft.quantity) > 0 ? reward / (distance * Number(draft.quantity)) : 0
-    const riskPercent = entry > 0 && stop > 0 ? (Math.abs(entry - stop) / entry) * 100 : 0
-    return { riskUsd, reward, rr, riskPercent }
-  }, [draft])
+    const riskPercent = backendRiskPreview?.stop_distance_pct ?? 0
+    return { riskUsd, reward, rr, riskPercent, loading: !backendRiskPreview && !backendRiskPreviewError }
+  }, [backendRiskPreview, backendRiskPreviewError, draft])
 
   const tradeDecision = useMemo<TradeDecision>(() => buildTradeDecision(analysis, candles, mtfAnalyses), [analysis, candles, mtfAnalyses])
   const triggerMonitor = useMemo<TriggerMonitor>(() => buildTriggerMonitor(tradeDecision, analysis, candles, triggerLifecycleRef.current, snapshot?.currentPrice ?? candles[candles.length - 1]?.close), [tradeDecision, analysis, candles, snapshot?.currentPrice])
@@ -846,6 +877,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                   <div className="orderSummaryRow"><span>R/R</span><strong>{riskPreview.rr > 0 ? `1:${riskPreview.rr.toFixed(2)}` : '—'}</strong></div>
                   <div className="orderSummaryRow"><span>Fees</span><strong>--</strong></div>
                 </div>
+                <small>{backendRiskPreviewError ? `BACKEND RISK PREVIEW UNAVAILABLE: ${backendRiskPreviewError}` : riskPreview.loading ? 'CALCULATING FROM BACKEND...' : backendRiskPreview?.capped ? 'BACKEND RISK CAPPED BY MARGIN / LEVERAGE' : 'BACKEND RISK VERIFIED'}</small>
               </div>
 
               <div className="tradeSection">

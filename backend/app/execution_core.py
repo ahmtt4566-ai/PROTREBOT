@@ -48,6 +48,7 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "max_trap_score": 35,
     "max_spread_bps": 8.0,
     "max_stop_distance_pct": 5.0,
+    "atr_stop_multiplier": 1.5,
     "fee_bps_per_side": 5.0,
     "slippage_bps_per_side": 3.0,
     "minimum_net_reward_usdt": 0.25,
@@ -125,6 +126,7 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
     base["max_trap_score"] = _integer(source.get("max_trap_score"), 35, 10, 60)
     base["max_spread_bps"] = _number(source.get("max_spread_bps"), 8, 0.5, 25)
     base["max_stop_distance_pct"] = _number(source.get("max_stop_distance_pct"), 5.0, 0.25, 5)
+    base["atr_stop_multiplier"] = _number(source.get("atr_stop_multiplier"), 1.5, 0.5, 3)
     base["fee_bps_per_side"] = _number(source.get("fee_bps_per_side"), 5, 0, 25)
     base["slippage_bps_per_side"] = _number(source.get("slippage_bps_per_side"), 3, 0, 30)
     base["minimum_net_reward_usdt"] = _number(source.get("minimum_net_reward_usdt"), 0.25, 0, 25)
@@ -178,13 +180,23 @@ def daily_execution_metrics(events: list[dict[str, Any]], now: datetime | None =
     }
 
 
-def risk_sized_order(entry: float, stop: float, policy: dict[str, Any]) -> dict[str, Any]:
+def dynamic_stop_distance_pct(entry: float, atr: float | None, policy: dict[str, Any]) -> float:
+    settings = sanitize_execution_policy(policy)
+    configured_cap = float(settings["max_stop_distance_pct"])
+    if atr is None or float(atr) <= 0 or entry <= 0:
+        return configured_cap
+    atr_pct = abs(float(atr)) / float(entry) * 100
+    return min(configured_cap, 5.0, max(1.0, atr_pct * float(settings["atr_stop_multiplier"])))
+
+
+def risk_sized_order(entry: float, stop: float, policy: dict[str, Any], *, atr: float | None = None) -> dict[str, Any]:
     settings = sanitize_execution_policy(policy)
     if entry <= 0 or stop <= 0 or entry == stop:
         raise ValueError("Giriş ve Stop sıfırdan büyük ve birbirinden farklı olmalı")
     stop_pct = abs(entry - stop) / entry * 100
-    if stop_pct > float(settings["max_stop_distance_pct"]) + 1e-9:
-        raise ValueError(f"Stop mesafesi %{stop_pct:.2f}; izin verilen üst sınır %{settings['max_stop_distance_pct']:.2f}")
+    stop_cap = dynamic_stop_distance_pct(entry, atr, settings)
+    if stop_pct > stop_cap + 1e-9:
+        raise ValueError(f"Stop mesafesi %{stop_pct:.2f}; izin verilen üst sınır %{stop_cap:.2f}")
     risk_fraction = stop_pct / 100
     risk_notional = float(settings["max_loss_per_trade"]) / risk_fraction
     leverage = int(settings["max_leverage"])
@@ -195,6 +207,8 @@ def risk_sized_order(entry: float, stop: float, policy: dict[str, Any]) -> dict[
         "entry": round(entry, 10),
         "stop": round(stop, 10),
         "stop_distance_pct": round(stop_pct, 5),
+        "max_stop_distance_pct": round(stop_cap, 5),
+        "atr": round(float(atr), 10) if atr is not None else None,
         "leverage": leverage,
         "notional_usdt": round(notional, 6),
         "margin_usdt": round(margin, 6),

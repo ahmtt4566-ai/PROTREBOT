@@ -441,6 +441,7 @@ class PolicyUpdate(BaseModel):
     max_trap_score: int | None = Field(default=None, ge=10, le=60)
     max_spread_bps: float | None = Field(default=None, ge=0.5, le=25)
     max_stop_distance_pct: float | None = Field(default=None, ge=0.25, le=5)
+    atr_stop_multiplier: float | None = Field(default=None, ge=0.5, le=3)
     fee_bps_per_side: float | None = Field(default=None, ge=0, le=25)
     slippage_bps_per_side: float | None = Field(default=None, ge=0, le=30)
     minimum_net_reward_usdt: float | None = Field(default=None, ge=0, le=25)
@@ -462,7 +463,16 @@ class LiveOrderRequest(BaseModel):
     tp1: float = Field(gt=0)
     tp2: float = Field(gt=0)
     tp3: float = Field(gt=0)
+    atr: float | None = Field(default=None, gt=0)
     intent_id: str | None = Field(default=None, min_length=8, max_length=96)
+
+
+class RiskPreviewRequest(BaseModel):
+    entry: float = Field(gt=0)
+    stop_loss: float = Field(gt=0)
+    margin_usdt: float = Field(ge=5, le=100)
+    leverage: int = Field(ge=1, le=50)
+    atr: float | None = Field(default=None, gt=0)
 
 
 class ManualLiveOrderRequest(LiveOrderRequest):
@@ -1275,6 +1285,7 @@ async def build_live_spec(
             float(entry),
             float(stop),
             {**settings, "max_margin_per_trade": order.margin_usdt, "max_leverage": order.leverage},
+            atr=order.atr,
         )
     except ValueError as exc:
         raise LiveExchangeError(f"Canlı Stop riski geçersiz: {exc}", http_status=422) from exc
@@ -1490,6 +1501,15 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
         plan["protection_state"] = "UNKNOWN"
         state["reconciliation_required"] = True
         lock_live_execution(state, "LIVE_PROVENANCE_UNCONFIRMED", unknown=True, symbol=symbol)
+        add_event(
+            state,
+            "OWNERSHIP_UNCERTAIN",
+            f"{symbol} canlı pozisyon sahipliği doğrulanamadı; Stop kurulmadı.",
+            symbol=symbol,
+            plan_id=plan.get("id"),
+            failures=provenance_failure_details(plan, position_view),
+            reconciliation_required=True,
+        )
         return
     if direction != plan["direction"]:
         plan["protection_state"] = "UNKNOWN"
@@ -1524,18 +1544,21 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
         plan["last_error"] = str(exc)[:240]
         return
     step, min_qty = Decimal(str(plan["step"])), Decimal(str(plan["min_qty"]))
-    partial = floor_step(abs(amount) * Decimal("0.30"), step)
     ids: list[int] = [plan["stop_algo_id"]] if plan.get("stop_algo_id") else []
     monitoring: list[str] = []
-    if partial >= min_qty:
-        for index, trigger in enumerate(plan["targets"][:2], start=1):
-            key = client_id_for(f"TP{index}", plan["intent_id"])
-            try:
-                result = await post_algo(client, {**common, "type": "TAKE_PROFIT_MARKET", "triggerPrice": trigger, "quantity": decimal_text(partial), "reduceOnly": "true", "clientAlgoId": key})
-                if result.get("algoId"):
-                    ids.append(int(result["algoId"]))
-            except LiveExchangeError:
-                monitoring.append(f"TP{index}")
+    combined_partial = floor_step(abs(amount) * Decimal("0.60"), step)
+    if combined_partial >= min_qty:
+        key = client_id_for("TP12", plan["intent_id"])
+        try:
+            result = await post_algo(client, {**common, "type": "TAKE_PROFIT_MARKET", "triggerPrice": plan["targets"][0], "quantity": decimal_text(combined_partial), "reduceOnly": "true", "clientAlgoId": key})
+            if result.get("algoId"):
+                ids.append(int(result["algoId"]))
+                plan["tp12_algo_id"] = int(result["algoId"])
+                plan["tp12_client_id"] = key
+            else:
+                monitoring.extend(["TP1", "TP2"])
+        except LiveExchangeError:
+            monitoring.extend(["TP1", "TP2"])
     else:
         monitoring.extend(["TP1", "TP2"])
     try:
@@ -1544,8 +1567,19 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
             ids.append(int(result["algoId"]))
     except LiveExchangeError:
         monitoring.append("TP3")
-    plan.update({"protection_ids": ids, "monitoring_targets": monitoring, "protected_at": now_iso(), "protection_state": "MATCHED" if plan.get("stop_algo_id") and not monitoring else "MISSING", "status": "KORUMA AKTİF" if not monitoring else "STOP AKTİF · HEDEF İZLEME"})
+    plan.update({
+        "protection_ids": ids,
+        "monitoring_targets": monitoring,
+        "monitoring_targets_persisted_at": now_iso() if monitoring else plan.get("monitoring_targets_persisted_at"),
+        "monitoring_targets_exchange_backed": not monitoring,
+        "protected_at": now_iso(),
+        "protection_state": "MATCHED" if plan.get("stop_algo_id") and not monitoring else "MISSING",
+        "status": "KORUMA AKTİF" if not monitoring else "STOP AKTİF · HEDEF İZLEME",
+    })
     add_event(state, "PROTECTION_ACTIVE", f"{symbol} canlı Stop ve TP koruma planı kuruldu.", symbol=symbol)
+    if monitoring:
+        add_event(state, "TP_MONITORING_PERSISTED", f"{symbol} {','.join(monitoring)} Binance minimum miktarına ulaşamadı; kalıcı reconciliation takibine alındı.", symbol=symbol, plan_id=plan.get("id"), monitoring_targets=list(monitoring))
+    persist_state(state)
 
 
 def _truthy(value: Any) -> bool:
@@ -2109,12 +2143,33 @@ def confirm_live_plan_provenance(plan: dict[str, Any], position: dict[str, Any])
     return True
 
 
+def provenance_failure_details(plan: dict[str, Any], position: dict[str, Any] | None) -> list[str]:
+    if position is None:
+        return ["position_missing"]
+    failures: list[str] = []
+    if str(position.get("symbol") or "").upper() != str(plan.get("symbol") or "").upper():
+        failures.append("symbol_mismatch")
+    if str(position.get("direction") or "").upper() != str(plan.get("direction") or "").upper():
+        failures.append("direction_mismatch")
+    try:
+        quantity = Decimal(str(position.get("quantity")))
+        expected = Decimal(str(plan.get("quantity")))
+        if not quantity.is_finite() or quantity <= 0 or quantity != expected:
+            failures.append("quantity_mismatch")
+    except (TypeError, ValueError, ArithmeticError):
+        failures.append("quantity_unreadable")
+    if not plan.get("entry_order_id") or not plan.get("entry_client_order_id"):
+        failures.append("entry_identity_missing")
+    return failures or ["plan_not_confirmed"]
+
+
 def owned_protection_rows(plan: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     expected = {
         str(value) for value in (
             plan.get("stop_client_id"),
             client_id_for("TP1", str(plan.get("intent_id") or "")),
             client_id_for("TP2", str(plan.get("intent_id") or "")),
+            client_id_for("TP12", str(plan.get("intent_id") or "")),
             client_id_for("TP3", str(plan.get("intent_id") or "")),
         ) if value
     }
@@ -2124,6 +2179,35 @@ def owned_protection_rows(plan: dict[str, Any], rows: list[dict[str, Any]]) -> l
         and str(row.get("symbol") or "").upper() == str(plan.get("symbol") or "").upper()
         and str(row.get("client_algo_id") or "") in expected
     ]
+
+
+def reconcile_monitoring_targets(state: dict[str, Any], plan: dict[str, Any], rows: list[dict[str, Any]]) -> None:
+    targets = [str(value) for value in plan.get("monitoring_targets", []) if str(value)]
+    if not targets:
+        return
+    owned_ids = {str(row.get("client_algo_id") or "") for row in owned_protection_rows(plan, rows)}
+    combined_id = client_id_for("TP12", str(plan.get("intent_id") or ""))
+    exchange_backed = combined_id in owned_ids
+    previous = plan.get("monitoring_targets_exchange_backed")
+    plan["monitoring_targets_exchange_backed"] = exchange_backed
+    plan["monitoring_targets_reconciled_at"] = now_iso()
+    logger.warning(
+        "TP_MONITORING_RECONCILED symbol=%s targets=%s exchange_backed=%s",
+        plan.get("symbol"), ",".join(targets), exchange_backed,
+    )
+    if previous != exchange_backed or not any(
+        event.get("kind") == "TP_MONITORING_RECONCILED" and event.get("plan_id") == plan.get("id")
+        for event in state.get("events", []) if isinstance(event, dict)
+    ):
+        add_event(
+            state,
+            "TP_MONITORING_RECONCILED",
+            f"{plan.get('symbol')} monitoring targets reconciliation tamamlandı; exchange_backed={exchange_backed}.",
+            symbol=plan.get("symbol"),
+            plan_id=plan.get("id"),
+            monitoring_targets=targets,
+            exchange_backed=exchange_backed,
+        )
 
 
 async def auto_session_credentials(
@@ -2839,7 +2923,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · {guard['reason']}"
                 continue
             try:
-                risk = risk_sized_order(float(signal["entry"]), float(signal["stop_loss"]), state["policy"])
+                risk = risk_sized_order(float(signal["entry"]), float(signal["stop_loss"]), state["policy"], atr=signal.get("atr"))
             except ValueError as exc:
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · risk hesabı reddedildi: {exc}"
                 continue
@@ -2850,6 +2934,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 symbol=symbol, direction=signal["direction"], order_type="MARKET",
                 margin_usdt=risk["margin_usdt"], leverage=risk["leverage"], stop_loss=signal["stop_loss"],
                 tp1=signal["tp1"], tp2=signal["tp2"], tp3=signal["tp3"], intent_id=intent_id,
+                atr=signal.get("atr"),
             )
             try:
                 await execute_live_order(application, body, source="V25_AUTO", allowed_symbols=[symbol], credentials=credentials)
@@ -2917,6 +3002,15 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
         if not live_plan_can_mutate(plan):
             state["reconciliation_required"] = True
             lock_live_execution(state, "LIVE_PLAN_PROVENANCE_UNKNOWN", unknown=True, symbol=str(plan.get("symbol") or ""))
+            add_event(
+                state,
+                "OWNERSHIP_UNCERTAIN",
+                f"{symbol} canlı plan sahipliği doğrulanamadı; koruma yönetimi kilitlendi.",
+                symbol=str(symbol or ""),
+                plan_id=plan.get("id"),
+                failures=provenance_failure_details(plan, position),
+                reconciliation_required=True,
+            )
             continue
         if position is None:
             if plan.get("status") == "DOLUM BEKLİYOR":
@@ -2950,6 +3044,7 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
             lock_live_execution(state, "PROTECTION_SNAPSHOT_UNKNOWN", unknown=True, symbol=str(symbol))
             continue
         owned_algos = owned_protection_rows(plan, open_algos)
+        reconcile_monitoring_targets(state, plan, open_algos)
         has_stop = any(str(item.get("type", "")).upper() == "STOP_MARKET" for item in owned_algos)
         plan["protection_state"] = "MATCHED" if has_stop else "MISSING"
         if not has_stop:
@@ -3295,6 +3390,35 @@ async def v25_order_test(request: Request, body: LiveOrderRequest) -> dict[str, 
         return {"ok": True, "exchange_response": result, "created_order": False, "message": "Binance canlı imza ve emir şeması doğrulandı; gerçek emir oluşturulmadı."}
     except (LiveExchangeError, BinanceDemoError) as exc:
         raise safe_exchange_error(exc) from exc
+
+
+@router.post("/risk/preview")
+async def v25_risk_preview(request: Request, body: RiskPreviewRequest) -> dict[str, Any]:
+    execution_owner(request)
+    state = request.app.state.v25_execution
+    policy = sanitize_execution_policy({
+        **state["policy"],
+        "max_margin_per_trade": body.margin_usdt,
+        "max_leverage": body.leverage,
+    })
+    try:
+        risk = risk_sized_order(body.entry, body.stop_loss, policy, atr=body.atr)
+    except ValueError as exc:
+        raise HTTPException(422, f"Risk preview reddedildi: {exc}") from exc
+    return {
+        "ok": True,
+        "orders_created": False,
+        "entry": risk["entry"],
+        "stop": risk["stop"],
+        "stop_distance_pct": risk["stop_distance_pct"],
+        "max_stop_distance_pct": risk["max_stop_distance_pct"],
+        "leverage": risk["leverage"],
+        "notional_usdt": risk["notional_usdt"],
+        "margin_usdt": risk["margin_usdt"],
+        "estimated_stop_loss_usdt": risk["estimated_stop_loss_usdt"],
+        "capped": risk["capped"],
+        "atr": risk["atr"],
+    }
 
 
 @router.post("/arm")

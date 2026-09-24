@@ -25,6 +25,7 @@ from app.execution_core import (  # noqa: E402
     configured_mtf_allow_either_timeframe,
     configured_min_confidence,
     daily_execution_metrics,
+    dynamic_stop_distance_pct,
     evaluate_entry_gates,
     policy_digest,
     release_gates,
@@ -65,6 +66,36 @@ def complete_reconciliation_snapshot(**overrides):
 
 
 class V25LiveGuardCoreTests(unittest.TestCase):
+    def test_atr_stop_cap_narrows_and_widens_with_hard_bounds(self):
+        policy = initial_state()["policy"]
+        self.assertEqual(dynamic_stop_distance_pct(100, 0.5, policy), 1.0)
+        self.assertEqual(dynamic_stop_distance_pct(100, 10, policy), 5.0)
+        with self.assertRaisesRegex(ValueError, "izin verilen üst sınır %1.00"):
+            risk_sized_order(100, 98, policy, atr=0.5)
+        risk = risk_sized_order(100, 96, policy, atr=10)
+        self.assertEqual(risk["max_stop_distance_pct"], 5.0)
+
+    def test_tp_monitoring_reconciliation_survives_persisted_plan(self):
+        state = initial_state()
+        plan = {"id": "plan-1", "symbol": "BTCUSDT", "intent_id": "intent-123", "monitoring_targets": ["TP1", "TP2"], "monitoring_targets_exchange_backed": False}
+        v25_execution.reconcile_monitoring_targets(state, plan, [])
+        self.assertFalse(plan["monitoring_targets_exchange_backed"])
+        self.assertTrue(plan["monitoring_targets_reconciled_at"])
+        self.assertEqual(state["events"][0]["kind"], "TP_MONITORING_RECONCILED")
+        restored = sanitized_state({"plans": {"plan-1": plan}})
+        self.assertEqual(restored["plans"]["plan-1"]["monitoring_targets"], ["TP1", "TP2"])
+
+    def test_risk_preview_is_no_side_effect_backend_calculation(self):
+        state = initial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        request = SimpleNamespace(app=application)
+        body = v25_execution.RiskPreviewRequest(entry=100, stop_loss=99, margin_usdt=10, leverage=2, atr=0.5)
+        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}):
+            preview = asyncio.run(v25_execution.v25_risk_preview(request, body))
+        self.assertTrue(preview["ok"])
+        self.assertFalse(preview["orders_created"])
+        self.assertEqual(preview["max_stop_distance_pct"], 1.0)
+
     def test_live_account_snapshot_algo_orders_quality_contract(self):
         class FakeClient:
             def __init__(self, algo_orders):
@@ -427,6 +458,41 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         expired_restored = sanitized_state({"web_consent": expired})
         self.assertEqual(expired_restored["web_consent"]["expires_at_epoch"], 0.0)
         self.assertIsNone(expired_restored["web_consent"]["key_fingerprint"])
+
+    def test_consent_acknowledges_current_policy_for_its_24_hour_window(self):
+        state = initial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
+        request = SimpleNamespace(app=application)
+
+        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
+            patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
+            patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.v25_web_consent(
+                request,
+                v25_execution.Confirmation(confirmation="CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM"),
+            ))
+
+        self.assertEqual(state["policy_ack_digest"], policy_digest(state["policy"]))
+
+    def test_policy_change_preserves_active_consent_ack_and_arm(self):
+        state = initial_state()
+        state["policy_ack_digest"] = policy_digest(state["policy"])
+        state["armed_until"] = time.time() + 300
+        state["real_trading_locked"] = False
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
+        request = SimpleNamespace(app=application)
+
+        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
+            patch.object(v25_execution, "consent_status", return_value={"active": True, "fingerprint": "fingerprint"}), \
+            patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.v25_policy(
+                request,
+                v25_execution.PolicyUpdate(max_loss_per_trade=4),
+            ))
+
+        self.assertEqual(state["policy_ack_digest"], policy_digest(state["policy"]))
+        self.assertGreater(state["armed_until"], time.time())
+        self.assertFalse(state["auto"]["enabled"])
 
     def test_hard_total_exposure_and_active_plan_gates_fail_closed(self):
         self.assertEqual(HARD_MAX_TOTAL_EXPOSURE_USDT, 250.0)
