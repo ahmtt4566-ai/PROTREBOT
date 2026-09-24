@@ -50,7 +50,11 @@ const V25 = `${API_BASE}/v25`
 const CONNECTIONS = `${API_BASE}/exchange-connections`
 const initialOrder = (symbol: string): OrderDraft => ({symbol, direction: 'LONG', order_type: 'MARKET', margin_usdt: '10', leverage: '1', limit_price: '', stop_loss: '', tp1: '', tp2: '', tp3: ''})
 const text = (value: unknown) => value === null || value === undefined || value === '' ? '—' : String(value)
-const money = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? `${value.toLocaleString('tr-TR', {maximumFractionDigits: 2})} USDT` : '—'
+const money = (value: unknown) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  const decimals = Math.abs(value) < 10 ? 4 : 2
+  return `${value.toLocaleString('tr-TR', {maximumFractionDigits: decimals, minimumFractionDigits: decimals})} USDT`
+}
 const date = (value: unknown) => value ? new Date(String(value)).toLocaleString('tr-TR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'
 
 function errorMessage(payload: unknown, fallback: string): string {

@@ -55,6 +55,9 @@ const fmtNum = (value: number | null | undefined, decimals = 2) =>
 const fmtCompact = (value: number | null | undefined) =>
   value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
 
+const fmtPnl = (value: number | null | undefined) =>
+  value === undefined || value === null || !Number.isFinite(value) ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 4, minimumFractionDigits: 4 })
+
 const fmtDecisionNumber = (value: number | null | undefined, decimals = 0) =>
   value === null || value === undefined || !Number.isFinite(value) ? '--' : value.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
 
@@ -628,7 +631,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const overviewCards = [
     { label: 'BALANCE', value: account?.wallet_balance === undefined ? '--' : `$${fmtCompact(account.wallet_balance)}`, note: account ? 'LIVE account equity' : 'DATA UNAVAILABLE', tone: 'default' },
     { label: 'AVAILABLE', value: account?.available_balance === undefined ? '--' : `$${fmtCompact(account.available_balance)}`, note: account ? 'Current margin' : 'DATA UNAVAILABLE', tone: 'default' },
-    { label: 'UNREALIZED PNL', value: account?.unrealized_pnl === undefined ? '--' : `${account.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(account.unrealized_pnl)}`, note: account ? 'Account snapshot' : 'DATA UNAVAILABLE', tone: account?.unrealized_pnl && account.unrealized_pnl >= 0 ? 'positive' : 'default' },
+    { label: 'UNREALIZED PNL', value: account?.unrealized_pnl === undefined ? '--' : `${account.unrealized_pnl >= 0 ? '+' : ''}$${fmtPnl(account.unrealized_pnl)}`, note: account ? 'Account snapshot' : 'DATA UNAVAILABLE', tone: account?.unrealized_pnl && account.unrealized_pnl >= 0 ? 'positive' : 'default' },
     { label: 'REALIZED PNL', value: performanceSnapshot ? `${performanceSnapshot.net_profit >= 0 ? '+' : ''}$${fmtCompact(performanceSnapshot.net_profit)}` : '--', note: performanceSnapshot ? 'Verified LIVE history' : 'NO TRADE HISTORY', tone: 'default' },
     { label: 'MARGIN USED', value: account?.wallet_balance !== undefined && account.available_balance !== undefined ? `$${fmtCompact(account.wallet_balance - account.available_balance)}` : '--', note: account ? 'Derived from account' : 'DATA UNAVAILABLE', tone: 'default' },
     { label: 'OPEN POSITIONS', value: account?.positions ? String(account.positions.length) : '--', note: account ? 'LIVE account positions' : 'DATA UNAVAILABLE', tone: 'default' },
@@ -981,7 +984,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td>${fmtMarketPrice(position.mark_price)}</td>
                       <td>{position.leverage ? `${position.leverage}x` : '--'}</td>
                       <td>{plan?.margin_usdt === undefined ? '--' : `$${fmtCompact(plan.margin_usdt)}`}</td>
-                      <td className={(position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{position.unrealized_pnl === undefined ? '--' : `${position.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(position.unrealized_pnl)}`}</td>
+                      <td className={(position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{position.unrealized_pnl === undefined ? '--' : `${position.unrealized_pnl >= 0 ? '+' : ''}$${fmtPnl(position.unrealized_pnl)}`}</td>
                       <td>--</td>
                       <td>${fmtMarketPrice(stopLoss)}</td>
                       <td>${fmtMarketPrice(target)}</td>
@@ -1174,7 +1177,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <div><small>Leverage</small><b>{positionAction.position.leverage ? `${positionAction.position.leverage}x` : '--'}</b></div>
               <div><small>Margin</small><b>--</b></div>
               <div><small>Liquidation</small><b>${fmtNum(positionAction.position.liquidation_price)}</b></div>
-              <div><small>Unrealized PnL</small><b className={(positionAction.position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{positionAction.position.unrealized_pnl === undefined ? '--' : `${positionAction.position.unrealized_pnl >= 0 ? '+' : ''}$${fmtCompact(positionAction.position.unrealized_pnl)}`}</b></div>
+              <div><small>Unrealized PnL</small><b className={(positionAction.position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{positionAction.position.unrealized_pnl === undefined ? '--' : `${positionAction.position.unrealized_pnl >= 0 ? '+' : ''}$${fmtPnl(positionAction.position.unrealized_pnl)}`}</b></div>
               <div><small>PnL %</small><b>--</b></div>
               <div><small>Stop Loss</small><b>${fmtMarketPrice(positionAction.position.stop_loss)}</b></div>
               <div><small>TP1</small><b>${fmtMarketPrice(positionAction.position.tp1)}</b></div>
