@@ -362,8 +362,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
   const validateOrderDraft = () => {
     if (!Number.isFinite(draft.margin) || draft.margin < 5 || draft.margin > 100) return 'LIVE margin must be between 5 and 100 USDT.'
-    if (!Number.isFinite(draft.leverage) || draft.leverage < 1 || draft.leverage > 3) return 'LIVE leverage must be between 1x and 3x.'
-    if (draft.margin * draft.leverage > 200) return 'LIVE position size exceeds the configured safety limit.'
+    if (!Number.isFinite(draft.leverage) || draft.leverage < 1 || draft.leverage > 50) return 'LIVE leverage must be between 1x and 50x.'
+    if (draft.margin * draft.leverage > 5000) return 'LIVE position size exceeds the configured safety limit.'
     if (![draft.entry, draft.stopLoss, draft.tp1, draft.tp2, draft.tp3].every(value => Number.isFinite(value) && value > 0)) return 'Entry, Stop Loss ve TP1–TP3 alanlarını güncel analizden doldurun.'
     const levelsValid = draft.side === 'LONG'
       ? draft.stopLoss < draft.entry && draft.entry < draft.tp1 && draft.tp1 < draft.tp2 && draft.tp2 < draft.tp3
