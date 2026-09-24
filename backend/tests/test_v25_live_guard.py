@@ -66,6 +66,14 @@ def complete_reconciliation_snapshot(**overrides):
 
 
 class V25LiveGuardCoreTests(unittest.TestCase):
+    def test_default_live_policy_raises_leverage_only(self):
+        policy = initial_state()["policy"]
+        self.assertEqual(policy["max_leverage"], 30)
+        self.assertEqual(policy["max_loss_per_trade"], 3.0)
+        self.assertEqual(policy["max_margin_per_trade"], 25.0)
+        self.assertEqual(policy["max_stop_distance_pct"], 5.0)
+        self.assertEqual(policy["atr_stop_multiplier"], 1.5)
+
     def test_atr_stop_cap_narrows_and_widens_with_hard_bounds(self):
         policy = initial_state()["policy"]
         self.assertEqual(dynamic_stop_distance_pct(100, 0.5, policy), 1.0)
@@ -1365,6 +1373,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             plan["dry_run_protection_ready"] = True
 
         state = initial_state()
+        state["policy"]["max_leverage"] = 2
         state.update({
             "recovery_ready": True,
             "connected": True,

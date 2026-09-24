@@ -37,7 +37,7 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "allow_short": True,
     "max_margin_per_trade": 25.0,
     "max_loss_per_trade": 3.0,
-    "max_leverage": 2,
+    "max_leverage": 30,
     "max_positions": 5,
     "max_total_exposure_usdt": 100.0,
     "daily_loss_limit": 10.0,
@@ -115,7 +115,7 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
         base[name] = bool(source.get(name, base[name]))
     base["max_margin_per_trade"] = _number(source.get("max_margin_per_trade"), 25, 5, HARD_MAX_MARGIN_USDT)
     base["max_loss_per_trade"] = _number(source.get("max_loss_per_trade"), 3, 0.5, 25)
-    base["max_leverage"] = _integer(source.get("max_leverage"), 2, 1, HARD_MAX_LEVERAGE)
+    base["max_leverage"] = _integer(source.get("max_leverage"), 30, 1, HARD_MAX_LEVERAGE)
     base["max_positions"] = _integer(source.get("max_positions"), 5, 1, HARD_MAX_POSITIONS)
     base["max_total_exposure_usdt"] = _number(source.get("max_total_exposure_usdt"), 100, 25, HARD_MAX_TOTAL_EXPOSURE_USDT)
     base["daily_loss_limit"] = _number(source.get("daily_loss_limit"), 10, 5, HARD_MAX_DAILY_LOSS_USDT)
