@@ -251,7 +251,7 @@ def evaluate_entry_gates(
     )
     gates = [
         GateResult(armed, "arm", "Süreli canlı kilit", "Canlı kilit yalnızca kısa süreli kullanıcı onayıyla açılır."),
-        GateResult(safe_symbol in symbol_scope, "symbol", "Parite izin listesi", safe_symbol),
+        GateResult(not symbol_scope or safe_symbol in symbol_scope, "symbol", "Parite izin listesi", safe_symbol),
         GateResult(direction in {"LONG", "SHORT"}, "direction", "Net yön", direction),
         GateResult(direction != "LONG" or settings["allow_long"], "long", "LONG izni", "Açık" if settings["allow_long"] else "Kapalı"),
         GateResult(direction != "SHORT" or settings["allow_short"], "short", "SHORT izni", "Açık" if settings["allow_short"] else "Kapalı"),

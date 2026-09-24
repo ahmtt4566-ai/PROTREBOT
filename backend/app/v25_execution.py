@@ -1237,7 +1237,7 @@ async def build_live_spec(
     settings = sanitize_execution_policy(policy)
     symbol = normalize_symbol(order.symbol)
     symbol_scope = allowed_symbols if allowed_symbols is not None else settings["allowed_symbols"]
-    if symbol not in symbol_scope:
+    if symbol_scope and symbol not in symbol_scope:
         raise LiveExchangeError(f"{symbol} canlı izin listesinde değil.", http_status=422)
     if order.direction == "LONG" and not settings["allow_long"]:
         raise LiveExchangeError("Canlı LONG işlemleri risk politikasında kapalı.", http_status=422)
@@ -2328,6 +2328,7 @@ async def execute_live_order(
             symbol = normalize_symbol(body.symbol)
             daily = live_daily_metrics(state)
             manual_signal = {"direction": body.direction, "confidence": 100, "radar": {"trap_score": 0}}
+            manual_symbol_scope = [] if source == "MANUAL" else allowed_symbols
             guard = evaluate_entry_gates(
                 symbol=symbol,
                 signal=manual_signal,
@@ -2336,7 +2337,7 @@ async def execute_live_order(
                 daily=daily,
                 spread_bps=await spread_bps(client, symbol),
                 armed=True,
-                allowed_symbols=allowed_symbols,
+                allowed_symbols=manual_symbol_scope,
                 active_plans=list(state.get("plans", {}).values()),
                 candidate_notional_usdt=body.margin_usdt * body.leverage,
             )
@@ -2344,7 +2345,7 @@ async def execute_live_order(
                 raise LiveExchangeError(f"Canlı risk kapısı: {guard['reason']}", http_status=409)
             if float(snapshot.get("available_balance") or 0) < body.margin_usdt:
                 raise LiveExchangeError("Canlı hesap kullanılabilir bakiyesi seçilen marjinden düşük.", http_status=409)
-            spec = await build_live_spec(client, body, state["policy"], allowed_symbols=allowed_symbols)
+            spec = await build_live_spec(client, body, state["policy"], allowed_symbols=manual_symbol_scope)
             validate_protection_readiness(spec, state["policy"])
             expected_margin_type = "CROSSED" if snapshot.get("multi_assets_mode", False) else "ISOLATED"
             if expected_margin_type == "ISOLATED":
