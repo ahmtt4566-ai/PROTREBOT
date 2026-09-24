@@ -455,7 +455,7 @@ class LiveOrderRequest(BaseModel):
     direction: Literal["LONG", "SHORT"]
     order_type: Literal["MARKET", "LIMIT"] = "MARKET"
     margin_usdt: float = Field(ge=5, le=100)
-    leverage: int = Field(ge=1, le=3)
+    leverage: int = Field(ge=1, le=50)
     limit_price: float | None = Field(default=None, gt=0)
     stop_loss: float = Field(gt=0)
     tp1: float = Field(gt=0)
