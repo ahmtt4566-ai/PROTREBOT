@@ -350,7 +350,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       : draft.tp3 < draft.tp2 && draft.tp2 < draft.tp1 && draft.tp1 < draft.entry && draft.entry < draft.stopLoss
     if (!levelsValid) return draft.side === 'LONG' ? 'LONG için SL < Entry < TP1 < TP2 < TP3 olmalı.' : 'SHORT için TP3 < TP2 < TP1 < Entry < SL olmalı.'
     const stopDistancePct = Math.abs(draft.entry - draft.stopLoss) / draft.entry * 100
-    if (stopDistancePct > 4.5) return `Stop mesafesi %${stopDistancePct.toFixed(2)}. Analizi yenileyin; LIVE üst sınır %4.50.`
+    if (stopDistancePct > 4.5 + 1e-6) return `Stop mesafesi %${stopDistancePct.toFixed(2)}. Analizi yenileyin; LIVE üst sınır %4.50.`
     return ''
   }
 

@@ -490,6 +490,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertLessEqual(order["margin_usdt"], 25)
         self.assertLessEqual(order["notional_usdt"], 50)
         self.assertLessEqual(order["estimated_stop_loss_usdt"], 3)
+        self.assertEqual(risk_sized_order(100, 95.5, policy)["stop_distance_pct"], 4.5)
         with self.assertRaises(ValueError):
             risk_sized_order(100, 90, policy)
 

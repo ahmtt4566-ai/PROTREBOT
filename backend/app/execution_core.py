@@ -183,7 +183,7 @@ def risk_sized_order(entry: float, stop: float, policy: dict[str, Any]) -> dict[
     if entry <= 0 or stop <= 0 or entry == stop:
         raise ValueError("Giriş ve Stop sıfırdan büyük ve birbirinden farklı olmalı")
     stop_pct = abs(entry - stop) / entry * 100
-    if stop_pct > float(settings["max_stop_distance_pct"]):
+    if stop_pct > float(settings["max_stop_distance_pct"]) + 1e-9:
         raise ValueError(f"Stop mesafesi %{stop_pct:.2f}; izin verilen üst sınır %{settings['max_stop_distance_pct']:.2f}")
     risk_fraction = stop_pct / 100
     risk_notional = float(settings["max_loss_per_trade"]) / risk_fraction
