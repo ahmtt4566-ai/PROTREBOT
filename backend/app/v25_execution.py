@@ -278,9 +278,9 @@ def lock_reconciliation_failure(state: dict[str, Any]) -> None:
 def clear_clean_reconciliation_state(state: dict[str, Any], snapshot: dict[str, Any]) -> bool:
     """Clear only a stale technical UNKNOWN after a complete clean snapshot."""
     emergency = state.get("emergency") if isinstance(state.get("emergency"), dict) else {}
-    if emergency.get("reason") != "RECONCILIATION_FAILURE":
+    if emergency.get("reason") not in {"RECONCILIATION_FAILURE", "LIVE_EXCEPTION"}:
         return False
-    if state.get("execution_state") not in {"UNKNOWN", "LOCKED"} or not state.get("reconciliation_required"):
+    if state.get("execution_state") not in {"UNKNOWN", "LOCKED"} or (not state.get("reconciliation_required") and emergency.get("reason") != "LIVE_EXCEPTION"):
         return False
     required_snapshot_keys = {
         "wallet_balance",
@@ -703,7 +703,7 @@ def sanitized_exception_message(exc: BaseException | str) -> str:
 def latest_reconciliation_diagnostic(state: dict[str, Any]) -> dict[str, Any] | None:
     events = state.get("events") if isinstance(state.get("events"), list) else []
     for event in events:
-        if not isinstance(event, dict) or event.get("kind") != "RECONCILIATION_FAILURE_DIAGNOSTIC":
+        if not isinstance(event, dict) or event.get("kind") not in {"RECONCILIATION_FAILURE_DIAGNOSTIC", "LIVE_ORDER_EXCEPTION_DIAGNOSTIC"}:
             continue
         return {
             "exception_type": str(event.get("exception_type") or "")[:120],
@@ -2452,6 +2452,8 @@ async def execute_live_order(
             state["connection"]["last_error"] = str(exc)[:240]
             raise safe_exchange_error(exc) from exc
         except Exception as exc:
+            safe_message = sanitized_exception_message(exc)
+            frame = traceback.extract_tb(exc.__traceback__)[-1] if exc.__traceback__ else None
             lock_live_execution(
                 state,
                 "LIVE_EXCEPTION_UNKNOWN" if submission_started else "LIVE_EXCEPTION",
@@ -2459,7 +2461,18 @@ async def execute_live_order(
                 symbol=body.symbol,
                 client_id=body.intent_id,
             )
-            state["connection"]["last_error"] = "Beklenmeyen canlı emir hatası"
+            state["connection"]["last_error"] = safe_message
+            add_event(
+                state,
+                "LIVE_ORDER_EXCEPTION_DIAGNOSTIC",
+                "Manuel canlı emir akışı beklenmeyen hata nedeniyle durduruldu; yeni emir gönderilmedi.",
+                exception_type=type(exc).__name__,
+                exception_message=safe_message,
+                source=os.path.basename(frame.filename) if frame else os.path.basename(__file__),
+                function=frame.name if frame else "execute_live_order",
+                line=frame.lineno if frame else 0,
+                submission_started=submission_started,
+            )
             persist_state(state)
             raise HTTPException(502, "Canlı emir akışı güvenli şekilde kilitlendi; manuel inceleme gerekli.") from exc
 
@@ -3209,6 +3222,21 @@ async def v25_disarm(request: Request) -> dict[str, Any]:
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
     add_event(state, "LIVE_DISARM", "Canlı yeni girişler ve otomasyon kilitlendi; korumalar çalışmaya devam eder.", actor=user["id"])
+    return public_status(request.app, request)
+
+
+@router.post("/recovery/check")
+async def v25_recovery_check(request: Request, body: Confirmation) -> dict[str, Any]:
+    """Reconcile a fail-closed state before allowing the owner to re-arm."""
+    execution_owner(request)
+    if body.confirmation.strip().upper() != "LIVE RECOVERY CHECK":
+        raise HTTPException(422, "Recovery kontrolü için LIVE RECOVERY CHECK yazın.")
+    state = request.app.state.v25_execution
+    async with state["lock"]:
+        try:
+            await reconcile(request.app, credentials=live_credentials_status(request)[:2])
+        except (LiveExchangeError, BinanceDemoError) as exc:
+            raise safe_exchange_error(exc) from exc
     return public_status(request.app, request)
 
 
