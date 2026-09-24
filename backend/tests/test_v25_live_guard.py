@@ -1095,6 +1095,63 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         diagnostic = next(event for event in state["events"] if event["kind"] == "RECONCILIATION_FAILURE_DIAGNOSTIC")
         self.assertEqual(diagnostic["reconciliation_stage"], "automatic_cycle")
 
+    def test_transient_reconciliation_recovery_reopens_mocked_auto_order_path(self):
+        state = initial_state()
+        state.update({
+            "recovery_ready": True,
+            "connected": True,
+            "snapshot": complete_reconciliation_snapshot(),
+        })
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300, "last_scan": None})
+        state["live_auto_trade"] = True
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        state["_app"] = application
+        session_until_before_failure = state["auto"]["session_until"]
+        v25_execution.lock_reconciliation_failure(state)
+
+        self.assertTrue(v25_execution.clear_clean_reconciliation_state(state, complete_reconciliation_snapshot()))
+        self.assertTrue(any(event["kind"] == "AUTO_RECOVERED_FROM_TRANSIENT_RECONCILIATION" for event in state["events"]))
+        self.assertFalse(state["real_trading_locked"])
+        self.assertEqual(state["auto"]["session_until"], session_until_before_failure)
+
+        class FakeClient:
+            time_offset_ms = 0
+
+        snapshot = complete_reconciliation_snapshot()
+        candles = [{"time": index, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for index in range(220)]
+        spec = {
+            "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "close_side": "SELL", "order_type": "MARKET",
+            "margin_usdt": 25.0, "leverage": 2, "notional_usdt": 50.0, "quantity": "0.500",
+            "entry_price": "100.00", "stop_loss": "98.00", "targets": ["102.00", "104.00", "106.00"],
+            "step": Decimal("0.001"), "min_qty": Decimal("0.001"), "estimated_stop_loss_usdt": 1.0,
+        }
+        analysis = {"direction": "LONG", "confidence": 90, "radar": {"trap_score": 1}, "entry": 100, "stop_loss": 98, "tp1": 102, "tp2": 104, "tp3": 106}
+        ready = {"ready": True, "score": 100, "gates": []}
+        submit = AsyncMock(return_value={"status": "NEW", "orderId": 12345})
+        with patch.multiple(
+            v25_execution,
+            client_for_with_credentials=lambda application, credentials, request=None: FakeClient(),
+            account_snapshot=AsyncMock(return_value=snapshot),
+            scan_market_candidates=AsyncMock(return_value=[{"symbol": "BTCUSDT", "opportunity_score": 99}]),
+            live_candles=AsyncMock(return_value=(candles, 123)),
+            canonical_live_decision=AsyncMock(return_value={"decision": "BUY", "entry_eligible": True, "analysis": analysis}),
+            spread_bps=AsyncMock(return_value=1.0),
+            readiness_for=lambda *args, **kwargs: ready,
+            auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
+            evaluate_entry_gates=lambda **kwargs: {"passed": True, "gates": []},
+            build_live_spec=AsyncMock(return_value=spec),
+            set_live_isolated_margin=AsyncMock(),
+            apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 2, "margin_type": "isolated"}),
+            submit_entry=submit,
+            install_protection=AsyncMock(),
+            persist_state=lambda current: None,
+        ):
+            asyncio.run(v25_execution.automatic_cycle(application, credentials=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")))
+
+        submit.assert_awaited_once()
+        self.assertEqual(state["auto"]["last_scan_stats"]["executed_symbols"], ["BTCUSDT"])
+
     def test_auto_trade_dry_run_reaches_submit_boundary_without_exchange_mutation(self):
         class FakeTransport:
             def __init__(self):
