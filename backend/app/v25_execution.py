@@ -2329,13 +2329,17 @@ async def execute_live_order(
             daily = live_daily_metrics(state)
             manual_signal = {"direction": body.direction, "confidence": 100, "radar": {"trap_score": 0}}
             manual_symbol_scope = [] if source == "MANUAL" else allowed_symbols
+            current_spread = await spread_bps(client, symbol)
+            if current_spread > float(state["policy"]["max_spread_bps"]):
+                await asyncio.sleep(0.25)
+                current_spread = await spread_bps(client, symbol)
             guard = evaluate_entry_gates(
                 symbol=symbol,
                 signal=manual_signal,
                 snapshot=snapshot,
                 policy=state["policy"],
                 daily=daily,
-                spread_bps=await spread_bps(client, symbol),
+                spread_bps=current_spread,
                 armed=True,
                 allowed_symbols=manual_symbol_scope,
                 active_plans=list(state.get("plans", {}).values()),
@@ -2448,8 +2452,17 @@ async def execute_live_order(
                     symbol=body.symbol,
                     client_id=body.intent_id,
                 )
-                persist_state(state)
+            if not (isinstance(exc, LiveExchangeError) and exc.unknown_execution):
+                add_event(
+                    state,
+                    "LIVE_ORDER_BLOCKED",
+                    "Canlı emir risk veya hesap kapısında durduruldu; Binance emri gönderilmedi.",
+                    reason=sanitized_exception_message(exc),
+                    symbol=normalize_symbol(body.symbol),
+                    source=source,
+                )
             state["connection"]["last_error"] = str(exc)[:240]
+            persist_state(state)
             raise safe_exchange_error(exc) from exc
         except Exception as exc:
             safe_message = sanitized_exception_message(exc)
