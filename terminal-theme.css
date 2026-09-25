@@ -2003,6 +2003,44 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   grid-column: span 3;
 }
 
+.masterTradeRoute .scannerPanel {
+  min-height: 0;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(15, 23, 32, 0.98), rgba(9, 15, 22, 0.98));
+}
+
+.masterTradeRoute .scannerList {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 2px 7px 2px 1px;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(99, 217, 232, 0.55) transparent;
+  scrollbar-width: thin;
+}
+
+.masterTradeRoute .scannerList::-webkit-scrollbar {
+  width: 6px;
+}
+
+.masterTradeRoute .scannerList::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.masterTradeRoute .scannerList::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(99, 217, 232, 0.75), rgba(229, 184, 102, 0.7));
+}
+
+.masterTradeRoute .scannerList article {
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.masterTradeRoute .scannerList article:hover {
+  border-color: rgba(99, 217, 232, 0.45);
+  background: rgba(22, 34, 45, 0.95);
+  transform: translateX(2px);
+}
+
 .masterTradeRoute .masterTradeDataGrid > .masterTradePanel {
   align-self: start;
 }
@@ -2126,6 +2164,10 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   .masterTradeRoute .terminalStatusStrip,
   .masterTradeRoute .masterTradeSafetyBanner {
     max-width: 100%;
+  }
+
+  .masterTradeRoute .scannerList {
+    max-height: 300px;
   }
 
   .masterTradeRoute .masterTradeSafetyBanner em {
