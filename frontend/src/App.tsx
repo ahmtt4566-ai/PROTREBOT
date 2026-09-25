@@ -263,7 +263,7 @@ function Chart({ symbol, interval, horizon, notional, onAnalysis, onFutureLab, o
       candleSeries.setData(rows.map(row => ({ time:row.time as never, open:row.open, high:row.high, low:row.low, close:row.close })))
       volumeSeries.setData(rows.map(row => ({ time:row.time as never, value:row.volume, color:row.close >= row.open ? '#85d8a6' : '#f1a398' })))
       const addLine = (data:Point[], color:string) => chart.addSeries(LineSeries, {color,lineWidth:2,priceLineVisible:false,lastValueVisible:false}).setData(data.map(point => ({time:point.time as never,value:point.value})))
-      addLine(analysis.series.ema20, '#20a75a'); addLine(analysis.series.ema50, '#f0a51c'); addLine(analysis.series.ema200, '#8b63d8')
+      addLine(analysis.series.ema20, '#20a75a'); addLine(analysis.series.ema50, '#f0a51c'); addLine(analysis.series.ema200, '#6f91ad')
       const level = (price:number,color:string,title:string,style=2) => candleSeries.createPriceLine({price,color,lineWidth:2,lineStyle:style,axisLabelVisible:true,title})
       if (showAnalysisLevels) {
         level(analysis.entry, '#169653', `${analysis.direction} GİRİŞ`, 0); level(analysis.stop_loss, '#e64e42', 'STOP LOSS')

@@ -1,0 +1,2066 @@
+/* Mobile dashboard layer: presentation-only overrides for the existing Demo UI. */
+.v26App {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.v26App input,
+.v26App textarea,
+.v26App select,
+.v26App [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+@media (max-width: 1024px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-width: 0 !important;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .v26App {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    overflow-x: hidden;
+  }
+
+  .v26Header {
+    height: auto;
+    min-height: 64px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 16px;
+  }
+
+  .v26Brand {
+    gap: 9px;
+  }
+
+  .v26Brand > span {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    font-size: 17px;
+  }
+
+  .v26Brand b {
+    font-size: 14px;
+    letter-spacing: 0;
+  }
+
+  .v26Brand small {
+    font-size: 6px;
+    letter-spacing: .8px;
+  }
+
+  .v26Refresh {
+    min-height: 44px;
+    height: 44px;
+    padding: 0 11px;
+    font-size: 7px;
+  }
+
+  .v26Nav {
+    position: sticky;
+    top: 6px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    margin-top: 8px;
+    padding: 5px;
+    border-radius: 14px;
+  }
+
+  .v26Nav button {
+    min-height: 48px;
+    justify-content: center;
+    padding: 7px 3px;
+    text-align: center;
+  }
+
+  .v26Nav button > svg {
+    width: 16px;
+    height: 16px;
+    padding: 5px;
+  }
+
+  .v26Nav b {
+    font-size: 6px;
+    letter-spacing: 0;
+  }
+
+  .v26Nav small {
+    display: none;
+  }
+
+  .v26ModeBar {
+    min-height: 0;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .v26ModeBar h1 {
+    font-size: 18px;
+    line-height: 1.15;
+  }
+
+  .v26ModeBar p {
+    font-size: 7px;
+    line-height: 1.45;
+  }
+
+  .v26ModeBar aside {
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .v26MarketBar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px;
+    border-radius: 16px;
+  }
+
+  .v26MarketPicker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .v26Intervals {
+    justify-content: stretch;
+  }
+
+  .v26Intervals button {
+    flex: 1;
+    min-width: 44px;
+    height: 40px;
+  }
+
+  .v26App .binanceDemoDeck {
+    min-width: 0;
+    gap: 9px;
+    margin-top: 9px;
+  }
+
+  .v26App .demoCommandBar {
+    grid-template-columns: 1fr;
+    gap: 7px;
+    padding: 8px;
+    border-radius: 16px;
+  }
+
+  .v26App .demoCommandBar > button,
+  .v26App .demoCommandBar > label,
+  .v26App .demoCommandBar > div {
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .v26App .demoCommandBar > div {
+    grid-column: auto;
+    justify-content: flex-start;
+  }
+
+  .v26App .demoCommandBar > label {
+    grid-template-columns: minmax(0, 1fr) minmax(92px, 38%);
+  }
+
+  .v26App .demoMessage,
+  .v26App .demoTicketFeedback {
+    align-items: flex-start;
+    min-height: 0;
+    padding: 10px 11px;
+    border-radius: 12px;
+    font-size: 7px;
+    line-height: 1.45;
+  }
+
+  .v26App .demoAccountStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-radius: 16px;
+  }
+
+  .v26App .demoAccountStrip article {
+    min-width: 0;
+    min-height: 70px;
+    gap: 8px;
+    padding: 10px;
+    border-right: 1px solid #e4ead8;
+  }
+
+  .v26App .demoAccountStrip article:nth-child(even) {
+    border-right: 0;
+  }
+
+  .v26App .demoAccountStrip svg {
+    width: 16px;
+    height: 16px;
+    padding: 6px;
+  }
+
+  .v26App .demoAccountStrip small {
+    font-size: 5px;
+    letter-spacing: .35px;
+  }
+
+  .v26App .demoAccountStrip b {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 9px;
+  }
+
+  .v26App .demoLiveChart {
+    min-height: 0;
+    padding: 10px;
+    border-radius: 16px;
+  }
+
+  .v26App .demoLiveChart > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .v26App .demoLiveChart > header > div:last-child {
+    text-align: left;
+  }
+
+  .v26App .demoChartCanvas,
+  .v26App .v26ChartShell {
+    min-height: 300px;
+    height: 300px;
+  }
+
+  .v26App .demoMainGrid,
+  .v26App .demoOrdersGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .v26App .demoTicket,
+  .v26App .demoPositions,
+  .v26App .demoOrderPanel,
+  .v26App .demoEventPanel {
+    min-width: 0;
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .v26App .demoTicket > header,
+  .v26App .demoPositions > header,
+  .v26App .demoOrderPanel > header,
+  .v26App .demoEventPanel > header {
+    align-items: flex-start;
+  }
+
+  .v26App .demoTicket > header h3,
+  .v26App .demoPositions > header h3,
+  .v26App .demoOrderPanel > header h3,
+  .v26App .demoEventPanel > header h3 {
+    font-size: 13px;
+  }
+
+  .v26App .demoPositionList > article {
+    min-width: 0;
+    padding: 11px;
+  }
+
+  .v26App .demoPositionList > article > header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .v26App .demoPositionList > article > header > div {
+    min-width: 0;
+    flex: 1 1 140px;
+  }
+
+  .v26App .demoPositionList > article > header em {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .demoPositionMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .v26App .demoPositionMetrics b,
+  .v26App .demoPositionMetrics small,
+  .v26App .demoLeverageAudit b {
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .demoMapRail {
+    margin: 0 12px;
+  }
+
+  .v26App .demoMapPin em,
+  .v26App .demoMapMark b {
+    font-size: 5px;
+  }
+
+  .v26App .demoOrderPanel > div,
+  .v26App .demoEventPanel > div {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .v26App .demoOrderPanel article {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+    gap: 7px;
+  }
+
+  .v26App .demoOrderPanel article em,
+  .v26App .demoOrderPanel article button {
+    grid-column: 2;
+  }
+
+  .v26App .demoOrderPanel article b,
+  .v26App .demoOrderPanel article small,
+  .v26App .demoEventPanel article b,
+  .v26App .demoEventPanel article small {
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .v21Pulse {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-radius: 14px;
+  }
+
+  .v26App .v21Pulse > strong {
+    grid-column: 1 / -1;
+    min-height: 44px;
+  }
+
+  .v26App .v21Pulse > span {
+    min-width: 0;
+    min-height: 48px;
+    padding: 8px 10px;
+  }
+
+  .v26App .v21Pulse b,
+  .v26App .v21Pulse small {
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .v21AutoBotGrid,
+  .v26App .v21AutoActivityGrid,
+  .v26App .v21AutoActivityCandidates,
+  .v26App .v21AutoActivityMetricRow.smallGrid,
+  .v26App .v21ScannerMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .v26App .v21AutoBotDashboard,
+  .v26App .v21AutoActivityCenter,
+  .v26App .v21ScannerDashboard {
+    min-width: 0;
+  }
+
+  .v26App .v21AutoBotCandidates,
+  .v26App .v21AutoActivityCandidates {
+    gap: 6px;
+  }
+
+  .v26App .v21AutoBotCandidates > span,
+  .v26App .v21AutoActivityCandidate {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .v21AutoActivityCard.wideCard,
+  .v26App .v21AutoActivityCard.fullWidthCard {
+    grid-column: 1 / -1;
+  }
+
+  .v26App .v21ScannerHeader {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .v26App .v21ScannerHeader h2 {
+    font-size: 17px;
+    line-height: 1.2;
+  }
+
+  .v26App .v21ScannerHeader button {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .v26App .v21ScannerMetrics span {
+    min-width: 0;
+    padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid #e3ecd6;
+  }
+
+  .v26App .v21ScannerMetrics span:nth-child(odd) {
+    border-right: 1px solid #e3ecd6;
+  }
+
+  .v26App .v21ScannerMetrics span:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .v26App .v21ScannerColumns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .v26App .v21ScannerTop,
+  .v26App .v21ScannerTable,
+  .v26App .v21ScannerTrades {
+    min-width: 0;
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .v26App .v21ScannerTable > div {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .v26App .v21ScannerTable table {
+    min-width: 560px;
+  }
+
+  .v26App .v21Workspace {
+    min-width: 0;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .v26App .v21WorkspaceHead {
+    gap: 12px;
+  }
+
+  .v26App .v21WorkspaceHead h2 {
+    font-size: 18px;
+    line-height: 1.2;
+  }
+
+  .v26App .v21WorkspaceHead > b,
+  .v26App .v21WorkspaceHead > button {
+    width: 100%;
+    min-height: 44px;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .v26App .v21GateStrip,
+  .v26App .v21JournalStats,
+  .v26App .v21BacktestMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .v26App .v21Alert {
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  }
+
+  .v26App .v21Alert time {
+    grid-column: 2;
+  }
+
+  .v26App .v21SafetyLock,
+  .v26App .v26Footer {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .v26App .v26Footer {
+    gap: 8px 14px;
+    margin-top: 10px;
+    font-size: 6px;
+  }
+
+  .v26App .v26Footer em {
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+}
+
+@media (max-width: 1024px) {
+  /* Keep dense market data readable without changing its data structure. */
+  .v26App .v21ScannerTable,
+  .v26App .v21ScannerTop,
+  .v26App .v21ScannerTrades,
+  .v26App .v21SmartAlerts,
+  .v26App .v21ActivityTimeline {
+    overflow: hidden;
+  }
+
+  .v26App .v21ScannerTable > header,
+  .v26App .v21ScannerTop > header,
+  .v26App .v21ScannerTrades > header,
+  .v26App .v21SmartAlerts > .v21WorkspaceHead,
+  .v26App .v21ActivityTimeline > .v21WorkspaceHead {
+    margin-bottom: 12px;
+  }
+
+  .v26App .v21ScannerTable > header > b,
+  .v26App .v21ScannerTop > header > b,
+  .v26App .v21ScannerTrades > header > b {
+    flex: 0 0 auto;
+    padding: 6px 9px;
+    border: 1px solid rgba(230, 184, 92, .35);
+    border-radius: 9px;
+    background: rgba(95, 76, 35, .32);
+    color: #e8c978;
+    font-size: 8px;
+    line-height: 1;
+  }
+
+  .v26App .v21Candidate {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 13px;
+    background: linear-gradient(145deg, #193044, #132638) !important;
+    box-shadow: inset 3px 0 #4fd2b1, 0 8px 18px rgba(0, 0, 0, .16);
+  }
+
+  .v26App .v21CandidateHead {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+    align-items: center;
+  }
+
+  .v26App .v21CandidateHead b {
+    min-width: 0;
+    color: #e9f5f3;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .v26App .v21CandidateHead strong,
+  .v26App .v21CandidateHead em {
+    justify-self: end;
+    white-space: nowrap;
+  }
+
+  .v26App .v21CandidateHead strong {
+    padding: 5px 7px;
+    border-radius: 7px;
+    background: rgba(55, 177, 126, .2);
+    color: #7de2b0;
+    font-size: 7px;
+  }
+
+  .v26App .v21CandidateHead em {
+    grid-column: 1 / -1;
+    justify-self: start;
+    color: #e4c878;
+    font-size: 7px;
+    font-style: normal;
+  }
+
+  .v26App .v21Candidate > small {
+    display: block;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: rgba(9, 25, 38, .48);
+    color: #a5bdc5;
+    font-size: 7px;
+  }
+
+  .v26App .v21Candidate ul {
+    display: grid;
+    gap: 5px;
+    margin: 0;
+    padding: 8px 0 0 17px;
+    border-top: 1px solid rgba(105, 159, 169, .22);
+  }
+
+  .v26App .v21Candidate li {
+    color: #c0d2d6;
+    font-size: 7px;
+    line-height: 1.45;
+  }
+
+  .v26App .v21ScannerTable th,
+  .v26App .v21ScannerTable td {
+    padding: 10px 9px;
+    white-space: nowrap;
+    font-size: 7px;
+  }
+
+  .v26App .v21ScannerTable th {
+    color: #7fa5b1;
+    background: #102231;
+    font-size: 6px;
+    letter-spacing: .45px;
+  }
+
+  .v26App .v21ScannerTable td b {
+    color: #e0f0f2;
+  }
+
+  .v26App .v21ScannerTable .scannerStatus {
+    display: inline-block;
+    padding: 4px 6px;
+    border-radius: 6px;
+    background: rgba(89, 143, 159, .2);
+    color: #b9d4d8;
+    font-size: 6px;
+    font-style: normal;
+    font-weight: 800;
+  }
+
+  .v26App .v21TradeRows {
+    display: grid;
+    gap: 8px;
+  }
+
+  .v26App .v21TradeRows > div {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border: 1px solid rgba(89, 143, 159, .3);
+    border-left: 3px solid #e2b75f;
+    border-radius: 12px;
+    background: linear-gradient(145deg, #193044, #132638) !important;
+  }
+
+  .v26App .v21TradeRows strong,
+  .v26App .v21TradeRows span,
+  .v26App .v21TradeRows small,
+  .v26App .v21TradeRows em {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .v21TradeRows strong {
+    color: #edf8f5;
+    font-size: 9px;
+  }
+
+  .v26App .v21TradeRows span,
+  .v26App .v21TradeRows small {
+    color: #a9c0c7;
+    font-size: 7px;
+    line-height: 1.45;
+  }
+
+  .v26App .v21TradeRows small {
+    padding-top: 7px;
+    border-top: 1px solid rgba(105, 159, 169, .2);
+  }
+
+  .v26App .v21TradeRows em {
+    justify-self: start;
+    padding: 5px 7px;
+    border-radius: 7px;
+    background: rgba(55, 177, 126, .18);
+    color: #83e3b2;
+    font-size: 6px;
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .v26App .v21AlertList {
+    gap: 8px;
+  }
+
+  .v26App .v21Alert {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 9px;
+    padding: 11px;
+    background: linear-gradient(145deg, #182d3d, #122536) !important;
+  }
+
+  .v26App .v21AlertBadge {
+    min-width: 48px;
+    padding: 6px 5px;
+    border: 1px solid rgba(115, 159, 175, .25);
+    background: rgba(8, 22, 34, .5);
+    color: #b8d0d5;
+    font-size: 5.5px;
+  }
+
+  .v26App .v21AlertBody {
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .v26App .v21AlertBody strong {
+    color: #e5f2f3;
+    font-size: 7px;
+  }
+
+  .v26App .v21AlertBody span {
+    color: #afc5cb;
+    font-size: 7px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .v21Alert time {
+    grid-column: 2;
+    color: #7896a1;
+    font-size: 5.5px;
+  }
+
+  .v26App .v21ActivityList article {
+    grid-template-columns: 12px minmax(0, 1fr);
+    align-items: start;
+    gap: 9px;
+    padding: 11px 2px;
+  }
+
+  .v26App .v21ActivityList div {
+    min-width: 0;
+  }
+
+  .v26App .v21ActivityList span {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    color: #a9c0c7;
+    line-height: 1.45;
+  }
+
+  .v26App .v21ActivityList time {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: -4px;
+  }
+
+  .v26App .demoMessage,
+  .v26App .demoTicketFeedback,
+  .v26App .v21ScannerError {
+    align-items: flex-start;
+    gap: 9px;
+    min-height: 0;
+    padding: 11px 12px;
+    border-radius: 12px;
+    background: linear-gradient(145deg, #192e3d, #122535) !important;
+    color: #c0d4d8;
+    font-size: 7px;
+    line-height: 1.5;
+  }
+
+  .v26App .demoMessage span,
+  .v26App .demoTicketFeedback span,
+  .v26App .v21ScannerError {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .demoTicketFeedback span {
+    display: grid;
+    gap: 4px;
+  }
+
+  .v26App .demoTicketFeedback b {
+    color: #e6f3f2;
+    font-size: 7px;
+  }
+
+  .v26App .demoTicketFeedback small {
+    color: #a9c0c7;
+    font-size: 7px;
+    line-height: 1.5;
+  }
+
+  .v26App .demoLiveChart > header,
+  .v26App .demoTicket > header,
+  .v26App .demoPositions > header,
+  .v26App .demoOrderPanel > header,
+  .v26App .demoEventPanel > header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .v26App .demoLiveChart > header > div,
+  .v26App .demoTicket > header > div,
+  .v26App .demoPositions > header > div,
+  .v26App .demoOrderPanel > header > div,
+  .v26App .demoEventPanel > header > div {
+    min-width: 0;
+  }
+
+  .v26App .demoLiveChart > header > div:last-child {
+    width: 100%;
+    text-align: left;
+  }
+
+  .v26App .demoLiveChart > header small {
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .demoAnalysisFill,
+  .v26App .demoTest,
+  .v26App .demoSubmit {
+    min-height: 44px;
+    line-height: 1.3;
+    white-space: normal;
+  }
+
+  .v26App .demoMessage {
+    position: sticky;
+    top: 8px;
+    z-index: 18;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .24);
+  }
+
+  .v26App .demoSubmit {
+    position: sticky;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    z-index: 17;
+    box-shadow: 0 12px 26px rgba(5, 94, 78, .34);
+  }
+
+  .v26App .demoAccountStrip b,
+  .v26App .demoExposure b,
+  .v26App .demoPositionMetrics b,
+  .v26App .demoOrderPanel article em,
+  .v26App .v21RiskRadarGrid strong {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .v26App .demoOrderPanel article,
+  .v26App .demoEventPanel article {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+    align-items: start;
+  }
+
+  .v26App .demoOrderPanel article em,
+  .v26App .demoOrderPanel article button,
+  .v26App .demoEventPanel time {
+    justify-self: start;
+  }
+
+  .v26App .demoEventPanel article > span,
+  .v26App .demoEventPanel article > span small {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 1024px) {
+  /* Give every mobile section a compact, intentional title treatment. */
+  .v26App h1,
+  .v26App h2,
+  .v26App h3,
+  .v26App h4 {
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    letter-spacing: .1px;
+    text-wrap: balance;
+  }
+
+  .v26App .v26ModeBar h1 {
+    max-width: 300px;
+    color: #8de3c4;
+    font-size: 20px;
+    line-height: 1.12;
+    text-shadow: 0 4px 18px rgba(49, 198, 161, .16);
+  }
+
+  .v26App .v26MarketTitle strong,
+  .v26App .v26MarketTitle small {
+    display: block;
+  }
+
+  .v26App .v26MarketTitle strong {
+    color: #e8c978;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .v26App .v21WorkspaceHead,
+  .v26App .v21AutoBotDashboard > header,
+  .v26App .v21ScannerHeader,
+  .v26App .v21ScannerTop > header,
+  .v26App .v21ScannerTable > header,
+  .v26App .v21ScannerTrades > header,
+  .v26App .demoLiveChart > header,
+  .v26App .demoTicket > header,
+  .v26App .demoPositions > header,
+  .v26App .demoOrderPanel > header,
+  .v26App .demoEventPanel > header {
+    position: relative;
+    padding-left: 11px;
+  }
+
+  .v26App .v21WorkspaceHead::before,
+  .v26App .v21AutoBotDashboard > header::before,
+  .v26App .v21ScannerHeader::before,
+  .v26App .v21ScannerTop > header::before,
+  .v26App .v21ScannerTable > header::before,
+  .v26App .v21ScannerTrades > header::before,
+  .v26App .demoLiveChart > header::before,
+  .v26App .demoTicket > header::before,
+  .v26App .demoPositions > header::before,
+  .v26App .demoOrderPanel > header::before,
+  .v26App .demoEventPanel > header::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    bottom: 13px;
+    width: 3px;
+    border-radius: 3px;
+    background: #4fd2b1;
+  }
+
+  .v26App .v21WorkspaceHead h2,
+  .v26App .v21AutoBotDashboard > header h2,
+  .v26App .v21ScannerHeader h2,
+  .v26App .demoLiveChart > header h3,
+  .v26App .demoTicket > header h3,
+  .v26App .demoPositions > header h3,
+  .v26App .demoOrderPanel > header h3,
+  .v26App .demoEventPanel > header h3,
+  .v26App .v21AutoActivityCard > header h3,
+  .v26App .v21Card > header h3 {
+    max-width: 100%;
+    margin-top: 5px;
+    color: #dcecef;
+    font-size: 14px;
+    font-weight: 750;
+    line-height: 1.22;
+    text-wrap: balance;
+  }
+
+  .v26App .v21WorkspaceHead > div > span,
+  .v26App .v21AutoBotDashboard > header > span,
+  .v26App .v21ScannerHeader > div > span,
+  .v26App .v21ScannerTop > header span,
+  .v26App .v21ScannerTable > header span,
+  .v26App .v21ScannerTrades > header span,
+  .v26App .demoLiveChart > header span,
+  .v26App .demoTicket > header span,
+  .v26App .demoPositions > header span,
+  .v26App .demoOrderPanel > header span,
+  .v26App .demoEventPanel > header span,
+  .v26App .v21AutoActivityCard > header span,
+  .v26App .v21Card > header small {
+    color: #72d7c0;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    font-size: 6px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    line-height: 1.35;
+  }
+
+  .v26App .v21ScannerHeader::before,
+  .v26App .v21ScannerTable > header::before,
+  .v26App .v21ScannerTrades > header::before {
+    background: #e2b75f;
+  }
+
+  .v26App .v21ScannerHeader h2,
+  .v26App .v21ScannerTable > header h3,
+  .v26App .v21ScannerTrades > header h3 {
+    color: #ead49a;
+  }
+
+  .v26App .v21ScannerHeader > div > span,
+  .v26App .v21ScannerTop > header span,
+  .v26App .v21ScannerTable > header span,
+  .v26App .v21ScannerTrades > header span {
+    color: #dbb764;
+  }
+
+  .v26App .demoLiveChart > header::before,
+  .v26App .demoTicket > header::before {
+    background: #6eaff0;
+  }
+
+  .v26App .demoLiveChart > header h3,
+  .v26App .demoTicket > header h3 {
+    color: #b9d9fa;
+  }
+
+  .v26App .demoPositions > header::before,
+  .v26App .v21AutoActivityCard > header::before {
+    background: #6f91ad;
+  }
+
+  .v26App .demoPositions > header h3,
+  .v26App .v21AutoActivityCard > header h3 {
+    color: #c3d5e0;
+  }
+
+  .v26App .demoOrderPanel > header::before,
+  .v26App .demoEventPanel > header::before {
+    background: #e9808a;
+  }
+
+  .v26App .demoOrderPanel > header h3,
+  .v26App .demoEventPanel > header h3 {
+    color: #f0bec1;
+  }
+
+  .v26App .v21SmartAlerts .v21WorkspaceHead::before,
+  .v26App .v21RiskRadar .v21WorkspaceHead::before {
+    background: #e2b75f;
+  }
+
+  .v26App .v21SmartAlerts .v21WorkspaceHead h2,
+  .v26App .v21RiskRadar .v21WorkspaceHead h2 {
+    color: #ead49a;
+  }
+
+  .v26App .v21ActivityTimeline .v21WorkspaceHead::before,
+  .v26App .v21SystemHealthCenter .v21WorkspaceHead::before {
+    background: #6eaff0;
+  }
+
+  .v26App .v21ActivityTimeline .v21WorkspaceHead h2,
+  .v26App .v21SystemHealthCenter .v21WorkspaceHead h2 {
+    color: #b9d9fa;
+  }
+
+  .v26App .v21AutoActivityCenter > .v21WorkspaceHead::before {
+    background: #4fd2b1;
+  }
+
+  .v26App .v21AutoActivityCenter > .v21WorkspaceHead h2 {
+    color: #8de3c4;
+  }
+
+  .v26App .v21WorkspaceHead p,
+  .v26App .v21ScannerHeader p {
+    max-width: 100%;
+    color: #91abb5;
+    font-size: 7px;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 360px) {
+  .v26App {
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+
+  .v26Brand b {
+    font-size: 12px;
+  }
+
+  .v26Refresh {
+    padding: 0 8px;
+  }
+
+  .v26Nav b {
+    font-size: 5.5px;
+  }
+
+  .v26App .demoAccountStrip,
+  .v26App .v21AutoBotGrid,
+  .v26App .v21AutoActivityGrid,
+  .v26App .v21AutoActivityMetricRow.smallGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .v26App .v21AutoActivityCard.wideCard,
+  .v26App .v21AutoActivityCard.fullWidthCard {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 1024px) {
+  .v26App .v21AutoActivityCenter > .v21WorkspaceHead h2 {
+    color: #8de3c4 !important;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    font-weight: 750;
+  }
+
+  .v26App .v21AutoActivityCard > header h3,
+  .v26App .v21Card > header h3 {
+    color: #c3d5e0 !important;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    font-weight: 750;
+  }
+
+  .v26App .v21ScannerHeader h2,
+  .v26App .v21ScannerTable > header h3,
+  .v26App .v21ScannerTrades > header h3 {
+    color: #ead49a !important;
+  }
+
+  .v26App .demoLiveChart > header h3,
+  .v26App .demoTicket > header h3 {
+    color: #b9d9fa !important;
+  }
+
+  .v26App .demoPositions > header h3 {
+    color: #c3d5e0 !important;
+  }
+
+  .v26App .demoOrderPanel > header h3,
+  .v26App .demoEventPanel > header h3 {
+    color: #f0bec1 !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  .v26App .v21Tabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding: 6px;
+    border-radius: 6px;
+    box-shadow: none;
+    scrollbar-width: thin;
+  }
+
+  .v26App .v21Tabs button {
+    flex: 0 0 136px;
+    min-height: 52px;
+    padding: 8px 10px;
+    border-radius: 4px;
+  }
+
+  .v26App .v21Tabs button > svg {
+    width: 16px;
+    height: 16px;
+    padding: 6px;
+  }
+
+  .v26App .v21Tabs b {
+    font-size: 7px;
+  }
+
+  .v26App .v21Tabs small {
+    font-size: 5.5px;
+  }
+
+  .v26App .v21EmptyState {
+    display: grid;
+    justify-items: center;
+    gap: 5px;
+    min-height: 92px;
+    padding: 16px 12px;
+    border: 1px dashed rgba(138, 143, 153, .3);
+    border-radius: 6px;
+    background: rgba(32, 38, 48, .45);
+    color: var(--v26-muted);
+    text-align: center;
+  }
+
+  .v26App .v21EmptyIcon {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border: 1px solid rgba(138, 143, 153, .28);
+    border-radius: 50%;
+    color: var(--v26-disabled);
+  }
+
+  .v26App .v21EmptyIcon svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .v26App .v21EmptyState strong {
+    color: #b6bbc4;
+    font-size: 8px;
+    font-weight: 700;
+  }
+
+  .v26App .v21EmptyState small {
+    max-width: 240px;
+    color: var(--v26-muted);
+    font-size: 6.5px;
+    line-height: 1.4;
+  }
+
+  .v26App .v21EmptyStateCompact {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+  }
+
+  .v26App .v21EmptyStateCompact .v21EmptyIcon {
+    width: 12px;
+    height: 12px;
+  }
+
+  .v26App .v21EmptyStateCompact .v21EmptyIcon svg {
+    width: 7px;
+    height: 7px;
+  }
+
+  .v26App .v21EmptyStateCompact strong,
+  .v26App .v21EmptyStateCompact small {
+    display: none;
+  }
+
+  .v26App .v21EmptyInline {
+    color: var(--v26-muted);
+    font-size: inherit;
+    font-weight: 500;
+  }
+
+  .v26App .v21HealthNode,
+  .v26App .v21CockpitCard,
+  .v26App .v21RiskRadarGrid article,
+  .v26App .v21Alert,
+  .v26App .v21AutoActivityCard,
+  .v26App .v21ScannerTop,
+  .v26App .v21ScannerTable,
+  .v26App .v21ScannerTrades {
+    border-radius: 6px;
+    box-shadow: none;
+  }
+
+  .v26App .v21HealthNode.unknown {
+    border-color: rgba(138, 143, 153, .3);
+  }
+
+  .v26App .v21HealthNode.unknown .v21HealthDot {
+    background: var(--v26-disabled);
+    box-shadow: none;
+  }
+
+  .v26App .v21ScannerTable table {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (max-width: 1024px) {
+  .v26App {
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+    font-family: Inter, "Segoe UI", sans-serif;
+  }
+
+  .v26App h1,
+  .v26App h2,
+  .v26App h3,
+  .v26App h4,
+  .v26App p,
+  .v26App small,
+  .v26App b,
+  .v26App span {
+    overflow-wrap: anywhere;
+  }
+
+  .v26App h1,
+  .v26App h2,
+  .v26App h3,
+  .v26App h4 {
+    letter-spacing: 0;
+    font-weight: 800;
+  }
+
+  .v26App .v26Header,
+  .v26App .v26Nav,
+  .v26App .v26ModeBar,
+  .v26App .v26MarketBar,
+  .v26App .demoCommandBar,
+  .v26App .demoMessage,
+  .v26App .demoAccountStrip,
+  .v26App .demoLiveChart,
+  .v26App .demoTicket,
+  .v26App .demoPositions,
+  .v26App .demoOrderPanel,
+  .v26App .demoEventPanel,
+  .v26App .v21Workspace,
+  .v26App .v21AutoBotDashboard,
+  .v26App .v21AutoActivityCenter,
+  .v26App .v21ScannerDashboard {
+    border-radius: 18px;
+    border-color: rgba(96, 181, 177, .34);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, .24), inset 0 1px rgba(130, 218, 201, .08);
+  }
+
+  .v26App .v26Header {
+    min-height: 72px;
+    padding: 12px 14px;
+  }
+
+  .v26App .v26Brand b {
+    font-size: 15px;
+    line-height: 1.15;
+  }
+
+  .v26App .v26Brand small {
+    margin-top: 5px;
+    color: #8caeb6;
+    font-size: 7px;
+    line-height: 1.2;
+  }
+
+  .v26App .v26Nav {
+    gap: 6px;
+    padding: 6px;
+    background: rgba(11, 28, 40, .94);
+  }
+
+  .v26App .v26Nav button {
+    min-height: 54px;
+    border-radius: 12px;
+    color: #a8c0c8;
+  }
+
+  .v26App .v26Nav button.active {
+    box-shadow: inset 0 0 0 1px rgba(109, 218, 184, .3), 0 7px 18px rgba(29, 145, 125, .2);
+  }
+
+  .v26App .v26ModeBar,
+  .v26App .v26MarketBar {
+    padding: 14px;
+  }
+
+  .v26App .v26ModeBar h1 {
+    margin: 4px 0 6px;
+    font-size: 19px;
+    line-height: 1.25;
+  }
+
+  .v26App .v26ModeBar p,
+  .v26App .v21WorkspaceHead p,
+  .v26App .v21ScannerHeader p {
+    font-size: 8px;
+    line-height: 1.55;
+  }
+
+  .v26App .v21Workspace,
+  .v26App .v21AutoBotDashboard,
+  .v26App .v21AutoActivityCenter,
+  .v26App .v21ScannerDashboard {
+    padding: 14px;
+  }
+
+  .v26App .v21WorkspaceHead {
+    padding: 4px 2px 15px;
+    border-bottom-color: rgba(101, 176, 166, .28);
+  }
+
+  .v26App .v21WorkspaceHead h2,
+  .v26App .v21AutoBotDashboard > header h2,
+  .v26App .v21ScannerHeader h2 {
+    margin: 6px 0 4px;
+    color: #e4f5f2;
+    font-size: 18px;
+    line-height: 1.3;
+  }
+
+  .v26App .v21WorkspaceHead > b,
+  .v26App .v21WorkspaceHead > button,
+  .v26App .v21ScannerHeader button {
+    min-height: 44px;
+    border-radius: 11px;
+    font-size: 8px;
+  }
+
+  .v26App .v21AutoActivityCard,
+  .v26App .v21Card,
+  .v26App .v21CockpitCard,
+  .v26App .v21HealthNode,
+  .v26App .v21RiskRadarGrid article {
+    border-radius: 15px;
+    border-color: rgba(88, 144, 157, .34);
+  }
+
+  .v26App .v21AutoActivityCard > header,
+  .v26App .v21Card > header {
+    padding-bottom: 12px;
+  }
+
+  .v26App .v21AutoActivityCard > header h3,
+  .v26App .v21Card > header h3,
+  .v26App .demoTicket > header h3,
+  .v26App .demoPositions > header h3,
+  .v26App .demoOrderPanel > header h3,
+  .v26App .demoEventPanel > header h3 {
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  .v26App .v21AutoActivityCard > header span,
+  .v26App .v21Card > header small,
+  .v26App .demoTicket > header span,
+  .v26App .demoPositions > header span,
+  .v26App .demoOrderPanel > header span,
+  .v26App .demoEventPanel > header span {
+    font-size: 7px;
+    line-height: 1.35;
+  }
+
+  .v26App .v21AutoActivityMetricRow > div,
+  .v26App .v21AutoBotGrid > div,
+  .v26App .demoPositionMetrics span,
+  .v26App .v21Pulse > span {
+    border-radius: 11px;
+    border-color: rgba(86, 144, 158, .32);
+  }
+
+  .v26App button,
+  .v26App input,
+  .v26App select {
+    min-height: 42px;
+  }
+
+  .v26App .v21Alert,
+  .v26App .v21ActivityList article {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .v26App .v21Pulse {
+    gap: 1px;
+    border: 1px solid rgba(96, 181, 177, .28);
+    background: #0d1b28;
+  }
+
+  .v26App .v21Pulse > span {
+    padding: 11px 12px;
+    background: #132536;
+  }
+
+  .v26App .v21Pulse small,
+  .v26App .v21AutoBotGrid small,
+  .v26App .v21AutoActivityMetricRow small,
+  .v26App .v21ScannerMetrics small {
+    color: #86a4af;
+    font-size: 6px;
+    letter-spacing: .4px;
+  }
+
+  .v26App .v21Pulse b,
+  .v26App .v21AutoBotGrid strong,
+  .v26App .v21AutoActivityMetricRow b,
+  .v26App .v21ScannerMetrics b {
+    color: #e3f0f2;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .v26App .v21Pulse > strong {
+    min-height: 44px;
+    padding: 10px 12px;
+    border-top: 1px solid rgba(91, 177, 157, .22);
+    background: linear-gradient(135deg, #15554d, #176d57);
+    color: #dff9ec;
+    font-size: 7px;
+    line-height: 1.35;
+  }
+
+  .v26App .v21AutoBotGrid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .v26App .v21AutoBotGrid > div {
+    min-height: 64px;
+    padding: 12px;
+    background: #122434;
+  }
+
+  .v26App .v21AutoBotGrid > div:nth-child(1) { order: 1; }
+  .v26App .v21AutoBotGrid > div:nth-child(5) { order: 2; }
+  .v26App .v21AutoBotGrid > div:nth-child(6) { order: 3; }
+  .v26App .v21AutoBotGrid > div:nth-child(7) { order: 4; }
+  .v26App .v21AutoBotGrid > div:nth-child(2) { order: 5; }
+  .v26App .v21AutoBotGrid > div:nth-child(3) { order: 6; }
+  .v26App .v21AutoBotGrid > div:nth-child(4) { order: 7; }
+  .v26App .v21AutoBotGrid > div:nth-child(8) { order: 8; }
+
+  .v26App .v21AutoBotGrid > div span {
+    color: #8da6b0;
+    font-variant-numeric: tabular-nums;
+    font-size: 6px;
+    line-height: 1.35;
+  }
+
+  .v26App .v21AutoBotGrid button {
+    min-height: 36px;
+    margin-top: 8px;
+    padding: 7px 10px;
+    border-radius: 9px;
+    font-size: 7px;
+  }
+
+  .v26App .v21AutoBotCandidates,
+  .v26App .v21AutoActivityCandidates {
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .v26App .v21AutoBotCandidates > span {
+    min-height: 42px;
+    align-items: center;
+    padding: 9px 10px;
+    border: 1px solid rgba(91, 163, 157, .28);
+    border-radius: 11px;
+    background: #16333a;
+    line-height: 1.3;
+  }
+
+  .v26App .v21AutoBotCandidates > span b {
+    color: #e1f2ef;
+    font-size: 7px;
+  }
+
+  .v26App .v21AutoBotCandidates > span em {
+    color: #8ee0bd;
+    font-size: 6px;
+    font-style: normal;
+  }
+
+  .v26App .v21AutoActivityCandidate {
+    padding: 12px;
+    background: #122535;
+  }
+
+  .v26App .v21AutoActivityCandidateMeta,
+  .v26App .v21AutoActivityCandidateLevels {
+    gap: 6px;
+  }
+
+  .v26App .v21AutoActivityCandidateMeta > span,
+  .v26App .v21AutoActivityCandidateLevels > span {
+    min-width: 0;
+    padding: 8px;
+    border-radius: 9px;
+    background: #172e3e;
+  }
+
+  .v26App .v21AutoActivityPositionList li {
+    min-height: 48px;
+    padding: 10px 11px;
+    border-bottom-color: rgba(91, 137, 154, .22);
+  }
+
+  .v26App .v21AutoActivityPositionList li span,
+  .v26App .v21AutoActivityPositionList li strong {
+    font-size: 8px;
+  }
+
+  .v26App .v21ScannerMetrics {
+    gap: 1px;
+    background: #0c1b28 !important;
+  }
+
+  .v26App .v21ScannerMetrics span {
+    min-height: 70px;
+    padding: 11px;
+    background: #132536 !important;
+  }
+
+  .v26App .v21ScannerMetrics b {
+    margin-top: 4px;
+  }
+
+  .v26App .v21Candidate {
+    margin-top: 9px;
+    padding: 12px;
+    border: 1px solid rgba(89, 143, 159, .3);
+    border-radius: 13px;
+    background: #122535;
+  }
+
+  .v26App .v21CandidateHead {
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+
+  .v26App .v21CandidateHead b {
+    color: #e4f1f2;
+    font-size: 9px;
+  }
+
+  .v26App .v21CandidateHead em,
+  .v26App .v21Candidate > small {
+    color: #91aab4;
+    font-size: 6px;
+    line-height: 1.4;
+  }
+
+  .v26App .v21Candidate ul {
+    margin-top: 9px;
+    padding-top: 8px;
+    border-top-color: rgba(92, 138, 153, .2);
+  }
+
+  .v26App .v21TableScroll {
+    border: 1px solid rgba(89, 143, 159, .24);
+    border-radius: 12px;
+    background: #0e1d2b;
+  }
+
+  .v26App .v21ScannerTable table {
+    background: transparent;
+  }
+
+  .v26App .v21ScannerTable th,
+  .v26App .v21ScannerTable td {
+    border-bottom-color: rgba(91, 137, 154, .2);
+    color: #c2d4d9;
+  }
+
+  .v26App .v21ScannerError,
+  .v26App .demoMessage-error,
+  .v26App .demoTicketFeedback-error {
+    border-color: rgba(217, 102, 105, .4);
+    background: rgba(111, 39, 52, .32);
+    color: #ffb0a8;
+  }
+
+  .v26App .v21AutoActivityCenter {
+    margin-top: 14px;
+    padding: 14px;
+    border: 1px solid rgba(93, 164, 164, .38);
+    border-radius: 20px;
+    background: linear-gradient(145deg, #172737 0%, #132332 54%, #10202d 100%) !important;
+    box-shadow: 0 18px 38px rgba(0, 0, 0, .28), inset 0 1px rgba(131, 216, 203, .1);
+  }
+
+  .v26App .v21AutoActivityCenter > .v21WorkspaceHead {
+    margin: 0 0 12px;
+    padding: 5px 2px 14px;
+    border-bottom: 1px solid rgba(103, 180, 171, .28);
+    background: linear-gradient(90deg, rgba(24, 57, 69, .72), rgba(17, 39, 54, .2)) !important;
+  }
+
+  .v26App .v21AutoActivityCenter > .v21WorkspaceHead > div > span {
+    color: #78d7c4;
+    font-size: 7px;
+    letter-spacing: .7px;
+  }
+
+  .v26App .v21AutoActivityCenter > .v21WorkspaceHead h2 {
+    margin-top: 6px;
+    color: #8de3c4 !important;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    font-weight: 750;
+    font-size: 17px;
+    line-height: 1.3;
+  }
+
+  .v26App .v21AutoActivityCenter > .v21WorkspaceHead > b {
+    background: #1c3944 !important;
+    border: 1px solid rgba(105, 184, 172, .35);
+    color: #b9ebe0 !important;
+  }
+
+  .v26App .v21AutoActivityCenter > .v21WorkspaceHead > b.demoLoss {
+    border-color: rgba(239, 112, 120, .52) !important;
+    background: rgba(112, 42, 55, .72) !important;
+    color: #ff9c9b !important;
+  }
+
+  .v26App .v21AutoActivityCenter .v21AutoActivityGrid {
+    gap: 10px;
+    margin-top: 0;
+  }
+
+  .v26App .v21AutoActivityCenter .v21AutoActivityCard {
+    padding: 13px;
+    border: 1px solid rgba(88, 140, 157, .34);
+    border-radius: 15px;
+    background: linear-gradient(155deg, #1a2d3d, #142433) !important;
+    box-shadow: 0 9px 20px rgba(0, 0, 0, .18), inset 0 1px rgba(135, 198, 203, .06);
+  }
+
+  .v26App .v21AutoActivityCenter .v21AutoActivityCard > header {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(104, 157, 168, .25);
+    background: transparent !important;
+  }
+
+  .v26App .v21AutoActivityCenter .v21AutoActivityCard > header span {
+    color: #7bc9bf;
+    font-size: 6px;
+  }
+
+  .v26App .v21AutoActivityCenter .v21AutoActivityCard > header h3 {
+    color: #d9eaed;
+    font-size: 13px;
+  }
+
+  .v26App .v21AutoActivityCenter .v21AutoActivityMetricRow > div,
+  .v26App .v21AutoActivityCenter .v21AutoActivityCandidateMeta > span,
+  .v26App .v21AutoActivityCenter .v21AutoActivityCandidateLevels > span {
+    background: #1d3444 !important;
+    border: 1px solid rgba(95, 149, 163, .25);
+  }
+
+  .v26App .v21AutoActivityCenter .v21AutoActivityEmpty,
+  .v26App .v21AutoActivityCenter .v21AutoActivityNote {
+    color: #9bb3bc;
+  }
+
+  .v26App .v21AutoActivityCenter .demoLoss,
+  .v26App .v21AutoActivityCenter .v21CriticalText,
+  .v26App .v21AutoActivityCenter .v21CriticalEvent strong,
+  .v26App .v21AutoActivityCenter .v21CriticalEvent small {
+    color: #ff8f91 !important;
+  }
+
+  .v26App .v21AutoActivityCenter .demoLoss {
+    background: rgba(145, 57, 70, .34);
+    border-color: rgba(239, 112, 120, .4);
+  }
+
+  .v26App .v21AutoActivityCenter .v21StopMetric {
+    border-color: rgba(226, 104, 111, .38) !important;
+    background: linear-gradient(145deg, rgba(103, 42, 53, .72), rgba(58, 30, 42, .8)) !important;
+  }
+
+  .v26App .v21AutoActivityCenter .v21StopMetric small,
+  .v26App .v21AutoActivityCenter .v21StopMetric b {
+    color: #ff9c9b !important;
+  }
+
+  .v26App .v21AutoActivityCenter .v21CriticalText {
+    border-left-color: #e96b72 !important;
+    background: rgba(112, 42, 55, .28) !important;
+  }
+
+  .v26App .v21AutoActivityCenter .v21CriticalEvent {
+    border-left: 2px solid #e96b72;
+    background: linear-gradient(90deg, rgba(108, 41, 53, .3), transparent 75%);
+  }
+
+  .v26App .v21AutoActivityCenter .v21CriticalEvent time,
+  .v26App .v21AutoActivityCenter .v21CriticalEvent span {
+    color: #c9858b;
+  }
+
+  .v26App {
+    padding-bottom: calc(78px + env(safe-area-inset-bottom));
+  }
+
+  .v26App .v26Brand {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .v26App .v26Nav {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    top: auto;
+    z-index: 80;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    margin: 0;
+    padding: 5px;
+    border: 1px solid rgba(142, 119, 63, .42);
+    border-radius: 16px;
+    background: rgba(15, 23, 32, .95);
+    box-shadow: 0 16px 34px rgba(0, 0, 0, .36), inset 0 1px rgba(138, 222, 207, .1);
+    backdrop-filter: blur(18px);
+    transform: translateY(0);
+    opacity: 1;
+    transition: transform .22s ease, opacity .22s ease;
+  }
+
+  .v26App .v26Nav.mobileNavHidden {
+    transform: translateY(calc(100% + 24px));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .v26App .v26Nav button {
+    min-height: 48px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 5px 2px;
+    text-align: center;
+  }
+
+  .v26App .v26Nav button > svg {
+    width: 14px;
+    height: 14px;
+    margin: 0 auto;
+    padding: 5px;
+  }
+
+  .v26App .v26Nav button.active {
+    border-color: rgba(232, 193, 91, .68);
+    background: linear-gradient(145deg, #5b4928, #725b2f);
+    color: #fff0bb;
+    box-shadow: inset 0 0 0 1px rgba(255, 223, 133, .1), 0 5px 15px rgba(117, 85, 27, .2);
+  }
+
+  .v26App .v26Nav button.active::after {
+    left: 18px;
+    right: 18px;
+    bottom: 3px;
+    height: 2px;
+    background: #f0c65d;
+  }
+
+  .v26App .v26Nav b {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 5.7px;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .v26App .v26Nav button.active > svg {
+    background: linear-gradient(145deg, #f3ce67, #dcae42);
+    color: #33280f;
+  }
+
+  .v26App .v26Nav button:not(.active):nth-child(1) > svg {
+    background: rgba(61, 178, 159, .2);
+    color: #6bd8c0;
+  }
+
+  .v26App .v26Nav button:not(.active):nth-child(2) > svg {
+    background: rgba(91, 145, 211, .2);
+    color: #8bbdff;
+  }
+
+  .v26App .v26Nav button:not(.active):nth-child(3) > svg {
+    background: rgba(211, 109, 130, .2);
+    color: #ed9aa8;
+  }
+
+  .v26App .v26Nav button:not(.active):nth-child(4) > svg {
+    background: rgba(157, 122, 213, .2);
+    color: #c4a8f1;
+  }
+
+  .v26App .mobileBackTop {
+    position: fixed;
+    right: 13px;
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    z-index: 79;
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(103, 182, 178, .42);
+    border-radius: 50%;
+    background: rgba(21, 54, 66, .94);
+    color: #a9eee0;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .3), inset 0 1px rgba(151, 236, 218, .12);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+    transition: opacity .2s ease, transform .2s ease, background .2s ease;
+  }
+
+  .v26App .mobileBackTop.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .v26App .mobileBackTop:hover,
+  .v26App .mobileBackTop:focus-visible {
+    background: #1f6b65;
+  }
+
+  .v26App .mobileBackTop svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .v26App .v26Header {
+    border: 1px solid rgba(99, 174, 171, .38);
+    background: linear-gradient(135deg, #152a3a 0%, #102333 62%, #132d37 100%);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .26), inset 0 1px rgba(131, 216, 203, .1);
+  }
+
+  .v26App .v26Header::before {
+    right: 14px;
+    left: 14px;
+    height: 2px;
+    background: linear-gradient(90deg, #efc45b, #6bd8c0, transparent);
+    opacity: .9;
+  }
+
+  .v26App .v26Brand > span {
+    background: linear-gradient(145deg, #75dfc0, #b0df77);
+    color: #102b2b;
+    box-shadow: 0 7px 18px rgba(80, 198, 157, .18), inset 0 0 0 1px rgba(195, 243, 174, .25);
+  }
+
+  .v26App .v26Refresh {
+    min-height: 40px;
+    height: 40px;
+    border: 1px solid rgba(114, 211, 188, .36);
+    border-radius: 11px;
+    background: #1b5a56;
+    box-shadow: none;
+  }
+
+  .v26App .v26ModeBar {
+    position: relative;
+    gap: 13px;
+    margin-top: 10px;
+    padding: 16px;
+    border: 1px solid rgba(97, 169, 171, .38);
+    border-radius: 19px;
+    background: linear-gradient(140deg, #182c3d, #132638 58%, #173542);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, .22), inset 0 1px rgba(135, 219, 206, .08);
+  }
+
+  .v26App .v26ModeBar::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 16px;
+    width: 62px;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
+    background: #efc45b;
+  }
+
+  .v26App .v26ModeBar::after {
+    display: none;
+  }
+
+  .v26App .v26ModeBar small {
+    color: #82c8bb;
+    font-size: 7px;
+    letter-spacing: .8px;
+  }
+
+  .v26App .v26ModeBar h1 {
+    max-width: 100%;
+    color: #e4f2f2;
+    font-size: 19px;
+    font-weight: 800;
+  }
+
+  .v26App .v26ModeBar aside {
+    gap: 3px 10px;
+    padding: 11px 12px;
+    border: 1px solid rgba(97, 164, 166, .28);
+    border-radius: 12px;
+    background: rgba(12, 29, 41, .64);
+    box-shadow: none;
+  }
+
+  .v26App .v26ModeBar aside span,
+  .v26App .v26ModeBar aside em {
+    color: #91adb6;
+  }
+
+  .v26App .v26ModeBar aside b {
+    color: #efc45b;
+  }
+
+  .v26App .v26MarketBar {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid rgba(91, 161, 166, .34);
+    border-radius: 18px;
+    background: linear-gradient(145deg, #142a3a, #112332);
+    box-shadow: 0 12px 26px rgba(0, 0, 0, .2), inset 0 1px rgba(132, 211, 204, .07);
+  }
+
+  .v26App .v26MarketTitle {
+    padding: 5px 6px 8px;
+    border-bottom: 1px solid rgba(95, 147, 159, .22);
+  }
+
+  .v26App .v26MarketTitle > svg {
+    background: linear-gradient(145deg, #70d9bd, #9fdc76);
+    color: #12322d;
+  }
+
+  .v26App .v26MarketTitle small {
+    color: #82a8b1;
+  }
+
+  .v26App .v26MarketTitle b {
+    color: #e4f2f2;
+    font-size: 15px;
+  }
+
+  .v26App .v26MarketTitle strong {
+    background: #233744;
+    color: #a8c3c9;
+  }
+
+  .v26App .v26MarketPicker {
+    gap: 6px;
+  }
+
+  .v26App .v26MarketPicker input {
+    min-height: 42px;
+    grid-column: 1 / -1;
+    border: 1px solid rgba(93, 157, 168, .38) !important;
+    border-radius: 10px;
+    background: #0e1f2d !important;
+    color: #e3f1f2 !important;
+  }
+
+  .v26App .v26MarketPicker button {
+    min-height: 48px;
+    border: 1px solid rgba(90, 145, 157, .26);
+    border-radius: 11px;
+    background: #172d3d;
+  }
+
+  .v26App .v26MarketPicker button.active {
+    border-color: rgba(234, 193, 88, .58);
+    background: linear-gradient(145deg, #554525, #6a552c);
+    color: #ffe9a9;
+  }
+
+  .v26App .v26Intervals {
+    padding-top: 2px;
+  }
+
+  .v26App .v26Intervals button {
+    height: 38px;
+    border: 1px solid rgba(88, 145, 158, .22);
+    border-radius: 9px;
+    background: #142a3a;
+    color: #9db8bf;
+  }
+
+  .v26App .v26Intervals button.active {
+    background: #70592d;
+    color: #ffe7a0;
+    box-shadow: none;
+  }
+}

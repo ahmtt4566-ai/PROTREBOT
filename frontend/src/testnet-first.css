@@ -132,3 +132,139 @@ body{background:#f3f8e7}
   body{min-width:900px}.v26App{padding:10px}.v26Nav{position:relative;top:auto}.v26MarketBar{grid-template-columns:1fr}.v26Intervals{grid-column:auto}.v26SetupGrid{grid-template-columns:1fr}.v26GateList{grid-template-columns:repeat(2,1fr)}
   .v26SetupGrid>article{grid-template-columns:auto 1fr}.v26SetupGrid ul{grid-column:1/-1;grid-row:auto;grid-template-columns:1fr 1fr}.v26SetupGrid strong{grid-column:2}
 }
+
+@media (max-width:1024px) {
+/* Shared terminal skin: presentation-only, with unchanged component contracts. */
+.v26App .v26Header,
+.v26App .v26Nav,
+.v26App .v26ModeBar,
+.v26App .v26MarketBar,
+.v26App .v26Loading,
+.v26App .v26Footer,
+.v26App .demoCommandBar,
+.v26App .demoMessage,
+.v26App .demoAccountStrip,
+.v26App .demoLiveChart,
+.v26App .demoTicket,
+.v26App .demoPositions,
+.v26App .demoOrderPanel,
+.v26App .demoEventPanel,
+.v26App .v21Setup,
+.v26App .v21Tabs,
+.v26App .v21Pulse,
+.v26App .v21Workspace,
+.v26App .v21Card,
+.v26App .v21MetricRow,
+.v26App .v21JournalStats,
+.v26App .v21GateStrip,
+.v26App .v21BacktestMetrics,
+.v26App .v21SafetyLock,
+.v26App .v21ScannerHeader,
+.v26App .v21ScannerTop,
+.v26App .v21ScannerTable,
+.v26App .v21ScannerTrades {
+  border-color:var(--v26-line);
+  border-radius:6px;
+  background:var(--v26-bg-secondary);
+  box-shadow:none;
+  backdrop-filter:none;
+}
+
+.v26App .v26Header::before,
+.v26App .v26ModeBar::after,
+.v26App .v26Header::after {
+  display:none;
+}
+
+.v26App .v26Brand>span,
+.v26App .v26Nav button>svg,
+.v26App .v26Nav button.active>svg {
+  border-radius:6px;
+  background:var(--v26-bg-tertiary);
+  color:var(--v26-blue);
+  box-shadow:none;
+}
+
+.v26App .v26HeaderSignals>span,
+.v26App .v26ModeBar aside,
+.v26App .v26Nav button,
+.v26App .v26MarketPicker button,
+.v26App .v26Intervals button,
+.v26App .demoSidePicker button,
+.v26App .demoTypePicker button {
+  border-color:var(--v26-line);
+  border-radius:4px;
+  background:transparent;
+  color:var(--v26-muted);
+  box-shadow:none;
+}
+
+.v26App .v26Nav button.active,
+.v26App .v26MarketPicker button.active,
+.v26App .v26Intervals button.active {
+  border-color:rgba(33,150,243,.52);
+  background:rgba(33,150,243,.12);
+  color:#7dc4ff;
+  box-shadow:none;
+}
+
+.v26App .v26Nav button.active::after {
+  height:2px;
+  border-radius:0;
+  background:var(--v26-blue);
+}
+
+.v26App .v26Refresh,
+.v26App .demoSubmit,
+.v26App .demoConnect,
+.v26App .demoSetupCard button {
+  border:1px solid rgba(240,185,11,.7);
+  border-radius:4px;
+  background:var(--v26-action);
+  color:#17191d;
+  box-shadow:none;
+}
+
+.v26App .v26HeaderSignals .ok,
+.v26App .v21Running,
+.v26App .demoProfit,
+.v26App .demoLong {
+  border:1px solid rgba(38,166,154,.55);
+  border-radius:4px;
+  background:rgba(38,166,154,.1);
+  color:#66d8ca !important;
+}
+
+.v26App .v26HeaderSignals .locked,
+.v26App .v21Pending,
+.v26App .demoTest {
+  border:1px solid rgba(240,185,11,.55);
+  border-radius:4px;
+  background:rgba(240,185,11,.1);
+  color:#f5cf62 !important;
+}
+
+.v26App .demoLoss,
+.v26App .demoShort,
+.v26App .demoEmergency {
+  border:1px solid rgba(239,83,80,.58);
+  border-radius:4px;
+  background:rgba(239,83,80,.1);
+  color:#ff8986 !important;
+}
+
+.v26App input,
+.v26App select,
+.v26App textarea,
+.v26App .demoFieldGrid label>div,
+.v26App .demoPositionMetrics span,
+.v26App .demoOrderPanel article,
+.v26App .demoEventPanel article,
+.v26App .v21JournalStats span,
+.v26App .v21BacktestMetrics span {
+  border-color:var(--v26-line) !important;
+  border-radius:4px;
+  background:var(--v26-bg-tertiary) !important;
+  color:var(--v26-ink) !important;
+}
+}

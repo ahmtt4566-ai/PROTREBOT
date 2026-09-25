@@ -1,0 +1,553 @@
+@media (max-width: 1024px) {
+:root {
+  --v26-ink: #e7f0f5;
+  --v26-muted: #8ba2b2;
+  --v26-green: #45d483;
+  --v26-green-deep: #1fa866;
+  --v26-lime: #8be28e;
+  --v26-yellow: #e6b85c;
+  --v26-red: #f27676;
+  --v26-line: rgba(111, 157, 183, .24);
+  --v26-card: rgba(16, 28, 41, .94);
+  --v26-shadow: 0 18px 52px rgba(0, 0, 0, .28), 0 2px 8px rgba(0, 0, 0, .18);
+}
+
+html,
+body {
+  background: #08111a;
+}
+
+body {
+  color: var(--v26-ink);
+}
+
+.v26App {
+  color: var(--v26-ink);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(44, 130, 151, .18), transparent 27%),
+    radial-gradient(circle at 94% 12%, rgba(58, 111, 170, .16), transparent 29%),
+    linear-gradient(145deg, #08111a 0%, #0d1925 56%, #101b28 100%);
+}
+
+.v26App::before {
+  background: rgba(47, 155, 160, .08);
+  box-shadow: 0 0 0 70px rgba(63, 116, 170, .04);
+}
+
+.v26App::after {
+  background: rgba(41, 116, 151, .08);
+  box-shadow: 0 0 0 65px rgba(88, 142, 188, .04);
+}
+
+.v26Header,
+.v26ModeBar,
+.v26MarketBar,
+.v26Loading,
+.v26Footer,
+.demoHero,
+.demoSetupCard,
+.demoCommandBar,
+.demoMessage,
+.demoAccountStrip,
+.demoLiveChart,
+.demoTicket,
+.demoPositions,
+.demoOrderPanel,
+.demoEventPanel,
+.v21Setup,
+.v21Tabs,
+.v21Pulse,
+.v21Workspace,
+.v21Card,
+.v21MetricRow,
+.v21JournalStats,
+.v21GateStrip,
+.v21BacktestMetrics,
+.v21SafetyLock,
+.v21ScannerHeader,
+.v21ScannerTop,
+.v21ScannerTable,
+.v21ScannerTrades {
+  color: var(--v26-ink);
+  border-color: rgba(103, 144, 170, .28);
+  background: linear-gradient(145deg, rgba(18, 33, 47, .96), rgba(12, 23, 35, .96));
+  box-shadow: var(--v26-shadow);
+}
+
+.v26Header,
+.v26ModeBar,
+.demoHero,
+.demoSetupCard,
+.v21ScannerHeader {
+  background: linear-gradient(120deg, #142737, #102131 62%, #172b3a);
+}
+
+.v26Header::before {
+  background: linear-gradient(90deg, #35c9c2, #70d99d, #e6b85c);
+}
+
+.v26Brand > span,
+.v26MarketTitle > svg,
+.v26Nav button.active > svg,
+.v26GateList article > span,
+.v21GateStrip span > b,
+.v21LargeEmpty svg {
+  color: #07151c;
+  background: linear-gradient(145deg, #78e2c4, #8be28e);
+}
+
+.v26Brand small,
+.v26ModeBar small,
+.v26ModeBar p,
+.v26MarketTitle small,
+.v26MarketPicker span,
+.v26Nav small,
+.v26Footer,
+.demoHeroCopy p,
+.demoLiveChart > header small,
+.v21ScannerHeader p,
+.v21Card > header small {
+  color: var(--v26-muted);
+}
+
+.v26HeaderSignals > span,
+.v26ModeBar aside,
+.v26Nav,
+.v26MarketPicker button,
+.v26Intervals button,
+.demoCommandBar > label,
+.demoCommandBar > div,
+.demoAccountStrip article,
+.demoChartCanvas,
+.demoSidePicker button,
+.demoTypePicker button,
+.demoFieldGrid input,
+.demoFieldGrid select,
+.demoFieldGrid label > div,
+.demoPositionMetrics span,
+.demoOrderPanel article,
+.demoPositionList > article,
+.demoPositionMap,
+.demoLeverageAudit,
+.v21GateStrip span,
+.v21JournalStats span,
+.v21BacktestMetrics span,
+.v21CalcQuote > span,
+.v21CalcQuote > label,
+.v21SettingsGrid > label:not(.v21Switch),
+.v21AutoRules label:not(.v21Switch) {
+  border-color: rgba(92, 132, 157, .28);
+  background: rgba(20, 36, 50, .78);
+  color: var(--v26-ink);
+}
+
+.v26HeaderSignals > span,
+.v26Nav button,
+.v26Intervals button,
+.demoSidePicker button,
+.demoTypePicker button {
+  color: #a9bcc8;
+}
+
+.v26HeaderSignals .ok,
+.v26HeaderSignals .locked,
+.v26Nav button.active,
+.v26Nav button.liveTab.active,
+.v26MarketPicker button.active,
+.v26Intervals button.active,
+.demoTypePicker .activeType,
+.demoCommandBar > div,
+.v21Running {
+  border-color: rgba(103, 211, 158, .5);
+  background: linear-gradient(135deg, rgba(24, 75, 75, .9), rgba(24, 81, 62, .86));
+  color: #d6f8e6;
+}
+
+.v26HeaderSignals .locked,
+.demoSetupCard,
+.v21Pending {
+  border-color: rgba(230, 184, 92, .46);
+  background: linear-gradient(135deg, rgba(77, 62, 30, .8), rgba(43, 43, 28, .9));
+  color: #f1d895;
+}
+
+.v26Refresh,
+.v21Card > button,
+.v21ScannerHeader button,
+.demoSubmit,
+.demoSetupCard button,
+.demoConnect {
+  background: linear-gradient(135deg, #167d78, #259e70);
+  color: #f2fffb;
+  box-shadow: 0 10px 24px rgba(18, 132, 115, .24);
+}
+
+.v26Nav button:hover,
+.v26MarketPicker button:hover,
+.demoSidePicker button:hover,
+.demoTypePicker button:hover {
+  background: rgba(39, 67, 84, .88);
+}
+
+.v26MarketTitle strong,
+.demoTest,
+.demoLock,
+.v21EmptyMini {
+  background: rgba(32, 49, 62, .9);
+  color: #a9bdc8;
+}
+
+.v26MarketTitle strong.long,
+.demoProfit,
+.v21HealthNode.healthy .v21HealthDot {
+  background: rgba(46, 145, 101, .28);
+  color: #76e4a5 !important;
+}
+
+.v26MarketTitle strong.short,
+.demoLoss {
+  background: rgba(145, 57, 70, .28);
+  color: #ff9292 !important;
+}
+
+.demoHeroCopy h2,
+.demoLiveChart > header h3,
+.demoTicket > header h3,
+.demoPositions > header h3,
+.demoOrderPanel > header h3,
+.demoEventPanel > header h3,
+.v21ScannerHeader h2,
+.v21WorkspaceHead h2,
+.v21Card > header h3 {
+  color: #edf6fa;
+}
+
+.demoHeroCopy > span,
+.demoHeroStatus > span,
+.demoSetupCard > div > svg,
+.demoAccountStrip svg,
+.demoPositionMetrics span,
+.demoMapRail::before,
+.demoExposure span,
+.demoTicketFeedback,
+.v21CalcQuote > span,
+.v21RiskResult span {
+  background: rgba(26, 53, 64, .86);
+  border-color: rgba(91, 145, 157, .28);
+  color: #b9ccd4;
+}
+
+.demoHeroCopy > div b,
+.demoSidePicker .activeLong,
+.demoSubmit,
+.demoLong,
+.v21AutoBotGrid button {
+  background: linear-gradient(135deg, #16866d, #2aae72);
+  color: #effff8;
+}
+
+.demoSidePicker .activeShort,
+.demoEmergency,
+.v21AutoBotGrid button.stop {
+  background: linear-gradient(135deg, #a94756, #d56862);
+  color: #fff4f4;
+}
+
+.demoPositionList > article,
+.demoOrderPanel article.demoOrderItem.buy,
+.demoOrderPanel article.demoOrderItem.sell,
+.demoOrderPanel article.demoAlgoOrder.close,
+.demoOrderPanel article.demoAlgoOrder.hedge {
+  background: linear-gradient(145deg, rgba(23, 42, 55, .96), rgba(14, 28, 41, .96));
+  border-color: rgba(96, 139, 160, .28);
+}
+
+.demoPositionList > article > header b,
+.demoPositionMetrics b,
+.demoOrderPanel article b,
+.demoEventPanel article b,
+.v21JournalStats b,
+.v21BacktestMetrics b {
+  color: #dcebf1;
+}
+
+.demoPositionMetrics small,
+.demoOrderPanel article small,
+.demoEventPanel article small,
+.demoEventPanel time,
+.demoTicketNote,
+.v21JournalStats small,
+.v21BacktestMetrics small {
+  color: #8199a8;
+}
+
+.demoPositionMetrics span,
+.demoLeverageAudit,
+.demoEventPanel article,
+.demoTicket > header,
+.demoPositions > header,
+.demoOrderPanel > header,
+.demoEventPanel > header,
+.demoLiveChart > header {
+  border-color: rgba(89, 130, 153, .24);
+}
+
+input,
+select,
+textarea {
+  color-scheme: dark;
+}
+
+.v26App input,
+.v26App select,
+.v26App textarea {
+  border-color: rgba(92, 132, 157, .42) !important;
+  background: #0d1c29 !important;
+  color: #e5f0f4 !important;
+}
+
+.v26App input::placeholder {
+  color: #708a9a;
+}
+
+.demoConfirmation,
+.demoConfirmation input {
+  border-color: rgba(92, 143, 158, .42);
+  background: linear-gradient(145deg, #172b3b, #0e1d2b);
+  color: #e7f1f5;
+}
+
+.demoConfirmation p,
+.demoConfirmation label span {
+  color: #91a7b3;
+}
+
+.v21Workspace,
+.v21CockpitSummary,
+.v21SystemHealthCenter,
+.v21RiskRadar,
+.v21SmartAlerts,
+.v21ActivityTimeline,
+.v21AutoBotDashboard,
+.v21AutoActivityCenter {
+  background: linear-gradient(145deg, rgba(9, 18, 28, .98), rgba(15, 31, 42, .98));
+  border-color: rgba(86, 133, 153, .34);
+}
+
+.v21CockpitCard,
+.v21HealthNode,
+.v21RiskRadarGrid article,
+.v21Alert,
+.v21AutoActivityCard,
+.v21AutoActivityMetricRow > div,
+.v21AutoActivityCandidate,
+.v21AutoBotGrid > div {
+  background: linear-gradient(180deg, rgba(22, 42, 55, .96), rgba(12, 26, 39, .98));
+  border-color: rgba(91, 134, 155, .3);
+}
+
+.v21CockpitCard small,
+.v21HealthNode p,
+.v21ActivityList span,
+.v21AutoActivityNote,
+.v21AutoActivityMetricRow small,
+.v21AutoBotGrid small {
+  color: #8ca5b2;
+}
+
+.v21CockpitCard strong,
+.v21HealthNodeHeader strong,
+.v21AutoBotGrid strong,
+.v21AutoActivityMetricRow b,
+.v21AlertBody strong {
+  color: #e4f1f4;
+}
+
+.v21SectionKicker span,
+.v21WorkspaceHead > div > span,
+.v21AutoActivityCard > header span {
+  color: #70d7ba;
+}
+
+.v26Footer b {
+  color: #73ddb2;
+}
+
+.v26Footer em,
+.v21RiskRadarGrid strong {
+  color: #e6c878;
+}
+
+/* Keep legacy light surfaces from leaking through the dark theme. */
+.v26App .demoHero,
+.v26App .demoSetupCard,
+.v26App .demoCommandBar,
+.v26App .demoMessage,
+.v26App .demoAccountStrip,
+.v26App .demoLiveChart,
+.v26App .demoTicket,
+.v26App .demoPositions,
+.v26App .demoOrderPanel,
+.v26App .demoEventPanel,
+.v26App .v21Setup,
+.v26App .v21ScannerHeader,
+.v26App .v21ScannerTop,
+.v26App .v21ScannerTable,
+.v26App .v21ScannerTrades,
+.v26App .v21JournalStats,
+.v26App .v21BacktestMetrics {
+  background: linear-gradient(145deg, #122536, #0c1b2a) !important;
+}
+
+.v26App header,
+.v26App .v21ScannerMetrics,
+.v26App .v21ScannerMetrics span {
+  background: #122536 !important;
+}
+
+.v26App header:not(.v26Header) {
+  color: var(--v26-ink);
+  height: auto;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.v26App .v21WorkspaceHead,
+.v26App .v21AutoActivityCard > header,
+.v26App .v21AutoBotDashboard > header,
+.v26App .v21Card > header,
+.v26App .v21ScannerTop > header,
+.v26App .v21ScannerTable > header,
+.v26App .v21ScannerTrades > header {
+  height: auto;
+  min-height: 0;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-bottom: 13px;
+}
+
+.v26App .v21WorkspaceHead > div,
+.v26App .v21AutoActivityCard > header > div,
+.v26App .v21Card > header > div {
+  min-width: 0;
+}
+
+.v26App .v21WorkspaceHead h2,
+.v26App .v21AutoActivityCard > header h3,
+.v26App .v21Card > header h3,
+.v26App .v21ScannerHeader h2 {
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.v26App .demoChartCanvas,
+.v26App .v26ChartShell,
+.v26App .demoPositionMap,
+.v26App .demoExposure span,
+.v26App .demoFieldGrid label > div,
+.v26App .demoOrderPanel article,
+.v26App .demoEventPanel article,
+.v26App .v21GateStrip span,
+.v26App .v21JournalStats span,
+.v26App .v21BacktestMetrics span,
+.v26App .v21CalcQuote > span,
+.v26App .v21CalcQuote > label,
+.v26App .v21RiskResult span {
+  background: #142838 !important;
+  border-color: rgba(93, 137, 160, .3) !important;
+}
+
+.v26App .demoSetupCard p,
+.v26App .demoTicketNote,
+.v26App .demoMessage,
+.v26App .v21ScannerHeader p,
+.v26App .v21JournalStats small,
+.v26App .v21BacktestMetrics small {
+  color: #9ab0bd !important;
+}
+
+/* Shared terminal tokens keep mobile semantics aligned with desktop. */
+.v26App,
+.v26App .v26Header,
+.v26App .v26ModeBar,
+.v26App .v26MarketBar,
+.v26App .demoCommandBar,
+.v26App .demoMessage,
+.v26App .demoAccountStrip,
+.v26App .demoLiveChart,
+.v26App .demoTicket,
+.v26App .demoPositions,
+.v26App .demoOrderPanel,
+.v26App .demoEventPanel,
+.v26App .v21Setup,
+.v26App .v21Tabs,
+.v26App .v21Pulse,
+.v26App .v21Workspace,
+.v26App .v21Card,
+.v26App .v21ScannerHeader,
+.v26App .v21ScannerTop,
+.v26App .v21ScannerTable,
+.v26App .v21ScannerTrades {
+  background: var(--v26-bg-secondary) !important;
+  border-color: var(--v26-line) !important;
+  border-radius: 6px;
+  box-shadow: none !important;
+  background-image: none !important;
+}
+
+.v26App .v26Brand > span,
+.v26App .v26Nav button > svg,
+.v26App .v26Nav button.active > svg {
+  background: var(--v26-bg-tertiary) !important;
+  color: var(--v26-blue) !important;
+  box-shadow: none !important;
+}
+
+.v26App .v26Nav button.active,
+.v26App .v26MarketPicker button.active,
+.v26App .v26Intervals button.active {
+  border-color: rgba(33, 150, 243, .52) !important;
+  background: rgba(33, 150, 243, .12) !important;
+  color: #7dc4ff !important;
+  box-shadow: none !important;
+}
+
+.v26App .v26Refresh,
+.v26App .demoSubmit,
+.v26App .demoConnect,
+.v26App .demoSetupCard button {
+  border: 1px solid rgba(240, 185, 11, .7) !important;
+  border-radius: 4px;
+  background: var(--v26-action) !important;
+  color: #17191d !important;
+  box-shadow: none !important;
+  background-image: none !important;
+}
+
+.v26App .v21Running,
+.v26App .demoProfit,
+.v26App .demoLong {
+  border-color: rgba(38, 166, 154, .55) !important;
+  border-radius: 4px;
+  background: rgba(38, 166, 154, .1) !important;
+  color: #66d8ca !important;
+}
+
+.v26App .v21Pending,
+.v26App .demoTest {
+  border-color: rgba(240, 185, 11, .55) !important;
+  border-radius: 4px;
+  background: rgba(240, 185, 11, .1) !important;
+  color: #f5cf62 !important;
+}
+
+.v26App .demoLoss,
+.v26App .demoShort,
+.v26App .demoEmergency {
+  border-color: rgba(239, 83, 80, .58) !important;
+  border-radius: 4px;
+  background: rgba(239, 83, 80, .1) !important;
+  color: #ff8986 !important;
+}
+}
