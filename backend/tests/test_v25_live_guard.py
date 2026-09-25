@@ -89,6 +89,26 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(result["external_income"][0]["income"], "0.06")
         self.assertEqual({(method, path) for method, path, _ in calls}, {("GET", "/fapi/v1/userTrades"), ("GET", "/fapi/v1/income")})
 
+    def test_external_history_discovers_symbols_from_binance_income(self):
+        state = initial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        request = SimpleNamespace(app=application)
+
+        class IncomeDiscoveryClient:
+            async def signed(self, method, path, params):
+                if path.endswith("income") and "symbol" not in params:
+                    return [{"incomeType": "REALIZED_PNL", "symbol": "4USDT", "income": "-2.7", "asset": "USDT", "time": 1790314375000}]
+                if path.endswith("userTrades"):
+                    return [{"id": 1, "orderId": 2, "side": "SELL", "price": "0.02", "qty": "1", "realizedPnl": "-2.7", "time": 1790314375000}]
+                return []
+
+        with patch.object(v25_execution, "execution_owner", return_value={}), patch.object(v25_execution, "client_for", return_value=IncomeDiscoveryClient()):
+            result = asyncio.run(v25_execution.v25_history(request, symbol=None, limit=100))
+
+        self.assertEqual(result["symbols"], ["4USDT"])
+        self.assertEqual(len(result["external_trades"]), 1)
+        self.assertEqual(result["external_income"][0]["income"], "-2.7")
+
     def test_default_live_policy_raises_leverage_only(self):
         policy = initial_state()["policy"]
         self.assertEqual(policy["max_leverage"], 30)

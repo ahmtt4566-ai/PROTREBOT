@@ -3341,7 +3341,23 @@ async def v25_history(
         for item in state.get("plans", {}).values()
         if isinstance(item, dict) and item.get("symbol")
     )
-    symbols = [requested_symbol] if requested_symbol else sorted(item for item in known_symbols if item.endswith("USDT"))[:12]
+    errors: list[dict[str, str]] = []
+    bootstrap_income: dict[str, list[dict[str, Any]]] = {}
+    if requested_symbol:
+        symbols = [requested_symbol]
+    else:
+        try:
+            income_payload = await client.signed("GET", "/fapi/v1/income", {"incomeType": "REALIZED_PNL", "limit": limit})
+            for row in response_rows(income_payload):
+                if not isinstance(row, dict) or str(row.get("incomeType") or "") != "REALIZED_PNL":
+                    continue
+                item_symbol = str(row.get("symbol") or "").upper()
+                if item_symbol.endswith("USDT"):
+                    bootstrap_income.setdefault(item_symbol, []).append(row)
+        except LiveExchangeError as exc:
+            errors = [{"symbol": "*", "message": sanitized_exception_message(exc)}]
+            bootstrap_income = {}
+        symbols = sorted(set(item for item in known_symbols if item.endswith("USDT")) | set(bootstrap_income))[:12]
     tracked_order_ids = {
         int(order_id)
         for plan in state.get("plans", {}).values()
@@ -3358,13 +3374,10 @@ async def v25_history(
     }
     external_trades: list[dict[str, Any]] = []
     external_income: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
     for item_symbol in symbols:
         try:
-            trades_payload, income_payload = await asyncio.gather(
-                client.signed("GET", "/fapi/v1/userTrades", {"symbol": item_symbol, "limit": limit}),
-                client.signed("GET", "/fapi/v1/income", {"symbol": item_symbol, "incomeType": "REALIZED_PNL", "limit": limit}),
-            )
+            trades_payload = await client.signed("GET", "/fapi/v1/userTrades", {"symbol": item_symbol, "limit": limit})
+            income_payload = bootstrap_income[item_symbol] if item_symbol in bootstrap_income else await client.signed("GET", "/fapi/v1/income", {"symbol": item_symbol, "incomeType": "REALIZED_PNL", "limit": limit})
         except LiveExchangeError as exc:
             errors.append({"symbol": item_symbol, "message": sanitized_exception_message(exc)})
             continue
