@@ -639,6 +639,22 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
   const performanceTrend: number[] = []
   const openPositions = account?.positions ?? []
+  const protectionOrders = [...(account?.open_orders ?? []), ...(account?.open_algo_orders ?? [])]
+  const protectionLevel = (order: AccountOrder) => {
+    const value = order.trigger_price ?? order.price
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  }
+  const liveProtectionLevels = (position: AccountPosition) => {
+    const expectedSide = position.direction === 'LONG' ? 'SELL' : 'BUY'
+    const symbolOrders = protectionOrders.filter(order => order.symbol === position.symbol && String(order.side || '').toUpperCase() === expectedSide)
+    const stopOrder = symbolOrders.find(order => String(order.type || '').toUpperCase() === 'STOP_MARKET')
+    const targetOrders = symbolOrders
+      .filter(order => String(order.type || '').toUpperCase() === 'TAKE_PROFIT_MARKET')
+      .map(order => ({ order, level: protectionLevel(order) }))
+      .filter((item): item is { order: AccountOrder; level: number } => item.level !== undefined)
+      .sort((left, right) => position.direction === 'LONG' ? left.level - right.level : right.level - left.level)
+    return { stopLoss: protectionLevel(stopOrder || {}), target: targetOrders[0]?.level }
+  }
   const openRiskValues = openPositions.map(position => {
     const plan = account?.plans?.find(item => item.symbol === position.symbol)
     const stopLoss = position.stop_loss ?? (plan?.stop_loss ? Number(plan.stop_loss) : undefined)
@@ -973,8 +989,9 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 <tbody>
                   {accountSyncState === 'DISCONNECTED' ? <tr><td colSpan={13} className="emptyState">ACCOUNT DISCONNECTED</td></tr> : accountSyncState === 'DATA_UNAVAILABLE' ? <tr><td colSpan={13} className="emptyState">POSITIONS UNAVAILABLE</td></tr> : accountSyncState === 'STALE' ? <tr><td colSpan={13} className="emptyState">STALE DATA</td></tr> : openPositions.length ? openPositions.map((position) => {
                     const plan = account?.plans?.find(item => item.symbol === position.symbol)
-                    const stopLoss = position.stop_loss ?? (plan?.stop_loss ? Number(plan.stop_loss) : undefined)
-                    const target = plan?.targets?.[0] ? Number(plan.targets[0]) : position.tp1
+                    const liveLevels = liveProtectionLevels(position)
+                    const stopLoss = position.stop_loss ?? (plan?.stop_loss ? Number(plan.stop_loss) : undefined) ?? liveLevels.stopLoss
+                    const target = plan?.targets?.[0] ? Number(plan.targets[0]) : position.tp1 ?? liveLevels.target
                     return (
                     <tr key={position.symbol}>
                       <td><strong>{position.symbol}</strong><span className="positionAge">{position.age || '--'}</span></td>
