@@ -387,7 +387,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
   useEffect(() => {
     if (!active || !status) return
-    void call<ExternalHistory>(V25, '/history').then(setExternalHistory).catch(() => setExternalHistory(null))
+    void call<ExternalHistory>(V25, '/history?limit=1000').then(setExternalHistory).catch(() => setExternalHistory(null))
   }, [active, status?.events?.length, status?.plans?.length])
   const ownershipUncertain = status?.events?.find(event => String(event.kind) === 'OWNERSHIP_UNCERTAIN')
   const latestSignal = activity.find(event => /SIGNAL|ENTRY|ORDER|SCAN|CANDIDATE/i.test(String(event.kind || '')))

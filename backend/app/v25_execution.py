@@ -3324,7 +3324,7 @@ async def v25_status(request: Request) -> dict[str, Any]:
 async def v25_history(
     request: Request,
     symbol: str | None = Query(default=None, min_length=5, max_length=20),
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: int = Query(default=1000, ge=1, le=1000),
 ) -> dict[str, Any]:
     """Read-only Binance history for fills without a matching V25 plan."""
     execution_owner(request)
@@ -3342,12 +3342,13 @@ async def v25_history(
         if isinstance(item, dict) and item.get("symbol")
     )
     errors: list[dict[str, str]] = []
+    start_time = int((time.time() - 180 * 24 * 60 * 60) * 1000)
     bootstrap_income: dict[str, list[dict[str, Any]]] = {}
     if requested_symbol:
         symbols = [requested_symbol]
     else:
         try:
-            income_payload = await client.signed("GET", "/fapi/v1/income", {"incomeType": "REALIZED_PNL", "limit": limit})
+            income_payload = await client.signed("GET", "/fapi/v1/income", {"incomeType": "REALIZED_PNL", "startTime": start_time, "limit": limit})
             for row in response_rows(income_payload):
                 if not isinstance(row, dict) or str(row.get("incomeType") or "") != "REALIZED_PNL":
                     continue
@@ -3376,8 +3377,8 @@ async def v25_history(
     external_income: list[dict[str, Any]] = []
     for item_symbol in symbols:
         try:
-            trades_payload = await client.signed("GET", "/fapi/v1/userTrades", {"symbol": item_symbol, "limit": limit})
-            income_payload = bootstrap_income[item_symbol] if item_symbol in bootstrap_income else await client.signed("GET", "/fapi/v1/income", {"symbol": item_symbol, "incomeType": "REALIZED_PNL", "limit": limit})
+            trades_payload = await client.signed("GET", "/fapi/v1/userTrades", {"symbol": item_symbol, "startTime": start_time, "limit": limit})
+            income_payload = bootstrap_income[item_symbol] if item_symbol in bootstrap_income else await client.signed("GET", "/fapi/v1/income", {"symbol": item_symbol, "incomeType": "REALIZED_PNL", "startTime": start_time, "limit": limit})
         except LiveExchangeError as exc:
             errors.append({"symbol": item_symbol, "message": sanitized_exception_message(exc)})
             continue
