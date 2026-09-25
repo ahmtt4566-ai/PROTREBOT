@@ -1,8 +1,12 @@
+import asyncio
 import os
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import httpx
 
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -37,6 +41,28 @@ class HttpClientProxyTests(unittest.TestCase):
         self.assertNotIn(proxy_url, str(context.exception))
         self.assertNotIn("proxy-secret", str(context.exception))
         self.assertIn("QUOTAGUARD_URL", str(context.exception))
+
+    def test_market_data_request_returns_normal_response(self):
+        response = httpx.Response(200, json={"ok": True}, request=httpx.Request("GET", "https://example.test"))
+
+        class FastClient:
+            async def get(self, url, params=None):
+                return response
+
+        application = SimpleNamespace(state=SimpleNamespace(http=FastClient()))
+        result = asyncio.run(main_module.market_data_request(application, "/fapi/v1/ping"))
+
+        self.assertIs(result, response)
+
+    def test_market_data_request_is_bounded_when_rate_limit_wait_hangs(self):
+        class HangingClient:
+            async def get(self, url, params=None):
+                await asyncio.Event().wait()
+
+        application = SimpleNamespace(state=SimpleNamespace(http=HangingClient()))
+        with patch.object(main_module, "MARKET_DATA_REQUEST_TIMEOUT_SECONDS", 0.01):
+            with self.assertRaises(httpx.ReadTimeout):
+                asyncio.run(main_module.market_data_request(application, "/fapi/v1/ping"))
 
 
 if __name__ == "__main__":

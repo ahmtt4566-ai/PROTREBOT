@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 
 BINANCE_API = "https://api.binance.com"
 FUTURES_MARKET_DATA_API = DEMO_REST_BASE
+MARKET_DATA_REQUEST_TIMEOUT_SECONDS = max(1.0, float(os.getenv("MARKET_DATA_REQUEST_TIMEOUT_SECONDS", "8")))
 LEGACY_PAPER_CONTRACT = 'version="20.2.0"'
 LEGACY_V25_API_CONTRACT = 'version="25.0.0"'
 DEPLOYMENT_PATCH = "28.0.0-in-app-encrypted-exchange-vault"
@@ -1408,18 +1409,34 @@ async def market_data_request(application: FastAPI, path: str, params: dict[str,
     """Retry only transient public market-data failures; preserve final error mapping."""
     application.state.http = await ensure_http_client(application)
     last_error: httpx.HTTPError | None = None
+    deadline = time.monotonic() + MARKET_DATA_REQUEST_TIMEOUT_SECONDS
     for attempt in range(3):
-        try:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        async def request() -> httpx.Response:
             async with BINANCE_RATE_LIMITER.slot(FUTURES_MARKET_DATA_API) as rate_limit:
                 response = await application.state.http.get(f"{FUTURES_MARKET_DATA_API}{path}", params=params)
                 rate_limit.observe(response)
+                return response
+
+        try:
+            response = await asyncio.wait_for(request(), timeout=remaining)
             if response.status_code not in {500, 502, 503, 504} or attempt == 2:
                 return response
+        except asyncio.TimeoutError as exc:
+            last_error = httpx.ReadTimeout("Binance Futures market data request timed out")
+            if attempt == 2:
+                raise last_error from exc
         except httpx.RequestError as exc:
             last_error = exc
             if attempt == 2:
                 raise
-        await asyncio.sleep(0.5 * (2 ** attempt))
+        retry_delay = min(0.5 * (2 ** attempt), max(0.0, deadline - time.monotonic()))
+        if retry_delay <= 0:
+            break
+        await asyncio.sleep(retry_delay)
     if last_error is not None:
         raise last_error
     raise RuntimeError("Market data request retry loop ended unexpectedly")
