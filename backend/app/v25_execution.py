@@ -477,6 +477,10 @@ class RiskPreviewRequest(BaseModel):
     atr: float | None = Field(default=None, gt=0)
 
 
+class AdoptExternalPositionPreviewRequest(BaseModel):
+    symbol: str = Field(min_length=5, max_length=20)
+
+
 class ManualLiveOrderRequest(LiveOrderRequest):
     confirmation: str = Field(min_length=1, max_length=64)
 
@@ -2185,6 +2189,164 @@ def provenance_failure_details(plan: dict[str, Any], position: dict[str, Any] | 
     return failures or ["plan_not_confirmed"]
 
 
+def protection_trigger_price(order: dict[str, Any]) -> Decimal:
+    value = order.get("trigger_price")
+    if value is None:
+        value = order.get("triggerPrice")
+    if value is None:
+        value = order.get("stop_price")
+    if value is None:
+        value = order.get("stopPrice")
+    try:
+        parsed = Decimal(str(value))
+        return parsed if parsed.is_finite() else Decimal("0")
+    except (TypeError, ValueError, ArithmeticError):
+        return Decimal("0")
+
+
+def find_candidate_protection_orders(
+    symbol: str,
+    position_side: str,
+    position_qty: Decimal | str | float,
+    open_algo_orders: list[dict[str, Any]],
+    step_size: Decimal | str | float,
+) -> dict[str, list[dict[str, Any]]]:
+    """Classify PTBLV protection orders without exchange or state access."""
+    expected_side = {
+        "LONG": "SELL",
+        "SHORT": "BUY",
+    }.get(str(position_side).upper())
+
+    try:
+        expected_quantity = Decimal(str(position_qty))
+        quantity_step = Decimal(str(step_size))
+    except (TypeError, ValueError, ArithmeticError):
+        return {
+            "stop_loss_candidates": [],
+            "target_candidates": [],
+            "matched": [],
+            "unmatched": [{
+                "reason": "INVALID_POSITION_QUANTITY_OR_STEP_SIZE",
+                "orders": list(open_algo_orders or []),
+            }],
+        }
+
+    if (
+        not expected_side
+        or not expected_quantity.is_finite()
+        or expected_quantity <= 0
+        or not quantity_step.is_finite()
+        or quantity_step <= 0
+    ):
+        return {
+            "stop_loss_candidates": [],
+            "target_candidates": [],
+            "matched": [],
+            "unmatched": [{
+                "reason": "INVALID_POSITION_SIDE_QUANTITY_OR_STEP_SIZE",
+                "orders": list(open_algo_orders or []),
+            }],
+        }
+
+    normalized_symbol = str(symbol or "").upper()
+    stop_loss_candidates: list[dict[str, Any]] = []
+    target_candidates: list[dict[str, Any]] = []
+    matched: list[dict[str, Any]] = []
+    unmatched: list[dict[str, Any]] = []
+
+    for order in open_algo_orders or []:
+        if not isinstance(order, dict):
+            continue
+
+        client_algo_id = str(
+            order.get("client_algo_id")
+            or order.get("clientAlgoId")
+            or order.get("client_order_id")
+            or order.get("clientOrderId")
+            or ""
+        )
+
+        # Non-V25 orders are outside external adoption scope.
+        if not client_algo_id.startswith(LIVE_CLIENT_PREFIX):
+            continue
+
+        raw_algo_id = order.get("algo_id")
+        if raw_algo_id is None:
+            raw_algo_id = order.get("algoId")
+        try:
+            algo_id = int(raw_algo_id)
+            if algo_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError, ArithmeticError):
+            algo_id = None
+
+        order_symbol = str(order.get("symbol") or "").upper()
+        order_side = str(order.get("side") or "").upper()
+        order_position_side = str(
+            order.get("position_side")
+            or order.get("positionSide")
+            or "BOTH"
+        ).upper()
+        order_type = str(order.get("type") or "").upper()
+        raw_quantity = order.get("quantity")
+        if raw_quantity is None:
+            raw_quantity = order.get("origQty")
+        if raw_quantity is None:
+            raw_quantity = order.get("qty")
+
+        try:
+            order_quantity = Decimal(str(raw_quantity))
+        except (TypeError, ValueError, ArithmeticError):
+            order_quantity = None
+
+        failures: list[str] = []
+        if algo_id is None:
+            failures.append("MISSING_ALGO_ID")
+        if order_symbol != normalized_symbol:
+            failures.append("SYMBOL_MISMATCH")
+        if order_side != expected_side:
+            failures.append("SIDE_MISMATCH")
+        if order_position_side != "BOTH":
+            failures.append("POSITION_SIDE_MISMATCH")
+        if (
+            order_quantity is None
+            or not order_quantity.is_finite()
+            or abs(order_quantity - expected_quantity) > quantity_step
+        ):
+            failures.append("QUANTITY_MISMATCH")
+
+        is_stop = order_type in {"STOP_MARKET", "STOP"}
+        is_target = order_type in {"TAKE_PROFIT_MARKET", "TAKE_PROFIT"}
+        if not is_stop and not is_target:
+            failures.append("UNSUPPORTED_PROTECTION_TYPE")
+
+        if failures:
+            unmatched.append({
+                "order": order,
+                "client_algo_id": client_algo_id,
+                "reasons": failures,
+            })
+            continue
+
+        matched.append(order)
+        if is_stop:
+            stop_loss_candidates.append(order)
+        else:
+            target_candidates.append(order)
+
+    target_candidates.sort(
+        key=protection_trigger_price,
+        reverse=str(position_side).upper() == "SHORT",
+    )
+
+    return {
+        "stop_loss_candidates": stop_loss_candidates,
+        "target_candidates": target_candidates,
+        "matched": matched,
+        "unmatched": unmatched,
+    }
+
+
 def owned_protection_rows(plan: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     expected = {
         str(value) for value in (
@@ -3616,6 +3778,158 @@ async def v25_risk_preview(request: Request, body: RiskPreviewRequest) -> dict[s
         "estimated_stop_loss_usdt": risk["estimated_stop_loss_usdt"],
         "capped": risk["capped"],
         "atr": risk["atr"],
+    }
+
+
+@router.post("/adopt-external-position/preview")
+async def v25_adopt_external_position_preview(
+    request: Request,
+    body: AdoptExternalPositionPreviewRequest,
+) -> dict[str, Any]:
+    execution_owner(request)
+    symbol = normalize_symbol(body.symbol)
+    client = client_for(request.app, request)
+    started_at = time.monotonic()
+
+    try:
+        position_payload = await client.signed(
+            "GET",
+            "/fapi/v3/positionRisk",
+            {"symbol": symbol},
+        )
+        open_algo_payload = await client.signed(
+            "GET",
+            "/fapi/v1/openAlgoOrders",
+            {"symbol": symbol},
+        )
+        exchange_info = await client.public_get("/fapi/v1/exchangeInfo")
+    except (LiveExchangeError, BinanceDemoError) as exc:
+        raise safe_exchange_error(exc) from exc
+
+    elapsed_seconds = time.monotonic() - started_at
+    warnings: list[str] = []
+    if elapsed_seconds > 2.0:
+        warnings.append("STALE_SNAPSHOT")
+
+    positions = [
+        row for row in response_rows(position_payload)
+        if isinstance(row, dict)
+        and str(row.get("symbol") or "").upper() == symbol
+        and Decimal(str(row.get("positionAmt") or "0")) != 0
+    ]
+    if not positions:
+        raise HTTPException(404, "NO_POSITION")
+    if len(positions) > 1:
+        raise HTTPException(422, "AMBIGUOUS_POSITION")
+
+    position = positions[0]
+    try:
+        position_amount = Decimal(str(position.get("positionAmt")))
+        position_quantity = abs(position_amount)
+    except (TypeError, ValueError, ArithmeticError) as exc:
+        raise HTTPException(422, "NO_POSITION") from exc
+
+    direction = "LONG" if position_amount > 0 else "SHORT"
+    exchange_symbol = next(
+        (
+            row for row in exchange_info.get("symbols", [])
+            if isinstance(row, dict) and str(row.get("symbol") or "").upper() == symbol
+        ),
+        None,
+    )
+    if not exchange_symbol:
+        raise HTTPException(422, f"{symbol} exchangeInfo içinde bulunamadı.")
+    filters = {
+        item.get("filterType"): item
+        for item in exchange_symbol.get("filters", [])
+        if isinstance(item, dict)
+    }
+    lot_filter = filters.get("LOT_SIZE") or {}
+    step_size = lot_filter.get("stepSize")
+    if step_size is None:
+        raise HTTPException(422, f"{symbol} için LOT_SIZE stepSize bulunamadı.")
+
+    normalized_open_algo_orders = []
+    for item in response_rows(open_algo_payload):
+        if not isinstance(item, dict):
+            continue
+        raw_algo_id = item.get("algoId")
+        try:
+            algo_id = int(raw_algo_id) if raw_algo_id is not None else None
+        except (TypeError, ValueError, ArithmeticError):
+            algo_id = None
+        normalized_open_algo_orders.append({
+            "symbol": item.get("symbol"),
+            "algo_id": algo_id,
+            "client_algo_id": item.get("clientAlgoId"),
+            "side": item.get("side"),
+            "type": item.get("orderType", item.get("type")),
+            "status": item.get("algoStatus", item.get("status")),
+            "trigger_price": item.get("triggerPrice", item.get("stopPrice")),
+            "quantity": item.get("quantity", item.get("origQty", 0)) or 0,
+            "position_side": item.get("positionSide", "BOTH"),
+        })
+
+    candidates = find_candidate_protection_orders(
+        symbol=symbol,
+        position_side=direction,
+        position_qty=position_quantity,
+        open_algo_orders=normalized_open_algo_orders,
+        step_size=step_size,
+    )
+    stop_candidates = candidates["stop_loss_candidates"]
+    target_candidates = candidates["target_candidates"]
+    matched = candidates["matched"]
+    unmatched = candidates["unmatched"]
+
+    if not stop_candidates:
+        warnings.append("NO_PROTECTION_ORDERS")
+    if not target_candidates:
+        warnings.append("NO_TARGET_ORDERS")
+    if len(stop_candidates) > 1:
+        warnings.append("AMBIGUOUS_STOP")
+    target_prices = [protection_trigger_price(order) for order in target_candidates]
+    if len(target_prices) != len(set(target_prices)):
+        warnings.append("AMBIGUOUS_TARGET")
+    if unmatched:
+        warnings.append("PARTIAL_MATCH")
+
+    candidate_plan: dict[str, Any] | None = None
+    if (
+        stop_candidates
+        and len(stop_candidates) == 1
+        and target_candidates
+        and len(target_candidates) >= 1
+        and "AMBIGUOUS_STOP" not in warnings
+        and "AMBIGUOUS_TARGET" not in warnings
+    ):
+        candidate_plan = {
+            "symbol": symbol,
+            "direction": direction,
+            "quantity": str(position_quantity),
+            "entry_price": str(position.get("entryPrice")),
+            "stop_loss": str(protection_trigger_price(stop_candidates[0])),
+            "targets": [str(protection_trigger_price(order)) for order in target_candidates],
+            "protection_ids": [order["algo_id"] for order in matched],
+            "leverage": position.get("leverage"),
+            "margin_type": position.get("marginType"),
+            "provenance_state": "ADOPTED_EXTERNAL",
+            "source": "external_adoption",
+        }
+
+    confirm_token = None
+    if candidate_plan is not None:
+        serialized = json.dumps(candidate_plan, sort_keys=True, separators=(",", ":"))
+        confirm_token = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    return {
+        "would_create_plan": candidate_plan is not None,
+        "candidate_plan": candidate_plan,
+        "confirm_token": confirm_token,
+        "matched_protection_orders": matched,
+        "unmatched_protection_orders": unmatched,
+        "warnings": warnings,
+        "state_mutation": False,
     }
 
 
