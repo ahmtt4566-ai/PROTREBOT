@@ -2288,6 +2288,13 @@ def find_candidate_protection_orders(
             or "BOTH"
         ).upper()
         order_type = str(order.get("type") or "").upper()
+        raw_close_position = order.get("close_position")
+        if raw_close_position is None:
+            raw_close_position = order.get("closePosition", False)
+        close_position = (
+            raw_close_position is True
+            or str(raw_close_position).lower() == "true"
+        )
         raw_quantity = order.get("quantity")
         if raw_quantity is None:
             raw_quantity = order.get("origQty")
@@ -2308,17 +2315,20 @@ def find_candidate_protection_orders(
             failures.append("SIDE_MISMATCH")
         if order_position_side != "BOTH":
             failures.append("POSITION_SIDE_MISMATCH")
-        if (
-            order_quantity is None
-            or not order_quantity.is_finite()
-            or abs(order_quantity - expected_quantity) > quantity_step
-        ):
-            failures.append("QUANTITY_MISMATCH")
 
         is_stop = order_type in {"STOP_MARKET", "STOP"}
         is_target = order_type in {"TAKE_PROFIT_MARKET", "TAKE_PROFIT"}
         if not is_stop and not is_target:
             failures.append("UNSUPPORTED_PROTECTION_TYPE")
+        elif is_stop and not close_position:
+            failures.append("UNSUPPORTED_PARTIAL_STOP")
+        elif is_target and not close_position and (
+            order_quantity is None
+            or not order_quantity.is_finite()
+            or order_quantity <= 0
+            or order_quantity - expected_quantity > quantity_step
+        ):
+            failures.append("QUANTITY_MISMATCH")
 
         if failures:
             unmatched.append({
@@ -2328,11 +2338,15 @@ def find_candidate_protection_orders(
             })
             continue
 
-        matched.append(order)
+        normalized_order = {
+            **order,
+            "close_position": close_position,
+        }
+        matched.append(normalized_order)
         if is_stop:
-            stop_loss_candidates.append(order)
+            stop_loss_candidates.append(normalized_order)
         else:
-            target_candidates.append(order)
+            target_candidates.append(normalized_order)
 
     target_candidates.sort(
         key=protection_trigger_price,
@@ -3868,6 +3882,7 @@ async def v25_adopt_external_position_preview(
             "trigger_price": item.get("triggerPrice", item.get("stopPrice")),
             "quantity": item.get("quantity", item.get("origQty", 0)) or 0,
             "position_side": item.get("positionSide", "BOTH"),
+            "close_position": str(item.get("closePosition", "false")).lower() == "true",
         })
 
     candidates = find_candidate_protection_orders(
@@ -3881,6 +3896,14 @@ async def v25_adopt_external_position_preview(
     target_candidates = candidates["target_candidates"]
     matched = candidates["matched"]
     unmatched = candidates["unmatched"]
+    close_all_targets = [
+        order for order in target_candidates
+        if order.get("close_position") is True
+    ]
+    partial_targets = [
+        order for order in target_candidates
+        if order.get("close_position") is not True
+    ]
 
     if not stop_candidates:
         warnings.append("NO_PROTECTION_ORDERS")
@@ -3891,6 +3914,25 @@ async def v25_adopt_external_position_preview(
     target_prices = [protection_trigger_price(order) for order in target_candidates]
     if len(target_prices) != len(set(target_prices)):
         warnings.append("AMBIGUOUS_TARGET")
+    if len(close_all_targets) > 1 and "AMBIGUOUS_TARGET" not in warnings:
+        warnings.append("AMBIGUOUS_TARGET")
+
+    partial_target_quantity = sum(
+        (Decimal(str(order.get("quantity"))) for order in partial_targets),
+        Decimal("0"),
+    )
+    quantity_tolerance = Decimal(str(step_size))
+    if partial_target_quantity - position_quantity > quantity_tolerance:
+        warnings.append("TARGET_QUANTITY_EXCEEDS_POSITION")
+    elif not close_all_targets and position_quantity - partial_target_quantity > quantity_tolerance:
+        warnings.append("INSUFFICIENT_TARGET_COVERAGE")
+
+    if any(
+        "UNSUPPORTED_PARTIAL_STOP" in item.get("reasons", [])
+        for item in unmatched
+        if isinstance(item, dict)
+    ):
+        warnings.append("UNSUPPORTED_PARTIAL_STOP")
     if unmatched:
         warnings.append("PARTIAL_MATCH")
 
@@ -3902,15 +3944,42 @@ async def v25_adopt_external_position_preview(
         and len(target_candidates) >= 1
         and "AMBIGUOUS_STOP" not in warnings
         and "AMBIGUOUS_TARGET" not in warnings
+        and "UNSUPPORTED_PARTIAL_STOP" not in warnings
+        and "INSUFFICIENT_TARGET_COVERAGE" not in warnings
+        and "TARGET_QUANTITY_EXCEEDS_POSITION" not in warnings
     ):
+        target_coverage = (
+            "PARTIAL_PLUS_CLOSE_ALL"
+            if close_all_targets
+            else "FULL_PARTIAL"
+        )
         candidate_plan = {
             "symbol": symbol,
             "direction": direction,
             "quantity": str(position_quantity),
             "entry_price": str(position.get("entryPrice")),
-            "stop_loss": str(protection_trigger_price(stop_candidates[0])),
-            "targets": [str(protection_trigger_price(order)) for order in target_candidates],
+            "stop_loss": {
+                "price": str(protection_trigger_price(stop_candidates[0])),
+                "close_position": stop_candidates[0].get("close_position") is True,
+                "quantity": None if stop_candidates[0].get("close_position") is True else str(stop_candidates[0].get("quantity")),
+                "algo_id": stop_candidates[0]["algo_id"],
+            },
+            "targets": [
+                {
+                    "price": str(protection_trigger_price(order)),
+                    "close_position": order.get("close_position") is True,
+                    "quantity": None if order.get("close_position") is True else str(order.get("quantity")),
+                    "algo_id": order["algo_id"],
+                }
+                for order in target_candidates
+            ],
             "protection_ids": [order["algo_id"] for order in matched],
+            "protection_schema": (
+                "PARTIAL_TARGETS_WITH_CLOSE_ALL_V1"
+                if close_all_targets
+                else "PARTIAL_TARGETS_FULL_COVERAGE_V1"
+            ),
+            "target_coverage": target_coverage,
             "leverage": position.get("leverage"),
             "margin_type": position.get("marginType"),
             "provenance_state": "ADOPTED_EXTERNAL",
