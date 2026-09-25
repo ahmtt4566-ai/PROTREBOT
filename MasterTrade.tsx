@@ -39,7 +39,7 @@ type ScannerCandidate = { symbol: string; direction: string; confidence: number;
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number }
 type Analysis = { direction?: string; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; risk_reward?: number; trend?: string; momentum?: string; rsi?: number; macd?: number; adx?: number; atr?: number; support?: number; resistance?: number; radar?: { trap_score?: number; breakout_quality?: number; entry_timing?: string }; volume_ratio?: number; normalized_signal?: string }
 type AccountPlan = { symbol?: string; stop_loss?: string; targets?: string[]; margin_usdt?: number; created_at?: string }
-type AccountPosition = { symbol: string; position_side?: 'BOTH' | 'LONG' | 'SHORT'; direction?: TradeSide; quantity?: number; entry_price?: number; mark_price?: number; liquidation_price?: number; unrealized_pnl?: number; leverage?: number | null; margin_type?: string | null; stop_loss?: number; tp1?: number; age?: string }
+type AccountPosition = { symbol: string; position_side?: 'BOTH' | 'LONG' | 'SHORT'; direction?: TradeSide; quantity?: number; entry_price?: number; mark_price?: number; liquidation_price?: number; unrealized_pnl?: number; leverage?: number | null; margin_type?: string | null; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; age?: string }
 type AccountOrder = { symbol?: string; side?: string; type?: string; price?: number; trigger_price?: number; quantity?: number; status?: string; reduce_only?: boolean }
 type AccountSnapshot = { wallet_balance?: number; available_balance?: number; margin_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; plans?: AccountPlan[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number; max_margin_usdt?: number } }
 type PerformanceSnapshot = { total_trades: number; wins: number; losses: number; win_rate: number; total_profit: number; total_loss: number; net_profit: number; average_trade: number; best_trade: number; worst_trade: number; profit_factor: number | null; average_win: number | null; average_loss: number | null; losing_streak: number; max_drawdown: number; history_quality: string }
@@ -93,9 +93,16 @@ const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}
 }
 
 const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
-  const responses = await Promise.all(MTF_INTERVALS.map(timeframe => fetch(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal })))
+  const responses = await Promise.all(MTF_INTERVALS.map(async timeframe => {
+    try {
+      return await fetchWithTimeout(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal }, 10000)
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) throw error
+      return null
+    }
+  }))
   const values = await Promise.all(responses.map(async (response, index) => {
-    if (!response.ok) return null
+    if (!response || !response.ok) return null
     try {
       return { ...(await response.json() as Analysis), timeframe: MTF_INTERVALS[index] }
     } catch {
@@ -135,7 +142,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [showChartLevels, setShowChartLevels] = useState(true)
   const [showChartVolume, setShowChartVolume] = useState(true)
   const [manualOrderRequest, setManualOrderRequest] = useState(0)
-  const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 2, margin: 10, quantity: 0.08, entry: 61350, stopLoss: 60650, tp1: 61850, tp2: 62400, tp3: 63150 })
+  const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 2, margin: 10, quantity: 0.08, entry: 61350, stopLoss: 60800, tp1: 61850, tp2: 62400, tp3: 63150 })
   const [backendRiskPreview, setBackendRiskPreview] = useState<BackendRiskPreview | null>(null)
   const [backendRiskPreviewError, setBackendRiskPreviewError] = useState('')
   const [positionAction, setPositionAction] = useState<{ mode: 'DETAILS' | 'REDUCE' | 'CLOSE'; position: AccountPosition } | null>(null)
@@ -215,8 +222,8 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       if (firstLoad) setDataLoading(true)
       try {
         const [candleResponse, analysisResponse, nextMtf] = await Promise.all([
-          fetch(`${API_BASE}/klines/${draft.market}?interval=${interval}&limit=160`, { signal: controller.signal }),
-          fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }),
+          fetchWithTimeout(`${API_BASE}/klines/${draft.market}?interval=${interval}&limit=160`, { signal: controller.signal }, 10000),
+          fetchWithTimeout(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }, 10000),
           fetchMtfAnalyses(draft.market, controller.signal),
         ])
         if (!candleResponse.ok) throw new Error('Market data unavailable')
@@ -653,7 +660,18 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       .map(order => ({ order, level: protectionLevel(order) }))
       .filter((item): item is { order: AccountOrder; level: number } => item.level !== undefined)
       .sort((left, right) => position.direction === 'LONG' ? left.level - right.level : right.level - left.level)
-    return { stopLoss: protectionLevel(stopOrder || {}), target: targetOrders[0]?.level }
+    return { stopLoss: protectionLevel(stopOrder || {}), targets: targetOrders.map(item => item.level) }
+  }
+  const positionWithProtection = (position: AccountPosition): AccountPosition => {
+    const plan = account?.plans?.find(item => item.symbol === position.symbol)
+    const liveLevels = liveProtectionLevels(position)
+    return {
+      ...position,
+      stop_loss: position.stop_loss ?? (plan?.stop_loss ? Number(plan.stop_loss) : undefined) ?? liveLevels.stopLoss,
+      tp1: position.tp1 ?? (plan?.targets?.[0] ? Number(plan.targets[0]) : undefined) ?? liveLevels.targets[0],
+      tp2: position.tp2 ?? (plan?.targets?.[1] ? Number(plan.targets[1]) : undefined) ?? liveLevels.targets[1],
+      tp3: position.tp3 ?? (plan?.targets?.[2] ? Number(plan.targets[2]) : undefined) ?? liveLevels.targets[2],
+    }
   }
   const openRiskValues = openPositions.map(position => {
     const plan = account?.plans?.find(item => item.symbol === position.symbol)
@@ -991,7 +1009,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                     const plan = account?.plans?.find(item => item.symbol === position.symbol)
                     const liveLevels = liveProtectionLevels(position)
                     const stopLoss = position.stop_loss ?? (plan?.stop_loss ? Number(plan.stop_loss) : undefined) ?? liveLevels.stopLoss
-                    const target = plan?.targets?.[0] ? Number(plan.targets[0]) : position.tp1 ?? liveLevels.target
+                    const target = plan?.targets?.[0] ? Number(plan.targets[0]) : position.tp1 ?? liveLevels.targets[0]
                     return (
                     <tr key={position.symbol}>
                       <td><strong>{position.symbol}</strong><span className="positionAge">{position.age || '--'}</span></td>
@@ -1006,7 +1024,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                       <td>${fmtMarketPrice(stopLoss)}</td>
                       <td>${fmtMarketPrice(target)}</td>
                       <td><span className="statusBadge open">OPEN</span></td>
-                      <td><div className="positionActions"><button type="button" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'DETAILS', position }) }}>DETAILS</button><button type="button" className="dangerAction positionCloseButton" aria-label={`Close ${position.symbol} position`} onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position }) }}><XCircle size={14} aria-hidden="true" /> CLOSE POSITION</button></div></td>
+                      <td><div className="positionActions"><button type="button" onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'DETAILS', position: positionWithProtection(position) }) }}>DETAILS</button><button type="button" className="dangerAction positionCloseButton" aria-label={`Close ${position.symbol} position`} onClick={() => { setPositionActionError(''); setPositionAction({ mode: 'CLOSE', position }) }}><XCircle size={14} aria-hidden="true" /> CLOSE POSITION</button></div></td>
                     </tr>
                     )
                   }) : <tr><td colSpan={13} className="emptyState">{snapshot?.accountError || 'NO OPEN POSITIONS'}</td></tr>}
