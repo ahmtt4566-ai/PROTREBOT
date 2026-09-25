@@ -169,7 +169,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       if (!active || marketRefreshInFlight.current) return
       marketRefreshInFlight.current = true
       try {
-        const response = await fetchWithTimeout(`${API_BASE}/markets?limit=500`, { signal: controller.signal })
+        const response = await fetchWithTimeout(`${API_BASE}/markets?limit=50`, { signal: controller.signal })
         if (!response.ok) throw new Error('Market data unavailable')
         const items = await response.json() as MarketRow[]
         if (!active) return
