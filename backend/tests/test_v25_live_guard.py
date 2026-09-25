@@ -35,7 +35,7 @@ from app.execution_core import (  # noqa: E402
 )
 from app import v25_execution  # noqa: E402
 from app.binance_demo import BinanceDemoError, verify_symbol_configuration  # noqa: E402
-from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, prune_mtf_decision_history, rank_market_tickers, sanitized_state, submit_entry, summarize_mtf_relaxation, validate_protection_readiness  # noqa: E402
+from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, classify_plan_protection, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, prune_mtf_decision_history, rank_market_tickers, sanitized_state, submit_entry, summarize_mtf_relaxation, validate_protection_readiness  # noqa: E402
 
 
 EXECUTION_SOURCE = (BACKEND / "app" / "v25_execution.py").read_text(encoding="utf-8")
@@ -426,6 +426,25 @@ class V25LiveGuardCoreTests(unittest.TestCase):
             {"symbol": "BTCUSDT", "client_algo_id": "PTB_FOREIGN"},
         ]
         self.assertEqual(owned_protection_rows(plan, rows), [rows[0]])
+
+    def test_protection_classification_matches_exact_client_or_algo_identity(self):
+        plan = {"symbol": "BTCUSDT", "direction": "LONG", "stop_client_id": "PTB_SL_owned", "stop_algo_id": 101}
+        rows = [{"symbol": "BTCUSDT", "client_algo_id": "PTB_SL_owned", "algo_id": 101, "side": "SELL", "type": "STOP_MARKET", "status": "NEW"}]
+        status, matched, reason = classify_plan_protection(plan, rows)
+        self.assertEqual((status, reason), ("MATCHED", "EXACT_IDENTITY"))
+        self.assertEqual(matched, rows)
+
+    def test_protection_classification_marks_single_fallback_as_unknown(self):
+        plan = {"symbol": "BTCUSDT", "direction": "LONG", "stop_client_id": "PTB_SL_owned"}
+        rows = [{"symbol": "BTCUSDT", "client_algo_id": "EXTERNAL_STOP", "side": "SELL", "type": "STOP_MARKET", "status": "NEW"}]
+        status, matched, reason = classify_plan_protection(plan, rows)
+        self.assertEqual((status, reason), ("UNKNOWN", "FALLBACK_SYMBOL_DIRECTION_TYPE"))
+        self.assertEqual(matched, rows)
+
+    def test_protection_classification_marks_absent_stop_as_missing(self):
+        plan = {"symbol": "BTCUSDT", "direction": "SHORT", "stop_client_id": "PTB_SL_owned"}
+        status, matched, reason = classify_plan_protection(plan, [])
+        self.assertEqual((status, matched, reason), ("MISSING", [], "REQUIRED_STOP_NOT_FOUND"))
 
     def test_live_is_locked_and_auto_trade_is_off_by_default_and_after_restart(self):
         self.assertTrue(initial_state()["real_trading_locked"])

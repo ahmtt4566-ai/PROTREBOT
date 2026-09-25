@@ -22,7 +22,7 @@ type LiveStatus = {
   readiness?: {ready?: boolean; gates?: Array<{key?: string; label?: string; passed?: boolean; detail?: string}>}
   account?: {wallet_balance?: number | null; available_balance?: number | null; margin_balance?: number | null; unrealized_pnl?: number | null; positions?: Array<Record<string, unknown>>; open_orders?: Array<Record<string, unknown>>}
   daily?: {realized_pnl?: number; remaining_loss_budget?: number; entries?: number}
-  plans?: Array<Record<string, unknown> & {targets?: unknown[]; stop_loss?: unknown; protection_state?: string}>
+  plans?: Array<Record<string, unknown> & {targets?: unknown[]; stop_loss?: unknown; protection_state?: string; protection_status?: string}>
   events?: Array<{kind?: string; message?: string; created_at?: string; symbol?: string; failures?: string[]}>
   emergency?: {active?: boolean; reason?: string | null}
   recovery_ready?: boolean
@@ -338,11 +338,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const currentPosition = positions[0]
   const activePlan = status?.plans?.find(plan => !['CLOSED', 'CANCELLED', 'KAPANDI', 'İPTAL'].includes(String(plan.status || '').toUpperCase()))
   const recentOrder = status?.events?.find(event => ['LIVE_ENTRY', 'LIVE_ENTRY_RECOVERED', 'LIVE_ORDER_UPDATE'].includes(String(event.kind)))
-  const currentProtection = activePlan?.protection_state === 'MATCHED' ? 'PROTECTED' : activePlan?.protection_state === 'MISSING' ? 'NOT PROTECTED' : protectionState === 'READY' ? 'PROTECTED' : protectionState === 'EXTERNAL' ? 'EXTERNAL / NOT MANAGED' : 'UNKNOWN'
+  const activeProtectionState = String(activePlan?.protection_status || activePlan?.protection_state || 'UNKNOWN').toUpperCase()
+  const currentProtection = activeProtectionState === 'MATCHED' ? 'PROTECTED' : activeProtectionState === 'MISSING' ? 'NOT PROTECTED' : activeProtectionState === 'UNKNOWN' ? 'OWNERSHIP UNKNOWN' : protectionState === 'READY' ? 'PROTECTED' : protectionState === 'EXTERNAL' ? 'EXTERNAL / NOT MANAGED' : 'UNKNOWN'
   const protectionItem = (key: string) => {
     if (!activePlan) return 'UNKNOWN'
-    if (key === 'STOP') return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT ACTIVE' : 'UNKNOWN'
-    return activePlan.protection_state === 'MATCHED' ? 'ACTIVE' : activePlan.protection_state === 'MISSING' ? 'NOT SET' : 'UNKNOWN'
+    if (key === 'STOP') return activeProtectionState === 'MATCHED' ? 'ACTIVE' : activeProtectionState === 'MISSING' ? 'NOT ACTIVE' : 'UNKNOWN'
+    return activeProtectionState === 'MATCHED' ? 'ACTIVE' : activeProtectionState === 'MISSING' ? 'NOT SET' : 'UNKNOWN'
   }
   const blocker = status === null
     ? 'LIVE status is not available.'

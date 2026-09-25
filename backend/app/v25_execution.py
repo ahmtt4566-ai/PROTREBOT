@@ -74,6 +74,7 @@ from .execution_core import (
 )
 from .exchange_connections import session_credentials_for_identity, session_credentials_for_request, session_id
 from .local_storage import DATA_DIR, migrate_legacy_files
+from .trade_review import write_trade_review
 from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user
 
@@ -592,6 +593,7 @@ def initial_state() -> dict[str, Any]:
         # health so a rejected order never overwrites the connectivity diagnostic.
         "last_order_error": None,
         "monitoring_credentials_stale_since": None,
+        "trade_review": None,
     }
 
 
@@ -629,6 +631,13 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     for key in ("events", "plans", "intents", "duplicate_blocks", "protection_repairs"):
         if key in payload and isinstance(payload[key], type(base[key])):
             base[key] = payload[key]
+    if isinstance(payload.get("trade_review"), dict):
+        base["trade_review"] = {
+            "review_key": str(payload["trade_review"].get("review_key") or "")[:256],
+            "path": str(payload["trade_review"].get("path") or "")[:512],
+            "generated_at": str(payload["trade_review"].get("generated_at") or "")[:64],
+            "symbols": [str(item)[:32] for item in payload["trade_review"].get("symbols", []) if item],
+        }
     base["mtf_decision_history"] = prune_mtf_decision_history(payload.get("mtf_decision_history"))
     if isinstance(payload.get("emergency"), dict):
         base["emergency"] = {
@@ -662,6 +671,11 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
         plan.setdefault("protection_state", "UNKNOWN")
         if plan.get("protection_state") not in PROTECTION_STATES:
             plan["protection_state"] = "UNKNOWN"
+        plan.setdefault("protection_status", plan["protection_state"])
+        if plan.get("protection_status") not in PROTECTION_STATES:
+            plan["protection_status"] = plan["protection_state"]
+        plan.setdefault("protection_match_confidence", "NONE")
+        plan.setdefault("protection_match_reason", "NOT_RECONCILED")
     # Entry authority never survives a process restart.
     base["auto"]["last_decision"] = "Güvenli yeniden başlatma: canlı otomasyon yeniden onay bekliyor."
     base["real_trading_locked"] = True
@@ -1915,12 +1929,16 @@ async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], p
     if verified:
         plan.update({
             "status": "KAPANDI",
+            "pnl_verified": True,
             "closed_at": verified.get("created_at"),
             "realized_pnl": verified.get("realized_pnl"),
             "exit_price": verified.get("exit_price"),
             "opened_at": verified.get("opened_at"),
             "close_reason": verified.get("close_reason") or plan.get("close_reason") or "UNKNOWN",
         })
+        review = write_trade_review(state)
+        if review:
+            add_event(state, "TRADE_REVIEW_GENERATED", "4USDT ve MUBARAKUSDT için doğrulanmış canlı işlem inceleme raporu oluşturuldu.", **review)
         return
     try:
         result = await verified_plan_pnl(client, plan)
@@ -1949,6 +1967,9 @@ async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], p
         close_reason=close_reason,
         **result,
     )
+    review = write_trade_review(state)
+    if review:
+        add_event(state, "TRADE_REVIEW_GENERATED", "4USDT ve MUBARAKUSDT için doğrulanmış canlı işlem inceleme raporu oluşturuldu.", **review)
 
 
 def recover_plan_from_intent(intent_id: str, intent: dict[str, Any], order: dict[str, Any]) -> dict[str, Any] | None:
@@ -2181,6 +2202,72 @@ def owned_protection_rows(plan: dict[str, Any], rows: list[dict[str, Any]]) -> l
     ]
 
 
+def classify_plan_protection(
+    plan: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]], str]:
+    """Classify the required Stop without claiming an unrelated order."""
+    symbol = str(plan.get("symbol") or "").upper()
+    direction = str(plan.get("direction") or "").upper()
+    expected_side = "SELL" if direction == "LONG" else "BUY" if direction == "SHORT" else ""
+    stop_client_id = str(plan.get("stop_client_id") or "")
+    expected_algo_id = str(plan.get("stop_algo_id") or "")
+    active_statuses = {"NEW", "WORKING", "PENDING_NEW", "PARTIALLY_FILLED"}
+    same_shape: list[dict[str, Any]] = []
+    exact: list[dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        row_symbol = str(row.get("symbol") or "").upper()
+        row_side = str(row.get("side") or "").upper()
+        row_type = str(row.get("type") or "").upper()
+        row_status = str(row.get("status") or "").upper()
+        if row_symbol != symbol or row_side != expected_side or row_type != "STOP_MARKET":
+            continue
+        if row_status not in active_statuses:
+            continue
+        same_shape.append(row)
+        if (
+            (stop_client_id and str(row.get("client_algo_id") or "") == stop_client_id)
+            or (expected_algo_id and str(row.get("algo_id") or "") == expected_algo_id)
+        ):
+            exact.append(row)
+    if len(exact) == 1:
+        return "MATCHED", exact, "EXACT_IDENTITY"
+    if len(exact) > 1:
+        return "UNKNOWN", exact, "DUPLICATE_EXACT_IDENTITY"
+    if len(same_shape) == 1:
+        return "UNKNOWN", same_shape, "FALLBACK_SYMBOL_DIRECTION_TYPE"
+    if len(same_shape) > 1:
+        return "UNKNOWN", same_shape, "AMBIGUOUS_SYMBOL_DIRECTION_TYPE"
+    return "MISSING", [], "REQUIRED_STOP_NOT_FOUND"
+
+
+def record_protection_ownership_uncertain(
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    reason: str,
+) -> None:
+    plan_id = str(plan.get("id") or "")
+    if any(
+        isinstance(event, dict)
+        and event.get("kind") == "OWNERSHIP_UNCERTAIN"
+        and event.get("plan_id") == plan_id
+        and event.get("reason") == reason
+        for event in state.get("events", [])
+    ):
+        return
+    add_event(
+        state,
+        "OWNERSHIP_UNCERTAIN",
+        f"{plan.get('symbol')} Stop sahipliği doğrulanamadı; otomatik koruma değişikliği yapılmadı.",
+        symbol=plan.get("symbol"),
+        plan_id=plan_id,
+        reason=reason,
+        protection_status="UNKNOWN",
+    )
+
+
 def reconcile_monitoring_targets(state: dict[str, Any], plan: dict[str, Any], rows: list[dict[str, Any]]) -> None:
     targets = [str(value) for value in plan.get("monitoring_targets", []) if str(value)]
     if not targets:
@@ -2377,6 +2464,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "policy_acknowledged": state.get("policy_ack_digest") == policy_digest(state["policy"]),
         "reconciliation_diagnostic": latest_reconciliation_diagnostic(state),
         "last_order_error": state.get("last_order_error"),
+        "trade_review": state.get("trade_review"),
         "readiness": release,
         "account": {"wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"), "unrealized_pnl": snapshot.get("unrealized_pnl"), "positions": snapshot.get("positions", []), "open_orders": snapshot.get("open_orders", []), "open_algo_orders": snapshot.get("open_algo_orders", []), "hedge_mode": snapshot.get("hedge_mode")},
         "daily": live_daily_metrics(state),
@@ -3043,20 +3131,26 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
             state["reconciliation_required"] = True
             lock_live_execution(state, "PROTECTION_SNAPSHOT_UNKNOWN", unknown=True, symbol=str(symbol))
             continue
-        owned_algos = owned_protection_rows(plan, open_algos)
         reconcile_monitoring_targets(state, plan, open_algos)
-        has_stop = any(str(item.get("type", "")).upper() == "STOP_MARKET" for item in owned_algos)
-        plan["protection_state"] = "MATCHED" if has_stop else "MISSING"
-        if not has_stop:
+        protection_state, _matched_stops, protection_reason = classify_plan_protection(plan, open_algos)
+        plan["protection_state"] = protection_state
+        plan["protection_status"] = protection_state
+        plan["protection_match_confidence"] = "EXACT" if protection_reason == "EXACT_IDENTITY" else "LOW" if protection_state == "UNKNOWN" else "NONE"
+        plan["protection_match_reason"] = protection_reason
+        if protection_state == "UNKNOWN":
+            record_protection_ownership_uncertain(state, plan, protection_reason)
+            continue
+        if protection_state == "MISSING":
             if not live_plan_can_mutate(plan):
                 plan["protection_state"] = "UNKNOWN"
+                plan["protection_status"] = "UNKNOWN"
                 state["reconciliation_required"] = True
                 lock_live_execution(state, "PROTECTION_PROVENANCE_UNKNOWN", unknown=True, symbol=str(symbol))
                 continue
             state["protection_repairs"] += 1
             add_event(state, "PROTECTION_REPAIR", f"{symbol} Stop eksik; koruma yeniden kuruluyor.", symbol=symbol)
             await install_protection(client, state, plan)
-        elif plan.get("status") == "DOLUM BEKLİYOR":
+        elif protection_state == "MATCHED" and plan.get("status") == "DOLUM BEKLİYOR":
             plan["status"] = "KORUMA AKTİF"
     clear_clean_reconciliation_state(state, snapshot)
     persist_state(state)
