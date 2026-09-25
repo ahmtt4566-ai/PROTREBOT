@@ -66,6 +66,29 @@ def complete_reconciliation_snapshot(**overrides):
 
 
 class V25LiveGuardCoreTests(unittest.TestCase):
+    def test_external_history_keeps_unmatched_binance_records_read_only(self):
+        state = initial_state()
+        state["events"] = [{"kind": "ORPHAN_PROTECTION_CLEANUP", "symbol": "4USDT"}]
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        request = SimpleNamespace(app=application)
+        calls = []
+
+        class ReadOnlyHistoryClient:
+            async def signed(self, method, path, params):
+                calls.append((method, path, params))
+                if path.endswith("userTrades"):
+                    return [{"id": 7, "orderId": 11, "side": "SELL", "price": "0.020", "qty": "100", "realizedPnl": "0.06", "commission": "0.01", "commissionAsset": "USDT", "time": 1790317267000}]
+                return [{"incomeType": "REALIZED_PNL", "income": "0.06", "asset": "USDT", "time": 1790317267000, "tranId": "income-7"}]
+
+        with patch.object(v25_execution, "execution_owner", return_value={}), patch.object(v25_execution, "client_for", return_value=ReadOnlyHistoryClient()):
+            result = asyncio.run(v25_execution.v25_history(request, symbol="4USDT", limit=100))
+
+        self.assertTrue(result["read_only"])
+        self.assertEqual(result["label"], "EXTERNAL / NOT MANAGED BY V25")
+        self.assertEqual(result["external_trades"][0]["realized_pnl"], "0.06")
+        self.assertEqual(result["external_income"][0]["income"], "0.06")
+        self.assertEqual({(method, path) for method, path, _ in calls}, {("GET", "/fapi/v1/userTrades"), ("GET", "/fapi/v1/income")})
+
     def test_default_live_policy_raises_leverage_only(self):
         policy = initial_state()["policy"]
         self.assertEqual(policy["max_leverage"], 30)

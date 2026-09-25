@@ -39,6 +39,7 @@ type ConnectionStatus = {
 }
 
 type ConnectionTestResult = {testedAt?: string; fingerprint?: string | null}
+type ExternalHistory = {read_only?: boolean; label?: string; external_trades?: Array<Record<string, unknown>>; external_income?: Array<Record<string, unknown>>; errors?: Array<Record<string, unknown>>}
 
 type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MARKET' | 'LIMIT'; margin_usdt: string; leverage: string; limit_price: string; stop_loss: string; tp1: string; tp2: string; tp3: string}
 
@@ -94,6 +95,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null)
   const [showSecret, setShowSecret] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [externalHistory, setExternalHistory] = useState<ExternalHistory | null>(null)
   const [notice, setNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string}>({kind: 'info', text: 'LIVE başlatılmadı. Gerçek emir kilidi varsayılan olarak kapalıdır.'})
   const refreshInFlight = useRef(false)
   const status = sharedStatus !== undefined ? sharedStatus : localStatus
@@ -379,6 +381,14 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setPolicy('allowed_symbols', next)
   }
   const activity = (status?.events || []).slice(-8).reverse()
+  const externalDate = (value: unknown) => {
+    const timestamp = Number(value)
+    return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toLocaleString('tr-TR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : date(value)
+  }
+  useEffect(() => {
+    if (!active || !status) return
+    void call<ExternalHistory>(V25, '/history').then(setExternalHistory).catch(() => setExternalHistory(null))
+  }, [active, status?.events?.length, status?.plans?.length])
   const ownershipUncertain = status?.events?.find(event => String(event.kind) === 'OWNERSHIP_UNCERTAIN')
   const latestSignal = activity.find(event => /SIGNAL|ENTRY|ORDER|SCAN|CANDIDATE/i.test(String(event.kind || '')))
   const signalStatus = status?.live_auto_trade ? autoStatusLabel : latestSignal ? text(latestSignal.kind).replaceAll('_', ' ') : 'WAITING'
@@ -444,6 +454,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       <section className="masterTradeLiveSection masterTradeLiveAccountTable"><header><div><span className="masterTradeLiveKicker">OPEN ORDERS</span><h3>Pending orders</h3></div><span className="masterTradeLiveCount">{openOrders.length}</span></header>{openOrders.length ? <div className="masterTradeLiveTableWrap"><table><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th>Price</th><th>Quantity</th><th>Status</th><th>Time</th></tr></thead><tbody>{openOrders.map((order, index) => <tr key={`${String(order.order_id)}-${index}`}><td><strong>{text(order.symbol)}</strong></td><td>{text(order.side)}</td><td>{text(order.type)}</td><td>{text(order.price)}</td><td>{text(order.quantity)}</td><td>{text(order.status)}</td><td>--</td></tr>)}</tbody></table></div> : <div className="masterTradeLiveEmpty"><strong>No open orders</strong><span>Pending order data is read from the V25 account snapshot.</span></div>}</section>
 
       <section className="masterTradeLiveSection masterTradeLiveSignal"><header><div><span className="masterTradeLiveKicker">LATEST SIGNAL</span><h3>{analysis?.direction || 'WAITING FOR SIGNAL'}</h3></div><strong>{signalStatus}</strong></header><div className="masterTradeLiveSignalSymbol"><b>{symbol}</b><span>{analysis?.direction || '—'}</span></div><div className="masterTradeLiveSignalGrid"><span><small>CONFIDENCE</small><b>{analysis?.confidence !== undefined ? `${analysis.confidence}%` : '—'}</b></span><span><small>RISK</small><b>{numericPolicy('max_loss_per_trade', 1)}%</b></span><span><small>ENTRY</small><b>{text(analysis?.entry)}</b></span><span><small>STOP</small><b>{text(analysis?.stop_loss)}</b></span><span><small>TARGET</small><b>{text(analysis?.tp1)}</b></span><span><small>EXPOSURE</small><b>{money(exposure)}</b></span></div><p>{latestSignal ? `${text(latestSignal.message)} · ${date(latestSignal.created_at)}` : 'No recent signal event is available from the backend.'}</p></section></div>
+
+    <section className="masterTradeLiveSection masterTradeLiveAccountTable" aria-label="External Binance trade history"><header><div><span className="masterTradeLiveKicker">EXTERNAL / NOT MANAGED BY V25</span><h3>Plan-dışı Binance geçmişi</h3></div><span className="masterTradeLiveCount">{externalHistory?.external_trades?.length ?? 0}</span></header><p className="masterTradeLiveOperationalNote">Read-only userTrades and REALIZED_PNL income records without a matching V25 plan.</p>{externalHistory?.external_trades?.length ? <div className="masterTradeLiveTableWrap"><table><thead><tr><th>Symbol</th><th>Side</th><th>Price</th><th>Quantity</th><th>Realized PnL</th><th>Time</th></tr></thead><tbody>{externalHistory.external_trades.slice(0, 30).map((trade, index) => <tr key={`${String(trade.trade_id || trade.order_id)}-${index}`}><td><strong>{text(trade.symbol)}</strong></td><td>{text(trade.side)}</td><td>{text(trade.price)}</td><td>{text(trade.quantity)}</td><td className={Number(trade.realized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{money(Number(trade.realized_pnl || 0))}</td><td>{externalDate(trade.time)}</td></tr>)}</tbody></table></div> : <div className="masterTradeLiveEmpty"><strong>No unmatched Binance trades found</strong><span>Only verified V25 plans appear in managed history; this section is read-only fallback evidence.</span></div>}</section>
 
     <div className="masterTradeLiveGrid masterTradeLiveLowerGrid"><section className="masterTradeLiveSection masterTradeLiveActivity"><header><div><span className="masterTradeLiveKicker">ACTIVITY</span><h3>Latest events</h3></div><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW ALL</button></header>{activity.length ? <ol>{activity.map((event, index) => <li key={`${event.created_at}-${event.kind}-${index}`}><i /><time>{date(event.created_at)}</time><span>{text(event.message || event.kind).replaceAll('_', ' ')}</span></li>)}</ol> : <div className="masterTradeLiveEmpty"><span>No recent LIVE activity.</span></div>}</section>
 

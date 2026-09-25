@@ -136,6 +136,7 @@ PRIVATE_PATHS = {
     ("GET", "/fapi/v1/allOrders"),
     ("GET", "/fapi/v1/allAlgoOrders"),
     ("GET", "/fapi/v1/userTrades"),
+    ("GET", "/fapi/v1/income"),
     ("GET", "/fapi/v1/positionSide/dual"),
     ("POST", "/fapi/v1/leverage"),
     ("POST", "/fapi/v1/marginType"),
@@ -3317,6 +3318,95 @@ async def shutdown_v25_execution(application: Any) -> None:
 async def v25_status(request: Request) -> dict[str, Any]:
     execution_owner(request)
     return public_status(request.app, request)
+
+
+@router.get("/history")
+async def v25_history(
+    request: Request,
+    symbol: str | None = Query(default=None, min_length=5, max_length=20),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> dict[str, Any]:
+    """Read-only Binance history for fills without a matching V25 plan."""
+    execution_owner(request)
+    state = request.app.state.v25_execution
+    client = client_for(request.app, request)
+    requested_symbol = normalize_symbol(symbol) if symbol else None
+    known_symbols = {
+        str(item.get("symbol") or "").upper()
+        for item in state.get("events", [])
+        if isinstance(item, dict) and item.get("symbol")
+    }
+    known_symbols.update(
+        str(item.get("symbol") or "").upper()
+        for item in state.get("plans", {}).values()
+        if isinstance(item, dict) and item.get("symbol")
+    )
+    symbols = [requested_symbol] if requested_symbol else sorted(item for item in known_symbols if item.endswith("USDT"))[:12]
+    tracked_order_ids = {
+        int(order_id)
+        for plan in state.get("plans", {}).values()
+        if isinstance(plan, dict)
+        for order_id in [*plan.get("exchange_order_ids", []), plan.get("entry_order_id")]
+        if str(order_id).isdigit()
+    }
+    tracked_client_ids = {
+        str(client_id)
+        for plan in state.get("plans", {}).values()
+        if isinstance(plan, dict)
+        for client_id in [plan.get("entry_client_order_id"), *plan.get("close_client_order_ids", [])]
+        if client_id
+    }
+    external_trades: list[dict[str, Any]] = []
+    external_income: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for item_symbol in symbols:
+        try:
+            trades_payload, income_payload = await asyncio.gather(
+                client.signed("GET", "/fapi/v1/userTrades", {"symbol": item_symbol, "limit": limit}),
+                client.signed("GET", "/fapi/v1/income", {"symbol": item_symbol, "incomeType": "REALIZED_PNL", "limit": limit}),
+            )
+        except LiveExchangeError as exc:
+            errors.append({"symbol": item_symbol, "message": sanitized_exception_message(exc)})
+            continue
+        for row in response_rows(trades_payload):
+            if not isinstance(row, dict):
+                continue
+            order_id = int(row.get("orderId") or 0) if str(row.get("orderId") or "").isdigit() else 0
+            client_order_id = str(row.get("clientOrderId") or "")
+            if order_id in tracked_order_ids or client_order_id in tracked_client_ids:
+                continue
+            external_trades.append({
+                "symbol": item_symbol,
+                "trade_id": row.get("id"),
+                "order_id": order_id or None,
+                "side": row.get("side"),
+                "price": row.get("price"),
+                "quantity": row.get("qty"),
+                "realized_pnl": row.get("realizedPnl"),
+                "commission": row.get("commission"),
+                "commission_asset": row.get("commissionAsset"),
+                "time": row.get("time"),
+                "position_side": row.get("positionSide"),
+            })
+        for row in response_rows(income_payload):
+            if not isinstance(row, dict) or str(row.get("incomeType") or "") != "REALIZED_PNL":
+                continue
+            external_income.append({
+                "symbol": item_symbol,
+                "income": row.get("income"),
+                "asset": row.get("asset"),
+                "time": row.get("time"),
+                "transaction_id": row.get("tranId"),
+                "info": row.get("info"),
+            })
+    return {
+        "read_only": True,
+        "label": "EXTERNAL / NOT MANAGED BY V25",
+        "symbols": symbols,
+        "external_trades": external_trades,
+        "external_income": external_income,
+        "errors": errors,
+    }
 
 
 @router.get("/mtf/history")
