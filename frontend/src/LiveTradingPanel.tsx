@@ -96,6 +96,11 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [showSecret, setShowSecret] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [externalHistory, setExternalHistory] = useState<ExternalHistory | null>(null)
+  const [adoptionCandidate, setAdoptionCandidate] = useState<{
+    symbol: string
+    candidatePlan: any
+    confirmToken: string
+  } | null>(null)
   const [notice, setNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string}>({kind: 'info', text: 'LIVE başlatılmadı. Gerçek emir kilidi varsayılan olarak kapalıdır.'})
   const refreshInFlight = useRef(false)
   const status = sharedStatus !== undefined ? sharedStatus : localStatus
@@ -290,6 +295,53 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setConfirmText('')
   }
 
+  const previewAdoption = async (adoptionSymbol: string) => {
+    setBusy('adoption-preview')
+    try {
+      const result = await call<{
+        would_create_plan?: boolean
+        candidate_plan?: any
+        confirm_token?: string | null
+      }>(V25, '/adopt-external-position/preview', {
+        method: 'POST',
+        body: JSON.stringify({symbol: adoptionSymbol}),
+      })
+      if (result.would_create_plan !== true || !result.candidate_plan || !result.confirm_token) {
+        setAdoptionCandidate(null)
+        setNotice({kind: 'info', text: `${adoptionSymbol} için read-only plan oluşturulamadı.`})
+        return
+      }
+      const candidate = {
+        symbol: adoptionSymbol,
+        candidatePlan: result.candidate_plan,
+        confirmToken: result.confirm_token,
+      }
+      setAdoptionCandidate(candidate)
+      setConfirm({
+        title: 'Adopt & Manage',
+        message: `${adoptionSymbol} pozisyonu V25 read-only plan olarak sahiplenilecek. Mevcut emirler değiştirilmeyecek, yalnızca izlenecek.`,
+        simple: true,
+        action: async () => {
+          const executeResult = await call<{ok?: boolean; code?: string}>(V25, '/adopt-external-position', {
+            method: 'POST',
+            body: JSON.stringify({symbol: candidate.symbol, confirm_token: candidate.confirmToken}),
+          })
+          if (executeResult.ok === false && executeResult.code === 'ADOPTION_PERSISTENCE_UNCERTAIN') {
+            throw new Error('Pozisyon sahiplenilmiş olabilir ancak kayıt belirsiz; reconciliation gerekiyor.')
+          }
+          setAdoptionCandidate(null)
+          if (onRefreshStatus) await onRefreshStatus(true)
+        },
+      })
+      setConfirmText('')
+    } catch (error) {
+      setAdoptionCandidate(null)
+      setNotice({kind: 'error', text: error instanceof Error ? error.message : 'Pozisyon sahiplenme önizlemesi alınamadı.'})
+    } finally {
+      setBusy('')
+    }
+  }
+
   const fillAnalysis = () => setOrder(current => ({...current, direction: analysis?.direction === 'SHORT' ? 'SHORT' : 'LONG', limit_price: text(analysis?.entry).replace('—', ''), stop_loss: text(analysis?.stop_loss).replace('—', ''), tp1: text(analysis?.tp1).replace('—', ''), tp2: text(analysis?.tp2).replace('—', ''), tp3: text(analysis?.tp3).replace('—', '')}))
   const reviewOrder = (nextOrder = order) => {
     const values = [nextOrder.margin_usdt, nextOrder.leverage, nextOrder.stop_loss, nextOrder.tp1, nextOrder.tp2, nextOrder.tp3]
@@ -469,7 +521,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     <div className="liveUxStatus"><div><small>LIVE TRADING</small><b>{liveState}</b></div><div><small>AUTO TRADE</small><b>{status?.live_auto_trade ? 'ON' : 'OFF'}</b></div><div><small>MARKET DATA</small><b>{marketDataConnected ? 'CONNECTED' : status === null ? 'UNKNOWN' : 'DISCONNECTED'}</b></div><div><small>LIVE ACCOUNT</small><b>{connected ? 'CONNECTED' : 'DISCONNECTED'}</b></div><div><small>RISK</small><b>{riskState}</b></div><div><small>EXPOSURE</small><b>{exposureState}</b></div><div><small>PROTECTION</small><b>{currentProtection}</b></div><div><small>RECOVERY</small><b>{recoveryState}</b></div><div><small>EMERGENCY</small><b>{emergencyState}</b></div></div>
     <div className={`liveUxNow ${liveState.toLowerCase()}`}><div><small>WHAT TO DO NOW</small><strong>{ownershipUncertain ? 'OWNERSHIP UNCERTAIN' : liveState === 'BLOCKED' ? '⚠ LIVE IS BLOCKED' : liveState === 'READY' ? 'LIVE IS READY' : '🔒 LIVE IS LOCKED'}</strong><p>{ownershipUncertain ? `${text(ownershipUncertain.symbol)} ownership checks failed: ${ownershipUncertain.failures?.join(', ') || 'unknown'}.` : blocker}</p></div><button type="button" onClick={() => void refresh(false)} disabled={Boolean(busy)}><RefreshCw/> REFRESH STATUS</button></div>
 
-    <div className="liveUxGrid liveUxTopGrid"><section className="liveUxCard liveUxPosition"><header><CircleDollarSign/><div><small>CURRENT POSITION</small><h3>{currentPosition ? text(currentPosition.symbol) : 'NO OPEN POSITION'}</h3></div><b>{currentPosition ? 'OPEN' : 'NO ACTIVE POSITION'}</b></header>{currentPosition ? <><div className="liveUxPositionSide"><strong>{text(currentPosition.direction)}</strong><span>Position Status · OPEN</span></div><div className="liveUxMetrics"><span><small>ENTRY</small><b>{positionValue('entry_price')}</b></span><span><small>MARK PRICE</small><b>{positionValue('mark_price')}</b></span><span><small>QUANTITY</small><b>{positionValue('quantity')}</b></span><span><small>UNREALIZED PNL</small><b>{money(currentPosition.unrealized_pnl)}</b></span><span><small>STOP LOSS</small><b>{text(activePlan?.stop_loss)}</b></span><span><small>TAKE PROFIT 1</small><b>{text(activePlan?.targets?.[0])}</b></span><span><small>TAKE PROFIT 2</small><b>{text(activePlan?.targets?.[1])}</b></span><span><small>TAKE PROFIT 3</small><b>{text(activePlan?.targets?.[2])}</b></span></div><div className={`liveUxProtectionBadge ${currentProtection.toLowerCase().replaceAll(' ', '-')}`}>PROTECTION · {currentProtection}</div></> : <p className="liveUxEmpty">No active LIVE position. Position data is read from the backend account snapshot.</p>}</section>
+    <div className="liveUxGrid liveUxTopGrid"><section className="liveUxCard liveUxPosition"><header><CircleDollarSign/><div><small>CURRENT POSITION</small><h3>{currentPosition ? text(currentPosition.symbol) : 'NO OPEN POSITION'}</h3></div><b>{currentPosition ? 'OPEN' : 'NO ACTIVE POSITION'}</b></header>{currentPosition ? <><div className="liveUxPositionSide"><strong>{text(currentPosition.direction)}</strong><span>Position Status · OPEN</span></div><div className="liveUxMetrics"><span><small>ENTRY</small><b>{positionValue('entry_price')}</b></span><span><small>MARK PRICE</small><b>{positionValue('mark_price')}</b></span><span><small>QUANTITY</small><b>{positionValue('quantity')}</b></span><span><small>UNREALIZED PNL</small><b>{money(currentPosition.unrealized_pnl)}</b></span><span><small>STOP LOSS</small><b>{text(activePlan?.stop_loss)}</b></span><span><small>TAKE PROFIT 1</small><b>{text(activePlan?.targets?.[0])}</b></span><span><small>TAKE PROFIT 2</small><b>{text(activePlan?.targets?.[1])}</b></span><span><small>TAKE PROFIT 3</small><b>{text(activePlan?.targets?.[2])}</b></span></div><div className={`liveUxProtectionBadge ${currentProtection.toLowerCase().replaceAll(' ', '-')}`}>PROTECTION · {currentProtection}</div>{protectionState === 'EXTERNAL' && <button type="button" className="liveArmButton" onClick={() => void previewAdoption(String(currentPosition.symbol))} disabled={Boolean(busy) || !connected || recoveryRequired}>ADOPT &amp; MANAGE</button>}</> : <p className="liveUxEmpty">No active LIVE position. Position data is read from the backend account snapshot.</p>}</section>
       <section className="liveUxCard liveUxControls"><header><UnlockKeyhole/><div><small>LIVE ARM</small><h3>Release control</h3></div><b>{liveArmed ? 'ARMED' : 'LOCKED'}</b></header><div className="liveUxControlState"><strong>{liveArmed ? 'ARMED' : 'LOCKED'}</strong><span>Arming LIVE does not start an order. Auto Trade must be enabled separately.</span></div><button type="button" className="liveArmButton" onClick={liveArmed ? disarmLive : armLive} disabled={Boolean(busy) || (!liveArmed && (!configured || !connected || emergency || recoveryRequired || !readinessReady))}>{liveArmed ? <LockKeyhole/> : <UnlockKeyhole/>}{liveArmed ? ' DISARM LIVE' : ' ARM LIVE'}</button><small className="liveUxReason">{liveArmed ? 'New-entry authority is active until the backend arm window expires.' : 'Current backend blocker: ' + (blocker || 'unknown')}</small></section></div>
 
     <section className="liveUxCard liveUxAuto"><header><Power/><div><small>AUTO TRADE / LIVE ARM</small><h3>Supervised live automation</h3></div><b>{status?.live_auto_trade ? 'ON' : 'OFF'}</b></header><div className="liveUxActionRow"><button type="button" onClick={autoToggle} disabled={Boolean(busy) || !autoReady || Boolean(status?.live_auto_trade)}><Power/> START LIVE AUTO TRADE</button><button type="button" onClick={stopAutoTrade} disabled={Boolean(busy) || !status?.live_auto_trade}><Power/> STOP AUTO TRADE</button></div><p className="liveUxReason"><strong>Reason:</strong> {status?.live_auto_trade ? 'Automatic trading is enabled by backend state.' : status?.auto?.last_decision || blocker}</p></section>

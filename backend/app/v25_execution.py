@@ -79,6 +79,9 @@ from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user
 
 
+PersistenceWriteResult = Literal["INSERTED", "UPDATED", "SKIPPED"]
+
+
 logger = logging.getLogger(__name__)
 AUTOMATION_TELEMETRY_INTERVAL = 30.0
 _automation_telemetry_at: dict[str, float] = {}
@@ -101,6 +104,12 @@ LIVE_CONSENT_GRACE_SECONDS = 15 * 60
 RECONCILE_SECONDS = 10
 MONITORING_CREDENTIALS_STALE_SECONDS = 90
 ANALYSIS_TIMEOUT_SECONDS = 15
+ADOPTION_PERSISTENCE_RETRY_BACKOFF_SECONDS = (5, 15, 60, 300, 900)
+ADOPTION_PERSISTENCE_RETRY_TIMEOUT_SECONDS = 5
+ADOPTION_PERSISTENCE_RETRY_STARTED = "ADOPTION_PERSISTENCE_RETRY_STARTED"
+ADOPTION_PERSISTENCE_RETRY_SUCCEEDED = "ADOPTION_PERSISTENCE_RETRY_SUCCEEDED"
+ADOPTION_PERSISTENCE_RETRY_FAILED = "ADOPTION_PERSISTENCE_RETRY_FAILED"
+ADOPTION_PERSISTENCE_RETRY_EXHAUSTED = "ADOPTION_PERSISTENCE_RETRY_EXHAUSTED"
 try:
     TRANSIENT_RECONCILIATION_RECOVERY_SECONDS = max(1.0, min(300.0, float(os.getenv("PROTREBOT_TRANSIENT_RECONCILIATION_RECOVERY_SECONDS", "60"))))
 except (TypeError, ValueError):
@@ -481,6 +490,11 @@ class AdoptExternalPositionPreviewRequest(BaseModel):
     symbol: str = Field(min_length=5, max_length=20)
 
 
+class AdoptExternalPositionRequest(BaseModel):
+    symbol: str = Field(min_length=5, max_length=20)
+    confirm_token: str = Field(min_length=64, max_length=64)
+
+
 class ManualLiveOrderRequest(LiveOrderRequest):
     confirmation: str = Field(min_length=1, max_length=64)
 
@@ -575,6 +589,7 @@ def initial_state() -> dict[str, Any]:
         "events": [],
         "mtf_decision_history": [],
         "plans": {},
+        "persistence_revision": 0,
         "intents": {},
         "armed_until": 0.0,
         "auto": {"enabled": False, "busy": False, "cycles": 0, "last_scan": None, "last_scan_stats": None, "confidence_rejection_history": [], "last_skip_reason": None, "last_cycle_stage": "idle", "last_decision": "Kullanıcı onayı bekleniyor.", "last_error": None, "session_until": 0.0},
@@ -606,6 +621,13 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     base = initial_state()
     if not isinstance(payload, dict):
         return base
+    try:
+        base["persistence_revision"] = max(
+            0,
+            int(payload.get("persistence_revision") or 0),
+        )
+    except (TypeError, ValueError):
+        base["persistence_revision"] = 0
     base["policy"] = sanitize_execution_policy(payload.get("policy"))
     base["policy"]["mtf_allow_either_timeframe"] = configured_mtf_allow_either_timeframe()
     base["policy_ack_digest"] = payload.get("policy_ack_digest") if payload.get("policy_ack_digest") == policy_digest(base["policy"]) else None
@@ -681,6 +703,26 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
             plan["protection_status"] = plan["protection_state"]
         plan.setdefault("protection_match_confidence", "NONE")
         plan.setdefault("protection_match_reason", "NOT_RECONCILED")
+        if plan.get("source") == "external_adoption":
+            plan.setdefault("provenance_kind", "ADOPTED_EXTERNAL")
+            plan.setdefault("mutation_policy", "READ_ONLY_EXTERNAL")
+            plan.setdefault("persistence_status", "PERSISTED")
+            plan.setdefault("persistence_retry_count", 0)
+            plan.setdefault("persistence_next_retry_at", None)
+            plan.setdefault("persistence_last_error", None)
+            plan.setdefault("persistence_retry_exhausted", False)
+            try:
+                plan["persistence_retry_count"] = max(0, int(plan.get("persistence_retry_count") or 0))
+            except (TypeError, ValueError):
+                plan["persistence_retry_count"] = 0
+            if plan.get("persistence_next_retry_at") is not None:
+                try:
+                    plan["persistence_next_retry_at"] = max(0.0, float(plan["persistence_next_retry_at"]))
+                except (TypeError, ValueError):
+                    plan["persistence_next_retry_at"] = None
+            plan["persistence_retry_exhausted"] = bool(plan.get("persistence_retry_exhausted"))
+            if not isinstance(plan.get("adoption_snapshot"), dict):
+                plan["adoption_snapshot"] = {}
     # Entry authority never survives a process restart.
     base["auto"]["last_decision"] = "Güvenli yeniden başlatma: canlı otomasyon yeniden onay bekliyor."
     base["real_trading_locked"] = True
@@ -699,7 +741,27 @@ def load_state() -> dict[str, Any]:
     return initial_state()
 
 
+def _advance_persistence_revision(state: dict[str, Any]) -> int:
+    revision = int(state.get("persistence_revision") or 0) + 1
+    state["persistence_revision"] = revision
+    return revision
+
+
+def _persist_state_file(payload: dict[str, Any]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    temporary = STATE_PATH.with_suffix(".tmp")
+    temporary.write_text(body, encoding="utf-8")
+    if STATE_PATH.exists():
+        try:
+            BACKUP_PATH.write_bytes(STATE_PATH.read_bytes())
+        except OSError:
+            pass
+    temporary.replace(STATE_PATH)
+
+
 def persist_state(state: dict[str, Any]) -> None:
+    _advance_persistence_revision(state)
     application = state.get("_app")
     pool = getattr(getattr(application, "state", None), "db_pool", None)
     if application is not None and pool is not None:
@@ -721,17 +783,20 @@ def persist_state(state: dict[str, Any]) -> None:
         state["auto"].update({"enabled": False, "session_until": 0.0})
         state["execution_state"] = "LOCKED"
         return
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _persist_state_file(sanitized_state(state))
+
+
+async def persist_state_awaited(state: dict[str, Any]) -> PersistenceWriteResult:
+    _advance_persistence_revision(state)
+    application = state.get("_app")
+    pool = getattr(getattr(application, "state", None), "db_pool", None)
     payload = sanitized_state(state)
-    body = json.dumps(payload, ensure_ascii=False, indent=2)
-    temporary = STATE_PATH.with_suffix(".tmp")
-    temporary.write_text(body, encoding="utf-8")
-    if STATE_PATH.exists():
-        try:
-            BACKUP_PATH.write_bytes(STATE_PATH.read_bytes())
-        except OSError:
-            pass
-    temporary.replace(STATE_PATH)
+    if application is not None and pool is not None:
+        return await _persist_state_snapshot(application, payload)
+    if os.getenv("DATABASE_URL", "").strip():
+        raise RuntimeError("PostgreSQL persistence unavailable.")
+    _persist_state_file(payload)
+    return "UPDATED"
 
 
 V25_SNAPSHOT_KEY = "v25_live:state"
@@ -763,20 +828,37 @@ def latest_reconciliation_diagnostic(state: dict[str, Any]) -> dict[str, Any] | 
     return None
 
 
-async def _persist_state_snapshot(application: Any, payload: dict[str, Any]) -> None:
+async def _persist_state_snapshot(
+    application: Any,
+    payload: dict[str, Any],
+) -> PersistenceWriteResult:
     pool = getattr(application.state, "db_pool", None)
     if pool is None:
-        return
-    await pool.execute(
+        return "SKIPPED"
+    row = await pool.fetchrow(
         """
         INSERT INTO application_state_snapshots (state_key, updated_at, payload)
         VALUES ($1, NOW(), $2::jsonb)
         ON CONFLICT (state_key) DO UPDATE
         SET updated_at = NOW(), payload = EXCLUDED.payload
+        WHERE COALESCE(
+            NULLIF(EXCLUDED.payload->>'persistence_revision', '')::bigint,
+            0
+        ) >= COALESCE(
+            NULLIF(application_state_snapshots.payload->>'persistence_revision', '')::bigint,
+            0
+        )
+        RETURNING CASE WHEN xmax = 0 THEN 'INSERTED' ELSE 'UPDATED' END AS write_status
         """,
         V25_SNAPSHOT_KEY,
         json.dumps(payload, ensure_ascii=False),
     )
+    if row is None:
+        return "SKIPPED"
+    write_status = str(row["write_status"])
+    if write_status not in {"INSERTED", "UPDATED"}:
+        raise RuntimeError(f"Unexpected persistence write status: {write_status}")
+    return write_status
 
 
 async def restore_v25_state(application: Any) -> bool:
@@ -1343,6 +1425,15 @@ async def build_live_spec(
 def client_id_for(kind: str, intent_id: str) -> str:
     digest = hashlib.sha256(f"{kind}:{intent_id}".encode("utf-8")).hexdigest()[:22]
     return f"{LIVE_CLIENT_PREFIX}{kind[:5].upper()}_{digest}"[:36]
+
+
+def compute_adoption_confirm_token(candidate_plan: dict[str, Any]) -> str:
+    serialized = json.dumps(
+        candidate_plan,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 async def find_order(client: BinanceLiveClient, symbol: str, client_id: str) -> dict[str, Any] | None:
@@ -2146,6 +2237,8 @@ def live_plan_is_active(plan: dict[str, Any]) -> bool:
 
 
 def live_plan_can_mutate(plan: dict[str, Any]) -> bool:
+    if plan.get("mutation_policy") == "READ_ONLY_EXTERNAL":
+        return False
     return plan.get("provenance_state") == "CONFIRMED"
 
 
@@ -3250,6 +3343,107 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
         state["reconciliation_required"] = False
         state["emergency"].update({"active": False, "reason": "UNKNOWN_ORDER_RECONCILED"})
         add_event(state, "UNKNOWN_ORDER_RECONCILED", "Belirsiz canlı emir exact kimlik ve parametrelerle uzlaştırıldı; yeniden arm gerekiyor.", recovery_state="LOCKED")
+    retry_now = time.time()
+    retry_plans: list[tuple[str, dict[str, Any], int]] = []
+    for plan_id, plan in state.get("plans", {}).items():
+        if not isinstance(plan, dict) or plan.get("source") != "external_adoption":
+            continue
+        if plan.get("persistence_status") != "UNKNOWN" or plan.get("status") in {"KAPANDI", "İPTAL"}:
+            continue
+        if plan.get("persistence_retry_exhausted"):
+            continue
+        next_retry_at = plan.get("persistence_next_retry_at")
+        if next_retry_at is None:
+            plan["persistence_next_retry_at"] = retry_now + ADOPTION_PERSISTENCE_RETRY_BACKOFF_SECONDS[0]
+            continue
+        if float(next_retry_at) > retry_now:
+            continue
+        attempt = int(plan.get("persistence_retry_count") or 0) + 1
+        plan.update({
+            "persistence_retry_count": attempt,
+            "persistence_next_retry_at": None,
+            "persistence_status": "PERSISTED",
+        })
+        retry_plans.append((str(plan_id), plan, attempt))
+        add_event(
+            state,
+            ADOPTION_PERSISTENCE_RETRY_STARTED,
+            "UNKNOWN adoption persistence retry başlatıldı.",
+            plan_id=str(plan_id),
+            symbol=str(plan.get("symbol") or ""),
+            retry_attempt=attempt,
+        )
+    if retry_plans:
+        persistence_result: PersistenceWriteResult | None = None
+        persistence_error: str | None = None
+        try:
+            # wait_for cancellation propagates into asyncpg's pool.fetchrow().
+            # asyncpg releases the pool connection when that acquire context unwinds.
+            persistence_result = await asyncio.wait_for(
+                persist_state_awaited(state),
+                timeout=ADOPTION_PERSISTENCE_RETRY_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            persistence_error = f"persistence timeout after {ADOPTION_PERSISTENCE_RETRY_TIMEOUT_SECONDS}s"
+        except Exception as exc:
+            persistence_error = sanitized_exception_message(exc)
+        if persistence_error is None and persistence_result in {"INSERTED", "UPDATED"}:
+            for plan_id, plan, attempt in retry_plans:
+                plan.update({
+                    "persistence_status": "PERSISTED",
+                    "persistence_next_retry_at": None,
+                    "persistence_last_error": None,
+                    "persistence_retry_exhausted": False,
+                })
+                add_event(
+                    state,
+                    ADOPTION_PERSISTENCE_RETRY_SUCCEEDED,
+                    "UNKNOWN adoption persistence retry başarıyla tamamlandı.",
+                    plan_id=plan_id,
+                    symbol=str(plan.get("symbol") or ""),
+                    retry_attempt=attempt,
+                    persistence_result=persistence_result,
+                )
+            if not any(
+                isinstance(plan, dict) and plan.get("persistence_status") == "UNKNOWN"
+                for plan in state.get("plans", {}).values()
+            ):
+                state["reconciliation_required"] = False
+        else:
+            failure_message = persistence_error or f"persistence write returned {persistence_result}"
+            for plan_id, plan, attempt in retry_plans:
+                plan.update({
+                    "persistence_status": "UNKNOWN",
+                    "persistence_last_error": failure_message,
+                })
+                if attempt >= len(ADOPTION_PERSISTENCE_RETRY_BACKOFF_SECONDS):
+                    plan.update({
+                        "persistence_retry_exhausted": True,
+                        "persistence_next_retry_at": None,
+                    })
+                    add_event(
+                        state,
+                        ADOPTION_PERSISTENCE_RETRY_EXHAUSTED,
+                        "UNKNOWN adoption persistence retry limiti doldu; manuel müdahale gerekiyor.",
+                        plan_id=plan_id,
+                        symbol=str(plan.get("symbol") or ""),
+                        retry_attempt=attempt,
+                    )
+                else:
+                    plan.update({
+                        "persistence_retry_exhausted": False,
+                        "persistence_next_retry_at": retry_now + ADOPTION_PERSISTENCE_RETRY_BACKOFF_SECONDS[attempt],
+                    })
+                add_event(
+                    state,
+                    ADOPTION_PERSISTENCE_RETRY_FAILED,
+                    "UNKNOWN adoption persistence retry başarısız oldu.",
+                    plan_id=plan_id,
+                    symbol=str(plan.get("symbol") or ""),
+                    retry_attempt=attempt,
+                    error=failure_message,
+                )
+            state["reconciliation_required"] = True
     await cleanup_orphan_protection_orders(client, state, positions, open_algos)
     for plan in state.get("plans", {}).values():
         if plan.get("status") in {"KAPANDI", "İPTAL"}:
@@ -3795,30 +3989,48 @@ async def v25_risk_preview(request: Request, body: RiskPreviewRequest) -> dict[s
     }
 
 
-@router.post("/adopt-external-position/preview")
-async def v25_adopt_external_position_preview(
-    request: Request,
-    body: AdoptExternalPositionPreviewRequest,
+async def build_external_position_candidate(
+    client: BinanceLiveClient,
+    symbol: str,
 ) -> dict[str, Any]:
-    execution_owner(request)
-    symbol = normalize_symbol(body.symbol)
-    client = client_for(request.app, request)
     started_at = time.monotonic()
 
+    position_payload = await client.signed(
+        "GET",
+        "/fapi/v3/positionRisk",
+        {"symbol": symbol},
+    )
+    open_algo_payload = await client.signed(
+        "GET",
+        "/fapi/v1/openAlgoOrders",
+        {"symbol": symbol},
+    )
+    symbol_config_payload = await client.signed(
+        "GET",
+        "/fapi/v1/symbolConfig",
+        {"symbol": symbol},
+    )
+    exchange_info = await client.public_get("/fapi/v1/exchangeInfo")
+
+    symbol_config = next(
+        (
+            row for row in response_rows(symbol_config_payload)
+            if isinstance(row, dict)
+            and str(row.get("symbol") or "").upper() == symbol
+        ),
+        None,
+    )
+    if symbol_config is None:
+        raise HTTPException(422, f"{symbol} için Binance symbolConfig bulunamadı.")
     try:
-        position_payload = await client.signed(
-            "GET",
-            "/fapi/v3/positionRisk",
-            {"symbol": symbol},
-        )
-        open_algo_payload = await client.signed(
-            "GET",
-            "/fapi/v1/openAlgoOrders",
-            {"symbol": symbol},
-        )
-        exchange_info = await client.public_get("/fapi/v1/exchangeInfo")
-    except (LiveExchangeError, BinanceDemoError) as exc:
-        raise safe_exchange_error(exc) from exc
+        leverage = int(symbol_config.get("leverage"))
+    except (TypeError, ValueError):
+        raise HTTPException(422, f"{symbol} için Binance symbolConfig leverage değeri geçersiz.") from None
+    if leverage < 1:
+        raise HTTPException(422, f"{symbol} için Binance symbolConfig leverage değeri geçersiz.")
+    margin_type = str(symbol_config.get("marginType") or "").strip().lower()
+    if margin_type not in {"isolated", "crossed"}:
+        raise HTTPException(422, f"{symbol} için Binance symbolConfig marginType değeri geçersiz.")
 
     elapsed_seconds = time.monotonic() - started_at
     warnings: list[str] = []
@@ -3980,16 +4192,15 @@ async def v25_adopt_external_position_preview(
                 else "PARTIAL_TARGETS_FULL_COVERAGE_V1"
             ),
             "target_coverage": target_coverage,
-            "leverage": position.get("leverage"),
-            "margin_type": position.get("marginType"),
+            "leverage": leverage,
+            "margin_type": margin_type,
             "provenance_state": "ADOPTED_EXTERNAL",
             "source": "external_adoption",
         }
 
     confirm_token = None
     if candidate_plan is not None:
-        serialized = json.dumps(candidate_plan, sort_keys=True, separators=(",", ":"))
-        confirm_token = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        confirm_token = compute_adoption_confirm_token(candidate_plan)
 
     return {
         "would_create_plan": candidate_plan is not None,
@@ -4000,6 +4211,187 @@ async def v25_adopt_external_position_preview(
         "warnings": warnings,
         "state_mutation": False,
     }
+
+
+@router.post("/adopt-external-position/preview")
+async def v25_adopt_external_position_preview(
+    request: Request,
+    body: AdoptExternalPositionPreviewRequest,
+) -> dict[str, Any]:
+    execution_owner(request)
+    symbol = normalize_symbol(body.symbol)
+    client = client_for(request.app, request)
+    try:
+        return await build_external_position_candidate(client, symbol)
+    except (LiveExchangeError, BinanceDemoError) as exc:
+        raise safe_exchange_error(exc) from exc
+
+
+@router.post("/adopt-external-position")
+async def v25_adopt_external_position(
+    request: Request,
+    body: AdoptExternalPositionRequest,
+) -> dict[str, Any]:
+    user = execution_owner(request)
+    state = request.app.state.v25_execution
+    await state["lock"].acquire()
+    try:
+        if state.get("recovery_loaded") is not True:
+            raise HTTPException(503, "Canlı durum recovery tamamlanmadı.")
+        if os.getenv("DATABASE_URL", "").strip() and getattr(request.app.state, "db_pool", None) is None:
+            raise HTTPException(503, "PostgreSQL persistence hazır değil.")
+        if state.get("recovery_ready") is not True:
+            raise HTTPException(503, "Canlı durum persistence recovery için hazır değil.")
+        if state.get("reconciliation_required"):
+            raise HTTPException(423, "Önce canlı hesap reconciliation tamamlanmalı.")
+
+        symbol = normalize_symbol(body.symbol)
+        active_plans = [
+            plan for plan in state.get("plans", {}).values()
+            if isinstance(plan, dict)
+            and str(plan.get("symbol") or "").upper() == symbol
+            and live_plan_is_active(plan)
+        ]
+        if active_plans:
+            existing = active_plans[0]
+            if existing.get("source") == "external_adoption":
+                raise HTTPException(409, "ALREADY_ADOPTED")
+            raise HTTPException(409, "PLAN_EXISTS")
+
+        client = client_for(request.app, request)
+        candidate = await build_external_position_candidate(client, symbol)
+        candidate_plan = candidate.get("candidate_plan")
+        if candidate.get("would_create_plan") is not True or not isinstance(candidate_plan, dict):
+            raise HTTPException(
+                422,
+                detail={
+                    "code": "ADOPTION_CANDIDATE_INVALID",
+                    "warnings": candidate.get("warnings", []),
+                    "matched_protection_orders": candidate.get("matched_protection_orders", []),
+                    "unmatched_protection_orders": candidate.get("unmatched_protection_orders", []),
+                },
+            )
+
+        confirm_token = compute_adoption_confirm_token(candidate_plan)
+        if body.confirm_token != confirm_token:
+            raise HTTPException(409, "TOKEN_MISMATCH")
+
+        plan_id = uuid.uuid4().hex[:16]
+        intent_id = f"external-adoption-{plan_id}"
+        stop_loss = candidate_plan["stop_loss"]
+        targets = candidate_plan["targets"]
+        plan = {
+            "id": plan_id,
+            "intent_id": intent_id,
+            "symbol": candidate_plan["symbol"],
+            "direction": candidate_plan["direction"],
+            "order_type": "EXTERNAL",
+            "entry_price": candidate_plan["entry_price"],
+            "quantity": candidate_plan["quantity"],
+            "margin_usdt": None,
+            "notional_usdt": None,
+            "leverage": candidate_plan.get("leverage"),
+            "applied_leverage": candidate_plan.get("leverage"),
+            "margin_type": candidate_plan.get("margin_type"),
+            "stop_loss": stop_loss["price"],
+            "targets": [target["price"] for target in targets],
+            "step": None,
+            "min_qty": None,
+            "entry_order_id": None,
+            "entry_client_order_id": None,
+            "status": "KORUMA AKTİF",
+            "created_at": now_iso(),
+            "source": "external_adoption",
+            "live": True,
+            "protection_ids": list(candidate_plan.get("protection_ids", [])),
+            "provenance_state": "ADOPTED_EXTERNAL",
+            "protection_state": "UNKNOWN",
+            "protection_cleanup_state": "IDLE",
+            "protection_cleanup_pending_ids": [],
+            "protection_cleanup_last_error": None,
+            "protection_cleanup_attempted_at": None,
+            "exchange_order_ids": [],
+            "provenance_kind": "ADOPTED_EXTERNAL",
+            "mutation_policy": "READ_ONLY_EXTERNAL",
+            "persistence_status": "PENDING",
+            "persistence_retry_count": 0,
+            "persistence_next_retry_at": None,
+            "persistence_last_error": None,
+            "persistence_retry_exhausted": False,
+            "adoption_snapshot": {
+                "candidate_plan": candidate_plan,
+                "matched_protection_orders": candidate.get("matched_protection_orders", []),
+                "unmatched_protection_orders": candidate.get("unmatched_protection_orders", []),
+                "warnings": candidate.get("warnings", []),
+                "confirm_token": confirm_token,
+            },
+        }
+        state["plans"] = {plan_id: plan, **state.get("plans", {})}
+        add_event(
+            state,
+            "LIVE_PLAN_ADOPTED",
+            f"{symbol} dış pozisyonu V25 read-only plan olarak sahiplenildi.",
+            actor=user["id"],
+            symbol=symbol,
+            plan_id=plan_id,
+            mutation_policy="READ_ONLY_EXTERNAL",
+        )
+
+        try:
+            persistence_result = await persist_state_awaited(state)
+        except Exception as exc:
+            plan["persistence_status"] = "UNKNOWN"
+            plan["persistence_last_error"] = sanitized_exception_message(exc)
+            state["reconciliation_required"] = True
+            add_event(
+                state,
+                "ADOPTION_PERSISTENCE_UNCERTAIN",
+                "Dış pozisyon adoption plan persistence sonucu belirsiz; reconciliation gerekiyor.",
+                symbol=symbol,
+                plan_id=plan_id,
+                exception_type=type(exc).__name__,
+            )
+            return {
+                "ok": False,
+                "code": "ADOPTION_PERSISTENCE_UNCERTAIN",
+                "plan": plan,
+                "persistence_status": "UNKNOWN",
+                "reconciliation_required": True,
+                "orders_created": False,
+            }
+
+        if persistence_result == "SKIPPED":
+            plan["persistence_status"] = "UNKNOWN"
+            state["reconciliation_required"] = True
+            add_event(
+                state,
+                "ADOPTION_PERSISTENCE_UNCERTAIN",
+                "Dış pozisyon adoption plan persistence atlandı; reconciliation gerekiyor.",
+                symbol=symbol,
+                plan_id=plan_id,
+            )
+            return {
+                "ok": False,
+                "code": "ADOPTION_PERSISTENCE_UNCERTAIN",
+                "plan": plan,
+                "persistence_status": "UNKNOWN",
+                "reconciliation_required": True,
+                "orders_created": False,
+            }
+
+        plan["persistence_status"] = "PERSISTED"
+        return {
+            "ok": True,
+            "adopted": True,
+            "plan": plan,
+            "persistence_status": "PERSISTED",
+            "persistence_result": persistence_result,
+            "orders_created": False,
+        }
+    except (LiveExchangeError, BinanceDemoError) as exc:
+        raise safe_exchange_error(exc) from exc
+    finally:
+        state["lock"].release()
 
 
 @router.post("/arm")
@@ -4159,8 +4551,18 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
             for plan in confirmed_plans
             for row in owned_protection_rows(plan, snapshot.get("open_algo_orders", []))
         }
+        owned_order_ids = {
+            str(value)
+            for plan in confirmed_plans
+            for value in [
+                plan.get("entry_client_order_id"),
+                *(plan.get("close_client_order_ids") or []),
+            ]
+            if value
+        }
         for row in snapshot.get("open_orders", []):
-            if str(row.get("client_order_id") or "").startswith(LIVE_CLIENT_PREFIX):
+            client_order_id = str(row.get("client_order_id") or "")
+            if client_order_id.startswith(LIVE_CLIENT_PREFIX) and client_order_id in owned_order_ids:
                 try:
                     await client.signed("DELETE", "/fapi/v1/order", {"symbol": row["symbol"], "orderId": row["order_id"]})
                     cancelled_orders += 1
