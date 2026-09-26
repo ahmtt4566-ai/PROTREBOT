@@ -1871,7 +1871,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("X-ProTreBot-Owner':ownerAccessToken()", ACTIVE_COMMERCIAL_SOURCE)
 
     def test_vercel_build_targets_current_render_api(self):
-        self.assertIn('"VITE_API_URL": "https://protrebot.onrender.com"', VERCEL_SOURCE)
+        self.assertIn('"VITE_API_URL": "https://protrebot-rkpt.onrender.com"', VERCEL_SOURCE)
         self.assertNotIn("tradebt8.onrender.com", VERCEL_SOURCE)
 
     def test_render_manifest_matches_production_service(self):

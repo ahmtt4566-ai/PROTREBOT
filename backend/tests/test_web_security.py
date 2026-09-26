@@ -24,6 +24,13 @@ class WebSecurityTests(unittest.TestCase):
         )
         self.assertTrue(decision.allowed)
 
+    def test_healthz_is_public_for_render_monitoring(self):
+        decision = evaluate_access(
+            required=True, configured_token="x" * 32, authorization=None,
+            path="/healthz", method="GET",
+        )
+        self.assertTrue(decision.allowed)
+
     def test_database_health_is_public_for_host_monitoring(self):
         decision = evaluate_access(
             required=True, configured_token="x" * 32, authorization=None,
@@ -120,6 +127,44 @@ class WebSecurityTests(unittest.TestCase):
         self.assertTrue(is_allowed_cors_origin("https://frontend-gh7asjvqj-ahmet-f11.vercel.app", {"https://frontend-nu-two-18.vercel.app"}))
         self.assertFalse(is_allowed_cors_origin("https://other-project.vercel.app", {"https://frontend-nu-two-18.vercel.app"}))
         self.assertFalse(is_allowed_cors_origin("http://frontend-nu-two-18.vercel.app", {"https://frontend-nu-two-18.vercel.app"}))
+
+    def test_production_auth_preflight_allows_login_and_session_headers(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from fastapi.middleware.cors import CORSMiddleware
+
+        main_source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('PRODUCTION_WEB_ORIGIN = "https://frontend-nu-two-18.vercel.app"', main_source)
+        self.assertIn('"Authorization"', main_source)
+        self.assertIn('"Content-Type"', main_source)
+        self.assertIn('"X-ProTreBot-Session"', main_source)
+
+        origin = "https://frontend-nu-two-18.vercel.app"
+        requested_headers = "Authorization, Content-Type, X-ProTreBot-Session"
+        app = FastAPI()
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[origin],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Accept", "Authorization", "Content-Type", "Origin", "X-ProTreBot-Session"],
+        )
+        with TestClient(app) as client:
+            for path, method in (("/api/v22/auth/login", "POST"), ("/api/v22/session", "GET")):
+                response = client.options(
+                    path,
+                    headers={
+                        "Origin": origin,
+                        "Access-Control-Request-Method": method,
+                        "Access-Control-Request-Headers": requested_headers,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
+                allowed_headers = response.headers.get("access-control-allow-headers", "").lower()
+                self.assertIn("authorization", allowed_headers)
+                self.assertIn("content-type", allowed_headers)
+                self.assertIn("x-protrebot-session", allowed_headers)
         old = os.environ.get("PROTREBOT_TEST_FLAG")
         try:
             os.environ["PROTREBOT_TEST_FLAG"] = "yes"
