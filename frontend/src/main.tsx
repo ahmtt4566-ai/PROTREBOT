@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import TestnetFirstApp from './TestnetFirstApp'
 import AppErrorBoundary from './AppErrorBoundary'
 import WebAccessGate from './WebAccessGate'
+import AuthGate from './AuthGate'
 import { installAuthorizedFetch } from './api'
 import './style.css'
 import './binance-demo.css'
@@ -15,4 +16,7 @@ import './exchange-connections.css'
 import './dark-dashboard.css'
 
 installAuthorizedFetch()
-ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary><WebAccessGate><TestnetFirstApp/></WebAccessGate></AppErrorBoundary></React.StrictMode>)
+const ownerPreview = import.meta.env.VITE_OWNER_PREVIEW === 'true'
+const application = <AuthGate><TestnetFirstApp/></AuthGate>
+const gatedApplication = ownerPreview ? <WebAccessGate>{application}</WebAccessGate> : application
+ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary>{gatedApplication}</AppErrorBoundary></React.StrictMode>)
