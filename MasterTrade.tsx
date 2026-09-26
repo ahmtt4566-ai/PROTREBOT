@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, Gauge, Lock, ShieldCheck, TrendingUp, Wallet, XCircle } from 'lucide-react'
+import { Gauge, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 
 type TradeSide = 'LONG' | 'SHORT'
-type Source = 'MANUAL' | 'AUTO'
-
 type TradeHistoryRow = {
   id: string
   symbol: string
@@ -42,12 +40,12 @@ type AccountPlan = { symbol?: string; stop_loss?: string; targets?: string[]; ma
 type AccountPosition = { symbol: string; position_side?: 'BOTH' | 'LONG' | 'SHORT'; direction?: TradeSide; quantity?: number; entry_price?: number; mark_price?: number; liquidation_price?: number; unrealized_pnl?: number; leverage?: number | null; margin_type?: string | null; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number; age?: string }
 type AccountOrder = { symbol?: string; side?: string; type?: string; price?: number; trigger_price?: number; quantity?: number; status?: string; reduce_only?: boolean }
 type AccountSnapshot = { wallet_balance?: number; available_balance?: number; margin_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; plans?: AccountPlan[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number; max_margin_usdt?: number } }
+type BackendRiskPreview = { estimated_stop_loss_usdt?: number; stop_distance_pct?: number; notional_usdt?: number; margin_usdt?: number; max_stop_distance_pct?: number; capped?: boolean }
 type PerformanceSnapshot = { total_trades: number; wins: number; losses: number; win_rate: number; total_profit: number; total_loss: number; net_profit: number; average_trade: number; best_trade: number; worst_trade: number; profit_factor: number | null; average_win: number | null; average_loss: number | null; losing_streak: number; max_drawdown: number; history_quality: string }
 type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[]; analysis: Analysis | null; mtf: MtfAnalysis[]; account: AccountSnapshot | null; currentPrice: number | null; priceUpdatedAt: string | null; marketUpdatedAt: string | null; accountUpdatedAt: string | null; marketError: string; accountError: string }
 type AccountSyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'DATA_UNAVAILABLE'
 type TradeHistorySyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'UNAVAILABLE'
 type CloseLifecycleState = 'IDLE' | 'CLOSING' | 'CLOSED' | 'CLOSE_FAILED' | 'HISTORY_SYNC_FAILED' | 'ACCOUNT_SYNC_FAILED' | 'SYNC_FAILED'
-type BackendRiskPreview = { estimated_stop_loss_usdt?: number; stop_distance_pct?: number; notional_usdt?: number; margin_usdt?: number; max_stop_distance_pct?: number; capped?: boolean }
 
 const fmtNum = (value: number | null | undefined, decimals = 2) =>
   value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
@@ -112,7 +110,7 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   return values.filter((item): item is MtfAnalysis => item !== null)
 }
 
-export default function MasterTrade({ onBack }: { onBack?: () => void }) {
+export default function MasterTrade() {
   const [history, setHistory] = useState<TradeHistoryRow[]>([])
   const [historySyncState, setHistorySyncState] = useState<TradeHistorySyncState>('READY')
   const [accountSyncState, setAccountSyncState] = useState<AccountSyncState>('READY')
@@ -135,14 +133,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const triggerLifecycleRef = useRef<TriggerLifecycle | null>(null)
   const [dataLoading, setDataLoading] = useState(false)
   const [dataError, setDataError] = useState('')
-  const [analysisFillLoading, setAnalysisFillLoading] = useState(false)
-  const [analysisFillError, setAnalysisFillError] = useState('')
-  const [analysisSyncedAt, setAnalysisSyncedAt] = useState('')
   const [chartHoverIndex, setChartHoverIndex] = useState<number | null>(null)
   const [showChartLevels, setShowChartLevels] = useState(true)
   const [showChartVolume, setShowChartVolume] = useState(true)
-  const [manualOrderRequest, setManualOrderRequest] = useState(0)
-  const [draft, setDraft] = useState({ side: 'LONG' as TradeSide, market: 'BTCUSDT', leverage: 2, margin: 10, quantity: 0.08, entry: 61350, stopLoss: 60800, tp1: 61850, tp2: 62400, tp3: 63150 })
+  const [draft, setDraft] = useState({ market: 'BTCUSDT', leverage: 2, margin: 10, quantity: 0.08, entry: 61350, stopLoss: 60800, tp1: 61850, tp2: 62400, tp3: 63150 })
   const [backendRiskPreview, setBackendRiskPreview] = useState<BackendRiskPreview | null>(null)
   const [backendRiskPreviewError, setBackendRiskPreviewError] = useState('')
   const [positionAction, setPositionAction] = useState<{ mode: 'DETAILS' | 'REDUCE' | 'CLOSE'; position: AccountPosition } | null>(null)
@@ -232,9 +226,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
         if (!nextCandles.length || !nextAnalysis) throw new Error('Market data unavailable')
         setSnapshot({ symbol: draft.market, timeframe: interval, candles: nextCandles, analysis: nextAnalysis, mtf: nextMtf, account: accountRef.current, currentPrice: nextCandles[nextCandles.length - 1]?.close ?? null, priceUpdatedAt: new Date().toISOString(), marketUpdatedAt: new Date().toISOString(), accountUpdatedAt: null, marketError: '', accountError: '' })
         const latest = nextCandles[nextCandles.length - 1]
-        if (latest) setDraft(current => current.stopLoss > 0 && current.tp1 > 0 && current.tp2 > 0 && current.tp3 > 0
-          ? current
-          : { ...current, entry: latest.close })
         setDataError('')
       } catch (error) {
         if (error instanceof Error && error.name !== 'AbortError') { setDataError('DATA STALE / DATA UNAVAILABLE'); setSnapshot(current => current ? { ...current, marketError: 'DATA STALE / DATA UNAVAILABLE' } : current) }
@@ -384,17 +375,11 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     return () => { window.clearTimeout(timer); controller.abort() }
   }, [analysis?.atr, draft.entry, draft.stopLoss, draft.margin, draft.leverage])
 
-  const riskPreview = useMemo(() => {
-    const entry = Number(draft.entry)
-    const stop = Number(draft.stopLoss)
-    const distance = Math.max(1, Math.abs(entry - stop))
-    const riskUsd = backendRiskPreview?.estimated_stop_loss_usdt ?? null
-    const tp = Number(draft.tp1)
-    const reward = Math.abs(tp - entry) * Number(draft.quantity)
-    const rr = entry > 0 && stop > 0 && tp > 0 && Number(draft.quantity) > 0 ? reward / (distance * Number(draft.quantity)) : 0
-    const riskPercent = backendRiskPreview?.stop_distance_pct ?? 0
-    return { riskUsd, reward, rr, riskPercent, loading: !backendRiskPreview && !backendRiskPreviewError }
-  }, [backendRiskPreview, backendRiskPreviewError, draft])
+  const riskPreview = useMemo(() => ({
+    riskUsd: backendRiskPreview?.estimated_stop_loss_usdt ?? null,
+    riskPercent: backendRiskPreview?.stop_distance_pct ?? 0,
+    error: backendRiskPreviewError,
+  }), [backendRiskPreview, backendRiskPreviewError])
 
   const tradeDecision = useMemo<TradeDecision>(() => buildTradeDecision(analysis, candles, mtfAnalyses), [analysis, candles, mtfAnalyses])
   const triggerMonitor = useMemo<TriggerMonitor>(() => buildTriggerMonitor(tradeDecision, analysis, candles, triggerLifecycleRef.current, snapshot?.currentPrice ?? candles[candles.length - 1]?.close), [tradeDecision, analysis, candles, snapshot?.currentPrice])
@@ -418,20 +403,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       : `${tradeDecision.direction} bias · ${triggerMonitor.lifecycle.toLowerCase()} · ${triggerMonitor.remainingConditions ?? '--'} conditions remaining`
     setDecisionTimeline(current => [{ time: snapshot.marketUpdatedAt as string, message }, ...current].slice(0, 12))
   }, [snapshot?.marketUpdatedAt, snapshot?.symbol, snapshot?.timeframe, tradeDecision.direction, triggerMonitor.lifecycle, triggerMonitor.remainingConditions])
-
-  const validateOrderDraft = () => {
-    if (!Number.isFinite(draft.margin) || draft.margin < 5 || draft.margin > 100) return 'LIVE margin must be between 5 and 100 USDT.'
-    if (!Number.isFinite(draft.leverage) || draft.leverage < 1 || draft.leverage > 50) return 'LIVE leverage must be between 1x and 50x.'
-    if (draft.margin * draft.leverage > 5000) return 'LIVE position size exceeds the configured safety limit.'
-    if (![draft.entry, draft.stopLoss, draft.tp1, draft.tp2, draft.tp3].every(value => Number.isFinite(value) && value > 0)) return 'Entry, Stop Loss ve TP1–TP3 alanlarını güncel analizden doldurun.'
-    const levelsValid = draft.side === 'LONG'
-      ? draft.stopLoss < draft.entry && draft.entry < draft.tp1 && draft.tp1 < draft.tp2 && draft.tp2 < draft.tp3
-      : draft.tp3 < draft.tp2 && draft.tp2 < draft.tp1 && draft.tp1 < draft.entry && draft.entry < draft.stopLoss
-    if (!levelsValid) return draft.side === 'LONG' ? 'LONG için SL < Entry < TP1 < TP2 < TP3 olmalı.' : 'SHORT için TP3 < TP2 < TP1 < Entry < SL olmalı.'
-    const stopDistancePct = Math.abs(draft.entry - draft.stopLoss) / draft.entry * 100
-    if (stopDistancePct > 5 + 1e-6) return `Stop mesafesi %${stopDistancePct.toFixed(2)}. Analizi yenileyin; LIVE üst sınır %5.00.`
-    return ''
-  }
 
   const submitPositionAction = async () => {
     if (!positionAction || positionAction.mode === 'DETAILS' || positionActionBusy) return
@@ -514,56 +485,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     }
   }
 
-  const fillFromCurrentAnalysis = async () => {
-    setAnalysisFillLoading(true)
-    setAnalysisFillError('')
-    try {
-      const response = await fetch(`${API_BASE}/analysis/${draft.market}?interval=${interval}`)
-      const payload = await response.json().catch(() => null) as (Analysis & { detail?: unknown; message?: unknown }) | null
-      if (!response.ok) {
-        const detail = typeof payload?.detail === 'string' ? payload.detail : typeof payload?.message === 'string' ? payload.message : `Analysis unavailable (HTTP ${response.status}).`
-        throw new Error(detail)
-      }
-      if (!payload || typeof payload !== 'object') throw new Error('Invalid analysis response.')
-      const nextAnalysis = payload
-      const nextMtf = await fetchMtfAnalyses(draft.market)
-      const directionText = String(nextAnalysis.normalized_signal || nextAnalysis.direction || '').toUpperCase()
-      const analysisSide: TradeSide | null = /SHORT|SELL/.test(directionText) ? 'SHORT' : /LONG|BUY/.test(directionText) ? 'LONG' : null
-      const nextSide: TradeSide = analysisSide || draft.side
-      const entry = nextAnalysis.entry
-      const analyzedStopLoss = nextAnalysis.stop_loss
-      const targets = [nextAnalysis.tp1, nextAnalysis.tp2, nextAnalysis.tp3]
-      if (![entry, analyzedStopLoss, ...targets].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0)) {
-        throw new Error('Güncel analizde Entry, Stop Loss ve TP seviyeleri bulunamadı.')
-      }
-      const stopLimit = nextSide === 'LONG' ? entry * 0.955 : entry * 1.045
-      const stopLoss = nextSide === 'LONG' ? Math.max(analyzedStopLoss, stopLimit) : Math.min(analyzedStopLoss, stopLimit)
-      const orderedTargets = [...targets].sort((left, right) => nextSide === 'LONG' ? left - right : right - left)
-      const levelsValid = nextSide === 'LONG'
-        ? stopLoss < entry && entry < orderedTargets[0] && orderedTargets[0] < orderedTargets[1] && orderedTargets[1] < orderedTargets[2]
-        : orderedTargets[2] < orderedTargets[1] && orderedTargets[1] < orderedTargets[0] && orderedTargets[0] < entry && entry < stopLoss
-      if (!levelsValid) throw new Error(nextSide === 'LONG' ? 'LONG analiz seviyeleri SL < Entry < TP1 < TP2 < TP3 sırasını sağlamıyor.' : 'SHORT analiz seviyeleri TP3 < TP2 < TP1 < Entry < SL sırasını sağlamıyor.')
-      setSnapshot(current => current ? { ...current, analysis: nextAnalysis, mtf: nextMtf, marketUpdatedAt: new Date().toISOString(), marketError: '' } : current)
-      setDraft(current => ({
-        ...current,
-        side: nextSide,
-        entry,
-        stopLoss,
-        tp1: orderedTargets[0],
-        tp2: orderedTargets[1],
-        tp3: orderedTargets[2],
-      }))
-      setAnalysisSyncedAt(new Date().toLocaleTimeString('en-GB'))
-      if (!analysisSide) setAnalysisFillError(`Analiz BEKLE durumunda; manuel ${nextSide} seçimi için geçerli koruma seviyeleri dolduruldu.`)
-      else if (stopLoss !== analyzedStopLoss) setAnalysisFillError('Stop mesafesi LIVE %5.00 sınırına göre %4.5 olarak daraltıldı.')
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') return
-      setAnalysisFillError(error instanceof Error ? error.message : 'Analysis unavailable.')
-    } finally {
-      setAnalysisFillLoading(false)
-    }
-  }
-
   const watchlistCandidates: ScannerCandidate[] = scannerCandidates.length ? scannerCandidates : markets.map(market => ({
     symbol: market.symbol,
     display: market.display,
@@ -631,18 +552,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const selectMarket = (symbol: string) => {
     setDraft(current => ({ ...current, market: symbol, entry: 0, stopLoss: 0, tp1: 0, tp2: 0, tp3: 0 }))
     setMarketQuery('')
-    setAnalysisFillError('')
-    setAnalysisSyncedAt('')
   }
-
-  const overviewCards = [
-    { label: 'BALANCE', value: account?.wallet_balance === undefined ? '--' : `$${fmtCompact(account.wallet_balance)}`, note: account ? 'LIVE account equity' : 'DATA UNAVAILABLE', tone: 'default' },
-    { label: 'AVAILABLE', value: account?.available_balance === undefined ? '--' : `$${fmtCompact(account.available_balance)}`, note: account ? 'Current margin' : 'DATA UNAVAILABLE', tone: 'default' },
-    { label: 'UNREALIZED PNL', value: account?.unrealized_pnl === undefined ? '--' : `${account.unrealized_pnl >= 0 ? '+' : ''}$${fmtPnl(account.unrealized_pnl)}`, note: account ? 'Account snapshot' : 'DATA UNAVAILABLE', tone: account?.unrealized_pnl && account.unrealized_pnl >= 0 ? 'positive' : 'default' },
-    { label: 'REALIZED PNL', value: performanceSnapshot ? `${performanceSnapshot.net_profit >= 0 ? '+' : ''}$${fmtCompact(performanceSnapshot.net_profit)}` : '--', note: performanceSnapshot ? 'Verified LIVE history' : 'NO TRADE HISTORY', tone: 'default' },
-    { label: 'MARGIN USED', value: account?.wallet_balance !== undefined && account.available_balance !== undefined ? `$${fmtCompact(account.wallet_balance - account.available_balance)}` : '--', note: account ? 'Derived from account' : 'DATA UNAVAILABLE', tone: 'default' },
-    { label: 'OPEN POSITIONS', value: account?.positions ? String(account.positions.length) : '--', note: account ? 'LIVE account positions' : 'DATA UNAVAILABLE', tone: 'default' },
-  ]
 
   const performanceTrend: number[] = []
   const openPositions = account?.positions ?? []
@@ -682,7 +592,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const usedMargin = account?.wallet_balance !== undefined && account.available_balance !== undefined ? account.wallet_balance - account.available_balance : null
   const latestUpdate = snapshot?.marketUpdatedAt ? new Date(snapshot.marketUpdatedAt).toLocaleTimeString('en-GB') : '--'
   const marketAgeSeconds = snapshot?.marketUpdatedAt ? Math.max(0, (Date.now() - new Date(snapshot.marketUpdatedAt).getTime()) / 1000) : null
-  const persistentTradeHistoryText = 'localStorage trade history persistence enabled; live trading remains locked.'
   const priceAgeSeconds = snapshot?.priceUpdatedAt ? Math.max(0, (Date.now() - new Date(snapshot.priceUpdatedAt).getTime()) / 1000) : null
   const dataHealth = !snapshot ? 'NO DATA' : snapshot.marketError ? 'ERROR' : priceAgeSeconds !== null && priceAgeSeconds <= 20 ? 'LIVE' : 'STALE'
   const riskMetrics = [
@@ -697,23 +606,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   return (
     <section className="masterTradePage masterTrade">
       <div className="masterTradeShell">
-        <header className="masterTradeTopbar">
-          <div className="masterTradeTopbarLeft">
-            {onBack && (
-              <button type="button" className="masterTradeBackButton" onClick={onBack}>← Dashboard</button>
-            )}
-            <div>
-              <span className="masterTradeEyebrow">MASTER TRADE V2</span>
-              <h2>Professional execution terminal</h2>
-            </div>
-          </div>
-
-          <div className="masterTradeStatusRow">
-            <span className="statusPill online"><Activity /> CONNECTED</span>
-            <span className="statusPill online"><Wallet /> LIVE ACCOUNT</span>
-          </div>
-        </header>
-
         <div className="terminalStatusStrip" aria-label="Master Trade connection status">
           <span className="terminalStatusItem online"><i /> CONNECTED</span>
           <span className="terminalStatusItem"><small>WS</small> --</span>
@@ -723,21 +615,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           <span className="terminalStatusItem online">LIVE ACCOUNT</span>
         </div>
 
-        <div className="masterTradeOverview">
-          {overviewCards.map((card) => (
-            <article key={card.label} className={`metricCard ${card.tone}`}>
-              <small>{card.label}</small>
-              <strong>{card.value}</strong>
-              <span>{card.note}</span>
-            </article>
-          ))}
-        </div>
-
         <div className="masterTradeWorkspace">
           <div className="masterTradeSafetyBanner" role="status">
             <strong>LIVE TRADING LOCKED</strong>
             <span>LIVE ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY CONTROLLED</span>
-            <em>{persistentTradeHistoryText}</em>
           </div>
           <aside className="masterTradePanel watchlistPanel">
             <div className="panelHeader">
@@ -871,95 +752,9 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </section>
           </main>
 
-          <aside className="masterTradePanel orderPanel">
-            <div className="panelHeader orderHeader">
-              <div className="tradeTerminalHeader">
-                <span className="panelEyebrow">TRADE TERMINAL</span>
-                <div className="tradeSymbolRow">
-                  <strong>{draft.market}</strong>
-                  <span className="liveBadge">LIVE</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="tradeTerminalStack">
-              <div className="tradeSegmentGroup">
-                <button type="button" className={draft.side === 'LONG' ? 'selected long' : ''} onClick={() => setDraft((current) => ({ ...current, side: 'LONG' }))}>LONG</button>
-                <button type="button" className={draft.side === 'SHORT' ? 'selected short' : ''} onClick={() => setDraft((current) => ({ ...current, side: 'SHORT' }))}>SHORT</button>
-              </div>
-
-              <div className="tradeSegmentGroup compact">
-                <button type="button" className="active">MARKET</button>
-                <button type="button">LIMIT</button>
-              </div>
-
-              <div className="tradeSection">
-                <div className="tradeSectionLabel">ORDER PARAMETERS</div>
-                <div className="fieldGrid compactFields">
-                  <label><span>Margin</span><input value={draft.margin} onChange={(event) => setDraft((current) => ({ ...current, margin: Number(event.target.value) || 0 }))} /></label>
-                  <label><span>Leverage</span><input value={draft.leverage} onChange={(event) => setDraft((current) => ({ ...current, leverage: Number(event.target.value) || 1 }))} /></label>
-                  <label><span>Quantity</span><input value={draft.quantity} onChange={(event) => setDraft((current) => ({ ...current, quantity: Number(event.target.value) || 0 }))} /></label>
-                  <label><span>Entry Price</span><input value={draft.entry} onChange={(event) => setDraft((current) => ({ ...current, entry: Number(event.target.value) || 0 }))} /></label>
-                </div>
-              </div>
-
-              <div className="tradeSection">
-                <div className="tradeSectionLabel">ORDER PREVIEW</div>
-                <div className="orderSummaryList">
-                  <div className="orderSummaryRow"><span>Entry</span><strong>{draft.entry > 0 ? `$${fmtMarketPrice(Number(draft.entry))}` : '--'}</strong></div>
-                  <div className="orderSummaryRow"><span>Quantity</span><strong>{draft.quantity > 0 ? `${fmtCompact(Number(draft.quantity))}` : '--'}</strong></div>
-                  <div className="orderSummaryRow"><span>Position</span><strong>{draft.entry > 0 && draft.quantity > 0 ? `${fmtMarketPrice((Number(draft.entry) * Number(draft.quantity)))} USDT` : '--'}</strong></div>
-                  <div className="orderSummaryRow"><span>Risk</span><strong>${fmtCompact(riskPreview.riskUsd)}</strong></div>
-                  <div className="orderSummaryRow"><span>Risk %</span><strong>{draft.entry > 0 ? `${riskPreview.riskPercent.toFixed(2)}%` : '--'}</strong></div>
-                  <div className="orderSummaryRow"><span>R/R</span><strong>{riskPreview.rr > 0 ? `1:${riskPreview.rr.toFixed(2)}` : '—'}</strong></div>
-                  <div className="orderSummaryRow"><span>Fees</span><strong>--</strong></div>
-                </div>
-                <small>{backendRiskPreviewError ? `BACKEND RISK PREVIEW UNAVAILABLE: ${backendRiskPreviewError}` : riskPreview.loading ? 'CALCULATING FROM BACKEND...' : backendRiskPreview?.capped ? 'BACKEND RISK CAPPED BY MARGIN / LEVERAGE' : 'BACKEND RISK VERIFIED'}</small>
-              </div>
-
-              <div className="tradeSection">
-                <div className="tradeSectionLabel">STOP LOSS</div>
-                <div className="slRow">
-                  <span>SL</span>
-                  <strong>{draft.stopLoss > 0 ? `$${fmtCompact(draft.stopLoss)}` : '--'}</strong>
-                </div>
-                <div className="orderSummaryList microList">
-                  <div className="orderSummaryRow"><span>Risk</span><strong>{draft.entry > 0 ? `${riskPreview.riskPercent.toFixed(2)}%` : '--'}</strong></div>
-                  <div className="orderSummaryRow"><span>Value</span><strong>${fmtCompact(riskPreview.riskUsd)}</strong></div>
-                </div>
-              </div>
-
-              <div className="tradeSection">
-                <div className="tradeSectionLabel">TAKE PROFIT</div>
-                <div className="tpGroup compactTpGroup">
-                  <div><span>TP1</span><strong>{draft.tp1 > 0 ? `$${fmtMarketPrice(Number(draft.tp1))}` : '--'}</strong></div>
-                  <div><span>TP2</span><strong>{draft.tp2 > 0 ? `$${fmtMarketPrice(Number(draft.tp2))}` : '--'}</strong></div>
-                  <div><span>TP3</span><strong>{draft.tp3 > 0 ? `$${fmtMarketPrice(Number(draft.tp3))}` : '--'}</strong></div>
-                </div>
-              </div>
-
-              <div className="tradeActions">
-                <button type="button" className="analysisFillButton" onClick={() => void fillFromCurrentAnalysis()} disabled={analysisFillLoading || dataLoading}>
-                  {analysisFillLoading ? 'ANALİZ YÜKLENİYOR...' : 'GÜNCEL ANALİZDEN DOLDUR'}
-                </button>
-                {analysisSyncedAt && <div className="analysisSyncStatus">Analysis synced · {analysisSyncedAt}</div>}
-                {analysisFillError && <div className="analysisFillError" role="status">{analysisFillError}</div>}
-                <button type="button" className="primaryOrderButton" onClick={() => {
-                  const validationError = validateOrderDraft()
-                  if (validationError) {
-                    setAnalysisFillError(validationError)
-                    return
-                  }
-                  setManualOrderRequest(current => current + 1)
-                  document.getElementById('master-trade-live-terminal')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                }}>LIVE ORDER</button>
-                <small className="orderLockReason">LIVE ORDER, Stop Loss ve TP korumalarıyla birlikte onay ekranını açar.</small>
-              </div>
-            </div>
-          </aside>
         </div>
 
-        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} manualOrderRequest={manualOrderRequest} manualOrderDraft={{symbol: draft.market, direction: draft.side, order_type: 'MARKET', margin_usdt: String(draft.margin), leverage: String(draft.leverage), limit_price: String(draft.entry), stop_loss: String(draft.stopLoss), tp1: String(draft.tp1), tp2: String(draft.tp2), tp3: String(draft.tp3)}} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
+        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
 
         <div className="masterTradeDataGrid">
           <section className="masterTradePanel riskMonitorPanel">
@@ -1165,36 +960,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="scannerList">{scannerCandidates.length ? scannerCandidates.map((candidate, index) => <article key={candidate.symbol}><span className="scannerScore">#{index + 1}</span><div><strong>{candidate.symbol}</strong><small>{candidate.direction} · Confidence {fmtDecisionNumber(candidate.confidence)}%</small></div><strong>{fmtDecisionNumber(candidate.final_decision_score)}<small> / 100 FINAL DECISION</small></strong></article>) : <div className="emptyState">NO CURRENT OPPORTUNITY SNAPSHOT</div>}</div>
           </section>
 
-          <section className="masterTradePanel activityPanel compactPanel">
-            <div className="panelHeader">
-              <div>
-                <span className="panelEyebrow">LIVE ACTIVITY</span>
-                <h3>Event feed</h3>
-              </div>
-              <Activity className="panelHeaderIcon" />
-            </div>
-            <div className="activityEmpty"><i /><strong>Waiting for live events</strong><span>Market, order and risk events appear here when available.</span></div>
-          </section>
-
-          <section className="masterTradePanel safetyPanel compactPanel">
-            <div className="panelHeader">
-              <div>
-                <span className="panelEyebrow">ACCOUNT SYNC</span>
-                <h3>Recovery status</h3>
-              </div>
-            </div>
-
-            <div className="systemStatus">
-              <div className="statusRow"><i className="onlineDot" /> <span>Connected</span></div>
-              <div className="statusRow muted"><span>LIVE ACCOUNT SNAPSHOT</span><strong>{account?.last_checked ? new Date(account.last_checked).toLocaleTimeString('en-GB') : '--'}</strong></div>
-              <div className="statusRow muted"><span>RECOVERY</span><strong>{snapshot?.accountError || (account ? 'Current account snapshot' : 'DATA UNAVAILABLE')}</strong></div>
-            </div>
-
-            <div className="emergencyActions">
-              <button type="button" className="dangerBtn" disabled>STOP AUTO TRADE</button>
-              <button type="button" className="dangerBtn" disabled>EMERGENCY CLOSE ALL</button>
-            </div>
-          </section>
         </div>
       </div>
 

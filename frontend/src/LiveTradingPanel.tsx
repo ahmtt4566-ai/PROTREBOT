@@ -45,7 +45,7 @@ type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MAR
 
 export type SharedLiveStatus = LiveStatus
 export type SharedConnectionStatus = ConnectionStatus
-type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>; manualOrderDraft?: Partial<OrderDraft>; manualOrderRequest?: number}
+type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
 
 const V25 = `${API_BASE}/v25`
 const CONNECTIONS = `${API_BASE}/exchange-connections`
@@ -81,7 +81,7 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
-export default function LiveTradingPanel({active, symbol, analysis, masterTrade, sharedStatus, sharedConnections, onRefreshStatus, manualOrderDraft, manualOrderRequest}: Props) {
+export default function LiveTradingPanel({active, symbol, analysis, masterTrade, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
   const [localStatus, setLocalStatus] = useState<LiveStatus | null>(null)
   const [localConnections, setLocalConnections] = useState<ConnectionStatus | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
@@ -361,13 +361,6 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     }})
     setConfirmText('')
   }
-
-  useEffect(() => {
-    if (!manualOrderRequest || !manualOrderDraft) return
-    const nextOrder = {...order, ...manualOrderDraft}
-    setOrder(nextOrder)
-    reviewOrder(nextOrder)
-  }, [manualOrderRequest])
 
   const confirmAction = () => {
     if (!confirm || (!confirm.simple && confirmText.trim().toUpperCase() !== confirm.expected)) return
