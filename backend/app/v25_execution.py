@@ -72,7 +72,7 @@ from .execution_core import (
     risk_sized_order,
     sanitize_execution_policy,
 )
-from .exchange_connections import session_credentials_for_identity, session_credentials_for_request, session_id
+from .exchange_connections import session_account_identity, session_credentials_for_identity, session_credentials_for_request, session_id
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .trade_review import write_trade_review
 from .v21_demo import certificate_payload
@@ -585,7 +585,7 @@ def initial_state() -> dict[str, Any]:
         },
         "snapshot": None,
         "snapshot_session_id": None,
-        "live_session_authorization": {"session_id": "", "user_id": "", "fingerprint": ""},
+        "live_session_authorization": {"session_id": "", "user_id": "", "fingerprint": "", "trading_account_id": "", "policy_digest": ""},
         "events": [],
         "mtf_decision_history": [],
         "plans": {},
@@ -599,7 +599,7 @@ def initial_state() -> dict[str, Any]:
         "emergency": {"active": False, "triggered_at": None, "reason": None},
         # Consent persists only as a fingerprint-bound, expiring record. The
         # execution authority itself remains process-bound and is never restored.
-        "web_consent": {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None},
+        "web_consent": {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None, "user_id": "", "trading_account_id": "", "policy_digest": ""},
         "duplicate_blocks": 0,
         "protection_repairs": 0,
         "recovery_ready": False,
@@ -644,6 +644,8 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
             "session_id": str(authorization.get("session_id") or "")[:128],
             "user_id": str(authorization.get("user_id") or "")[:128],
             "fingerprint": str(authorization.get("fingerprint") or "")[:128],
+            "trading_account_id": str(authorization.get("trading_account_id") or "")[:192],
+            "policy_digest": str(authorization.get("policy_digest") or "")[:128],
         }
     consent = payload.get("web_consent")
     if isinstance(consent, dict):
@@ -655,6 +657,9 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
                 "expires_at_epoch": expires_at,
                 "key_fingerprint": fingerprint[:128],
             }
+            for key, limit in (("user_id", 128), ("trading_account_id", 192), ("policy_digest", 128)):
+                if key in consent:
+                    base["web_consent"][key] = str(consent.get(key) or "")[:limit]
     for key in ("events", "plans", "intents", "duplicate_blocks", "protection_repairs"):
         if key in payload and isinstance(payload[key], type(base[key])):
             base[key] = payload[key]
@@ -910,6 +915,38 @@ def normalize_consent_fingerprint(value: str | None) -> str:
     return str(value or "").strip().upper().removeprefix("SHA256:")
 
 
+AUTHORIZATION_REASONS = {
+    "NONE", "EXPIRED", "USER_CHANGED", "TRADING_ACCOUNT_CHANGED",
+    "CREDENTIAL_CHANGED", "POLICY_CHANGED", "SESSION_CHANGED", "RECOVERY_REQUIRED",
+    "RECONCILIATION_REQUIRED", "EMERGENCY_BLOCKED",
+}
+
+
+def current_user_id(request: Request | None) -> str:
+    if request is None:
+        return ""
+    request_state = getattr(request, "state", None)
+    member = getattr(request_state, "member", None)
+    if member:
+        return str(member.get("id") or "")
+    if bool(getattr(request_state, "web_owner_authenticated", False)):
+        return "WEB_OWNER"
+    return ""
+
+
+def current_trading_account_id(state: dict[str, Any], request: Request | None, fingerprint: str | None) -> str:
+    snapshot = state.get("snapshot") if isinstance(state.get("snapshot"), dict) else {}
+    account_id = str(snapshot.get("account_identity") or "").strip()
+    if account_id:
+        return f"BINANCE:LIVE:{account_id[:160]}"
+    if request is not None:
+        identity = session_account_identity(request, "LIVE", fingerprint or "")
+        if identity:
+            return identity
+    normalized = normalize_consent_fingerprint(fingerprint)
+    return f"BINANCE:LIVE:FINGERPRINT:{normalized[:64]}" if normalized else ""
+
+
 def update_account_snapshot(state: dict[str, Any], snapshot: dict[str, Any], *, session_binding: str | None = None) -> None:
     state["snapshot"] = snapshot
     if session_binding is not None:
@@ -930,21 +967,58 @@ def consent_status(
     local_payload = load_live_consent()
     web_payload = state.get("web_consent", {}) if isinstance(state, dict) else {}
     candidates = [payload for payload in (web_payload, local_payload) if isinstance(payload, dict)]
-    matching = [
-        candidate for candidate in candidates
-        if normalize_consent_fingerprint(candidate.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
-        and float(candidate.get("expires_at_epoch") or 0) > 0
-    ]
+    authorization = state.get("live_session_authorization") if isinstance(state, dict) and isinstance(state.get("live_session_authorization"), dict) else {}
+    if not authorization.get("user_id") and isinstance(state, dict) and isinstance(state.get("auto_authorization"), dict):
+        authorization = state["auto_authorization"]
+    if not authorization.get("user_id") and isinstance(state, dict) and isinstance(state.get("web_consent"), dict):
+        authorization = state["web_consent"]
+    current_user = current_user_id(request) or str(authorization.get("user_id") or "")
+    authorization_session = str(authorization.get("session_id") or "")
+    current_session = session_id(request) if request is not None else authorization_session
+    current_account = str(authorization.get("trading_account_id") or "") if request is None else current_trading_account_id(state or {}, request, fingerprint)
+    if not current_account:
+        current_account = current_trading_account_id(state or {}, request, fingerprint)
+    current_policy = policy_digest(state["policy"]) if isinstance(state, dict) else ""
+    matching = [candidate for candidate in candidates if float(candidate.get("expires_at_epoch") or 0) > 0]
     now = time.time()
-    payload = next((candidate for candidate in matching if float(candidate.get("expires_at_epoch") or 0) > now), None)
+    payload = next((candidate for candidate in matching if float(candidate.get("expires_at_epoch") or 0) > 0), None)
     if payload is None:
-        payload = next((candidate for candidate in matching if float(candidate.get("expires_at_epoch") or 0) + LIVE_CONSENT_GRACE_SECONDS > now), {})
+        payload = {}
     expires = float(payload.get("expires_at_epoch") or 0)
     grace_until = expires + LIVE_CONSENT_GRACE_SECONDS if expires else 0.0
-    active = bool(
-        api_key and fingerprint and normalize_consent_fingerprint(payload.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
-        and expires > now
+    scope_match = bool(
+        payload
+        and current_user
+        and authorization_session
+        and current_session == authorization_session
+        and str(payload.get("user_id") or "") == current_user
+        and str(payload.get("trading_account_id") or "") == current_account
+        and normalize_consent_fingerprint(payload.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
+        and str(payload.get("policy_digest") or "") == current_policy
     )
+    if not payload:
+        reason = "EXPIRED"
+    elif str(payload.get("user_id") or "") != current_user:
+        reason = "USER_CHANGED"
+    elif not authorization_session or current_session != authorization_session:
+        reason = "SESSION_CHANGED"
+    elif str(payload.get("trading_account_id") or "") != current_account:
+        reason = "TRADING_ACCOUNT_CHANGED"
+    elif normalize_consent_fingerprint(payload.get("key_fingerprint")) != normalize_consent_fingerprint(fingerprint):
+        reason = "CREDENTIAL_CHANGED"
+    elif str(payload.get("policy_digest") or "") != current_policy:
+        reason = "POLICY_CHANGED"
+    elif expires <= now:
+        reason = "EXPIRED"
+    elif bool(state and state.get("reconciliation_required")):
+        reason = "RECONCILIATION_REQUIRED"
+    elif bool(state and state.get("emergency", {}).get("active")):
+        reason = "EMERGENCY_BLOCKED"
+    elif state and (not state.get("recovery_ready") or state.get("execution_state") == "UNKNOWN"):
+        reason = "RECOVERY_REQUIRED"
+    else:
+        reason = "NONE"
+    active = bool(api_key and fingerprint and scope_match and expires > now and reason == "NONE")
     grace_active = bool(not active and api_key and fingerprint and expires <= now < grace_until)
     return {
         "active": active,
@@ -954,6 +1028,8 @@ def consent_status(
         "grace_until": datetime.fromtimestamp(grace_until, timezone.utc).isoformat() if grace_active else None,
         "reauthorization_required": not active,
         "fingerprint": fingerprint,
+        "scope_match": scope_match,
+        "reason": reason if reason in AUTHORIZATION_REASONS else "EXPIRED",
         "storage": "SUNUCU_KALICI" if payload is web_payload and (active or grace_active) else "WINDOWS_DPAPI" if active or grace_active else "YOK",
     }
 
@@ -2602,6 +2678,9 @@ async def fresh_auto_submission_credentials(application: Any, state: dict[str, A
     credentials = await auto_session_credentials(application, state, force_refresh=True)
     if not usable_live_credentials(credentials):
         return "", ""
+    auto_authorization = state.get("auto_authorization") if isinstance(state.get("auto_authorization"), dict) else {}
+    if float(auto_authorization.get("expires_at_epoch") or 0) <= time.time():
+        return "", ""
     if not consent_status(state, credentials=credentials).get("active"):
         return "", ""
     if (
@@ -2696,6 +2775,12 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "websocket_host": LIVE_WS_BASE,
         "credentials": {"configured": bool(consent.get("fingerprint")), "fingerprint": consent.get("fingerprint"), "storage": "OTURUM_KASASI" if consent.get("fingerprint") else "YOK"},
         "consent": consent,
+        "authorization": {
+            "valid": bool(consent.get("active")),
+            "expires_at": consent.get("expires_at"),
+            "reason": consent.get("reason", "EXPIRED"),
+            "scope_match": bool(consent.get("scope_match")),
+        },
         "connected": bool(state.get("connected")) and account_snapshot_ready,
         "connection": state.get("connection"),
         "stream": state.get("stream"),
@@ -3843,10 +3928,13 @@ async def connect_read_only_for_request(application: Any, request: Request, *, a
             snapshot = await account_snapshot(client)
             _, _, fingerprint = live_credentials_status(request)
             update_account_snapshot(state, snapshot, session_binding=session_id(request))
+            trading_account_id = current_trading_account_id(state, request, fingerprint)
             state["live_session_authorization"] = {
                 "session_id": session_id(request),
                 "user_id": str(actor or ""),
                 "fingerprint": fingerprint or "",
+                "trading_account_id": trading_account_id,
+                "policy_digest": policy_digest(state["policy"]),
             }
             if not state.get("reconciliation_required") and not unresolved_execution_evidence(state):
                 state["recovery_ready"] = True
@@ -3876,10 +3964,7 @@ async def v25_policy(request: Request, body: PolicyUpdate) -> dict[str, Any]:
     state = request.app.state.v25_execution
     updates = body.model_dump(exclude_none=True)
     state["policy"] = sanitize_execution_policy({**state["policy"], **updates})
-    if consent_status(state, request).get("active"):
-        state["policy_ack_digest"] = policy_digest(state["policy"])
-    else:
-        state["policy_ack_digest"] = None
+    state["policy_ack_digest"] = None
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
     state["live_auto_trade"] = False
@@ -3910,17 +3995,23 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
     api_key, secret_key, fingerprint = live_credentials_status(request)
     if not api_key or len(secret_key) < 10 or not fingerprint:
         raise HTTPException(412, "Önce programdaki Borsa Bağlantıları bölümünden canlı Binance API anahtarını kaydedip aktifleştirin.")
+    trading_account_id = current_trading_account_id(state, request, fingerprint)
+    current_policy_digest = policy_digest(state["policy"])
     state["live_session_authorization"] = {
         "session_id": session_id(request),
         "user_id": str(user["id"]),
         "fingerprint": fingerprint,
+        "trading_account_id": trading_account_id,
+        "policy_digest": current_policy_digest,
     }
     state["web_consent"] = {
         "accepted_at": now_iso(),
         "expires_at_epoch": time.time() + (24 * 60 * 60),
         "key_fingerprint": fingerprint,
+        "user_id": str(user["id"]),
+        "trading_account_id": trading_account_id,
+        "policy_digest": current_policy_digest,
     }
-    state["policy_ack_digest"] = policy_digest(state["policy"])
     state["armed_until"] = 0.0
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
@@ -3935,7 +4026,7 @@ async def v25_revoke_web_consent(request: Request, body: Confirmation) -> dict[s
     if body.confirmation.strip().upper() != "24 SAATLİK CONSENTİ KALDIR":
         raise HTTPException(422, "Onay için 24 SAATLİK CONSENTİ KALDIR yazın.")
     state = request.app.state.v25_execution
-    state["web_consent"] = {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None}
+    state["web_consent"] = {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None, "user_id": "", "trading_account_id": "", "policy_digest": ""}
     state["live_session_authorization"] = None
     state["armed_until"] = 0.0
     state["auto"]["enabled"] = False

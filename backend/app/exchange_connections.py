@@ -125,6 +125,17 @@ def normalize_fingerprint(value: str) -> str:
     return str(value or "").strip().upper().removeprefix("SHA256:")
 
 
+def account_identity(account: Any, mode: str = "LIVE", fingerprint: str = "") -> str:
+    """Return a stable, non-secret identity from a verified exchange account."""
+    payload = account if isinstance(account, dict) else {}
+    for key in ("uid", "account_id", "accountId", "accountAlias"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return f"BINANCE:{normalize_mode(mode)}:{value[:160]}"
+    normalized = normalize_fingerprint(fingerprint)
+    return f"BINANCE:{normalize_mode(mode)}:FINGERPRINT:{normalized[:64]}" if normalized else ""
+
+
 def _master_secret() -> str:
     # A dedicated key is optional.  The existing owner access token is already
     # required in the hosted build and lets the user configure the vault fully
@@ -266,6 +277,11 @@ def session_credentials(request: Request, mode: str, *, active_only: bool = True
 def session_credentials_for_request(request: Request, mode: str, *, active_only: bool = True) -> tuple[str, str]:
     return session_credentials(request, mode, active_only=active_only)
 
+
+def session_account_identity(request: Request, mode: str, fingerprint: str = "") -> str:
+    meta = _SESSION_META.get((session_id(request), normalize_mode(mode)), {})
+    return account_identity(meta.get("account"), mode, fingerprint or str(meta.get("fingerprint") or ""))
+
 async def session_credentials_for_identity(
     application: Any,
     session_value: str,
@@ -303,22 +319,6 @@ async def session_credentials_for_identity(
         """,
         session_value, user_id, normalized,
     )
-    if not row:
-        # A browser session token may rotate after the live monitor has been
-        # persisted. Recover only when the original owner and key fingerprint
-        # still identify a single active LIVE vault record.
-        rows = await pool.fetch(
-            """
-            SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active
-            FROM protrebot_exchange_session_vault
-            WHERE user_id = $1 AND mode = $2 AND active = TRUE AND fingerprint = $3
-            ORDER BY updated_at DESC
-            LIMIT 2
-            """,
-            user_id, normalized, f"SHA256:{normalize_fingerprint(fingerprint)}",
-        )
-        if len(rows) == 1:
-            row = rows[0]
     if not row or normalize_fingerprint(str(row.get("fingerprint") or "")) != normalize_fingerprint(fingerprint):
         logger.warning(
             "LIVE credential resolution failed: %s expected=%s stored=%s",
@@ -620,6 +620,7 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
     result = {
         "mode": normalized,
         "host": host,
+        "account_identity": str(account.get("uid") or account.get("accountId") or account.get("accountAlias") or "")[:160],
         "wallet_balance": float(account.get("totalWalletBalance") or 0),
         "available_balance": float(account.get("availableBalance") or 0),
         "unrealized_pnl": float(account.get("totalUnrealizedProfit") or 0),

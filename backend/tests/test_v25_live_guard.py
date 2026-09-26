@@ -34,6 +34,7 @@ from app.execution_core import (  # noqa: E402
     sanitize_execution_policy,
 )
 from app import v25_execution  # noqa: E402
+from app import exchange_connections  # noqa: E402
 from app.binance_demo import BinanceDemoError, verify_symbol_configuration  # noqa: E402
 from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, classify_plan_protection, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, prune_mtf_decision_history, rank_market_tickers, sanitized_state, submit_entry, summarize_mtf_relaxation, validate_protection_readiness  # noqa: E402
 
@@ -530,7 +531,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(expired_restored["web_consent"]["expires_at_epoch"], 0.0)
         self.assertIsNone(expired_restored["web_consent"]["key_fingerprint"])
 
-    def test_consent_acknowledges_current_policy_for_its_24_hour_window(self):
+    def test_consent_does_not_implicitly_acknowledge_current_policy(self):
         state = initial_state()
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
         request = SimpleNamespace(app=application)
@@ -543,9 +544,9 @@ class V25LiveGuardCoreTests(unittest.TestCase):
                 v25_execution.Confirmation(confirmation="CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM"),
             ))
 
-        self.assertEqual(state["policy_ack_digest"], policy_digest(state["policy"]))
+        self.assertIsNone(state["policy_ack_digest"])
 
-    def test_policy_change_preserves_active_consent_ack_and_arm(self):
+    def test_policy_change_clears_policy_acknowledgement(self):
         state = initial_state()
         state["policy_ack_digest"] = policy_digest(state["policy"])
         state["armed_until"] = time.time() + 300
@@ -561,9 +562,78 @@ class V25LiveGuardCoreTests(unittest.TestCase):
                 v25_execution.PolicyUpdate(max_loss_per_trade=4),
             ))
 
-        self.assertEqual(state["policy_ack_digest"], policy_digest(state["policy"]))
+        self.assertIsNone(state["policy_ack_digest"])
         self.assertGreater(state["armed_until"], time.time())
         self.assertFalse(state["auto"]["enabled"])
+
+    def _scoped_consent_context(self):
+        state = initial_state()
+        state["recovery_ready"] = True
+        state["snapshot"] = {"account_identity": "account-a"}
+        fingerprint = credential_fingerprint("api-key-123456")
+        digest = policy_digest(state["policy"])
+        scope = {
+            "user_id": "user-a",
+            "trading_account_id": "BINANCE:LIVE:account-a",
+            "credential_fingerprint": fingerprint,
+            "policy_digest": digest,
+        }
+        state["web_consent"] = {
+            "accepted_at": v25_execution.now_iso(),
+            "expires_at_epoch": time.time() + 3600,
+            "key_fingerprint": fingerprint,
+            **scope,
+        }
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
+        request = SimpleNamespace(app=application, headers={"x-protrebot-session": "session-a"}, state=SimpleNamespace(member={"id": "user-a"}))
+        state["live_session_authorization"] = {"session_id": v25_execution.session_id(request), "fingerprint": fingerprint, **scope}
+        return state, request
+
+    def test_scoped_authorization_is_valid_for_same_user_account_credential_and_policy(self):
+        state, request = self._scoped_consent_context()
+        with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", credential_fingerprint("api-key-123456"))):
+            result = v25_execution.consent_status(state, request)
+        self.assertTrue(result["active"])
+        self.assertTrue(result["scope_match"])
+        self.assertEqual(result["reason"], "NONE")
+
+    def test_scoped_authorization_reports_user_account_credential_policy_and_expiry_reasons(self):
+        cases = (
+            ("USER_CHANGED", lambda state, request: request.state.member.update({"id": "user-b"})),
+            ("TRADING_ACCOUNT_CHANGED", lambda state, request: state["snapshot"].update({"account_identity": "account-b"})),
+            ("CREDENTIAL_CHANGED", lambda state, request: None),
+            ("POLICY_CHANGED", lambda state, request: state["policy"].update({"max_leverage": 7})),
+            ("EXPIRED", lambda state, request: state["web_consent"].update({"expires_at_epoch": time.time() - 1})),
+        )
+        for reason, mutate in cases:
+            with self.subTest(reason=reason):
+                state, request = self._scoped_consent_context()
+                mutate(state, request)
+                credentials = ("different-api-key", "secret-key-123456", credential_fingerprint("different-api-key")) if reason == "CREDENTIAL_CHANGED" else ("api-key-123456", "secret-key-123456", credential_fingerprint("api-key-123456"))
+                with patch.object(v25_execution, "live_credentials_status", return_value=credentials):
+                    result = v25_execution.consent_status(state, request)
+                self.assertEqual(result["reason"], reason)
+                self.assertFalse(result["active"])
+
+    def test_scoped_authorization_rejects_different_session(self):
+        state, request = self._scoped_consent_context()
+        request.headers["x-protrebot-session"] = "different-session"
+        with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", credential_fingerprint("api-key-123456"))):
+            result = v25_execution.consent_status(state, request)
+        self.assertFalse(result["active"])
+        self.assertFalse(result["scope_match"])
+        self.assertEqual(result["reason"], "SESSION_CHANGED")
+
+    def test_session_bound_credentials_do_not_fallback_to_another_session(self):
+        pool = SimpleNamespace(fetchrow=AsyncMock(return_value=None), fetch=AsyncMock())
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=pool))
+        with patch.object(exchange_connections, "ensure_exchange_vault", new=AsyncMock(return_value=True)), \
+            patch.object(exchange_connections, "ensure_schema", new=AsyncMock()):
+            result = asyncio.run(exchange_connections.session_credentials_for_identity(
+                application, "missing-session", "user-a", "LIVE", "fingerprint-a",
+            ))
+        self.assertEqual(result, ("", ""))
+        pool.fetch.assert_not_awaited()
 
     def test_hard_total_exposure_and_active_plan_gates_fail_closed(self):
         self.assertEqual(HARD_MAX_TOTAL_EXPOSURE_USDT, 350.0)
@@ -1910,6 +1980,16 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
             "accepted_at": datetime.now(timezone.utc).isoformat(),
             "expires_at_epoch": expires_at,
             "key_fingerprint": fingerprint,
+            "user_id": self.USER_ID,
+            "trading_account_id": f"BINANCE:LIVE:FINGERPRINT:{fingerprint[:64]}",
+            "policy_digest": policy_digest(state["policy"]),
+        }
+        state["live_session_authorization"] = {
+            "session_id": self.SESSION_ID,
+            "user_id": self.USER_ID,
+            "fingerprint": fingerprint,
+            "trading_account_id": f"BINANCE:LIVE:FINGERPRINT:{fingerprint[:64]}",
+            "policy_digest": policy_digest(state["policy"]),
         }
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
         return application, state, credentials
