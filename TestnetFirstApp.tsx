@@ -411,7 +411,7 @@ export default function TestnetFirstApp() {
         </div>
       </section> :
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Master Trade hazırlanıyor…</div>}>
-        <MasterTrade />
+        <MasterTrade onBack={() => navigate('testnet')} />
       </Suspense>
     )}
 

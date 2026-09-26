@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Gauge, XCircle } from 'lucide-react'
+import { ArrowLeft, Gauge, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
@@ -110,7 +110,7 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   return values.filter((item): item is MtfAnalysis => item !== null)
 }
 
-export default function MasterTrade() {
+export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const [history, setHistory] = useState<TradeHistoryRow[]>([])
   const [historySyncState, setHistorySyncState] = useState<TradeHistorySyncState>('READY')
   const [accountSyncState, setAccountSyncState] = useState<AccountSyncState>('READY')
@@ -606,6 +606,17 @@ export default function MasterTrade() {
   return (
     <section className="masterTradePage masterTrade">
       <div className="masterTradeShell">
+        <header className="masterTradeTerminalHeader">
+          <button type="button" className="masterTradeDashboardButton" onClick={() => onBack?.()} disabled={!onBack}>
+            <ArrowLeft size={15} aria-hidden="true" />
+            <span>Dashboard</span>
+          </button>
+          <div className="masterTradeTerminalIdentity">
+            <span>INSTITUTIONAL EXECUTION DESK</span>
+            <strong>MASTER TRADE</strong>
+          </div>
+          <span className="masterTradeTerminalMode">LIVE OPERATIONS · CONTROLLED</span>
+        </header>
         <div className="terminalStatusStrip" aria-label="Master Trade connection status">
           <span className="terminalStatusItem online"><i /> CONNECTED</span>
           <span className="terminalStatusItem"><small>WS</small> --</span>
