@@ -763,6 +763,40 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </section>
           </main>
 
+          <aside className="masterTradePanel marketAnalysisPanel">
+            <div className="panelHeader">
+              <div>
+                <span className="panelEyebrow">MARKET ANALYSIS</span>
+                <h3>{draft.market}</h3>
+              </div>
+              <span className="marketAnalysisState">{tradeDecision.status}</span>
+            </div>
+            <div className="marketAnalysisDecision">
+              <span>MARKET REGIME</span>
+              <strong>{tradeDecision.marketRegime || '--'}</strong>
+              <em>{tradeDecision.direction || '--'} · {tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`} CONFIDENCE</em>
+            </div>
+            <div className="marketAnalysisMetrics">
+              <div><small>TREND</small><strong>{analysis?.trend || '--'}</strong></div>
+              <div><small>MOMENTUM</small><strong>{analysis?.momentum || '--'}</strong></div>
+              <div><small>RSI</small><strong>{fmtDecisionNumber(analysis?.rsi, 2)}</strong></div>
+              <div><small>MACD</small><strong className={analysis?.macd === undefined ? '' : analysis.macd >= 0 ? 'positive' : 'negative'}>{fmtSigned(analysis?.macd)}</strong></div>
+              <div><small>EMA 20</small><strong>--</strong></div>
+              <div><small>EMA 50</small><strong>--</strong></div>
+              <div><small>EMA 200</small><strong>--</strong></div>
+              <div><small>ATR</small><strong>{fmtDecisionNumber(analysis?.atr, 4)}</strong></div>
+              <div><small>ADX</small><strong>{fmtDecisionNumber(analysis?.adx, 2)}</strong></div>
+              <div><small>VOLUME</small><strong>{analysis?.volume_ratio === undefined ? '--' : `${fmtDecisionNumber(analysis.volume_ratio, 2)}x`}</strong></div>
+              <div><small>SUPPORT</small><strong>{fmtMarketPrice(analysis?.support)}</strong></div>
+              <div><small>RESISTANCE</small><strong>{fmtMarketPrice(analysis?.resistance)}</strong></div>
+            </div>
+            <div className="marketAnalysisFooter">
+              <span>DECISION</span>
+              <strong>{tradeDecision.status || '--'}</strong>
+              <em>{tradeDecision.signalStrength || '--'}</em>
+            </div>
+          </aside>
+
         </div>
 
         <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
