@@ -518,7 +518,39 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
       <section className="masterTradeLiveSection masterTradeLiveSafety"><header><div><span className="masterTradeLiveKicker">SAFETY</span><h3>Readiness overview</h3></div><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(value => !value)}>ADVANCED DETAILS</button></header><div className="masterTradeLiveSafetyList">{safetyRows.map(([label, value, detail]) => <details key={label} className={safetyStatus(value)}><summary><span><i />{label}</span><b>{value}</b></summary><p>{detail}</p></details>)}</div></section></div>
 
-    <section className="masterTradeLiveApiDrawer masterTradeLiveConnectionCard"><div className="masterTradeLiveApiHeader"><div><span className="masterTradeLiveKicker">EXCHANGE CONNECTION</span><h3>Connect your trading account</h3></div><strong className={connected ? 'masterTradeLiveConnected' : ''}><i className={connected ? 'connected' : ''} /> {connected ? 'Binance Connected' : 'Not connected'}</strong></div><div className="masterTradeLiveExchangeRow"><div className="masterTradeLiveExchangeIdentity"><span className="masterTradeLiveExchangeLogo">B</span><div><b>Binance</b><small>USDⓈ-M Futures · secure server vault</small></div></div><strong className="masterTradeLiveModeLabel">LIVE ACCOUNT</strong></div><div className="masterTradeLiveApiGrid"><label>API KEY<input type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})} placeholder="Paste API key" /></label><label>SECRET KEY<div className="masterTradeLiveSecretField"><input type={showSecret ? 'text' : 'password'} autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})} placeholder="Paste secret key" /><button type="button" aria-label={showSecret ? 'Hide secret key' : 'Show secret key'} onClick={() => setShowSecret(value => !value)}>{showSecret ? <EyeOff/> : <Eye/>}</button></div></label></div><label className="masterTradeLiveCheck"><input type="checkbox" checked={credentials.accepted} onChange={event => setCredentials({...credentials, accepted: event.target.checked})}/><span>Store credentials only in the encrypted server vault.</span></label><div className="masterTradeLiveApiMeta"><span>Environment <b>Binance Futures Mainnet</b></span><span>Permissions <b>Futures only · withdrawals unsupported</b></span><span>Last verification <b>{date(testResult?.testedAt || status?.connection?.last_checked)}</b></span><span>Identity <b>{text(testResult?.fingerprint || liveConnection?.fingerprint || status?.credentials?.fingerprint)}</b></span></div><div className="masterTradeLiveApiActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" className="masterTradeLiveSaveButton" onClick={connectAndSave} disabled={Boolean(busy)}>{busy === 'connect-save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} CONNECT &amp; SAVE</button></div><small className="masterTradeLiveApiHint">Test verifies access only. Connect &amp; Save stores the encrypted credentials, activates the read-only account connection, and does not arm or place orders.</small></section>
+    <section className="masterTradeLiveApiDrawer masterTradeLiveConnectionCard">
+      <div className="masterTradeLiveConnectionHeader">
+        <div className="masterTradeLiveConnectionHeading">
+          <span className="masterTradeLiveKicker">EXCHANGE CONNECTION</span>
+          <div className="masterTradeLiveExchangeIdentity">
+            <span className="masterTradeLiveExchangeLogo">B</span>
+            <div><h3>Connect your trading account</h3><small>Binance · USDT-M Futures</small></div>
+          </div>
+          <p>Securely connect your trading account. Credentials are encrypted and never displayed.</p>
+        </div>
+        <strong className={`masterTradeLiveConnectionStatus ${connected ? 'masterTradeLiveConnected' : ''}`}><i className={connected ? 'connected' : ''} /> {connected ? 'CONNECTED' : 'NOT CONNECTED'}</strong>
+      </div>
+
+      <div className="masterTradeLiveCredentialBlock">
+        <div className="masterTradeLiveCredentialLabel"><span className="masterTradeLiveKicker">CREDENTIALS</span><small>Use a key with Futures permissions only.</small></div>
+        <div className="masterTradeLiveApiGrid">
+          <label>API KEY<input type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})} placeholder="Paste API key" /></label>
+          <label>SECRET KEY<div className="masterTradeLiveSecretField"><input type={showSecret ? 'text' : 'password'} autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})} placeholder="Paste secret key" /><button type="button" aria-label={showSecret ? 'Hide secret key' : 'Show secret key'} onClick={() => setShowSecret(value => !value)}>{showSecret ? <EyeOff/> : <Eye/>}</button></div></label>
+        </div>
+        <label className="masterTradeLiveCheck"><input type="checkbox" checked={credentials.accepted} onChange={event => setCredentials({...credentials, accepted: event.target.checked})}/><span>I understand that API credentials are stored securely.</span></label>
+      </div>
+
+      <div className="masterTradeLiveConnectionActionBar">
+        <div className="masterTradeLiveActionMeta"><span>ENVIRONMENT</span><b>LIVE</b><small>Binance Futures Mainnet</small></div>
+        <div className="masterTradeLiveActionMeta"><span>PERMISSIONS</span><b>READ · TRADE</b><small>Withdrawals unsupported</small></div>
+        <div className="masterTradeLiveApiActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" className="masterTradeLiveSaveButton" onClick={connectAndSave} disabled={Boolean(busy)}>{busy === 'connect-save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} CONNECT ACCOUNT</button></div>
+      </div>
+
+      <div className="masterTradeLiveSecurityStrip" aria-label="Connection security status"><span><CheckCircle2/> Credentials encrypted</span><span><CheckCircle2/> Server-side validation</span><span><CheckCircle2/> API secret never displayed</span></div>
+
+      <div className="masterTradeLiveApiMeta"><span>CONNECTION STATUS <b>{connected ? 'CONNECTED' : 'NOT CONNECTED'}</b></span><span>LAST VERIFIED <b>{date(testResult?.testedAt || status?.connection?.last_checked)}</b></span><span>VAULT FINGERPRINT <b>{text(testResult?.fingerprint || liveConnection?.fingerprint || status?.credentials?.fingerprint)}</b></span><span>ACCOUNT MODE <b>READ-ONLY</b></span></div>
+      <small className="masterTradeLiveApiHint">Test verifies access only. Connect Account stores the encrypted credentials, activates the read-only account connection, and does not arm or place orders.</small>
+    </section>
     {confirmationModal}
   </section>
   return <section className="liveTradingPanel liveTerminal liveUx" aria-label="LIVE Trading Operations Terminal">
