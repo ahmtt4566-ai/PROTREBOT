@@ -18,7 +18,8 @@ type LiveStatus = {
   scanner?: {last_scan_at?: string | null; scanned_symbol_count?: number; candidate_symbols?: string[]; candidate_count?: number; selected_symbols?: string[]; selected_symbols_count?: number; last_skip_reason?: string | null; last_cycle_stage?: string | null}
   policy?: LivePolicy
   policy_acknowledged?: boolean
-  consent?: {active?: boolean; expires_at?: string | null; fingerprint?: string | null}
+  consent?: {active?: boolean; expires_at?: string | null; fingerprint?: string | null; reason?: string; scope_match?: boolean}
+  authorization?: {valid?: boolean; expires_at?: string | null; reason?: string; scope_match?: boolean}
   readiness?: {ready?: boolean; gates?: Array<{key?: string; label?: string; passed?: boolean; detail?: string}>}
   account?: {wallet_balance?: number | null; available_balance?: number | null; margin_balance?: number | null; unrealized_pnl?: number | null; positions?: Array<Record<string, unknown>>; open_orders?: Array<Record<string, unknown>>}
   daily?: {realized_pnl?: number; remaining_loss_budget?: number; entries?: number}
@@ -188,6 +189,25 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const protectionGate = status?.readiness?.gates?.find(gate => /protection|koruma/i.test(`${gate.key} ${gate.label}`))
   const recoveryState = recoveryRequired ? 'REQUIRED' : status?.recovery_ready === true ? 'READY' : 'UNKNOWN'
   const readinessReady = status?.readiness?.ready === true
+  const authorizationValid = status?.authorization?.valid === true
+  const authorizationReason = status?.authorization?.reason || status?.consent?.reason || 'EXPIRED'
+  const authorizationReasonText = authorizationReason === 'EXPIRED'
+    ? '24 saatlik izin sona erdi.'
+    : authorizationReason === 'TRADING_ACCOUNT_CHANGED'
+      ? 'Doğrulanmış trading account değişti.'
+      : authorizationReason === 'CREDENTIAL_CHANGED'
+        ? 'API credentials değişti.'
+        : authorizationReason === 'POLICY_CHANGED'
+          ? 'Risk policy değişti; policy acknowledgement ve authorization yenilenmeli.'
+          : authorizationReason === 'USER_CHANGED'
+            ? 'Kullanıcı değişti.'
+            : authorizationReason === 'RECOVERY_REQUIRED'
+              ? 'Recovery tamamlanmadan authorization kullanılamaz.'
+              : authorizationReason === 'RECONCILIATION_REQUIRED'
+                ? 'Reconciliation tamamlanmadan authorization kullanılamaz.'
+                : authorizationReason === 'EMERGENCY_BLOCKED'
+                  ? 'Emergency block aktif.'
+                  : '24 saatlik LIVE authorization gerekli.'
   const riskGate = status?.readiness?.gates?.find(gate => /risk|policy|limit|safety|guven/i.test(`${gate.key} ${gate.label}`)) || {passed: false}
   const activePlans = status?.plans?.filter(plan => !['CLOSED', 'CANCELLED', 'CLOSED_CONFIRMED'].includes(String(plan.status || '').toUpperCase())).length ?? 0
   const noActivePositionOrPlan = (status?.account?.positions || []).length === 0 && activePlans === 0
@@ -209,8 +229,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const exposureState = exposureGate !== 'UNKNOWN' ? exposureGate : status === null ? 'UNKNOWN' : exposure === 0 ? 'READY' : 'BLOCKED'
   const activePlanState = status === null ? 'UNKNOWN' : activePlans ? 'CONFLICT' : 'READY'
   const emergencyState = status === null ? 'UNKNOWN' : emergency ? 'ACTIVE' : 'CLEAR'
-  const autoReady = Boolean(status && connections && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
-  const manualOrderReady = Boolean(status && connected && readinessReady && !recoveryRequired && !emergency)
+  const autoReady = Boolean(status && connections && authorizationValid && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
+  const manualOrderReady = Boolean(status && connected && authorizationValid && readinessReady && !recoveryRequired && !emergency)
   const policy = policyDraft || status?.policy || {}
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
@@ -246,6 +266,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }, 'Binance Connected; hesap salt-okunur bağlandı ve gerçek emir kilidi korunuyor.')
 
   const armLive = () => {
+    if (!authorizationValid) {
+      setNotice({kind: 'error', text: authorizationReasonText})
+      return
+    }
     if (!readinessReady) {
       setNotice({kind: 'error', text: 'LIVE ARM için tüm backend readiness gate’leri PASS olmalıdır.'})
       return
@@ -409,10 +433,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
         ? (status.recovery_error || (status.reconciliation_required ? 'Reconciliation is required before LIVE execution can continue.' : 'LIVE recovery is required before execution can continue.'))
         : !connected
           ? 'LIVE account connection is required.'
-          : !readinessReady
-            ? 'Complete the required LIVE readiness checks before arming.'
-            : status.consent?.active !== true
-              ? '24-hour LIVE risk consent is required.'
+          : !authorizationValid
+              ? authorizationReasonText
+            : !readinessReady
+              ? 'Complete the required LIVE readiness checks before arming.'
               : !liveArmed
                 ? 'Canlı işlem onayı bekleniyor.'
                 : 'No LIVE blocker.'
@@ -474,8 +498,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     <section className="masterTradeLiveSection masterTradeLiveConfirmations" aria-label="LIVE Safety Confirmations">
       <header><div><span className="masterTradeLiveKicker">LIVE SAFETY CONFIRMATIONS</span><h3>Complete the release prerequisites</h3></div><strong className={readinessReady ? 'ready' : 'blocked'}>{readinessReady ? 'READY' : 'REQUIRED'}</strong></header>
       <div className="masterTradeLiveGrid masterTradeLiveConfirmationGrid">
-        <article><div><span className="masterTradeLiveKicker">24 HOUR CONSENT</span><h4>{status?.consent?.active ? 'Risk consent active' : 'LIVE işlem için 24 saatlik risk onayı gerekli.'}</h4><small>{status?.consent?.active ? `Valid until ${date(status.consent.expires_at)}` : 'This confirmation is bound to the current LIVE account and expires automatically.'}</small></div><strong className={status?.consent?.active ? 'ready' : 'blocked'}>{status?.consent?.active ? 'PASS' : 'PENDING'}</strong><button type="button" className="masterTradeLiveSecondary" onClick={grantConsent} disabled={Boolean(busy) || status?.consent?.active === true}>{status?.consent?.active ? '24 HOUR CONSENT ACTIVE' : '24 SAAT İZİN VER'}</button>{status?.consent?.active && <button type="button" className="masterTradeLiveSecondary masterTradeLiveRevokeButton" onClick={revokeConsent} disabled={Boolean(busy)}>REVOKE CONSENT</button>}</article>
-        <article><div><span className="masterTradeLiveKicker">POLICY ACKNOWLEDGEMENT</span><h4>{status?.policy_acknowledged ? 'Risk policy acknowledged' : 'Risk limitleri için politika onayı gerekli.'}</h4><small>{status?.policy_acknowledged ? 'Current policy is covered by the active 24-hour consent.' : 'Give 24-hour LIVE consent to acknowledge the current policy.'}</small></div><strong className={status?.policy_acknowledged ? 'ready' : 'blocked'}>{status?.policy_acknowledged ? 'PASS' : 'PENDING'}</strong><button type="button" className="masterTradeLiveSecondary" onClick={acknowledgePolicy} disabled={Boolean(busy) || status?.policy_acknowledged === true}>{status?.policy_acknowledged ? 'POLICY ACKNOWLEDGED' : 'LİMİTLERİ ONAYLA'}</button></article>
+        <article><div><span className="masterTradeLiveKicker">24 HOUR CONSENT</span><h4>{authorizationValid ? 'Risk consent active' : authorizationReasonText}</h4><small>{authorizationValid ? `Valid until ${date(status?.authorization?.expires_at || status?.consent?.expires_at)}` : authorizationReasonText}</small></div><strong className={authorizationValid ? 'ready' : 'blocked'}>{authorizationValid ? 'PASS' : 'PENDING'}</strong><button type="button" className="masterTradeLiveSecondary" onClick={grantConsent} disabled={Boolean(busy) || authorizationValid}>{authorizationValid ? '24 HOUR CONSENT ACTIVE' : '24 SAAT İZİN VER'}</button>{authorizationValid && <button type="button" className="masterTradeLiveSecondary masterTradeLiveRevokeButton" onClick={revokeConsent} disabled={Boolean(busy)}>REVOKE CONSENT</button>}</article>
+        <article><div><span className="masterTradeLiveKicker">POLICY ACKNOWLEDGEMENT</span><h4>{status?.policy_acknowledged ? 'Risk policy acknowledged' : 'Risk limitleri için politika onayı gerekli.'}</h4><small>{status?.policy_acknowledged ? 'Current policy is covered by the active 24-hour consent.' : 'Give 24-hour LIVE consent to acknowledge the current policy.'}</small></div><strong className={status?.policy_acknowledged ? 'ready' : 'blocked'}>{status?.policy_acknowledged ? 'PASS' : 'PENDING'}</strong><label className="masterTradeLivePolicyCheck"><input type="checkbox" aria-label="Acknowledge current risk policy" checked={status?.policy_acknowledged === true} onChange={event => { if (event.target.checked) acknowledgePolicy() }} disabled={Boolean(busy) || status?.policy_acknowledged === true}/><span>{status?.policy_acknowledged ? 'POLICY ACKNOWLEDGED' : 'I acknowledge the current risk limits'}</span></label><button type="button" className="masterTradeLiveSecondary" onClick={acknowledgePolicy} disabled={Boolean(busy) || status?.policy_acknowledged === true}>{status?.policy_acknowledged ? 'POLICY ACKNOWLEDGED' : 'LİMİTLERİ ONAYLA'}</button></article>
       </div>
       <p className="masterTradeLiveOperationalNote">Consent ve policy acknowledgement arka planda kontrol edilir. Manuel LIVE ORDER için ayrıca ARM LIVE gerekmez; ARM LIVE yalnızca Auto Trade içindir.</p>
     </section>
@@ -559,7 +583,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     <div className={`liveUxNow ${liveState.toLowerCase()}`}><div><small>WHAT TO DO NOW</small><strong>{ownershipUncertain ? 'OWNERSHIP UNCERTAIN' : liveState === 'BLOCKED' ? '⚠ LIVE IS BLOCKED' : liveState === 'READY' ? 'LIVE IS READY' : '🔒 LIVE IS LOCKED'}</strong><p>{ownershipUncertain ? `${text(ownershipUncertain.symbol)} ownership checks failed: ${ownershipUncertain.failures?.join(', ') || 'unknown'}.` : blocker}</p></div><button type="button" onClick={() => void refresh(false)} disabled={Boolean(busy)}><RefreshCw/> REFRESH STATUS</button></div>
 
     <div className="liveUxGrid liveUxTopGrid"><div className="liveUxPositionStack">{positions.length ? positions.map((position, index) => { const activePlanForPosition = findActivePlanForPosition(position); const protectionLabel = activePlanForPosition ? protectionLabelForPlan(activePlanForPosition) : 'EXTERNAL / NOT MANAGED'; const isExternal = !recoveryRequired && !activePlanForPosition; return <section className="liveUxCard liveUxPosition" key={`${String(position.symbol)}-${index}`}><header><CircleDollarSign/><div><small>CURRENT POSITION</small><h3>{text(position.symbol)}</h3></div><b>OPEN</b></header><div className="liveUxPositionSide"><strong>{text(position.direction)}</strong><span>Position Status · OPEN</span></div><div className="liveUxMetrics"><span><small>ENTRY</small><b>{text(position.entry_price)}</b></span><span><small>MARK PRICE</small><b>{text(position.mark_price)}</b></span><span><small>QUANTITY</small><b>{text(position.quantity)}</b></span><span><small>UNREALIZED PNL</small><b>{money(position.unrealized_pnl)}</b></span><span><small>STOP LOSS</small><b>{text(activePlanForPosition?.stop_loss)}</b></span><span><small>TAKE PROFIT 1</small><b>{text(activePlanForPosition?.targets?.[0])}</b></span><span><small>TAKE PROFIT 2</small><b>{text(activePlanForPosition?.targets?.[1])}</b></span><span><small>TAKE PROFIT 3</small><b>{text(activePlanForPosition?.targets?.[2])}</b></span></div><div className={`liveUxProtectionBadge ${protectionLabel.toLowerCase().replaceAll(' ', '-')}`}>PROTECTION · {protectionLabel}</div>{isExternal && <button type="button" className="liveArmButton" onClick={() => void previewAdoption(String(position.symbol))} disabled={Boolean(busy) || !connected || recoveryRequired}>ADOPT &amp; MANAGE</button>}</section> }) : <section className="liveUxCard liveUxPosition"><header><CircleDollarSign/><div><small>CURRENT POSITION</small><h3>NO OPEN POSITION</h3></div><b>NO ACTIVE POSITION</b></header><p className="liveUxEmpty">No active LIVE position. Position data is read from the backend account snapshot.</p></section>}</div>
-      <section className="liveUxCard liveUxControls"><header><UnlockKeyhole/><div><small>LIVE ARM</small><h3>Release control</h3></div><b>{liveArmed ? 'ARMED' : 'LOCKED'}</b></header><div className="liveUxControlState"><strong>{liveArmed ? 'ARMED' : 'LOCKED'}</strong><span>Arming LIVE does not start an order. Auto Trade must be enabled separately.</span></div><button type="button" className="liveArmButton" onClick={liveArmed ? disarmLive : armLive} disabled={Boolean(busy) || (!liveArmed && (!configured || !connected || emergency || recoveryRequired || !readinessReady))}>{liveArmed ? <LockKeyhole/> : <UnlockKeyhole/>}{liveArmed ? ' DISARM LIVE' : ' ARM LIVE'}</button><small className="liveUxReason">{liveArmed ? 'New-entry authority is active until the backend arm window expires.' : 'Current backend blocker: ' + (blocker || 'unknown')}</small></section></div>
+      <section className="liveUxCard liveUxControls"><header><UnlockKeyhole/><div><small>LIVE ARM</small><h3>Release control</h3></div><b>{liveArmed ? 'ARMED' : 'LOCKED'}</b></header><div className="liveUxControlState"><strong>{liveArmed ? 'ARMED' : 'LOCKED'}</strong><span>Arming LIVE does not start an order. Auto Trade must be enabled separately.</span></div><button type="button" className="liveArmButton" onClick={liveArmed ? disarmLive : armLive} disabled={Boolean(busy) || (!liveArmed && (!authorizationValid || !configured || !connected || emergency || recoveryRequired || !readinessReady))}>{liveArmed ? <LockKeyhole/> : <UnlockKeyhole/>}{liveArmed ? ' DISARM LIVE' : ' ARM LIVE'}</button><small className="liveUxReason">{liveArmed ? 'New-entry authority is active until the backend arm window expires.' : 'Current backend blocker: ' + (blocker || 'unknown')}</small></section></div>
 
     <section className="liveUxCard liveUxAuto"><header><Power/><div><small>AUTO TRADE / LIVE ARM</small><h3>Supervised live automation</h3></div><b>{status?.live_auto_trade ? 'ON' : 'OFF'}</b></header><div className="liveUxActionRow"><button type="button" onClick={autoToggle} disabled={Boolean(busy) || !autoReady || Boolean(status?.live_auto_trade)}><Power/> START LIVE AUTO TRADE</button><button type="button" onClick={stopAutoTrade} disabled={Boolean(busy) || !status?.live_auto_trade}><Power/> STOP AUTO TRADE</button></div><p className="liveUxReason"><strong>Reason:</strong> {status?.live_auto_trade ? 'Automatic trading is enabled by backend state.' : status?.auto?.last_decision || blocker}</p></section>
 
