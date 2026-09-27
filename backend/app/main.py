@@ -98,6 +98,8 @@ ALLOWED_INTERVALS = {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}
 INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
 SCAN_CACHE: dict[tuple[int, str], tuple[float, list]] = {}
 ANALYSIS_UNIVERSE_CACHE: dict[str, tuple[float, list[dict]]] = {}
+CANDLE_CACHE: dict[tuple[str, str, int], tuple[float, list[dict]]] = {}
+CANDLE_INFLIGHT: dict[tuple[str, str, int], asyncio.Lock] = {}
 CONSENSUS_CACHE: dict[str, tuple[float, dict]] = {}
 GUARD_CACHE: dict[str, tuple[float, dict]] = {}
 LAB_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
@@ -1382,28 +1384,39 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(400, "Desteklenmeyen zaman dilimi")
     safe_symbol = "".join(char for char in symbol.upper() if char.isalnum())
-    try:
-        response = await market_data_request(
-            app,
-            "/fapi/v1/klines",
-            params={"symbol": safe_symbol, "interval": interval, "limit": limit},
-        )
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise market_data_http_exception("Binance Futures mum verisi alınamadı", exc) from exc
-    try:
-        rows = response.json()
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(502, "Binance Futures geçersiz mum verisi döndürdü.") from exc
-    if not isinstance(rows, list):
-        raise HTTPException(502, "Binance Futures mum verisi beklenen biçimde değil.")
-    return [
-        {
-            "time": int(row[0] / 1000), "open": float(row[1]), "high": float(row[2]),
-            "low": float(row[3]), "close": float(row[4]), "volume": float(row[5]),
-        }
-        for row in rows
-    ]
+    key = (safe_symbol, interval, limit)
+    cached = CANDLE_CACHE.get(key)
+    if cached and time.monotonic() - cached[0] < 5:
+        return cached[1]
+    lock = CANDLE_INFLIGHT.setdefault(key, asyncio.Lock())
+    async with lock:
+        cached = CANDLE_CACHE.get(key)
+        if cached and time.monotonic() - cached[0] < 5:
+            return cached[1]
+        try:
+            response = await market_data_request(
+                app,
+                "/fapi/v1/klines",
+                params={"symbol": safe_symbol, "interval": interval, "limit": limit},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise market_data_http_exception("Binance Futures mum verisi alınamadı", exc) from exc
+        try:
+            rows = response.json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(502, "Binance Futures geçersiz mum verisi döndürdü.") from exc
+        if not isinstance(rows, list):
+            raise HTTPException(502, "Binance Futures mum verisi beklenen biçimde değil.")
+        result = [
+            {
+                "time": int(row[0] / 1000), "open": float(row[1]), "high": float(row[2]),
+                "low": float(row[3]), "close": float(row[4]), "volume": float(row[5]),
+            }
+            for row in rows
+        ]
+        CANDLE_CACHE[key] = (time.monotonic(), result)
+        return result
 
 
 async def market_data_request(application: FastAPI, path: str, params: dict[str, Any] | None = None) -> httpx.Response:

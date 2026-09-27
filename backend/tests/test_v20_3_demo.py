@@ -414,11 +414,12 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn('await snapshot_request(client, "/fapi/v1/symbolConfig"', SOURCE_TEXT)
         self.assertNotIn("account, positions, orders, algo_orders, hedge_mode, configurations = await asyncio.gather(", SOURCE_TEXT)
 
-    def test_analysis_universe_supports_full_100_symbol_market_scope(self):
+    def test_analysis_universe_uses_fast_analyst_scan_scope(self):
         main_source = (ROOT / "backend" / "app" / "main.py").read_text(encoding="utf-8")
         frontend_source = (ROOT / "CoinAnalysisCenter.tsx").read_text(encoding="utf-8")
         self.assertIn('limit: int = Query(100, ge=1, le=100)', main_source)
-        self.assertIn('/analysis-universe?interval=${interval}&limit=100', frontend_source)
+        self.assertIn('const ANALYST_SCAN_LIMIT = 40', frontend_source)
+        self.assertIn('/analysis-universe?interval=${interval}&limit=${ANALYST_SCAN_LIMIT}', frontend_source)
         self.assertNotIn('slice(0, 12)', frontend_source)
         self.assertNotIn('slice(0,12)', frontend_source)
 
