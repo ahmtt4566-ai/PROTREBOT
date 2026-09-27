@@ -44,6 +44,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const [analystOpen,setAnalystOpen] = useState(false)
   const [analystQuestion,setAnalystQuestion] = useState('')
   const [analystAnswer,setAnalystAnswer] = useState('')
+  const [analystSelection,setAnalystSelection] = useState('')
   const [alertDraft,setAlertDraft] = useState({signal:'ANY',score_min:85,rsi_min:0,volume_spike:false,price_crosses_ema20:false,mtf:'ANY'})
 
   const load = async () => {
@@ -88,11 +89,59 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const timeframeSummary = consensus ? `${consensus.timeframes.filter(item => item.direction === 'LONG').length}/${consensus.timeframes.length} bullish` : 'Ölçülüyor'
   const analystContext = active ? `Current data for ${active.display}: price ${fmt(active.price)}, 24h ${fmt(active.change)}%, signal ${active.direction}, Smart Score ${fmt(active.smart_score)}, RSI ${fmt(active.rsi)}, trend ${active.trend}, MTF ${active.mtf_alignment}, R/R ${fmt(active.risk_reward)}, volume ratio ${fmt(active.volume_ratio)}. Answer only from these facts; say there is not enough current market data when needed.` : ''
   const answerAnalyst = (customQuestion?:string) => { if (customQuestion !== undefined) setAnalystQuestion(customQuestion); if (!active) { setAnalystAnswer("I don't have enough current market data to answer that."); return }; const question = (customQuestion ?? analystQuestion).toLowerCase(); if (question.includes('long') || question.includes('fırsat')) { const best = topLong[0]; setAnalystAnswer(best ? `${best.display} has the highest current LONG Smart Score at ${fmt(best.smart_score)}/100, with RSI ${fmt(best.rsi)} and R/R ${fmt(best.risk_reward)}. This is a technical score, not a probability or guarantee.` : "I don't have enough current market data to answer that.") } else if (question.includes('short')) { const best = topShort[0]; setAnalystAnswer(best ? `${best.display} has the highest current SHORT Smart Score at ${fmt(best.smart_score)}/100, with RSI ${fmt(best.rsi)} and R/R ${fmt(best.risk_reward)}.` : "I don't have enough current market data to answer that.") } else { setAnalystAnswer(`${active.display} is currently ${active.direction} with a ${fmt(active.smart_score)}/100 Technical Signal Score, ${active.trend.toLowerCase()} structure, RSI ${fmt(active.rsi)}, MTF ${active.mtf_alignment}, and R/R ${fmt(active.risk_reward)}. This is a market snapshot, not a prediction.`) }; void analystContext }
+  const runAnalyst = (label:string, question:string) => { setAnalystSelection(label); answerAnalyst(question) }
   const whySignal = active ? [{label:'Trend alignment',ok:active.direction === 'LONG' ? active.ema20 > active.ema50 && active.ema50 > active.ema200 : active.direction === 'SHORT' ? active.ema20 < active.ema50 && active.ema50 < active.ema200 : false},{label:'RSI confirmation',ok:active.direction === 'LONG' ? active.rsi > 50 : active.direction === 'SHORT' ? active.rsi < 50 : false},{label:'Multi-timeframe support',ok:active.mtf_direction === active.direction},{label:`Risk/Reward ${fmt(active.risk_reward)}`,ok:active.risk_reward >= 2}].filter(item => item.ok) : []
   const createAlert = async () => { try { const response = await fetch(`${API_BASE}/scanner-alerts`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...alertDraft,symbol:selected})}); if (!response.ok) throw new Error('Alarm oluşturulamadı'); const item = await response.json() as ScannerAlert; setAlerts(current => [item,...current]); setAlertOpen(false) } catch { setError('Alarm oluşturulamadı; tekrar deneyin.') } }
   const openPaperTrade = async () => { if (!active) return; setPaperBusy(true); try { const direction = active.direction === 'SHORT' ? 'SHORT' : 'LONG'; const response = await fetch(`${API_BASE}/paper/open`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:active.symbol,direction,amount:100,stop_loss:active.stop_loss,take_profit:active.tp1,tp2:active.tp2,tp3:active.tp3,source:'MANUAL',signal_confidence:active.smart_score})}); if (!response.ok) throw new Error('Paper işlem açılamadı'); setPaperOpen(false); setAnalystAnswer('Paper position opened in the existing virtual wallet.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'Paper işlem açılamadı.') } finally { setPaperBusy(false) } }
 
   return <section className="coinAnalysisCenter">
+    <section className="analystWorkspace" aria-label="ProTreBot Analyst Market Intelligence">
+      <header className="analystWorkspaceHeader">
+        <div>
+          <span className="analystEyebrow">PROTREBOT ANALYST</span>
+          <h2>Market Intelligence</h2>
+          <p>Technical signals, market structure and risk-aware analysis in one place.</p>
+        </div>
+        <div className="analystWorkspaceContext"><small>SELECTED COIN</small><strong>{active?.display || 'WAITING FOR DATA'}</strong></div>
+      </header>
+      <div className="analystCommandGrid">
+        <section className="analystCommandGroup analystQuickGroup">
+          <header><span>01</span><div><strong>QUICK ANALYSIS</strong><small>Start with the current market picture</small></div></header>
+          <div className="analystCommandItems">
+            <button type="button" className={analystSelection === 'Market Overview' ? 'active' : ''} aria-pressed={analystSelection === 'Market Overview'} onClick={() => runAnalyst('Market Overview',"What's happening?")}><b>Market Overview</b><small>Current breadth and market context</small></button>
+            <button type="button" className={analystSelection === 'Best LONG' ? 'active' : ''} aria-pressed={analystSelection === 'Best LONG'} onClick={() => runAnalyst('Best LONG','Best LONG')}><b>Best LONG</b><small>Highest ranked long setup</small></button>
+            <button type="button" className={analystSelection === 'Best SHORT' ? 'active' : ''} aria-pressed={analystSelection === 'Best SHORT'} onClick={() => runAnalyst('Best SHORT','Best SHORT')}><b>Best SHORT</b><small>Highest ranked short setup</small></button>
+            <button type="button" className={analystSelection === 'Why This Coin' ? 'active' : ''} aria-pressed={analystSelection === 'Why This Coin'} onClick={() => runAnalyst('Why This Coin',`Why ${active?.display || 'this coin'}?`)}><b>Why This Coin</b><small>Explain the selected signal</small></button>
+          </div>
+        </section>
+        <section className="analystCommandGroup">
+          <header><span>02</span><div><strong>TECHNICAL INTELLIGENCE</strong><small>Read structure, confirmation and pressure</small></div></header>
+          <div className="analystCommandItems">
+            {['Trend Analysis','Momentum','Volume Intelligence','EMA Structure','RSI / MACD','Support / Resistance','Volatility'].map(label => <button type="button" key={label} className={analystSelection === label ? 'active' : ''} aria-pressed={analystSelection === label} onClick={() => runAnalyst(label,label)}><b>{label}</b><small>{label === 'Trend Analysis' ? 'Directional structure and alignment' : label === 'Momentum' ? 'RSI and momentum confirmation' : label === 'Volume Intelligence' ? 'Participation versus average volume' : label === 'EMA Structure' ? 'EMA20, EMA50 and EMA200 alignment' : label === 'RSI / MACD' ? 'Oscillator context from current data' : label === 'Support / Resistance' ? 'Current structural price levels' : 'Price movement and range pressure'}</small></button>)}
+          </div>
+        </section>
+        <section className="analystCommandGroup analystDecisionGroup">
+          <header><span>03</span><div><strong>DECISION SUPPORT</strong><small>Translate evidence into a risk-aware view</small></div></header>
+          <div className="analystCommandItems">
+            {['Market Regime','Entry Analysis','Exit Analysis','Risk / R:R','Signal Confidence'].map(label => <button type="button" key={label} className={analystSelection === label ? 'active' : ''} aria-pressed={analystSelection === label} onClick={() => runAnalyst(label,label)}><b>{label}</b><small>{label === 'Market Regime' ? 'Trend, range or mixed conditions' : label === 'Entry Analysis' ? 'Current entry and invalidation context' : label === 'Exit Analysis' ? 'Targets and protection levels' : label === 'Risk / R:R' ? 'Downside versus reward structure' : 'Confidence from the scanner snapshot'}</small></button>)}
+          </div>
+        </section>
+      </div>
+      <section className="analystResultWorkspace" aria-live="polite">
+        <header><div><span>ANALYSIS RESULT</span><h3>{active?.display || 'No active market data'}</h3></div><strong className={active ? tone(active.direction) : 'neutral'}>{active?.direction || 'WAITING'}</strong></header>
+        {active ? <>
+          <div className="analystResultMeta"><span><small>COIN</small><b>{active.symbol}</b></span><span><small>MARKET REGIME</small><b>{active.trend}</b></span><span><small>SIGNAL</small><b className={tone(active.direction)}>{active.direction}</b></span><span><small>CONFIDENCE</small><b>{fmt(active.confidence)}%</b></span></div>
+          <div className="analystMetricCards"><span><small>TREND</small><b>{active.trend}</b><em>EMA structure</em></span><span><small>MOMENTUM</small><b>RSI {fmt(active.rsi)}</b><em>Current oscillator view</em></span><span><small>VOLUME</small><b>{active.volume_ratio >= 1 ? '+' : ''}{fmt((active.volume_ratio - 1) * 100)}%</b><em>Versus average</em></span><span><small>RISK</small><b>R/R {fmt(active.risk_reward)}</b><em>-{fmt(active.risk_pct)}% risk</em></span></div>
+          <div className="analystWhyResult"><span>WHY THIS RESULT</span><p>{analystAnswer || `${active.display} is currently ${active.direction} with ${fmt(active.confidence)}% confidence from the current scanner snapshot. Review the structure and risk metrics before acting.`}</p></div>
+        </> : <p className="analystEmpty">Waiting for current scanner data. No synthetic signal is shown.</p>}
+      </section>
+      <section className="analystAskBar">
+        <div><span>ASK ANALYST</span><small>Use the current scanner snapshot for a focused answer.</small></div>
+        <input value={analystQuestion} onChange={event => setAnalystQuestion(event.target.value)} placeholder="Ask Analyst about this coin, trend, momentum or risk..." />
+        <button type="button" onClick={() => { setAnalystSelection('Ask Analyst'); answerAnalyst() }}>RUN ANALYSIS</button>
+        <div className="analystPromptChips">{['Why is BTC moving?','Is the trend strengthening?','Where is support?','What is the current risk?'].map(prompt => <button type="button" key={prompt} onClick={() => { setAnalystSelection('Ask Analyst'); answerAnalyst(prompt) }}>{prompt}</button>)}</div>
+      </section>
+    </section>
     <header className="coinAnalysisHeader"><div><span><BarChart3/> MARKET SCANNER · REAL-TIME MARKET INTELLIGENCE</span><h2>Coin Analiz Merkezi</h2><p>Piyasadaki teknik fırsatları keşfet.</p></div><div className="coinHeaderActions"><div className="coinHeaderStatus"><strong><i className={autoScan ? 'liveDot' : 'idleDot'}/>{autoScan ? 'LIVE' : 'PAUSED'}</strong><small>{rows.length} ASSETS</small><small>LAST SCAN · {scanMessage}</small></div><button type="button" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'SCANNING…' : 'RUN SCAN'}</button></div></header>
     <div className="coinAnalysisToolbar"><label><Search/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search coin…"/>{query && <button type="button" className="searchClear" aria-label="Aramayı temizle" onClick={() => setQuery('')}><X/></button>}</label><button className="filterTrigger" type="button" onClick={() => { setDraftFilters(filters); setFilterOpen(true) }}><Filter/>FİLTRELER{filterCount(filters) ? ` · ${filterCount(filters)}` : ''}</button><label className="autoScanToggle"><input type="checkbox" checked={autoScan} onChange={event => setAutoScan(event.target.checked)}/><span><i className={autoScan ? 'liveDot' : 'idleDot'}/>AUTO SCAN {autoScan ? 'LIVE' : 'OFF'}</span></label></div>
     <div className="activeFilterChips">{Object.entries(filters).filter(([key,value]) => value !== emptyFilters[key as keyof FilterState] && value !== false).map(([key,value]) => <button type="button" key={key} onClick={() => removeFilter(key as keyof FilterState)}>{filterNames[key]}{key === 'minRR' ? ` > ${value}` : `: ${value}`} <X/></button>)}</div>
