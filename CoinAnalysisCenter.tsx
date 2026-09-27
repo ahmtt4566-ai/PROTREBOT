@@ -12,6 +12,7 @@ type FilterState = {signal:string;strength:string;trend:string;rsiMin:number;rsi
 const emptyFilters:FilterState = {signal:'ALL',strength:'ANY',trend:'ALL',rsiMin:0,rsiMax:100,volume:'ANY',mtf:'ANY',volatility:'ANY',ema20:false,ema20_50:false,ema50_200:false,minRR:0}
 const intervals = ['1m','5m','15m','30m','1h','4h','1d']
 const ANALYST_SCAN_LIMIT = 40
+const ANALYST_SCAN_TIMEOUT_MS = 15000
 const fmt = (value?:number) => value === undefined || !Number.isFinite(value) ? '—' : value.toLocaleString('tr-TR',{maximumFractionDigits:value < 10 ? 3 : 2})
 const scoreLabel = (score:number) => score >= 90 ? 'Very Strong' : score >= 75 ? 'Strong' : score >= 60 ? 'Moderate' : score >= 40 ? 'Neutral' : 'Weak'
 const tone = (direction:Direction) => direction === 'LONG' ? 'positive' : direction === 'SHORT' ? 'negative' : 'neutral'
@@ -53,6 +54,8 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
     loadController.current?.abort()
     const controller = new AbortController()
     loadController.current = controller
+    let timedOut = false
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort() }, ANALYST_SCAN_TIMEOUT_MS)
     setLoading(true); setError(''); setScanMessage('Taranıyor…')
     try {
       const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=${ANALYST_SCAN_LIMIT}`,{signal:controller.signal})
@@ -62,8 +65,16 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
       setAnalystSelection(''); setAnalystAnswer('')
       setRows(payload.results || []); setError(''); setScanMessage(`${payload.results?.length || 0} coin analiz edildi`)
       if (payload.results?.length && !payload.results.some(row => row.symbol === selected)) setSelected(payload.results[0].symbol)
-    } catch (reason) { if (controller.signal.aborted) return; setRows([]); setError(reason instanceof Error ? reason.message : 'Market data temporarily unavailable.'); setScanMessage('Tarama başarısız') }
-    finally { if (loadController.current === controller) { loadController.current = null; setLoading(false) } }
+    } catch (reason) {
+      if (timedOut) {
+        setRows([]); setError('Market data request timed out. Please retry.'); setScanMessage('Zaman aşımı')
+      } else if (!controller.signal.aborted) {
+        setRows([]); setError(reason instanceof Error ? reason.message : 'Market data temporarily unavailable.'); setScanMessage('Tarama başarısız')
+      }
+    } finally {
+      window.clearTimeout(timeout)
+      if (loadController.current === controller) { loadController.current = null; setLoading(false) }
+    }
   }
   useEffect(() => { if (!autoScan) return; void load(); const timer = window.setInterval(() => void load(),60000); return () => { window.clearInterval(timer); loadController.current?.abort() } },[interval,autoScan])
   useEffect(() => { const timer = window.setTimeout(() => setDebouncedQuery(query.trim().toUpperCase()),250); return () => window.clearTimeout(timer) },[query])
@@ -105,6 +116,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const anomalies = useMemo(() => rows.filter(row => row.anomaly).sort((left,right) => (right.anomaly?.strength || 0) - (left.anomaly?.strength || 0)).slice(0,5),[rows])
   const featured = useMemo(() => [...rows].filter(row => row.direction !== 'BEKLE').sort(rankRows).slice(0,5),[rows])
   const summary = useMemo(() => ({long:rows.filter(row => row.direction === 'LONG').length,short:rows.filter(row => row.direction === 'SHORT').length,watch:rows.filter(row => row.direction === 'BEKLE').length}),[rows])
+  const hasMarketData = rows.length > 0
   const selectorRows = useMemo(() => rows.filter(row => row.display.toUpperCase().includes(selectorQuery.trim().toUpperCase()) && (selectorDirection === 'ALL' || (selectorDirection === 'WATCH' ? row.direction === 'BEKLE' : row.direction === selectorDirection))),[rows,selectorQuery,selectorDirection])
   const selectorSignal = (direction:Direction) => direction === 'BEKLE' ? 'WATCH' : direction
   const chooseSort = (key:keyof Row) => { if (sort === key) setAscending(value => !value); else { setSort(key); setAscending(false) } }
@@ -176,7 +188,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
     <header className="coinAnalysisHeader"><div><span><BarChart3/> MARKET SCANNER · REAL-TIME MARKET INTELLIGENCE</span><h2>Coin Analiz Merkezi</h2><p>Piyasadaki teknik fırsatları keşfet.</p></div><div className="coinHeaderActions"><div className="coinHeaderStatus"><strong><i className={autoScan ? 'liveDot' : 'idleDot'}/>{autoScan ? 'LIVE' : 'PAUSED'}</strong><small>{rows.length} ASSETS</small><small>LAST SCAN · {scanMessage}</small></div><button type="button" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'SCANNING…' : 'RUN SCAN'}</button></div></header>
     <div className="coinAnalysisToolbar"><label><Search/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search coin…"/>{query && <button type="button" className="searchClear" aria-label="Aramayı temizle" onClick={() => setQuery('')}><X/></button>}</label><button className="filterTrigger" type="button" onClick={() => { setDraftFilters(filters); setFilterOpen(true) }}><Filter/>FİLTRELER{filterCount(filters) ? ` · ${filterCount(filters)}` : ''}</button><label className="autoScanToggle"><input type="checkbox" checked={autoScan} onChange={event => setAutoScan(event.target.checked)}/><span><i className={autoScan ? 'liveDot' : 'idleDot'}/>AUTO SCAN {autoScan ? 'LIVE' : 'OFF'}</span></label></div>
     <div className="activeFilterChips">{Object.entries(filters).filter(([key,value]) => value !== emptyFilters[key as keyof FilterState] && value !== false).map(([key,value]) => <button type="button" key={key} onClick={() => removeFilter(key as keyof FilterState)}>{filterNames[key]}{key === 'minRR' ? ` > ${value}` : `: ${value}`} <X/></button>)}</div>
-    <div className="marketPulse"><span className="marketPulseLabel">MARKET OVERVIEW</span><div className="marketPulseCards"><article><b>{rows.length || '—'}</b><small>ASSETS</small></article><article className="positive"><b>{summary.long}</b><small>LONG</small></article><article className="negative"><b>{summary.short}</b><small>SHORT</small></article><article className="neutral"><b>{summary.watch}</b><small>WATCH</small></article><article className={summary.long >= summary.short ? 'regimeCard positive' : 'regimeCard negative'}><b>{summary.long >= summary.short ? 'BULLISH' : 'BEARISH'}</b><small>MARKET BREADTH</small></article></div></div>
+    <div className="marketPulse"><span className="marketPulseLabel">MARKET OVERVIEW</span><div className="marketPulseCards"><article><b>{hasMarketData ? rows.length : 'N/A'}</b><small>ASSETS</small></article><article className="positive"><b>{hasMarketData ? summary.long : 'N/A'}</b><small>LONG</small></article><article className="negative"><b>{hasMarketData ? summary.short : 'N/A'}</b><small>SHORT</small></article><article className="neutral"><b>{hasMarketData ? summary.watch : 'N/A'}</b><small>WATCH</small></article><article className={hasMarketData ? (summary.long >= summary.short ? 'regimeCard positive' : 'regimeCard negative') : 'regimeCard neutral'}><b>{hasMarketData ? (summary.long >= summary.short ? 'BULLISH' : 'BEARISH') : 'N/A'}</b><small>MARKET BREADTH</small></article></div></div>
     <div className="coinIntervals">{intervals.map(item => <button type="button" key={item} className={interval === item ? 'active' : ''} onClick={() => onIntervalChange(item)}>{item.toUpperCase()}</button>)}</div>
     {error && <div className="coinAnalysisError">{error}<button type="button" onClick={() => void load()}>RETRY</button></div>}
     <section className="topOpportunityGrid"><article><header><span>LONG SETUPS</span><h3>TOP LONG</h3></header>{topLong.length ? topLong.map(row => <button type="button" key={row.symbol} className={row.symbol === selected ? 'selectedRow' : ''} onClick={() => { setSelected(row.symbol); setDetailsOpen(true) }}><b>{row.display}</b><span className="rowBadges"><strong className="positive">LONG</strong><em>{fmt(row.smart_score)}</em></span><small>{fmt(row.price)} · RSI {fmt(row.rsi)} · R/R {fmt(row.risk_reward)} · MTF {row.mtf_direction}</small></button>) : <p className="emptyHint">{loading ? 'Scanning opportunities…' : 'No LONG setups yet.'}</p>}</article><article><header><span>SHORT SETUPS</span><h3>TOP SHORT</h3></header>{topShort.length ? topShort.map(row => <button type="button" key={row.symbol} className={row.symbol === selected ? 'selectedRow' : ''} onClick={() => { setSelected(row.symbol); setDetailsOpen(true) }}><b>{row.display}</b><span className="rowBadges"><strong className="negative">SHORT</strong><em>{fmt(row.smart_score)}</em></span><small>{fmt(row.price)} · RSI {fmt(row.rsi)} · R/R {fmt(row.risk_reward)} · MTF {row.mtf_direction}</small></button>) : <p className="emptyHint">{loading ? 'Scanning opportunities…' : 'No SHORT setups yet.'}</p>}</article></section>

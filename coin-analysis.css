@@ -155,6 +155,9 @@
 	.featuredList{grid-template-columns:1fr}
 	.featuredList button{border-right:0;border-bottom:1px solid var(--terminal-line)}
 	.featuredList button:last-child{border-bottom:0}
+	.coinDetailMetrics{grid-template-columns:repeat(2,minmax(0,1fr));}
+	.coinDetailMetrics span{min-width:0;overflow:hidden;}
+	.coinDetailMetrics b{overflow-wrap:anywhere;word-break:break-word;}
 }
 
 /* Analyst workspace: scoped intelligence surface, independent from scanner logic. */
