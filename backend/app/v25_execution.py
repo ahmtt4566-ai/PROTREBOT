@@ -1072,7 +1072,7 @@ def auto_session_active(state: dict[str, Any]) -> bool:
         state["auto"]["enabled"] = False
         state["auto"]["session_until"] = 0.0
         state["live_auto_trade"] = False
-        state["real_trading_locked"] = True
+        state["real_trading_locked"] = float(state.get("armed_until") or 0) <= time.time()
     return active
 
 
@@ -4580,7 +4580,7 @@ async def v25_auto_stop(request: Request) -> dict[str, Any]:
     state = request.app.state.v25_execution
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
-    state["real_trading_locked"] = True
+    state["real_trading_locked"] = float(state.get("armed_until") or 0) <= time.time()
     state["live_auto_trade"] = False
     state["auto_authorization"] = initial_state()["auto_authorization"]
     state["auto"]["last_decision"] = "Yeni otomatik canlı girişler durduruldu."

@@ -302,6 +302,40 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(status["real_trading_locked"])
         self.assertFalse(state["auto"]["enabled"])
 
+    def test_auto_cleanup_and_stop_leave_valid_arm_locked(self):
+        state = initial_state()
+        state.update({
+            "armed_until": time.time() + 300,
+            "real_trading_locked": False,
+            "live_auto_trade": True,
+        })
+        state["auto"].update({"enabled": True, "session_until": time.time() - 1})
+
+        self.assertFalse(v25_execution.auto_session_active(state))
+        self.assertGreater(state["armed_until"], time.time())
+        self.assertFalse(state["real_trading_locked"])
+        self.assertFalse(state["live_auto_trade"])
+        self.assertFalse(state["auto"]["enabled"])
+
+        state.update({
+            "armed_until": time.time() + 300,
+            "real_trading_locked": False,
+            "live_auto_trade": True,
+        })
+        state["auto"].update({"enabled": True, "session_until": time.time() + 300})
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        request = SimpleNamespace(app=application)
+
+        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
+            patch.object(v25_execution, "persist_state"), \
+            patch.object(v25_execution, "public_status", return_value={}):
+            asyncio.run(v25_execution.v25_auto_stop(request))
+
+        self.assertGreater(state["armed_until"], time.time())
+        self.assertFalse(state["real_trading_locked"])
+        self.assertFalse(state["live_auto_trade"])
+        self.assertFalse(state["auto"]["enabled"])
+
     def test_live_stream_uses_supervised_vault_credentials(self):
         state = initial_state()
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
