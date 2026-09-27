@@ -3012,6 +3012,43 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .v26MarketPicker button:hover { border-color: rgba(34,211,238,.54); background: #172632; transform: translateY(-1px); }
 .v26MarketPicker button.active { border-color: rgba(245,158,11,.76); background: rgba(245,158,11,.1); box-shadow: 0 0 18px rgba(245,158,11,.08); }
 .v26MarketPicker button.active b { color: #fde68a; }
+
+.v26App .v21Tabs { border-color: rgba(212,168,79,.28); background: rgba(8,14,19,.82); box-shadow: 0 16px 38px rgba(0,0,0,.22), inset 0 1px rgba(255,255,255,.05); }
+.v26App .v21Tabs button { border-color: rgba(148,163,184,.18); background: rgba(20,29,38,.82); color: #94a3b8; }
+.v26App .v21Tabs button:hover { border-color: rgba(212,168,79,.5); background: rgba(31,42,51,.94); color: #f8fafc; }
+.v26App .v21Tabs button.active { border-color: rgba(212,168,79,.82); background: linear-gradient(145deg, rgba(212,168,79,.2), rgba(20,29,38,.96)); color: #f8e2a1; box-shadow: inset 0 -2px #d4a84f, 0 8px 18px rgba(0,0,0,.16); }
+.v26App .v21Tabs button.active > svg { color: #f2c86b; }
+.v26App .v26Nav { border-color: rgba(212,168,79,.22); background: rgba(8,14,19,.78); box-shadow: 0 16px 38px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.04); }
+.v26App .v26Nav button { border-color: rgba(148,163,184,.16); background: rgba(20,29,38,.78); color: #94a3b8; }
+.v26App .v26Nav button:hover { border-color: rgba(212,168,79,.45); background: rgba(31,42,51,.92); color: #f8fafc; }
+.v26App .v26Nav button.active, .v26App .v26Nav button.liveTab.active { border-color: rgba(212,168,79,.8); background: linear-gradient(145deg, rgba(212,168,79,.18), rgba(20,29,38,.95)); color: #f8e2a1; box-shadow: inset 0 -2px #d4a84f, 0 8px 18px rgba(0,0,0,.14); }
+.v26App .v26Nav button.active::after { background: #d4a84f; }
+.v26App .v26Nav button.active > svg { background: rgba(212,168,79,.18); color: #f2c86b; }
+.v26App .v21GateStrip { border-color: rgba(212,168,79,.22); background: rgba(8,14,19,.72); box-shadow: inset 0 1px rgba(255,255,255,.04); }
+.v26App .v21GateStrip > span { min-height: 58px; border-color: rgba(148,163,184,.16); background: rgba(20,29,38,.84); color: #94a3b8; }
+.v26App .v21GateStrip > span.passed { border-color: rgba(52,211,153,.42); background: rgba(16,53,47,.46); color: #9de4c5; }
+.v26App .v21GateStrip > span:last-child { border-color: rgba(212,168,79,.5); }
+.v26App .v21GateStrip > span > b { background: rgba(148,163,184,.16); color: #cbd5e1; }
+.v26App .v21GateStrip > span.passed > b { background: rgba(52,211,153,.18); color: #86efac; }
+.v26App .v21GateStrip > span > em, .v26App .v21GateStrip > span > small { color: inherit; }
+
+.v26App .v26MarketPicker { min-width: 0; }
+.v26App .v26MarketPopover { border-color: rgba(212,168,79,.45); background: rgba(11,18,24,.98); box-shadow: 0 18px 38px rgba(0,0,0,.38); }
+.v26App .v26MarketPopover > input { border-color: rgba(148,163,184,.3); background: #16222c; color: #f8fafc; }
+.v26App .v26MarketOptions button:hover, .v26App .v26MarketOptions button.active { border-color: rgba(212,168,79,.62); background: rgba(212,168,79,.14); }
+.v26App .v26MarketOptions span, .v26App .v26MarketOptions em { color: #94a3b8; }
+
+.v26App .liveUxNowActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.v26App .liveCredentialCta { border-color: rgba(212,168,79,.65); background: rgba(212,168,79,.14); color: #f8e2a1; }
+
+@media (max-width: 640px) {
+  .v26App .v21Tabs { display: flex; overflow-x: auto; scrollbar-width: thin; }
+  .v26App .v21Tabs button { flex: 0 0 142px; }
+  .v26App .v21GateStrip { display: flex; overflow-x: auto; }
+  .v26App .v21GateStrip > span { flex: 0 0 132px; }
+  .v26App .liveUxNowActions { justify-content: flex-start; }
+  .v26App .v26MarketPopover { right: 0; left: auto; }
+}
 .v26Intervals { padding: 3px; border: 1px solid rgba(71,85,105,.7); border-radius: 9px; background: #0a1016; }
 .v26Intervals button { border: 0; background: transparent; }
 .v26Intervals button.active { background: var(--accent-strong); color: #17120a; font-weight: 800; }
