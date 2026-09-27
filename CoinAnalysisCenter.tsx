@@ -48,14 +48,14 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const [alertDraft,setAlertDraft] = useState({signal:'ANY',score_min:85,rsi_min:0,volume_spike:false,price_crosses_ema20:false,mtf:'ANY'})
 
   const load = async () => {
-    setLoading(true); setScanMessage('Taranıyor…')
+    setLoading(true); setError(''); setScanMessage('Taranıyor…')
     try {
       const response = await fetch(`${API_BASE}/analysis-universe?interval=${interval}&limit=100`)
       const payload = await response.json() as {results?:Row[];detail?:string}
       if (!response.ok) throw new Error(payload.detail || 'Market data temporarily unavailable.')
       setRows(payload.results || []); setError(''); setScanMessage(`${payload.results?.length || 0} coin analiz edildi`)
       if (payload.results?.length && !payload.results.some(row => row.symbol === selected)) setSelected(payload.results[0].symbol)
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Market data temporarily unavailable.'); setScanMessage('Tarama başarısız') }
+    } catch (reason) { setRows([]); setError(reason instanceof Error ? reason.message : 'Market data temporarily unavailable.'); setScanMessage('Tarama başarısız') }
     finally { setLoading(false) }
   }
   useEffect(() => { if (!autoScan) return; void load(); const timer = window.setInterval(() => void load(),60000); return () => window.clearInterval(timer) },[interval,autoScan])
@@ -129,7 +129,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
       </div>
       <section className="analystResultWorkspace" aria-live="polite">
         <header><div><span>ANALYSIS RESULT</span><h3>{active?.display || 'No active market data'}</h3></div><strong className={active ? tone(active.direction) : 'neutral'}>{active?.direction || 'WAITING'}</strong></header>
-        {active ? <>
+        {loading ? <div className="analystLoadingState" aria-label="Loading market data"><i/><i/><i/><i/></div> : error ? <div className="analystDataError" role="alert"><strong>DATA UNAVAILABLE</strong><p>Unable to load current market data.</p><button type="button" onClick={() => void load()}>RETRY</button></div> : active ? <>
           <div className="analystResultMeta"><span><small>COIN</small><b>{active.symbol}</b></span><span><small>MARKET REGIME</small><b>{active.trend}</b></span><span><small>SIGNAL</small><b className={tone(active.direction)}>{active.direction}</b></span><span><small>CONFIDENCE</small><b>{fmt(active.confidence)}%</b></span></div>
           <div className="analystMetricCards"><span><small>TREND</small><b>{active.trend}</b><em>EMA structure</em></span><span><small>MOMENTUM</small><b>RSI {fmt(active.rsi)}</b><em>Current oscillator view</em></span><span><small>VOLUME</small><b>{active.volume_ratio >= 1 ? '+' : ''}{fmt((active.volume_ratio - 1) * 100)}%</b><em>Versus average</em></span><span><small>RISK</small><b>R/R {fmt(active.risk_reward)}</b><em>-{fmt(active.risk_pct)}% risk</em></span></div>
           <div className="analystWhyResult"><span>WHY THIS RESULT</span><p>{analystAnswer || `${active.display} is currently ${active.direction} with ${fmt(active.confidence)}% confidence from the current scanner snapshot. Review the structure and risk metrics before acting.`}</p></div>

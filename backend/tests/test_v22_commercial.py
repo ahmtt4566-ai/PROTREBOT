@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -39,7 +40,7 @@ from app.binance_demo import (  # noqa: E402
 )
 from app.exchange_connections import SaveCredentialsRequest  # noqa: E402
 from app.v21_demo import state_for as v21_state_for  # noqa: E402
-from app.v22_commercial import BootstrapRequest, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_verification_status  # noqa: E402
+from app.v22_commercial import BootstrapRequest, access_snapshot, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_verification_status  # noqa: E402
 from app.main import database_health, database_health_status, health_check_redis, health_item, healthz, run_health_checks  # noqa: E402
 
 
@@ -53,6 +54,19 @@ GITIGNORE_SOURCE = (ROOT / ".gitignore").read_text(encoding="utf-8")
 
 
 class V22CommercialTests(unittest.TestCase):
+    def test_access_snapshot_is_server_driven_for_admin_and_plans(self):
+        state = {"users": [], "subscriptions": [], "licenses": []}
+        owner = {"id": "owner", "role": "OWNER", "email": "ahmtt4565@gmail.com"}
+        pro_user = {"id": "pro", "role": "CUSTOMER", "email": "pro@example.com"}
+        free_user = {"id": "free", "role": "CUSTOMER", "email": "free@example.com"}
+        expiry = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        state["subscriptions"] = [{"user_id": "pro", "plan": "PRO", "status": "ACTIVE", "currentPeriodEnd": expiry}]
+
+        self.assertTrue(access_snapshot(state, owner)["isAdmin"])
+        self.assertTrue(access_snapshot(state, owner)["canAccessMasterTrade"])
+        self.assertTrue(access_snapshot(state, pro_user)["canAccessMasterTrade"])
+        self.assertFalse(access_snapshot(state, free_user)["canAccessMasterTrade"])
+
     def test_bootstrap_promotes_existing_admin_without_changing_password(self):
         original_password = hash_password("ExistingStrong!123")
         owner = {

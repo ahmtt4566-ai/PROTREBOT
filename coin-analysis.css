@@ -380,6 +380,45 @@
 	font-size: 10px;
 	font-style: normal;
 }
+.coinAnalysisCenter .analystLoadingState {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 7px;
+	min-height: 102px;
+	padding-top: 10px;
+}
+.coinAnalysisCenter .analystLoadingState i {
+	display: block;
+	min-height: 76px;
+	border: 1px solid var(--terminal-line);
+	border-radius: 5px;
+	background: linear-gradient(100deg, #111a23 20%, #1b2832 45%, #111a23 70%);
+	background-size: 240% 100%;
+	animation: analystSkeleton 1.4s ease-in-out infinite;
+}
+.coinAnalysisCenter .analystLoadingState i:nth-child(2) { animation-delay: .12s; }
+.coinAnalysisCenter .analystLoadingState i:nth-child(3) { animation-delay: .24s; }
+.coinAnalysisCenter .analystLoadingState i:nth-child(4) { animation-delay: .36s; }
+.coinAnalysisCenter .analystDataError {
+	display: grid;
+	justify-items: start;
+	gap: 6px;
+	min-height: 102px;
+	padding: 16px 2px 2px;
+}
+.coinAnalysisCenter .analystDataError strong { color: #ffb0a7; font-size: 13px; letter-spacing: .08em; }
+.coinAnalysisCenter .analystDataError p { margin: 0; color: var(--terminal-muted); font-size: 12px; }
+.coinAnalysisCenter .analystDataError button {
+	margin-top: 5px;
+	padding: 7px 11px;
+	border: 1px solid var(--terminal-amber);
+	border-radius: 4px;
+	background: transparent;
+	color: var(--terminal-amber);
+	font-size: 11px;
+	font-weight: 800;
+}
+@keyframes analystSkeleton { 0%, 100% { background-position: 100% 0; opacity: .72; } 50% { background-position: 0 0; opacity: 1; } }
 .coinAnalysisCenter .analystWhyResult {
 	margin-top: 9px;
 	padding: 10px 12px;

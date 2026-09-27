@@ -856,14 +856,16 @@ async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Requ
 @router.get("/session")
 async def v22_session(request: Request):
     user = authenticated_user(request)
-    return {"user": public_user(user), "license": active_license(runtime(request)["state"], user["id"]), "demo_only": True}
+    state = runtime(request)["state"]
+    return {"user": public_user(user), "license": active_license(state, user["id"]), "access": access_snapshot(state, user), "demo_only": True}
 
 
 @router.get("/profile")
 async def v22_profile(request: Request):
     user = authenticated_user(request)
-    profile = next((item for item in runtime(request)["state"].get("profiles", []) if item.get("user_id") == user["id"]), None)
-    return {"user": public_user(user), "profile": profile, "subscription": subscription_for_user(runtime(request)["state"], user["id"]), "demo_only": True}
+    state = runtime(request)["state"]
+    profile = next((item for item in state.get("profiles", []) if item.get("user_id") == user["id"]), None)
+    return {"user": public_user(user), "profile": profile, "subscription": subscription_for_user(state, user["id"]), "access": access_snapshot(state, user), "demo_only": True}
 
 
 @router.patch("/profile")
@@ -912,6 +914,17 @@ def subscription_for_user(state: dict[str, Any], user_id: str) -> dict[str, Any]
         "currentPeriodEnd": license_row.get("expires_at"), "currentPrice": catalog["annual_price"],
         "features": catalog["features"], "entitlements": catalog["entitlements"],
         "cancelAtPeriodEnd": False, "mode": "DEVELOPMENT",
+    }
+
+
+def access_snapshot(state: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    subscription = subscription_for_user(state, user["id"])
+    plan = str(subscription.get("plan") or "FREE").upper()
+    is_admin = user.get("role") == "OWNER"
+    return {
+        "isAdmin": is_admin,
+        "canAccessMasterTrade": is_admin or plan in {"PRO", "ELITE"},
+        "entitlements": subscription.get("entitlements", {}),
     }
 
 

@@ -11,8 +11,6 @@ const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
 const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
 const MasterTrade = lazy(() => import('./MasterTrade'))
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT
-const ADMIN_EMAIL = 'ahmtt4565@gmail.com'
-
 type View = 'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'|'master-trade'
 type Market = {symbol:string;display:string;price:number;change:number;volume:number}
 type Candle = {time:number;open:number;high:number;low:number;close:number;volume:number}
@@ -207,11 +205,9 @@ export default function TestnetFirstApp() {
     fetch(`${API_BASE}/v22/profile`, { headers })
       .then(async response => {
         if (!response.ok) throw new Error('Unauthorized')
-        const payload = await response.json() as { subscription?: {plan?: string}; user?: { email?: string; subscription?: {plan?: string} }; email?: string }
-        const plan = String(payload.subscription?.plan || payload.user?.subscription?.plan || 'FREE').toUpperCase()
-        const email = String(payload.user?.email || payload.email || '').trim().toLowerCase()
+        const payload = await response.json() as { access?: {canAccessMasterTrade?: boolean} }
         if (!active) return
-        setMasterTradeAccess(email === ADMIN_EMAIL || ['PRO', 'ELITE'].includes(plan) ? 'granted' : 'locked')
+        setMasterTradeAccess(payload.access?.canAccessMasterTrade === true ? 'granted' : 'locked')
       })
       .catch(() => {
         if (active) setMasterTradeAccess('locked')
