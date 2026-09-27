@@ -1429,10 +1429,25 @@ async def market_data_request(application: FastAPI, path: str, params: dict[str,
                 last_response = response
                 if response.status_code not in {500, 502, 503, 504}:
                     return response
+                logger.warning(
+                    "Market data upstream response: host=%s status=%s path=%s attempt=%s",
+                    host,
+                    response.status_code,
+                    path,
+                    attempt + 1,
+                )
+                if host != FUTURES_MARKET_DATA_APIS[-1]:
+                    break
             except asyncio.TimeoutError as exc:
                 last_error = httpx.ReadTimeout(f"Binance Futures market data request timed out via {host}")
+                logger.warning("Market data upstream timeout: host=%s path=%s attempt=%s", host, path, attempt + 1)
+                if host != FUTURES_MARKET_DATA_APIS[-1]:
+                    break
             except httpx.RequestError as exc:
                 last_error = exc
+                logger.warning("Market data upstream network failure: host=%s path=%s attempt=%s detail=%s", host, path, attempt + 1, type(exc).__name__)
+                if host != FUTURES_MARKET_DATA_APIS[-1]:
+                    break
             retry_delay = min(0.5 * (2 ** attempt), max(0.0, deadline - time.monotonic()))
             if retry_delay <= 0:
                 break

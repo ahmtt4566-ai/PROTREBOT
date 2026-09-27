@@ -70,8 +70,8 @@ class HttpClientProxyTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(requests, [
             "https://primary.test/fapi/v1/ping",
-            "https://primary.test/fapi/v1/ping",
-            "https://primary.test/fapi/v1/ping",
+            "https://fallback.test/fapi/v1/ping",
+            "https://fallback.test/fapi/v1/ping",
             "https://fallback.test/fapi/v1/ping",
         ])
 
