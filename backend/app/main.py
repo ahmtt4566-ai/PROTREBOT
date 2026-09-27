@@ -69,7 +69,7 @@ from .web_security import PUBLIC_PATHS, bearer_token, cors_origins, env_flag, ev
 logger = logging.getLogger(__name__)
 
 BINANCE_API = "https://api.binance.com"
-FUTURES_MARKET_DATA_API = DEMO_REST_BASE
+FUTURES_MARKET_DATA_API = os.getenv("PROTREBOT_MARKET_DATA_BASE", "https://fapi.binance.com").strip().rstrip("/")
 MARKET_DATA_REQUEST_TIMEOUT_SECONDS = max(1.0, float(os.getenv("MARKET_DATA_REQUEST_TIMEOUT_SECONDS", "8")))
 LEGACY_PAPER_CONTRACT = 'version="20.2.0"'
 LEGACY_V25_API_CONTRACT = 'version="25.0.0"'
@@ -1453,6 +1453,7 @@ def market_data_http_exception(prefix: str, error: httpx.HTTPError) -> HTTPExcep
                 detail = str(payload.get("msg") or payload.get("message") or "").strip()
         except (ValueError, json.JSONDecodeError):
             detail = ""
+    logger.warning("Market data upstream failure: host=%s status=%s detail=%s", FUTURES_MARKET_DATA_API, status, detail or type(error).__name__)
     if status in {418, 429}:
         message = f"{prefix}: Binance Futures erişimi geçici olarak engelledi (HTTP 418)."
         if status == 429:
@@ -4145,6 +4146,8 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
         return {"cached": True, "interval": interval, "results": cached[1][:limit]}
 
     market_list = await markets(limit=limit)
+    if not market_list:
+        raise HTTPException(502, "Binance Futures market data unavailable: no tradable markets returned.")
     semaphore = asyncio.Semaphore(8)
 
     async def inspect(market: dict) -> dict | None:
@@ -4225,6 +4228,8 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
 
     inspected = await asyncio.gather(*(inspect(market) for market in market_list))
     results = [item for item in inspected if item is not None]
+    if not results:
+        raise HTTPException(502, "Binance Futures market data unavailable: no valid market snapshots returned.")
     results.sort(key=lambda item: (item["final_decision_score"], item["confidence"], item["smart_score"]), reverse=True)
     paper = app.state.paper
     history_changed = False
