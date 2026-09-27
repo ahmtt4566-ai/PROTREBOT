@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 
 BINANCE_API = "https://api.binance.com"
 FUTURES_MARKET_DATA_API = os.getenv("PROTREBOT_MARKET_DATA_BASE", "https://fapi.binance.com").strip().rstrip("/")
+FUTURES_MARKET_DATA_APIS = tuple(dict.fromkeys((FUTURES_MARKET_DATA_API, "https://fapi.binance.com", "https://www.binance.com")))
 MARKET_DATA_REQUEST_TIMEOUT_SECONDS = max(1.0, float(os.getenv("MARKET_DATA_REQUEST_TIMEOUT_SECONDS", "8")))
 LEGACY_PAPER_CONTRACT = 'version="20.2.0"'
 LEGACY_V25_API_CONTRACT = 'version="25.0.0"'
@@ -1409,36 +1410,39 @@ async def market_data_request(application: FastAPI, path: str, params: dict[str,
     """Retry only transient public market-data failures; preserve final error mapping."""
     application.state.http = await ensure_http_client(application)
     last_error: httpx.HTTPError | None = None
-    deadline = time.monotonic() + MARKET_DATA_REQUEST_TIMEOUT_SECONDS
-    for attempt in range(3):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
+    last_response: httpx.Response | None = None
+    for host in FUTURES_MARKET_DATA_APIS:
+        deadline = time.monotonic() + MARKET_DATA_REQUEST_TIMEOUT_SECONDS
+        for attempt in range(3):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
 
-        async def request() -> httpx.Response:
-            async with BINANCE_RATE_LIMITER.slot(FUTURES_MARKET_DATA_API) as rate_limit:
-                response = await application.state.http.get(f"{FUTURES_MARKET_DATA_API}{path}", params=params)
-                rate_limit.observe(response)
-                return response
+            async def request() -> httpx.Response:
+                async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+                    response = await application.state.http.get(f"{host}{path}", params=params)
+                    rate_limit.observe(response)
+                    return response
 
-        try:
-            response = await asyncio.wait_for(request(), timeout=remaining)
-            if response.status_code not in {500, 502, 503, 504} or attempt == 2:
-                return response
-        except asyncio.TimeoutError as exc:
-            last_error = httpx.ReadTimeout("Binance Futures market data request timed out")
-            if attempt == 2:
-                raise last_error from exc
-        except httpx.RequestError as exc:
-            last_error = exc
-            if attempt == 2:
-                raise
-        retry_delay = min(0.5 * (2 ** attempt), max(0.0, deadline - time.monotonic()))
-        if retry_delay <= 0:
-            break
-        await asyncio.sleep(retry_delay)
+            try:
+                response = await asyncio.wait_for(request(), timeout=remaining)
+                last_response = response
+                if response.status_code not in {500, 502, 503, 504}:
+                    return response
+            except asyncio.TimeoutError as exc:
+                last_error = httpx.ReadTimeout(f"Binance Futures market data request timed out via {host}")
+            except httpx.RequestError as exc:
+                last_error = exc
+            retry_delay = min(0.5 * (2 ** attempt), max(0.0, deadline - time.monotonic()))
+            if retry_delay <= 0:
+                break
+            await asyncio.sleep(retry_delay)
+        logger.warning("Market data host exhausted: host=%s path=%s", host, path)
     if last_error is not None:
-        raise last_error
+        if last_response is None:
+            raise last_error
+    if last_response is not None:
+        return last_response
     raise RuntimeError("Market data request retry loop ended unexpectedly")
 
 
@@ -1488,9 +1492,7 @@ async def historical_fetch_candles(symbol: str, interval: str, total_limit: int 
         rows = None
         for attempt in range(max_retries):
             try:
-                async with BINANCE_RATE_LIMITER.slot(FUTURES_MARKET_DATA_API) as rate_limit:
-                    response = await app.state.http.get(f"{FUTURES_MARKET_DATA_API}/fapi/v1/klines", params=params)
-                    rate_limit.observe(response)
+                response = await market_data_request(app, "/fapi/v1/klines", params=params)
                 if response.status_code in {429, 418}:
                     retry_after = response.headers.get("Retry-After", "").strip()
                     headers = {"Retry-After": retry_after} if retry_after.isdigit() else None

@@ -54,6 +54,27 @@ class HttpClientProxyTests(unittest.TestCase):
 
         self.assertIs(result, response)
 
+    def test_market_data_request_falls_back_after_transient_primary_failures(self):
+        requests = []
+
+        class FailoverClient:
+            async def get(self, url, params=None):
+                requests.append(url)
+                status = 503 if len(requests) <= 3 else 200
+                return httpx.Response(status, json={"ok": status == 200}, request=httpx.Request("GET", url))
+
+        application = SimpleNamespace(state=SimpleNamespace(http=FailoverClient()))
+        with patch.object(main_module, "FUTURES_MARKET_DATA_APIS", ("https://primary.test", "https://fallback.test")):
+            result = asyncio.run(main_module.market_data_request(application, "/fapi/v1/ping"))
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(requests, [
+            "https://primary.test/fapi/v1/ping",
+            "https://primary.test/fapi/v1/ping",
+            "https://primary.test/fapi/v1/ping",
+            "https://fallback.test/fapi/v1/ping",
+        ])
+
     def test_market_data_request_is_bounded_when_rate_limit_wait_hangs(self):
         class HangingClient:
             async def get(self, url, params=None):
