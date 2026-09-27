@@ -7472,3 +7472,72 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .v26App .v21SummaryIntro h2 { font-size: 18px !important; }
   .v26App .v21SummaryIntro p { font-size: 13px !important; }
 }
+
+@media (max-width: 600px) {
+  .v26HeaderActions .v26Refresh {
+    position: relative;
+    flex: 0 0 36px;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+    display: grid;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    font-size: 0;
+    line-height: 0;
+    white-space: nowrap;
+  }
+
+  .v26HeaderActions .v26Refresh svg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    flex-shrink: 0;
+    transform: translate(-50%, -50%);
+    transform-origin: center;
+  }
+
+  .v26HeaderActions .v26Refresh svg.spin {
+    animation: v26RefreshIconSpin .8s linear infinite;
+  }
+
+  .v26Header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+    gap: 8px;
+  }
+  .v26Brand,
+  .v26Brand > div { min-width: 0; }
+  .v26Brand b,
+  .v26Brand small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .v26HeaderActions {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    min-width: 0;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  .v26HeaderActions .v26MasterTradeButton,
+  .v26HeaderActions .v26SubscriptionBadge { display: none; }
+  .v26HeaderActions .v26Refresh,
+  .v26HeaderActions .mobileMenuButton,
+  .v26HeaderActions .v26NotificationButton,
+  .v26HeaderActions .v26Notifications {
+    flex: 0 0 36px;
+    min-width: 36px;
+    width: 36px;
+  }
+  .v26HeaderActions .v26NotificationButton { height: 36px; }
+}
+
+@keyframes v26RefreshIconSpin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
