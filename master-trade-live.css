@@ -69,6 +69,8 @@
 .masterTradeLiveConfirmationGrid article h4 { margin: 5px 0 0; color: var(--live-ink); font-size: 12px; line-height: 1.4; }
 .masterTradeLiveConfirmationGrid article small { display: block; margin-top: 6px; color: var(--live-muted); font-size: 9px; line-height: 1.45; }
 .masterTradeLiveConfirmationGrid article > strong { padding: 4px 6px; font-size: 8px; letter-spacing: .08em; }
+.masterTradeLivePolicyCheck { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: 38px; contain: layout; color: var(--live-muted); font-size: 9px; line-height: 1.4; }
+.masterTradeLivePolicyCheck input { flex: 0 0 auto; }
 .masterTradeLiveConfirmationGrid article .masterTradeLiveSecondary { grid-column: 1 / -1; justify-self: start; min-height: 30px; padding: 0 10px; border: 1px solid var(--live-line); border-radius: 4px; }
 .masterTradeLiveConfirmations > .masterTradeLiveOperationalNote { margin: 12px 0 0; }
 .masterTradeLiveControl { background: linear-gradient(145deg, rgba(18, 37, 35, .9), var(--live-surface)); }
