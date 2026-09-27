@@ -3954,24 +3954,116 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .v21DashboardActions button { min-width: 0; min-height: 44px; }
 
   .terminalMobileNav {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     min-width: 0;
-    gap: 4px;
+    gap: 7px;
+    padding: 7px;
   }
 
   .terminalMobileNav button {
     min-width: 0;
-    min-height: 48px;
-    overflow: hidden;
-    padding: 5px 2px;
-    font-size: 9px;
-    line-height: 1.15;
+    min-height: 58px;
+    padding: 8px 6px;
+    font-size: 10px;
+    line-height: 1.2;
+    text-align: center;
     white-space: normal;
     overflow-wrap: anywhere;
   }
 
   .terminalMobileNav button svg { flex: 0 0 auto; }
-  .scrollTopFab { right: 12px; bottom: 86px; }
+  .v26Nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .v26Nav button { min-height: 58px; padding: 8px 7px; }
+  .v26Nav b { overflow: visible; font-size: 9px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+
+  .v26App { min-width: 0; padding-bottom: 88px; overflow-x: hidden; }
+  .v26Header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    min-width: 0;
+    gap: 8px 10px;
+    padding: 10px;
+  }
+  .v26Brand { min-width: 0; align-items: flex-start; }
+  .v26Brand > div { min-width: 0; display: grid; align-content: start; gap: 3px; }
+  .v26Brand b { max-width: 100%; font-size: 13px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; }
+  .v26Brand small { max-width: 100%; margin-top: 0; font-size: 8px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
+  .v26HeaderActions { align-self: start; min-width: 0; flex-wrap: nowrap; }
+  .v26HeaderActions .v26Refresh,
+  .v26HeaderActions .mobileMenuButton,
+  .v26HeaderActions .v26NotificationButton { flex: 0 0 34px; }
+
+  .v21DashboardAutoTrade > header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    min-width: 0;
+    gap: 8px;
+    padding: 13px 14px;
+  }
+  .v21DashboardAutoTrade > header > div { min-width: 0; display: grid; gap: 3px; }
+  .v21DashboardAutoTrade > header > div > span { min-width: 0; font-size: 8px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
+  .v21DashboardAutoTrade > header h3 { margin: 0; min-width: 0; font-size: 18px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; }
+  .v21DashboardAutoTrade > header > b { align-self: start; margin: 0; white-space: nowrap; }
+
+  .v21DashboardAutoTradeGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 0 14px; }
+  .v21DashboardAutoTradeGrid span { display: grid; align-content: center; gap: 4px; min-width: 0; min-height: 62px; padding: 9px 10px; overflow: visible; }
+  .v21DashboardAutoTradeGrid small,
+  .v21DashboardAutoTradeGrid strong { display: block; min-width: 0; max-width: 100%; overflow: visible; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+  .v21DashboardAutoTradeGrid small { font-size: 8px; line-height: 1.2; }
+  .v21DashboardAutoTradeGrid strong { font-size: clamp(11px, 3.2vw, 14px); line-height: 1.25; }
+
+  .v21DashboardAutoTradeActions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; padding: 12px 14px 15px; }
+  .v21DashboardAutoTradeActions input,
+  .v21DashboardAutoTradeActions button { width: 100%; min-width: 0; min-height: 50px; padding: 10px 12px; font-size: 14px; line-height: 1.2; white-space: nowrap; }
+  .v21DashboardAutoTradeActions input { text-align: left; }
+  .v21DashboardAutoTradeActions button { text-align: center; }
+
+  .terminalMobileNav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; min-width: 0; padding: 7px; }
+  .terminalMobileNav button { display: grid; place-items: center; gap: 4px; min-width: 0; min-height: 58px; padding: 8px 6px; text-align: center; white-space: normal; overflow-wrap: anywhere; }
+  .terminalMobileNav button span { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+
+  .v21DashboardAutoTradeGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    min-width: 0;
+    padding: 0 14px;
+  }
+
+  .v21DashboardAutoTradeGrid span {
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 62px;
+    padding: 9px 10px;
+    overflow: visible;
+  }
+
+  .v21DashboardAutoTradeGrid small,
+  .v21DashboardAutoTradeGrid strong {
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .v21DashboardAutoTradeGrid small { font-size: 8px; line-height: 1.2; }
+  .v21DashboardAutoTradeGrid strong { font-size: clamp(11px, 3.2vw, 14px); line-height: 1.25; }
+  .v21DashboardAutoTrade > header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+  .v21DashboardAutoTrade > header > div { display: grid; gap: 3px; }
+  .v21DashboardAutoTrade > header > div > span { font-size: 8px; line-height: 1.2; }
+  .v21DashboardAutoTrade > header h3 { margin: 0; font-size: 18px; }
+  .v21DashboardAutoTrade > header > b { margin-top: 1px; padding: 5px 8px; font-size: 9px; }
+  .v21DashboardAutoTradeActions { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 12px 14px 15px; }
+  .v21DashboardAutoTradeActions input,
+  .v21DashboardAutoTradeActions button { width: 100%; min-width: 0; min-height: 50px; padding: 10px 12px; font-size: 14px; line-height: 1.2; white-space: nowrap; text-align: center; }
+  .v21DashboardAutoTradeActions input { text-align: left; }
+  .v26App .v21DashboardStatusGrid b { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+  .scrollTopFab { position: fixed; right: 16px; bottom: 90px; z-index: 70; }
 }
 .v26App .v21DashboardSubscription { max-width: none; }
 .v26App .v21DashboardStatusGrid b { white-space: nowrap; }

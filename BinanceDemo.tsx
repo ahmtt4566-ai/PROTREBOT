@@ -343,7 +343,7 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
   const lastNotificationId = useRef<string|null>(null)
 
   useEffect(() => {
-    const updateScrollTop = () => setShowScrollTop(window.scrollY > 300)
+    const updateScrollTop = () => setShowScrollTop(window.scrollY >= 300)
     updateScrollTop()
     window.addEventListener('scroll',updateScrollTop,{passive:true})
     return () => window.removeEventListener('scroll',updateScrollTop)
