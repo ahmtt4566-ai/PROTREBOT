@@ -104,6 +104,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   } | null>(null)
   const [notice, setNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string}>({kind: 'info', text: 'LIVE başlatılmadı. Gerçek emir kilidi varsayılan olarak kapalıdır.'})
   const refreshInFlight = useRef(false)
+  const confirmationOpen = useRef(false)
+  confirmationOpen.current = confirm !== null
   const status = sharedStatus !== undefined ? sharedStatus : localStatus
   const connections = sharedConnections !== undefined ? sharedConnections : localConnections
 
@@ -144,12 +146,14 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       return
     }
     if (refreshInFlight.current) return
+    if (confirmationOpen.current) return
     refreshInFlight.current = true
     try {
       const [nextStatus, nextConnections] = await Promise.all([
         call<LiveStatus>(V25, '/status'),
         call<ConnectionStatus>(CONNECTIONS, '/status'),
       ])
+      if (confirmationOpen.current) return
       setLocalStatus(nextStatus)
       setLocalConnections(nextConnections)
       setPolicyDraft(current => current || nextStatus.policy || {})
