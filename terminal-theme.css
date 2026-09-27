@@ -7150,3 +7150,95 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
     max-height: min(70vh, 520px);
   }
 }
+
+/* Final palette and readability guard for the active terminal surfaces. */
+.v26App .v26Nav button.active,
+.v26App .v21Tabs button.active,
+.v26App .terminalMobileNav button.active {
+  border-color: var(--terminal-gold) !important;
+  background: #1a2026 !important;
+  color: #fff4cf !important;
+  box-shadow: inset 0 -2px 0 var(--terminal-gold), 0 0 0 1px rgba(230,187,95,.08);
+}
+.v26App .v26Nav button.active svg,
+.v26App .v21Tabs button.active svg,
+.v26App .terminalMobileNav button.active svg { color: var(--terminal-gold) !important; }
+
+.v26App .v21WorkflowSteps {
+  gap: 10px;
+  padding: 12px;
+  border-color: var(--terminal-line);
+  background: #0b1117;
+}
+.v26App .v21WorkflowStep {
+  min-height: 86px;
+  padding: 13px 12px;
+  border-color: var(--terminal-line) !important;
+  background: #111a21 !important;
+  color: var(--terminal-copy);
+}
+.v26App .v21WorkflowStep.active,
+.v26App .v21WorkflowStep.current {
+  border-color: var(--terminal-gold) !important;
+  background: #211d15 !important;
+  box-shadow: inset 0 0 0 1px rgba(230,187,95,.12);
+}
+.v26App .v21WorkflowStep h3,
+.v26App .v21WorkflowStep strong,
+.v26App .v21WorkflowStep b { color: #fff4cf !important; font-size: 14px !important; font-weight: 700; }
+.v26App .v21WorkflowStep p,
+.v26App .v21WorkflowStep small,
+.v26App .v21WorkflowStep span { color: var(--terminal-muted) !important; font-size: 12px !important; line-height: 1.45; }
+.v26App .v21WorkflowSteps::before,
+.v26App .v21WorkflowSteps::after { background: var(--terminal-line-strong) !important; }
+
+.v26App .v21ExecutiveSummary,
+.v26App .v21SummaryIntro,
+.v26App .v21SummaryMetrics,
+.v26App .v21AutoControl,
+.v26App .v21AutoRules,
+.v26App .v21AutoDiagnostics,
+.v26App .v21AutoScanner { border-color: var(--terminal-line) !important; background: var(--terminal-panel) !important; }
+.v26App .v21SummaryIntro h2 { color: #f5f7f6 !important; font-size: 20px !important; }
+.v26App .v21SummaryIntro p { color: var(--terminal-copy) !important; font-size: 13px !important; line-height: 1.55; }
+.v26App .v21SummaryMetrics small,
+.v26App .v21MetricRow small,
+.v26App .v21ScannerStats small { color: var(--terminal-muted) !important; font-size: 11px !important; }
+.v26App .v21SummaryMetrics b,
+.v26App .v21MetricRow b { color: #f5f7f6 !important; font-size: 18px !important; }
+.v26App .v21NextAction { border-color: rgba(230,187,95,.42) !important; background: #171b1d !important; }
+.v26App .v21NextAction button,
+.v26App .v21DashboardActions button:first-child,
+.v26App .v21DashboardSubscription button { border-color: var(--terminal-gold) !important; background: var(--terminal-gold) !important; color: #17232a !important; }
+
+.v26App .v21AutoControl h3,
+.v26App .v21AutoRules h3,
+.v26App .v21AutoDiagnostics h3,
+.v26App .v21AutoScanner h3 { color: #f5f7f6 !important; font-size: 16px !important; }
+.v26App .v21AutoControl p,
+.v26App .v21AutoControl label,
+.v26App .v21AutoRules label { color: var(--terminal-copy) !important; font-size: 12px !important; line-height: 1.45; }
+.v26App .v21AutoControl input,
+.v26App .v21AutoRules input,
+.v26App .v21AutoRules select { border-color: var(--terminal-line) !important; background: var(--terminal-panel-inset) !important; color: #f5f7f6 !important; }
+.v26App .v21AutoControl > button,
+.v26App .v21AutoRules > button,
+.v26App .v21ContextCta { border-color: var(--terminal-gold) !important; background: var(--terminal-gold) !important; color: #17232a !important; }
+.v26App .v21AutoControl > button.stop { border-color: var(--terminal-red) !important; background: #321b1c !important; color: #ffd3cc !important; }
+
+.v26App .connectionPrimary,
+.v26App .liveCredentialCta { border-color: var(--terminal-gold) !important; background: var(--terminal-gold) !important; color: #17232a !important; opacity: 1 !important; }
+.v26App .connectionSecondary { border-color: var(--terminal-cyan) !important; background: #13232a !important; color: #d8f7fb !important; opacity: 1 !important; }
+.v26App .connectionPrimary:disabled,
+.v26App .connectionSecondary:disabled { color: #9aa9b2 !important; opacity: .72 !important; }
+.v26App .liveUxNow,
+.v26App .liveUxCard { border-color: var(--terminal-line) !important; background: var(--terminal-panel) !important; }
+.v26App .liveUxNowActions > button:not(.liveCredentialCta),
+.v26App .liveUxCard button:not(.liveArmButton) { border-color: var(--terminal-line-strong); background: #16222c; color: var(--terminal-copy); }
+
+@media (max-width: 700px) {
+  .v26App .v21WorkflowSteps { display: flex !important; overflow-x: auto; }
+  .v26App .v21WorkflowStep { flex: 0 0 min(230px, 78vw); }
+  .v26App .v21SummaryIntro h2 { font-size: 18px !important; }
+  .v26App .v21SummaryIntro p { font-size: 13px !important; }
+}
