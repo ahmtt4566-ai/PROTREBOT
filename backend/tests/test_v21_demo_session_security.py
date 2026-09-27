@@ -70,6 +70,8 @@ class DemoSessionSecurityTests(unittest.TestCase):
 
         self.assertTrue(result["connections"]["TESTNET"]["active"])
         self.assertTrue(result["connections"]["TESTNET"]["configured"])
+        self.assertEqual(result["connections"]["TESTNET"]["api_key_masked"], "abcd****wxyz")
+        self.assertNotIn("1234567890abcdef", str(result))
         api_key, secret_key = session_credentials(request, "TESTNET", active_only=False)
         self.assertEqual(api_key, "abcdefghijklmnopqrstuvwxyz")
         self.assertEqual(secret_key, "1234567890abcdef")

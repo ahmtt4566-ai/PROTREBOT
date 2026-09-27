@@ -23,7 +23,7 @@ type Analysis = {
   series:{ema20:Point[];ema50:Point[];ema200:Point[]}
 }
 type Health = {status:string;version:string;mode:string;testnet:string;live_guard:string;paper:string;database:string;cloud_evidence:string;web_access:string}
-type ConnectionStatus = {connections?:Record<'TESTNET'|'LIVE',{configured:boolean;active:boolean;last_test_ok:boolean;last_error?:string|null;storage?:string;account?:{active_positions?:number}|null}>;vault?:{ready:boolean;reason?:string|null}}
+type ConnectionStatus = {connections?:Record<'TESTNET'|'LIVE',{configured:boolean;active:boolean;last_test_ok:boolean;api_key_masked?:string;last_error?:string|null;storage?:string;account?:{active_positions?:number}|null}>;vault?:{ready:boolean;reason?:string|null}}
 type NotificationItem = {id:string;title:string;description:string;kind:'success'|'warning'|'error'|'info'}
 const ANALYSIS_TIMEOUT_MS = 30000
 
@@ -161,7 +161,9 @@ export default function TestnetFirstApp() {
   const [loading,setLoading] = useState(false)
   const [marketError,setMarketError] = useState(false)
   const [credentials,setCredentials] = useState({demoApiKey:'',demoSecretKey:'',liveApiKey:'',liveSecretKey:''})
-  const [demoVerification,setDemoVerification] = useState({busy:false,kind:'info',message:''})
+  const [demoSaveState,setDemoSaveState] = useState<'idle'|'saving'|'saved'|'error'>('idle')
+  const [demoVerifyState,setDemoVerifyState] = useState<'idle'|'verifying'|'verified'|'error'>('idle')
+  const [demoVerification,setDemoVerification] = useState({kind:'info',message:''})
   const [connectionStatus,setConnectionStatus] = useState<ConnectionStatus|null>(null)
   const [notificationsOpen,setNotificationsOpen] = useState(false)
   const [headerHidden,setHeaderHidden] = useState(false)
@@ -254,10 +256,12 @@ export default function TestnetFirstApp() {
     const apiKey = credentials.demoApiKey.trim()
     const secretKey = credentials.demoSecretKey.trim()
     if (!apiKey || !secretKey) {
-      setDemoVerification({busy:false,kind:'error',message:'Demo API Key ve Secret Key gerekli.'})
+      setDemoSaveState('error')
+      setDemoVerification({kind:'error',message:'Demo API Key ve Secret Key gerekli.'})
       return
     }
-    setDemoVerification({busy:true,kind:'info',message:'Demo anahtarları doğrulanıyor ve güvenli kasaya kaydediliyor…'})
+    setDemoSaveState('saving')
+    setDemoVerification({kind:'info',message:'Saving… Demo anahtarları güvenli kasaya kaydediliyor.'})
     try {
       const headers = new Headers({'Content-Type':'application/json'}); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`)
       const saveResponse = await fetch(`${API_BASE}/exchange-connections/save`,{
@@ -267,15 +271,18 @@ export default function TestnetFirstApp() {
       const savePayload = await saveResponse.json().catch(() => null) as {detail?:unknown}|null
       if (!saveResponse.ok) throw new Error(typeof savePayload?.detail === 'string' ? savePayload.detail : 'Demo credentials securely save edilemedi.')
       setCredentials(current => ({...current,demoApiKey:'',demoSecretKey:''}))
-      setDemoVerification({busy:false,kind:'ok',message:'Demo credentials saved securely. Verify connection to activate the Demo channel.'})
+      setDemoSaveState('saved')
+      setDemoVerification({kind:'ok',message:'Credentials saved · Ready to verify.'})
       await refreshConnectionStatus()
     } catch (error) {
-      setDemoVerification({busy:false,kind:'error',message:error instanceof Error ? error.message : 'Demo bağlantısı doğrulanamadı. Ağ ve vault durumunu kontrol edin.'})
+      setDemoSaveState('error')
+      setDemoVerification({kind:'error',message:error instanceof Error ? error.message : 'Save failed. Ağ ve vault durumunu kontrol edin.'})
     }
   }
 
   const verifyDemoConnection = async () => {
-    setDemoVerification({busy:true,kind:'info',message:'Kayıtlı Demo bağlantısı doğrulanıyor…'})
+    setDemoVerifyState('verifying')
+    setDemoVerification({kind:'info',message:'Verifying… Kayıtlı Demo credential context kullanılıyor.'})
     try {
       const headers = new Headers({'Content-Type':'application/json'}); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`)
       const testResponse = await fetch(`${API_BASE}/exchange-connections/test`,{method:'POST',headers,body:JSON.stringify({mode:'TESTNET'})})
@@ -284,11 +291,13 @@ export default function TestnetFirstApp() {
       const activateResponse = await fetch(`${API_BASE}/exchange-connections/activate`,{method:'POST',headers,body:JSON.stringify({mode:'TESTNET',confirmation:'TESTNET BAĞLANTIYI AÇ'})})
       const activatePayload = await activateResponse.json().catch(() => null) as {detail?:unknown}|null
       if (!activateResponse.ok) throw new Error(typeof activatePayload?.detail === 'string' ? activatePayload.detail : 'Demo connection could not be activated.')
-      setDemoVerification({busy:false,kind:'ok',message:'DEMO CONNECTED · API connection verified. Trading channel: DEMO.'})
+      setDemoVerifyState('verified')
+      setDemoVerification({kind:'ok',message:'DEMO CONNECTED · API connection verified. Trading channel: DEMO.'})
       await refreshConnectionStatus()
       await refresh()
     } catch (error) {
-      setDemoVerification({busy:false,kind:'error',message:error instanceof Error ? error.message : 'Saved Demo connection could not be verified.'})
+      setDemoVerifyState('error')
+      setDemoVerification({kind:'error',message:error instanceof Error ? error.message : 'Verification failed. Saved Demo connection could not be verified.'})
       await refreshConnectionStatus()
     }
   }
@@ -425,7 +434,7 @@ export default function TestnetFirstApp() {
       <header className="connectionCenterHeader"><div><span>SECURE CONNECTIONS · TESTNET-FIRST</span><h2>API &amp; Connection Center</h2><p>Demo ve Live bağlantılarını mevcut şifreli kasa ve fail-closed güvenlik kapılarıyla yönet.</p></div><div className="connectionHeaderStatus"><span><i className={connectionStatus?.connections?.TESTNET?.configured ? 'ok' : 'pending'}/>DEMO {connectionStatus?.connections?.TESTNET?.configured ? 'CONFIGURED' : 'NOT CONFIGURED'}</span><span><i className={connectionStatus?.connections?.TESTNET?.active ? 'ok' : 'pending'}/>DEMO {connectionStatus?.connections?.TESTNET?.active ? 'CONNECTED' : 'LOCKED'}</span><span><i className="locked"/>LIVE LOCKED</span></div></header>
       <section className="connectionStatusRail"><div><small>DEMO STATUS</small><strong><i className={connectionStatus?.connections?.TESTNET?.configured ? 'ok' : 'pending'}/>{connectionStatus?.connections?.TESTNET?.configured ? 'CONFIGURED' : 'NOT CONFIGURED'}</strong></div><div><small>CONNECTION</small><strong><i className={connectionStatus?.connections?.TESTNET?.active ? 'ok' : 'pending'}/>{connectionStatus?.connections?.TESTNET?.active ? 'CONNECTED' : 'NOT CONNECTED'}</strong></div><div><small>TRADING CHANNEL</small><strong><i className="locked"/>LOCKED</strong></div><button type="button" onClick={() => void refreshConnectionStatus()} aria-label="Refresh connection status"><RefreshCw/></button></section>
       <div className="connectionWorkflow"><span><b>01</b><small>ENTER CREDENTIALS</small></span><span><b>02</b><small>SAVE SECURELY</small></span><span><b>03</b><small>VERIFY CONNECTION</small></span><span><b>04</b><small>RUN DEMO TEST</small></span></div>
-      <section className="connectionDemoPanel"><header><div><span>DEMO / TESTNET</span><h3>Binance Futures Demo</h3><p>Demo API anahtarları şifreli sunucu kasasına kaydedilir. Bu kanal gerçek para ve Live emir kanalı değildir.</p></div><strong className="connectionChannelBadge"><TestTube2/> DEMO ONLY</strong></header><div className="connectionFormGrid"><label><span>Demo API Key</span><input type="text" value={credentials.demoApiKey} onChange={event => setCredentials(current => ({...current,demoApiKey:event.target.value}))} autoComplete="off" spellCheck={false} placeholder="Enter Demo API Key"/></label><label><span>Demo Secret Key</span><input type="password" value={credentials.demoSecretKey} onChange={event => setCredentials(current => ({...current,demoSecretKey:event.target.value}))} autoComplete="new-password" spellCheck={false} placeholder="Enter Demo Secret Key"/></label></div><div className="connectionActions"><button type="button" className="connectionPrimary" onClick={() => void saveDemoCredentials()} disabled={demoVerification.busy}><Save/>{demoVerification.busy ? 'SAVING…' : 'SAVE SECURELY'}</button><button type="button" className="connectionSecondary" onClick={() => void verifyDemoConnection()} disabled={demoVerification.busy || !connectionStatus?.connections?.TESTNET?.configured}><ShieldCheck/>{demoVerification.busy ? 'VERIFYING…' : 'VERIFY DEMO CONNECTION'}</button></div>{demoVerification.message && <div className={`connectionFeedback ${demoVerification.kind}`}><i/>{demoVerification.message}</div>}<small className="connectionNote">Secrets are sent only to the existing vault API and are never returned to the browser.</small></section>
+      <section className="connectionDemoPanel"><header><div><span>DEMO / TESTNET</span><h3>Binance Futures Demo</h3><p>Demo API anahtarları şifreli sunucu kasasına kaydedilir. Bu kanal gerçek para ve Live emir kanalı değildir.</p></div><strong className="connectionChannelBadge"><TestTube2/> DEMO ONLY</strong></header><div className="connectionFormGrid"><label><span>Demo API Key</span><input type="text" value={credentials.demoApiKey} onChange={event => setCredentials(current => ({...current,demoApiKey:event.target.value}))} autoComplete="off" spellCheck={false} placeholder="Enter Demo API Key"/></label><label><span>Demo Secret Key</span><input type="password" value={credentials.demoSecretKey} onChange={event => setCredentials(current => ({...current,demoSecretKey:event.target.value}))} autoComplete="new-password" spellCheck={false} placeholder="Enter Demo Secret Key"/></label></div>{connectionStatus?.connections?.TESTNET?.configured && <div className="connectionCredentialState"><span><small>SAVED API KEY</small><b>{connectionStatus.connections.TESTNET.api_key_masked || 'MASKED KEY'}</b></span><strong><i className={connectionStatus.connections.TESTNET.active ? 'ok' : 'pending'}/>{connectionStatus.connections.TESTNET.active ? 'SAVED / READY' : 'SAVED / VERIFY REQUIRED'}</strong></div>}<div className="connectionActions"><button type="button" className="connectionPrimary" onClick={() => void saveDemoCredentials()} disabled={demoSaveState === 'saving' || demoVerifyState === 'verifying' || !credentials.demoApiKey.trim() || !credentials.demoSecretKey.trim()}><Save/>{demoSaveState === 'saving' ? 'SAVING…' : 'SAVE SECURELY'}</button><button type="button" className="connectionSecondary" onClick={() => void verifyDemoConnection()} disabled={demoSaveState === 'saving' || demoVerifyState === 'verifying' || !connectionStatus?.connections?.TESTNET?.configured}><ShieldCheck/>{demoVerifyState === 'verifying' ? 'VERIFYING…' : 'VERIFY DEMO CONNECTION'}</button></div>{demoVerification.message && <div className={`connectionFeedback ${demoVerification.kind}`}><i/>{demoVerification.message}</div>}<small className="connectionNote">Secrets are sent only to the existing vault API and are never returned to the browser.</small></section>
       <section className="connectionLivePanel"><header><div><span>REAL BINANCE FUTURES</span><h3><LockKeyhole/> Live Trading Locked</h3><p>Live credentials are managed separately. Live trading remains locked until every existing V25 safety condition is satisfied.</p></div><strong className="connectionLiveBadge"><i className="locked"/>{health?.live_guard || 'LIVE LOCKED'}</strong></header><div className="connectionLiveGrid"><label><span>Live API Key</span><input type="text" value={credentials.liveApiKey} onChange={event => setCredentials(current => ({...current,liveApiKey:event.target.value}))} autoComplete="off" spellCheck={false} placeholder="Configured separately"/></label><label><span>Live Secret Key</span><input type="password" value={credentials.liveSecretKey} onChange={event => setCredentials(current => ({...current,liveSecretKey:event.target.value}))} autoComplete="new-password" placeholder="Never displayed"/></label></div><small>Live connection is not tested, activated, or armed from this page.</small></section>
       <section className="connectionSecurityPanel"><header><div><span>SECURITY &amp; SAFETY</span><h3>Fail-closed by design</h3></div><ShieldCheck/></header><div>{['Secrets are stored server-side','Secrets are never displayed in the UI','Live trading remains locked by default','Demo and Live credentials are separated','Orders require existing safety gates','No automatic live orders on startup'].map(item => <span key={item}><CheckCircle2/>{item}</span>)}</div></section>
     </section>}

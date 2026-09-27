@@ -121,6 +121,13 @@ def key_fingerprint(api_key: str) -> str:
     return f"SHA256:{digest[:12]}"
 
 
+def masked_api_key(api_key: str) -> str:
+    value = api_key.strip()
+    if len(value) < 10:
+        return ""
+    return f"{value[:4]}****{value[-4:]}"
+
+
 def normalize_fingerprint(value: str) -> str:
     return str(value or "").strip().upper().removeprefix("SHA256:")
 
@@ -319,6 +326,21 @@ async def session_credentials_for_identity(
         """,
         session_value, user_id, normalized,
     )
+    if not row:
+        # A rotated browser session may outlive the session id persisted by the
+        # live monitor. Recover only one active record for the same owner and key fingerprint.
+        rows = await pool.fetch(
+            """
+            SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active
+            FROM protrebot_exchange_session_vault
+            WHERE user_id = $1 AND mode = $2 AND active = TRUE AND fingerprint = $3
+            ORDER BY updated_at DESC
+            LIMIT 2
+            """,
+            user_id, normalized, f"SHA256:{normalize_fingerprint(fingerprint)}",
+        )
+        if len(rows) == 1:
+            row = rows[0]
     if not row or normalize_fingerprint(str(row.get("fingerprint") or "")) != normalize_fingerprint(fingerprint):
         logger.warning(
             "LIVE credential resolution failed: %s expected=%s stored=%s",
@@ -339,6 +361,7 @@ async def session_credentials_for_identity(
 
 def _session_connection(mode: str, key: tuple[str, str]) -> dict[str, Any]:
     meta = _SESSION_META.get(key, {})
+    api_key = _SESSION_CACHE.get(key, ("", ""))[0]
     return {
         "mode": mode,
         "label": "Binance Futures Demo" if mode == "TESTNET" else "Binance USD-M Futures Gerçek",
@@ -346,6 +369,7 @@ def _session_connection(mode: str, key: tuple[str, str]) -> dict[str, Any]:
         "configured": bool(meta.get("configured")),
         "active": bool(meta.get("active")),
         "fingerprint": meta.get("fingerprint"),
+        "api_key_masked": masked_api_key(api_key),
         "last_test_ok": bool(meta.get("last_test_ok")),
         "last_test_at": meta.get("last_test_at"),
         "last_error": meta.get("last_error"),
