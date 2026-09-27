@@ -37,6 +37,292 @@
   --ui-shadow: 0 20px 48px rgba(0,0,0,.36);
 }
 
+/* Active workspace terminal system: one visual language for demo, setup, and live surfaces. */
+.v26App {
+  --terminal-bg: #070b10;
+  --terminal-panel: #0d141c;
+  --terminal-panel-raised: #111c26;
+  --terminal-panel-inset: #091118;
+  --terminal-line: rgba(125, 151, 168, .24);
+  --terminal-line-strong: rgba(212, 168, 79, .58);
+  --terminal-copy: #d7e1e6;
+  --terminal-muted: #8397a3;
+  --terminal-gold: #e6bb5f;
+  --terminal-cyan: #64d7e8;
+  --terminal-green: #58d39a;
+  --terminal-red: #ff8178;
+  background: var(--terminal-bg);
+  color: var(--terminal-copy);
+}
+.v26App .v26ModeBar,
+.v26App .v26MarketBar,
+.v26App .v21Tabs,
+.v26App .v21Pulse,
+.v26App .v21Workspace,
+.v26App .v21CockpitSummary,
+.v26App .v21SystemHealthCenter,
+.v26App .v21RiskRadar,
+.v26App .v21SmartAlerts,
+.v26App .v21ActivityTimeline,
+.v26App .v21ScannerDashboard,
+.v26App .v21AutoActivityCenter,
+.v26App .demoTicket,
+.v26App .demoPositions,
+.v26App .demoOrdersGrid,
+.v26App .liveTradingPanel,
+.v26App .connectionCenter {
+  border-color: var(--terminal-line);
+  background: var(--terminal-panel);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, .2), inset 0 1px rgba(255,255,255,.035);
+}
+.v26App .v21Workspace,
+.v26App .v21CockpitSummary,
+.v26App .v21SystemHealthCenter,
+.v26App .v21RiskRadar,
+.v26App .v21SmartAlerts,
+.v26App .v21ActivityTimeline,
+.v26App .v21ScannerDashboard,
+.v26App .v21AutoActivityCenter { padding: 18px; border: 1px solid var(--terminal-line); border-radius: 10px; }
+.v26App .v21WorkspaceHead,
+.v26App .v21ScannerHeader,
+.v26App .v21WorkspaceHead.compactHead { padding-bottom: 14px; border-bottom-color: var(--terminal-line); }
+.v26App .v21WorkspaceHead h2,
+.v26App .v21ScannerHeader h2,
+.v26App .v21AutoActivityCard h3 { color: #f2f6f7; letter-spacing: .01em; }
+.v26App .v21WorkspaceHead > div > span,
+.v26App .v21ScannerHeader > div > span,
+.v26App .v21AutoActivityCard > header > span,
+.v26App .v21SectionKicker span { color: var(--terminal-gold); letter-spacing: .13em; }
+.v26App .v21WorkspaceHead p,
+.v26App .v21ScannerHeader p,
+.v26App .v21CockpitSummary .v21WorkspaceHead small { color: var(--terminal-muted); }
+
+.v26App .v21CockpitGrid,
+.v26App .v21RiskRadarGrid,
+.v26App .v21HealthFlow,
+.v26App .v21ScannerMetrics,
+.v26App .v21AutoBotGrid { gap: 8px; }
+.v26App .v21CockpitCard,
+.v26App .v21RiskRadarGrid article,
+.v26App .v21HealthNode,
+.v26App .v21ScannerMetrics > span,
+.v26App .v21AutoBotGrid > div,
+.v26App .v21MetricRow > span,
+.v26App .v21JournalStats > span,
+.v26App .v21BacktestMetrics > span,
+.v26App .v21PerformanceMeta > span {
+  border: 1px solid var(--terminal-line);
+  border-radius: 7px;
+  background: var(--terminal-panel-inset);
+}
+.v26App .v21CockpitCard strong,
+.v26App .v21RiskRadarGrid strong,
+.v26App .v21HealthNodeHeader strong,
+.v26App .v21ScannerMetrics b,
+.v26App .v21AutoBotGrid strong { color: #edf4f5; font-variant-numeric: tabular-nums; }
+.v26App .v21CockpitCard small,
+.v26App .v21RiskRadarGrid small,
+.v26App .v21HealthMeta small,
+.v26App .v21ScannerMetrics small,
+.v26App .v21AutoBotGrid small { color: var(--terminal-muted); letter-spacing: .08em; }
+.v26App .v21CockpitCard.pnlCard,
+.v26App .v21PerformancePrimary { border-color: rgba(88,211,154,.4); background: linear-gradient(135deg, rgba(24,79,67,.3), var(--terminal-panel-inset)); }
+
+.v26App .v21AutoActivityCard,
+.v26App .v21ScannerTop,
+.v26App .v21ScannerTable,
+.v26App .v21ScannerTrades,
+.v26App .v21Card,
+.v26App .demoOrderPanel,
+.v26App .demoEventPanel { border-color: var(--terminal-line); border-radius: 8px; background: var(--terminal-panel-raised); }
+.v26App .v21AutoActivityCard > header,
+.v26App .v21ScannerTop > header,
+.v26App .v21ScannerTable > header,
+.v26App .v21ScannerTrades > header,
+.v26App .v21Card > header,
+.v26App .demoOrderPanel > header,
+.v26App .demoEventPanel > header { border-bottom-color: var(--terminal-line); }
+.v26App .v21AutoActivityMetricRow > div,
+.v26App .v21AutoActivityCandidate,
+.v26App .v21AutoActivityPositionList li,
+.v26App .v21AutoActivityReasonList li,
+.v26App .v21AutoActivityEventList li,
+.v26App .v21Candidate,
+.v26App .v21ScannerEmpty,
+.v26App .v21EmptyMini,
+.v26App .v21LargeEmpty { border-color: var(--terminal-line); background: var(--terminal-panel-inset); }
+.v26App .v21AutoActivityCandidate:hover,
+.v26App .v21Candidate:hover,
+.v26App .v21AutoActivityPositionList li:hover { border-color: rgba(100,215,232,.48); background: rgba(100,215,232,.06); }
+.v26App .v21ScannerTable table { color: var(--terminal-copy); }
+.v26App .v21ScannerTable th { background: #0a1219; color: var(--terminal-muted); border-bottom-color: var(--terminal-line); }
+.v26App .v21ScannerTable td { border-bottom-color: rgba(125,151,168,.14); }
+
+.v26App .v21PerformanceHero { border-color: rgba(100,215,232,.36); background: linear-gradient(120deg, #0d2530, var(--terminal-panel) 72%); }
+.v26App .v21PerformancePrimary strong { color: var(--terminal-green); font-size: clamp(24px, 3vw, 38px); }
+.v26App .v21PerformanceMini { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1px; background: var(--terminal-line); }
+.v26App .v21PerformanceMini > span { padding: 14px; background: var(--terminal-panel-inset); }
+.v26App .v21PerformanceMini small { color: var(--terminal-muted); }
+.v26App .v21PerformanceMini b { display: block; margin-top: 5px; color: #f2f6f7; }
+.v26App .v21CertificateLayout > *,
+.v26App .v21CertificateGates > div > section,
+.v26App .v21Health > span { border-color: var(--terminal-line); background: var(--terminal-panel-inset); }
+.v26App .v21SafetyLock { border-color: rgba(88,211,154,.36); background: rgba(24,79,67,.18); color: var(--terminal-green); }
+
+.v26App button,
+.v26App input,
+.v26App select,
+.v26App textarea { font: inherit; }
+.v26App button { border-color: var(--terminal-line); background: #16222c; color: var(--terminal-copy); }
+.v26App button:hover:not(:disabled) { border-color: var(--terminal-line-strong); background: #1c2b36; color: #fff5d1; }
+.v26App button:focus-visible,
+.v26App input:focus-visible,
+.v26App select:focus-visible { outline: 2px solid var(--terminal-gold); outline-offset: 2px; }
+.v26App .demoSubmit,
+.v26App .v21RiskLayout .v21Card > button,
+.v26App .connectionPrimary { border-color: var(--terminal-line-strong); background: #b88932; color: #101820; }
+.v26App .demoEmergency,
+.v26App .liveDanger { border-color: rgba(255,129,120,.55); background: rgba(255,129,120,.1); color: #ffaaa2; }
+.v26App .demoProfit,
+.v26App .v21Running { color: var(--terminal-green); }
+.v26App .demoLoss,
+.v26App .v21CriticalText,
+.v26App .v21CriticalEvent { color: var(--terminal-red); }
+
+.v26App .liveTerminalHeader,
+.v26App .livePanelHero { border-color: rgba(255,129,120,.38); background: linear-gradient(120deg, #251a1c, #111920 70%); }
+.v26App .liveTerminalLock.locked,
+.v26App .liveHeroState { border-color: rgba(255,129,120,.5); background: rgba(94,32,37,.26); color: #ffaaa2; }
+.v26App .liveTerminalPanel,
+.v26App .liveCard { border-color: var(--terminal-line); background: var(--terminal-panel-raised); }
+.v26App .liveTerminalPanel > header,
+.v26App .liveCard > header { border-bottom-color: var(--terminal-line); }
+.v26App .liveTerminalPanel input,
+.v26App .liveCard input,
+.v26App .liveCard select { border-color: var(--terminal-line); background: var(--terminal-panel-inset); color: #f2f6f7; }
+.v26App .liveTerminalPanel input:focus,
+.v26App .liveCard input:focus,
+.v26App .liveCard select:focus { border-color: var(--terminal-gold); box-shadow: 0 0 0 3px rgba(230,187,95,.12); }
+
+/* The production route renders the liveUx branch; keep its control and redirect surfaces explicit. */
+.v26App .liveUx { display: grid; gap: 14px; min-width: 0; }
+.v26App .liveUxHero,
+.v26App .liveUxNow { border: 1px solid rgba(255,129,120,.34); border-radius: 10px; background: linear-gradient(120deg, #171b22, #0d141c 72%); box-shadow: 0 16px 36px rgba(0,0,0,.18); }
+.v26App .liveUxHero { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px; }
+.v26App .liveUxHero h2 { margin: 5px 0; color: #f5f7f7; font-size: 25px; letter-spacing: .02em; }
+.v26App .liveUxHero p,
+.v26App .liveUxReason,
+.v26App .liveUxEmpty { color: var(--terminal-muted); }
+.v26App .liveUxState { display: grid; grid-template-columns: auto 1fr; gap: 3px 9px; min-width: 160px; padding: 11px 13px; border: 1px solid rgba(255,129,120,.45); border-radius: 8px; background: rgba(94,32,37,.2); color: #ffaaa2; }
+.v26App .liveUxState svg { grid-row: span 2; align-self: center; }
+.v26App .liveUxState strong { font-size: 13px; letter-spacing: .1em; }
+.v26App .liveUxState small { grid-column: 2; color: #c99a98; font-size: 9px; }
+.v26App .liveUxNow { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border-color: rgba(230,187,95,.42); background: #101a22; }
+.v26App .liveUxNow > div:first-child { min-width: 0; }
+.v26App .liveUxNow small { color: var(--terminal-gold); font-size: 9px; font-weight: 800; letter-spacing: .13em; }
+.v26App .liveUxNow strong { display: block; margin-top: 5px; color: #f4f7f7; font-size: 15px; }
+.v26App .liveUxNow p { margin: 5px 0 0; color: var(--terminal-muted); font-size: 11px; line-height: 1.45; }
+.v26App .liveUxNowActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.v26App .liveUxNowActions button { min-height: 40px; padding: 9px 12px; border-radius: 7px; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.v26App .liveUxNowActions .liveCredentialCta { border-color: rgba(230,187,95,.68); background: #b88932; color: #101820; }
+.v26App .liveUxNowActions .liveCredentialCta:hover { border-color: #f4d890; background: #d3a84d; color: #101820; }
+.v26App .liveUxStatus { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--terminal-line); border-radius: 8px; background: var(--terminal-line); }
+.v26App .liveUxStatus > div { min-width: 0; padding: 11px 10px; background: var(--terminal-panel-inset); }
+.v26App .liveUxStatus small { display: block; color: var(--terminal-muted); font-size: 8px; letter-spacing: .08em; }
+.v26App .liveUxStatus b { display: block; margin-top: 5px; overflow-wrap: anywhere; color: #e8eff1; font-size: 11px; }
+.v26App .liveUxCard { min-width: 0; border: 1px solid var(--terminal-line); border-radius: 8px; background: var(--terminal-panel-raised); box-shadow: 0 10px 24px rgba(0,0,0,.14); }
+.v26App .liveUxCard > header { border-bottom-color: var(--terminal-line); }
+.v26App .liveUxMetrics > span,
+.v26App .liveUxProtectionList > span { border-color: var(--terminal-line); background: var(--terminal-panel-inset); }
+.v26App .liveUxMetrics small,
+.v26App .liveUxCard header small { color: var(--terminal-muted); letter-spacing: .08em; }
+.v26App .liveUxMetrics b,
+.v26App .liveUxCard header h3 { color: #eaf1f2; }
+.v26App .liveUxActionRow button,
+.v26App .liveUxCard > button,
+.v26App .liveArmButton { min-height: 40px; border: 1px solid var(--terminal-line); border-radius: 7px; background: #172630; color: var(--terminal-copy); font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.v26App .liveUxActionRow button:first-child { border-color: rgba(230,187,95,.6); background: rgba(230,187,95,.14); color: #f4d890; }
+.v26App .liveUxActionRow button:hover:not(:disabled),
+.v26App .liveUxCard > button:hover:not(:disabled),
+.v26App .liveArmButton:hover:not(:disabled) { border-color: var(--terminal-gold); background: #20313c; }
+.v26App .liveUxCard input,
+.v26App .liveUxCard select { border-color: var(--terminal-line); background: var(--terminal-panel-inset); color: #edf4f5; }
+.v26App .liveUxCard input::placeholder { color: #718691; }
+.v26App .liveUxCard input:focus,
+.v26App .liveUxCard select:focus { border-color: var(--terminal-cyan); box-shadow: 0 0 0 3px rgba(100,215,232,.1); }
+
+.v26App .connectionCenter { max-width: 1240px; margin: 14px auto 30px; padding: 0; overflow: hidden; }
+.v26App .connectionCenterHeader { padding: 22px 24px; border: 0; border-bottom: 1px solid var(--terminal-line); border-radius: 0; background: #111c26; box-shadow: none; }
+.v26App .connectionCenterHeader h2 { margin: 6px 0; color: #f4f7f7; font-size: 26px; }
+.v26App .connectionCenterHeader p { max-width: 700px; color: var(--terminal-muted); line-height: 1.5; }
+.v26App .connectionStatusRail { margin: 14px 18px 0; border-color: var(--terminal-line); background: var(--terminal-panel-inset); }
+.v26App .connectionWorkflow { margin: 12px 18px; padding: 5px; border: 1px solid var(--terminal-line); border-radius: 8px; background: var(--terminal-panel-inset); }
+.v26App .connectionWorkflow span { min-height: 52px; border-color: transparent; background: transparent; }
+.v26App .connectionWorkflow span + span { border-left: 1px solid var(--terminal-line); }
+.v26App .connectionWorkflow span:first-child { border-color: var(--terminal-line-strong); background: rgba(230,187,95,.08); }
+.v26App .connectionWorkflow b { width: 25px; height: 25px; background: rgba(230,187,95,.16); color: var(--terminal-gold); }
+.v26App .connectionWorkflow small { color: #cbd9de; font-size: 9px; letter-spacing: .08em; }
+.v26App .connectionDemoPanel,
+.v26App .connectionLivePanel,
+.v26App .connectionSecurityPanel { margin: 12px 18px; border-color: var(--terminal-line); border-radius: 8px; background: var(--terminal-panel-raised); box-shadow: none; }
+.v26App .connectionDemoPanel h3,
+.v26App .connectionLivePanel h3,
+.v26App .connectionSecurityPanel h3 { color: #edf4f5; }
+.v26App .connectionFormGrid input,
+.v26App .connectionLiveGrid input { min-height: 44px; border-color: var(--terminal-line); background: var(--terminal-panel-inset); color: #edf4f5; }
+.v26App .connectionFormGrid input:focus,
+.v26App .connectionLiveGrid input:focus { border-color: var(--terminal-cyan); box-shadow: 0 0 0 3px rgba(100,215,232,.1); }
+.v26App .connectionActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.v26App .connectionActions button { min-height: 42px; border-radius: 7px; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
+.v26App .connectionActions .connectionPrimary { background: #b88932 !important; color: #101820 !important; }
+.v26App .connectionActions .connectionSecondary { border-color: rgba(100,215,232,.48) !important; background: rgba(100,215,232,.08) !important; color: #b8edf3 !important; }
+
+@media (max-width: 900px) {
+  .v26App .liveUxStatus { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .v26App .connectionCenterHeader { padding: 18px; }
+  .v26App .connectionStatusRail,
+  .v26App .connectionWorkflow,
+  .v26App .connectionDemoPanel,
+  .v26App .connectionLivePanel,
+  .v26App .connectionSecurityPanel { margin-right: 12px; margin-left: 12px; }
+}
+@media (max-width: 560px) {
+  .v26App .liveUxHero,
+  .v26App .liveUxNow { align-items: stretch; flex-direction: column; }
+  .v26App .liveUxHero { padding: 16px; }
+  .v26App .liveUxState { width: 100%; }
+  .v26App .liveUxNowActions { justify-content: stretch; width: 100%; }
+  .v26App .liveUxNowActions button { flex: 1 1 100%; }
+  .v26App .liveUxStatus { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v26App .connectionWorkflow { display: flex; overflow-x: auto; }
+  .v26App .connectionWorkflow span { flex: 0 0 150px; }
+  .v26App .connectionWorkflow span + span { border-left: 0; }
+  .v26App .connectionActions { display: grid; grid-template-columns: 1fr; }
+  .v26App .connectionActions button { width: 100%; }
+}
+
+@media (max-width: 700px) {
+  .v26App .v21Workspace,
+  .v26App .v21CockpitSummary,
+  .v26App .v21SystemHealthCenter,
+  .v26App .v21RiskRadar,
+  .v26App .v21SmartAlerts,
+  .v26App .v21ActivityTimeline,
+  .v26App .v21ScannerDashboard,
+  .v26App .v21AutoActivityCenter { padding: 13px; }
+  .v26App .v21PerformanceMini { grid-template-columns: 1fr 1fr; }
+  .v26App .v21PerformanceMini > span:last-child { grid-column: 1 / -1; }
+  .v26App .v21WorkspaceHead h2,
+  .v26App .v21ScannerHeader h2 { font-size: 21px; }
+  .v26App .v21AutoActivityCard,
+  .v26App .v21ScannerTop,
+  .v26App .v21ScannerTable,
+  .v26App .v21ScannerTrades,
+  .v26App .v21Card { min-width: 0; }
+  .v26App .v21ScannerTable { overflow: hidden; }
+  .v26App .v21ScannerTable .v21TableScroll { overflow-x: auto; }
+}
+
 /* Phase 7H: Risk Vault terminal surface */
 .v26App .v21RiskLayout {
   grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
@@ -3049,6 +3335,155 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .v26App .liveUxNowActions { justify-content: flex-start; }
   .v26App .v26MarketPopover { right: 0; left: auto; }
 }
+
+.v26App .v21Workflow {
+  position: relative;
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 18px 20px;
+  overflow: hidden;
+  border: 1px solid rgba(98, 137, 158, .48);
+  border-radius: 16px;
+  background: linear-gradient(110deg, #0b151e 0%, #101d27 58%, #111b24 100%);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, .22), inset 0 1px rgba(255,255,255,.045);
+}
+.v26App .v21Workflow::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: #d4a84f; }
+.v26App .v21WorkflowTitle { display: grid; gap: 7px; align-content: center; min-width: 0; padding-right: 14px; border-right: 1px solid rgba(148,163,184,.18); }
+.v26App .v21WorkflowTitle span { color: #e5bd69; font-size: 11px; font-weight: 850; letter-spacing: .16em; }
+.v26App .v21WorkflowTitle small { color: #7f96a5; font-size: 11px; }
+.v26App .v21WorkflowSteps { position: relative; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; min-width: 0; }
+.v26App .v21WorkflowSteps::before { content: ''; position: absolute; left: 28px; right: 28px; top: 22px; height: 1px; background: linear-gradient(90deg, rgba(52,211,153,.55), rgba(212,168,79,.5), rgba(148,163,184,.18)); }
+.v26App .v21WorkflowStep { position: relative; z-index: 1; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 4px 8px; min-width: 0; min-height: 74px; padding: 12px 10px; border: 1px solid transparent; border-radius: 11px; background: transparent; color: #8da2ae; text-align: left; }
+.v26App .v21WorkflowStep em { position: absolute; top: 17px; right: -5px; color: #607987; font-size: 15px; font-style: normal; }
+.v26App .v21WorkflowStep i { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid rgba(148,163,184,.32); border-radius: 7px; background: #172631; color: #b9c7ce; font-size: 10px; font-style: normal; font-weight: 800; }
+.v26App .v21WorkflowStep span { min-width: 0; }
+.v26App .v21WorkflowStep b, .v26App .v21WorkflowStep small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v26App .v21WorkflowStep b { color: #d6e0e4; font-size: 11px; }
+.v26App .v21WorkflowStep small { margin-top: 4px; color: #718795; font-size: 9px; }
+.v26App .v21WorkflowStep:hover { border-color: rgba(212,168,79,.5); background: rgba(212,168,79,.08); color: #f8fafc; }
+.v26App .v21WorkflowStep.current { border-color: rgba(212,168,79,.86); background: linear-gradient(145deg, rgba(212,168,79,.22), rgba(14,29,39,.92)); box-shadow: 0 8px 22px rgba(0,0,0,.22), inset 0 0 0 1px rgba(255,255,255,.035); }
+.v26App .v21WorkflowStep.current i { border-color: #e8bf67; background: #d4a84f; color: #17232a; box-shadow: 0 0 0 4px rgba(212,168,79,.12); }
+.v26App .v21WorkflowStep.current b { color: #f8e2a1; }
+.v26App .v21WorkflowStep.completed i { border-color: rgba(52,211,153,.55); background: rgba(16,91,76,.72); color: #a7f3d0; }
+.v26App .v21WorkflowStep.completed b { color: #b7e8d3; }
+.v26App .v21WorkflowStep.locked { opacity: .56; }
+
+.v26App .v21Tabs { display: flex; grid-template-columns: none; gap: 5px; padding: 6px; border: 1px solid rgba(99,139,160,.48); border-radius: 14px; background: #0b151e; box-shadow: 0 16px 38px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.04); }
+.v26App .v21Tabs button { flex: 1 1 0; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; min-width: 0; min-height: 62px; padding: 10px 11px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #7e96a3; text-align: left; }
+.v26App .v21Tabs button > svg { width: 18px; height: 18px; color: #708997; }
+.v26App .v21Tabs button:hover { border-color: rgba(93,160,183,.62); background: rgba(27,47,58,.78); color: #e5eef2; }
+.v26App .v21Tabs button:focus-visible { outline: 2px solid #d4a84f; outline-offset: -2px; }
+.v26App .v21Tabs button.active { position: relative; border-color: rgba(212,168,79,.78); background: linear-gradient(160deg, rgba(212,168,79,.2), rgba(15,31,41,.96)); color: #f8e2a1; box-shadow: inset 0 -2px #d4a84f, 0 8px 20px rgba(0,0,0,.2); }
+.v26App .v21Tabs button.active::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 4px; height: 2px; border-radius: 2px; background: #d4a84f; }
+.v26App .v21Tabs b { color: inherit; font-size: 11px; letter-spacing: .02em; }
+.v26App .v21Tabs small { margin-top: 4px; color: #78919e; font-size: 9px; line-height: 1.25; }
+.v26App .v21Tabs button.active small { color: #c4ad77; }
+
+.v26App .v26MarketBar { grid-template-columns: minmax(250px, .8fr) minmax(250px, 1fr) auto; gap: 18px; padding: 14px 16px; border-color: rgba(96,137,157,.46); background: linear-gradient(105deg, #0b151e, #101d27); }
+.v26App .v26MarketTitle { padding-right: 16px; border-right: 1px solid rgba(148,163,184,.16); }
+.v26App .v26MarketTitle > svg { color: #d4a84f; }
+.v26App .v26MarketTitle small { color: #78909e; font-size: 9px; letter-spacing: .13em; }
+.v26App .v26MarketTitle b { color: #f1f6f7; font-size: 18px; }
+.v26App .v26MarketPicker { position: relative; display: block; min-width: 0; }
+.v26App .v26MarketTrigger { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 54px; padding: 9px 13px; border: 1px solid rgba(96,145,164,.62); border-radius: 10px; background: #13232d; color: #f1f6f7; }
+.v26App .v26MarketTrigger:hover, .v26App .v26MarketTrigger[aria-expanded="true"] { border-color: #d4a84f; background: #172d37; box-shadow: 0 0 0 3px rgba(212,168,79,.1); }
+.v26App .v26MarketTrigger span { display: grid; gap: 5px; }
+.v26App .v26MarketTrigger small { color: #7f9aa7; font-size: 9px; letter-spacing: .14em; }
+.v26App .v26MarketTrigger b { color: #f8fafc; font-size: 15px; }
+.v26App .v26MarketTrigger em { color: #d4a84f; font-size: 14px; font-style: normal; }
+.v26App .v26MarketPopover { top: calc(100% + 9px); width: min(360px, calc(100vw - 32px)); padding: 10px; border: 1px solid rgba(212,168,79,.6); border-radius: 13px; background: rgba(11,22,29,.98); box-shadow: 0 22px 45px rgba(0,0,0,.48); backdrop-filter: blur(18px); }
+.v26App .v26MarketPopover > input { min-height: 40px; border-color: rgba(98,145,163,.5); border-radius: 8px; background: #142630; color: #f8fafc; }
+.v26App .v26MarketOptions { max-height: 300px; gap: 2px; margin-top: 9px; }
+.v26App .v26MarketOptions button { min-height: 42px; grid-template-columns: minmax(0,1fr) auto auto; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; }
+.v26App .v26MarketOptions button b { color: #edf5f7; font-size: 12px; }
+.v26App .v26MarketOptions button span { color: #829aa5; font-size: 10px; }
+.v26App .v26MarketOptions button em { font-size: 10px; }
+.v26App .v26MarketOptions button:hover, .v26App .v26MarketOptions button.active { border-color: rgba(212,168,79,.62); background: rgba(212,168,79,.13); }
+.v26App .v26MarketOptions button.active b { color: #f8e2a1; }
+
+.v26App .exchangeHub { gap: 14px; padding: 4px 0 24px; color: #dce8ed; }
+.v26App .exchangeHero { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 16px; align-items: center; padding: 22px 24px; border: 1px solid rgba(96,137,157,.5); border-radius: 16px; background: linear-gradient(110deg, #0b151e, #122631); box-shadow: 0 18px 42px rgba(0,0,0,.24); }
+.v26App .exchangeHero:after { display: none; }
+.v26App .exchangeHeroIcon { width: 52px; height: 52px; border: 1px solid rgba(212,168,79,.55); border-radius: 12px; background: rgba(212,168,79,.13); box-shadow: none; color: #e5bd69; }
+.v26App .exchangeHero small, .v26App .exchangeCardHead small, .v26App .exchangeSafety small { color: #8ba3af; letter-spacing: .12em; }
+.v26App .exchangeHero h2 { color: #f1f6f7; font-size: 24px; }
+.v26App .exchangeHero p { color: #91a7b1; }
+.v26App .exchangeHero aside { min-width: 220px; border-color: rgba(96,137,157,.45); border-radius: 10px; background: #13232d; }
+.v26App .exchangeNotice { border-color: rgba(96,137,157,.45); border-radius: 11px; background: #101e27; color: #dbe7eb; }
+.v26App .exchangeModeSwitch { gap: 8px; padding: 7px; border-color: rgba(96,137,157,.45); border-radius: 12px; background: #0b151e; }
+.v26App .exchangeModeSwitch button { min-height: 70px; border-color: transparent; border-radius: 9px; background: transparent; color: #8da2ad; }
+.v26App .exchangeModeSwitch button:hover { border-color: rgba(93,160,183,.55); background: rgba(27,47,58,.78); }
+.v26App .exchangeModeSwitch button.active { border-color: rgba(212,168,79,.72); background: rgba(212,168,79,.13); color: #f8e2a1; box-shadow: inset 0 -2px #d4a84f; }
+.v26App .exchangeGrid { gap: 14px; }
+.v26App .exchangeCard { padding: 20px; border-color: rgba(96,137,157,.45); border-radius: 14px; background: #0f1c25; box-shadow: 0 16px 34px rgba(0,0,0,.18); }
+.v26App .exchangeCardHead { border-bottom-color: rgba(148,163,184,.18); }
+.v26App .exchangeCardHead h3 { color: #eef5f7; }
+.v26App .exchangeHint { color: #8ca3ae; }
+.v26App .exchangeCard.credentials > label > span { color: #aec0c8; }
+.v26App .exchangeCard.credentials input { min-height: 44px; border-color: rgba(96,145,164,.5); background: #142630; color: #f8fafc; }
+.v26App .exchangeCard.credentials input:focus { border-color: #d4a84f; box-shadow: 0 0 0 3px rgba(212,168,79,.12); }
+.v26App .exchangeActions { gap: 9px; margin-top: 16px; padding-top: 15px; border-top: 1px solid rgba(148,163,184,.16); }
+.v26App .exchangeActions button, .v26App .activationActions button { min-height: 44px; border-radius: 8px; font-weight: 800; letter-spacing: .03em; }
+.v26App .exchangeActions button.secondary { border-color: rgba(96,145,164,.6); background: #142630; color: #b9d1da; }
+.v26App .exchangeActions button.primary { border-color: rgba(212,168,79,.78); background: #b98b37; color: #14212a; box-shadow: 0 8px 18px rgba(185,139,55,.18); }
+.v26App .exchangeActions button:disabled { opacity: .5; filter: saturate(.55); }
+.v26App .exchangeFingerprint { border-color: rgba(148,163,184,.16); background: #0b151e; }
+.v26App .exchangeBadges span, .v26App .accountTiles article { border-color: rgba(148,163,184,.16); background: #13232d; }
+.v26App .activationActions button.activate { border-color: rgba(212,168,79,.65); background: rgba(212,168,79,.16); color: #f8e2a1; }
+
+@media (max-width: 900px) {
+  .v26App .v21Workflow { grid-template-columns: 1fr; gap: 14px; }
+  .v26App .v21WorkflowTitle { padding: 0 0 12px; border-right: 0; border-bottom: 1px solid rgba(148,163,184,.18); }
+  .v26App .v21WorkflowSteps { display: flex; overflow-x: auto; padding-bottom: 4px; }
+  .v26App .v21WorkflowStep { flex: 0 0 142px; min-width: 142px; }
+  .v26App .v21Tabs { overflow-x: auto; }
+  .v26App .v21Tabs button { flex: 0 0 150px; }
+  .v26App .v26MarketBar { grid-template-columns: 1fr; }
+  .v26App .v26MarketTitle { padding-right: 0; padding-bottom: 10px; border-right: 0; border-bottom: 1px solid rgba(148,163,184,.16); }
+  .v26App .exchangeHero { grid-template-columns: auto minmax(0,1fr); }
+  .v26App .exchangeHero aside { grid-column: 1/-1; min-width: 0; }
+}
+@media (max-width: 560px) {
+  .v26App { padding: 10px; }
+  .v26App .v21Workflow { padding: 15px 14px; }
+  .v26App .v21WorkflowSteps { margin: 0 -4px; }
+  .v26App .v21WorkflowStep { flex-basis: 134px; min-width: 134px; }
+  .v26App .exchangeHero { padding: 17px; }
+  .v26App .exchangeHero h2 { font-size: 20px; }
+  .v26App .exchangeCard { padding: 15px; }
+  .v26App .exchangeActions { grid-template-columns: 1fr; }
+}
+
+.v26App .connectionCenter { max-width: 1240px; gap: 14px; margin-top: 16px; }
+.v26App .connectionCenterHeader { padding: 24px 26px; border-color: rgba(96,137,157,.5); border-radius: 16px; background: linear-gradient(110deg, #0b151e, #122631); box-shadow: 0 18px 42px rgba(0,0,0,.24); }
+.v26App .connectionCenterHeader h2 { color: #f1f6f7; font-size: 29px; }
+.v26App .connectionCenterHeader p { color: #91a7b1; }
+.v26App .connectionCenterHeader span, .v26App .connectionDemoPanel header span, .v26App .connectionLivePanel header span, .v26App .connectionSecurityPanel header span { color: #e5bd69; }
+.v26App .connectionHeaderStatus { border-left-color: rgba(148,163,184,.18); }
+.v26App .connectionStatusRail, .v26App .connectionWorkflow span { border-color: rgba(96,137,157,.45); background: #0f1c25; }
+.v26App .connectionStatusRail>div { border-right-color: rgba(148,163,184,.16); }
+.v26App .connectionWorkflow { gap: 6px; }
+.v26App .connectionWorkflow span { min-height: 60px; border-radius: 9px; }
+.v26App .connectionWorkflow b { background: rgba(212,168,79,.18); color: #f8e2a1; }
+.v26App .connectionDemoPanel, .v26App .connectionLivePanel, .v26App .connectionSecurityPanel { border-color: rgba(96,137,157,.45); border-radius: 14px; background: #0f1c25; box-shadow: 0 16px 34px rgba(0,0,0,.18); }
+.v26App .connectionDemoPanel>header, .v26App .connectionLivePanel>header, .v26App .connectionSecurityPanel>header { border-bottom-color: rgba(148,163,184,.18); }
+.v26App .connectionDemoPanel h3, .v26App .connectionLivePanel h3, .v26App .connectionSecurityPanel h3 { color: #eef5f7; }
+.v26App .connectionFormGrid input, .v26App .connectionLiveGrid input { min-height: 46px; border-color: rgba(96,145,164,.5); background: #142630; color: #f8fafc; }
+.v26App .connectionFormGrid input:focus, .v26App .connectionLiveGrid input:focus { border-color: #d4a84f; box-shadow: 0 0 0 3px rgba(212,168,79,.12); }
+.v26App .connectionActions { gap: 9px; padding-top: 14px; border-top: 1px solid rgba(148,163,184,.16); }
+.v26App .connectionActions button { min-height: 46px; border-radius: 8px; }
+.v26App .connectionActions .connectionPrimary { border-color: rgba(212,168,79,.78) !important; background: #b98b37 !important; color: #14212a !important; box-shadow: 0 8px 18px rgba(185,139,55,.18); }
+.v26App .connectionActions .connectionSecondary { border-color: rgba(96,145,164,.6) !important; background: #142630 !important; color: #b9d1da !important; }
+.v26App .connectionActions button:disabled { opacity: .5; filter: saturate(.55); }
+@media (max-width: 700px) {
+  .v26App .connectionCenterHeader { padding: 18px; }
+  .v26App .connectionCenterHeader h2 { font-size: 23px; }
+  .v26App .connectionWorkflow span { min-height: 54px; padding: 10px; }
+  .v26App .connectionDemoPanel, .v26App .connectionLivePanel, .v26App .connectionSecurityPanel { padding: 16px; }
+}
 .v26Intervals { padding: 3px; border: 1px solid rgba(71,85,105,.7); border-radius: 9px; background: #0a1016; }
 .v26Intervals button { border: 0; background: transparent; }
 .v26Intervals button.active { background: var(--accent-strong); color: #17120a; font-weight: 800; }
@@ -3553,6 +3988,117 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .v26App .v21Health > span small { color: #64748b; }
 .v26App .v21Health > span b { color: #e2e8f0; text-align: right; overflow-wrap: anywhere; }
 .v26App .v21Health > div { min-width: 0; }
+
+/* Active market scanner and live surfaces inherit the same graphite terminal language. */
+.v26App .coinAnalysisCenter { gap: 14px; color: var(--terminal-text); }
+.v26App .coinAnalysisHeader,
+.v26App .coinAnalysisToolbar,
+.v26App .marketPulse,
+.v26App .featuredOpportunities,
+.v26App .coinTablePanel,
+.v26App .coinDetailPanel,
+.v26App .topOpportunityGrid article,
+.v26App .anomalyPanel,
+.v26App .heatmapPanel,
+.v26App .coinHistoryPanel,
+.v26App .coinAnalystPanel,
+.v26App .coinPaperPanel {
+  border-color: var(--terminal-line);
+  background: var(--terminal-panel);
+  box-shadow: 0 14px 32px rgba(0,0,0,.18);
+}
+.v26App .coinAnalysisHeader h2,
+.v26App .coinAnalysisCenter h3,
+.v26App .coinAnalysisCenter h4 { color: var(--terminal-text); }
+.v26App .coinAnalysisHeader p,
+.v26App .coinHeaderActions small,
+.v26App .coinAnalysisCenter article small,
+.v26App .coinAnalysisCenter .coinTableMeta small { color: var(--terminal-muted) !important; }
+.v26App .coinAnalysisToolbar,
+.v26App .coinIntervals,
+.v26App .coinTableScroll,
+.v26App .marketPulseCards article,
+.v26App .coinDetailMetrics span,
+.v26App .tradePlanRow,
+.v26App .historyItem {
+  border-color: var(--terminal-line);
+  background: var(--terminal-panel-inset);
+}
+.v26App .coinAnalysisToolbar > label:first-child,
+.v26App .coinAnalysisToolbar input,
+.v26App .filterDrawer,
+.v26App .featureDrawer {
+  border-color: var(--terminal-line-strong);
+  background: #0b1118;
+  color: var(--terminal-text);
+}
+.v26App .coinAnalysisHeader button,
+.v26App .coinAnalysisToolbar button,
+.v26App .coinIntervals button.active,
+.v26App .filterTrigger,
+.v26App .applyFeature {
+  border-color: var(--terminal-gold);
+  background: var(--terminal-gold);
+  color: #17232a;
+}
+.v26App .coinAnalysisHeader button:hover,
+.v26App .coinAnalysisToolbar button:hover,
+.v26App .coinIntervals button:hover,
+.v26App .filterTrigger:hover,
+.v26App .applyFeature:hover { background: #f2ce7d !important; }
+.v26App .coinAnalysisCenter button:focus-visible,
+.v26App .coinAnalysisCenter input:focus-visible,
+.v26App .coinAnalysisCenter select:focus-visible { outline-color: var(--terminal-cyan); }
+.v26App .coinAnalysisCenter .positive,
+.v26App .coinAnalysisCenter .liveDot { color: var(--terminal-green); }
+.v26App .coinAnalysisCenter .negative { color: var(--terminal-red); }
+.v26App .coinAnalysisCenter .neutral,
+.v26App .coinAnalysisCenter .idleDot { color: var(--terminal-muted); }
+.v26App .coinAnalysisCenter table th,
+.v26App .coinAnalysisCenter table td { border-color: var(--terminal-line); }
+.v26App .coinAnalysisCenter table tbody tr:hover,
+.v26App .coinAnalysisCenter .selectedRow,
+.v26App .coinAnalysisCenter table tr.selected { background: rgba(230,187,95,.09); }
+.v26App .coinAnalysisCenter .filterDrawer,
+.v26App .coinAnalysisCenter .featureDrawer { box-shadow: 0 24px 70px rgba(0,0,0,.48); }
+
+.v26App .masterTradeLiveSection,
+.v26App .masterTradeLiveConnectionCard,
+.v26App .masterTradeLiveActivity,
+.v26App .masterTradeLiveSafety,
+.v26App .masterTradeLiveApiDrawer {
+  border-color: var(--terminal-line);
+  background: var(--terminal-panel);
+  color: var(--terminal-text);
+  box-shadow: 0 14px 32px rgba(0,0,0,.18);
+}
+.v26App .masterTradeLiveAccountTable,
+.v26App .masterTradeLiveGrid,
+.v26App .masterTradeLiveSafetyList,
+.v26App .masterTradeLiveApiGrid {
+  border-color: var(--terminal-line);
+  background: var(--terminal-panel-inset);
+}
+.v26App .masterTradeLiveConnectionHeader,
+.v26App .masterTradeLiveExchangeIdentity,
+.v26App .masterTradeLiveCredentialBlock,
+.v26App .masterTradeLiveCheck,
+.v26App .masterTradeLiveSecurityStrip,
+.v26App .masterTradeLiveApiMeta,
+.v26App .masterTradeLiveApiHint {
+  border-color: var(--terminal-line);
+  color: var(--terminal-muted);
+}
+.v26App .masterTradeLiveSaveButton,
+.v26App .masterTradeLiveConnectionActionBar button,
+.v26App .masterTradeLiveApiActions button {
+  border-color: var(--terminal-gold);
+  background: var(--terminal-gold);
+  color: #17232a;
+}
+.v26App .masterTradeLiveSaveButton:hover,
+.v26App .masterTradeLiveConnectionActionBar button:hover,
+.v26App .masterTradeLiveApiActions button:hover { background: #f2ce7d; }
 .v26App .demoTicket .demoFieldGrid label > div { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; min-width: 0; }
 .v26App .demoTicket .demoFieldGrid label > div em { padding-left: 8px; color: #94a3b8; font-size: 11px; font-style: normal; white-space: nowrap; }
 .v26App .demoTicket .demoFieldGrid input { min-width: 0; }
