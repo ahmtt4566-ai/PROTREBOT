@@ -317,6 +317,128 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(state["live_auto_trade"])
         self.assertFalse(state["auto"]["enabled"])
 
+    def test_disarm_cancels_pending_owned_limit_entry(self):
+        state = initial_state()
+        state.update({"armed_until": time.time() + 300, "real_trading_locked": False})
+        state["plans"] = {
+            "plan-1": {
+                "id": "plan-1",
+                "symbol": "BTCUSDT",
+                "direction": "LONG",
+                "order_type": "LIMIT",
+                "quantity": "0.010",
+                "entry_order_id": 42,
+                "entry_client_order_id": "V25_ENTRY_pending-limit",
+                "status": "DOLUM BEKLİYOR",
+                "provenance_state": "CONFIRMED",
+            },
+        }
+        client_id = client_id_for("ENTRY", "pending-limit")
+        state["plans"]["plan-1"]["entry_client_order_id"] = client_id
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        request = SimpleNamespace(app=application)
+        cancelled = False
+
+        async def signed(method, path, params=None):
+            nonlocal cancelled
+            if method == "GET" and path == "/fapi/v1/order":
+                return {"orderId": 42, "clientOrderId": client_id, "symbol": "BTCUSDT", "side": "BUY", "positionSide": "BOTH", "type": "LIMIT", "origQty": "0.010", "status": "CANCELED" if cancelled else "NEW"}
+            if method == "DELETE":
+                cancelled = True
+                return {"orderId": 42, "status": "CANCELED"}
+            raise AssertionError(f"Unexpected call: {method} {path}")
+
+        client = SimpleNamespace(signed=AsyncMock(side_effect=signed))
+
+        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
+            patch.object(v25_execution, "client_for", return_value=client), \
+            patch.object(v25_execution, "persist_state"), \
+            patch.object(v25_execution, "public_status", return_value={}):
+            asyncio.run(v25_execution.v25_disarm(request))
+
+        client.signed.assert_any_await(
+            "DELETE",
+            "/fapi/v1/order",
+            {"symbol": "BTCUSDT", "orderId": 42},
+        )
+        self.assertEqual(state["plans"]["plan-1"]["status"], "İPTAL")
+        self.assertTrue(state["real_trading_locked"])
+
+    def test_disarm_keeps_missing_entry_and_market_plans_safe_without_delete(self):
+        state = initial_state()
+        state["plans"] = {
+            "missing": {
+                "id": "missing", "symbol": "BTCUSDT", "direction": "LONG", "order_type": "LIMIT",
+                "quantity": "0.010", "entry_client_order_id": client_id_for("ENTRY", "missing"), "status": "DOLUM BEKLİYOR",
+            },
+            "market": {
+                "id": "market", "symbol": "ETHUSDT", "direction": "LONG", "order_type": "MARKET",
+                "quantity": "0.010", "entry_client_order_id": client_id_for("ENTRY", "market"), "status": "DOLUM BEKLİYOR",
+            },
+        }
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        request = SimpleNamespace(app=application)
+        client = SimpleNamespace(signed=AsyncMock(return_value=None))
+
+        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
+            patch.object(v25_execution, "client_for", return_value=client), \
+            patch.object(v25_execution, "persist_state"), \
+            patch.object(v25_execution, "public_status", return_value={}):
+            asyncio.run(v25_execution.v25_disarm(request))
+
+        client.signed.assert_awaited_once_with(
+            "GET",
+            "/fapi/v1/order",
+            {"symbol": "BTCUSDT", "origClientOrderId": state["plans"]["missing"]["entry_client_order_id"]},
+        )
+        self.assertEqual(state["plans"]["missing"]["status"], "İPTAL")
+        self.assertEqual(state["plans"]["market"]["status"], "DOLUM BEKLİYOR")
+        self.assertTrue(state["real_trading_locked"])
+
+    def test_disarm_locks_unknown_when_owned_limit_cancel_cannot_be_verified(self):
+        state = initial_state()
+        client_id = client_id_for("ENTRY", "cancel-failure")
+        state["plans"] = {
+            "plan-1": {
+                "id": "plan-1", "symbol": "BTCUSDT", "direction": "LONG", "order_type": "LIMIT",
+                "quantity": "0.010", "entry_order_id": 42, "entry_client_order_id": client_id,
+                "status": "DOLUM BEKLİYOR", "provenance_state": "CONFIRMED",
+            },
+        }
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        request = SimpleNamespace(app=application)
+
+        async def signed(method, path, params=None):
+            if method == "GET":
+                return {"orderId": 42, "clientOrderId": client_id, "symbol": "BTCUSDT", "side": "BUY", "positionSide": "BOTH", "type": "LIMIT", "origQty": "0.010", "status": "NEW"}
+            raise v25_execution.LiveExchangeError("cancel unavailable")
+
+        client = SimpleNamespace(signed=AsyncMock(side_effect=signed))
+        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
+            patch.object(v25_execution, "client_for", return_value=client), \
+            patch.object(v25_execution, "persist_state"), \
+            patch.object(v25_execution, "public_status", return_value={}):
+            asyncio.run(v25_execution.v25_disarm(request))
+
+        self.assertTrue(state["real_trading_locked"])
+        self.assertTrue(state["reconciliation_required"])
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["emergency"]["active"])
+        self.assertEqual(sum(1 for call in client.signed.await_args_list if call.args[0] == "DELETE"), 1)
+
+    def test_disarm_lock_blocks_manual_live_entry_before_transport(self):
+        state = initial_state()
+        state.update({"recovery_ready": True, "real_trading_locked": True})
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        with self.assertRaises(v25_execution.HTTPException) as raised:
+            asyncio.run(v25_execution.execute_live_order(
+                application,
+                LiveOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1, stop_loss=98, tp1=102, tp2=104, tp3=106),
+                source="MANUAL",
+            ))
+        self.assertEqual(raised.exception.status_code, 423)
+
         state.update({
             "armed_until": time.time() + 300,
             "real_trading_locked": False,
@@ -667,7 +789,12 @@ class V25LiveGuardCoreTests(unittest.TestCase):
                 application, "missing-session", "user-a", "LIVE", "fingerprint-a",
             ))
         self.assertEqual(result, ("", ""))
-        pool.fetch.assert_not_awaited()
+        pool.fetch.assert_awaited_once_with(
+            unittest.mock.ANY,
+            "user-a",
+            "LIVE",
+            "SHA256:FINGERPRINT-A",
+        )
 
     def test_hard_total_exposure_and_active_plan_gates_fail_closed(self):
         self.assertEqual(HARD_MAX_TOTAL_EXPOSURE_USDT, 350.0)

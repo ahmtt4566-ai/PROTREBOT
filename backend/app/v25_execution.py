@@ -1544,6 +1544,67 @@ def order_matches_spec(order: dict[str, Any], spec: dict[str, Any], client_id: s
         return False
 
 
+async def cancel_pending_owned_limit_entries(client: BinanceLiveClient, state: dict[str, Any]) -> tuple[int, list[str]]:
+    """Cancel only exact V25-owned pending LIMIT entry orders after disarm."""
+    cancelled = 0
+    unresolved: list[str] = []
+    pending_statuses = {"NEW", "PARTIALLY_FILLED"}
+    terminal_statuses = {"CANCELED", "EXPIRED", "REJECTED", "EXPIRED_IN_MATCH"}
+
+    for plan in state.get("plans", {}).values():
+        if not isinstance(plan, dict) or not live_plan_is_active(plan):
+            continue
+        if str(plan.get("order_type") or "").upper() != "LIMIT":
+            continue
+        client_id = str(plan.get("entry_client_order_id") or "")
+        if not client_id.startswith(LIVE_CLIENT_PREFIX):
+            continue
+        symbol = normalize_symbol(str(plan.get("symbol") or ""))
+        try:
+            order = await find_order(client, symbol, client_id)
+            if order is None:
+                plan.update({"status": "İPTAL", "closed_at": now_iso(), "entry_cancellation_state": "NOT_FOUND"})
+                add_event(state, "LIVE_ENTRY_CANCELLED", f"{symbol} disarm sırasında bekleyen giriş emri bulunamadı; plan geçersiz kılındı.", symbol=symbol, plan_id=plan.get("id"))
+                continue
+
+            status = str(order.get("status") or "").upper()
+            if status in terminal_statuses:
+                plan.update({"status": "İPTAL", "closed_at": now_iso(), "entry_cancellation_state": status})
+                continue
+            if status not in pending_statuses:
+                continue
+
+            spec = {
+                "symbol": symbol,
+                "side": "BUY" if str(plan.get("direction") or "").upper() == "LONG" else "SELL",
+                "order_type": "LIMIT",
+                "quantity": str(plan.get("quantity") or ""),
+            }
+            if not order_matches_spec(order, spec, client_id):
+                unresolved.append(f"{symbol}:{client_id[-8:]}")
+                continue
+
+            await client.signed("DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order.get("orderId")})
+            verification = await find_order(client, symbol, client_id)
+            verification_status = str((verification or {}).get("status") or "").upper()
+            if verification is not None and verification_status not in terminal_statuses:
+                unresolved.append(f"{symbol}:{client_id[-8:]}")
+                continue
+            cancelled += 1
+            plan.update({"entry_cancellation_state": "CANCELLED", "entry_cancelled_at": now_iso()})
+            if status == "NEW":
+                plan.update({"status": "İPTAL", "closed_at": now_iso()})
+            add_event(state, "LIVE_ENTRY_CANCELLED", f"{symbol} bekleyen LIMIT giriş emri disarm sırasında iptal edildi.", symbol=symbol, plan_id=plan.get("id"))
+        except LiveExchangeError as exc:
+            if exc.exchange_code in {-2011, -2013}:
+                cancelled += 1
+                plan.update({"status": "İPTAL", "closed_at": now_iso(), "entry_cancellation_state": "NOT_FOUND"})
+                continue
+            unresolved.append(f"{symbol}:{client_id[-8:]}")
+
+    return cancelled, unresolved
+
+
 async def submit_entry(client: BinanceLiveClient, spec: dict[str, Any], client_id: str, *, test_only: bool) -> dict[str, Any]:
     params: dict[str, Any] = {
         "symbol": spec["symbol"], "side": spec["side"], "type": spec["order_type"],
@@ -2900,6 +2961,8 @@ async def execute_live_order(
         raise HTTPException(423, "24 saatlik canlı emir kilidi kapalı veya süresi doldu.")
     if live_execution_blocked(state):
         raise HTTPException(423, "Canlı yürütme kilitli; acil durum veya belirsiz emir uzlaştırması tamamlanmadı.")
+    if state.get("real_trading_locked") is not False:
+        raise HTTPException(423, "Gerçek işlem kilidi kapalı; disarm veya fail-closed state sonrası yeni canlı giriş gönderilmedi.")
     if source == "V25_AUTO" and credentials is None:
         credentials = await auto_session_credentials(application, state)
         if not usable_live_credentials(credentials):
@@ -4513,7 +4576,33 @@ async def v25_disarm(request: Request) -> dict[str, Any]:
     state["auto_authorization"] = initial_state()["auto_authorization"]
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
+    try:
+        client = client_for(request.app, request)
+        cancelled, unresolved = await cancel_pending_owned_limit_entries(client, state)
+        if unresolved:
+            lock_live_execution(state, "DISARM_ENTRY_CANCELLATION_UNCERTAIN", unknown=True)
+            add_event(
+                state,
+                "LIVE_DISARM_CLEANUP_UNKNOWN",
+                "Disarm sırasında V25 LIMIT giriş temizliği doğrulanamadı; canlı yürütme reconciliation için kilitlendi.",
+                actor=user["id"],
+                unresolved=unresolved,
+                reconciliation_required=True,
+            )
+        else:
+            add_event(state, "LIVE_DISARM_ENTRY_CLEANUP", f"Disarm sırasında {cancelled} V25 LIMIT giriş emri temizlendi.", actor=user["id"], cancelled=cancelled)
+    except Exception as exc:
+        lock_live_execution(state, "DISARM_ENTRY_CANCELLATION_FAILED", unknown=True)
+        add_event(
+            state,
+            "LIVE_DISARM_CLEANUP_UNKNOWN",
+            "Disarm sırasında V25 LIMIT giriş temizliği başarısız oldu; canlı yürütme reconciliation için kilitlendi.",
+            actor=user["id"],
+            exception_type=type(exc).__name__,
+            reconciliation_required=True,
+        )
     add_event(state, "LIVE_DISARM", "Canlı yeni girişler ve otomasyon kilitlendi; korumalar çalışmaya devam eder.", actor=user["id"])
+    persist_state(state)
     return public_status(request.app, request)
 
 

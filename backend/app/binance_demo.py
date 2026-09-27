@@ -1880,6 +1880,7 @@ async def _account_snapshot(
         "close_position": str(item.get("closePosition", "false")).lower() == "true",
     } for item in response_rows(algo_orders)]
     return {
+        "account_identity": str(account.get("uid") or account.get("accountId") or account.get("accountAlias") or "")[:160],
         "wallet_balance": float(account.get("totalWalletBalance", 0)),
         "available_balance": float(account.get("availableBalance", 0)),
         "margin_balance": float(account.get("totalMarginBalance", 0)),

@@ -81,6 +81,9 @@ class V22CommercialTests(unittest.TestCase):
         self.assertEqual(result["status"], "ERROR")
         self.assertNotIn("password", str(result).lower())
 
+    def test_healthz_returns_basic_ok_response_without_database_dependency(self):
+        self.assertEqual(asyncio.run(healthz()), {"status": "ok"})
+
     def test_database_health_is_safe_when_unconfigured(self):
         application = SimpleNamespace(state=SimpleNamespace(db_pool=None))
         with patch("app.main.DATABASE_URL", ""):
