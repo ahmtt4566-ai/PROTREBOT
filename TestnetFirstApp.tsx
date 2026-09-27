@@ -11,7 +11,7 @@ const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
 const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
 const MasterTrade = lazy(() => import('./MasterTrade'))
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT
-type View = 'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'|'master-trade'
+type View = 'dashboard'|'trading'|'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'|'master-trade'
 type Market = {symbol:string;display:string;price:number;change:number;volume:number}
 type Candle = {time:number;open:number;high:number;low:number;close:number;volume:number}
 type Point = {time:number;value:number}
@@ -145,7 +145,7 @@ function TestnetMarketChart({symbol,interval,onAnalysis,onAnalysisProgress,showL
 }
 
 export default function TestnetFirstApp() {
-  const initialView = ():View => window.location.pathname === '/pricing' ? 'pricing' : window.location.pathname === '/billing' ? 'billing' : window.location.pathname === '/master-trade' ? 'master-trade' : 'testnet'
+  const initialView = ():View => window.location.pathname === '/pricing' ? 'pricing' : window.location.pathname === '/billing' ? 'billing' : window.location.pathname === '/master-trade' ? 'master-trade' : 'dashboard'
   const [view,setView] = useState<View>(initialView)
   const [masterTradeAccess,setMasterTradeAccess] = useState<'loading'|'granted'|'locked'|'unauthenticated'>('loading')
   const [markets,setMarkets] = useState<Market[]>([])
@@ -175,6 +175,7 @@ export default function TestnetFirstApp() {
   const selectedMarket = markets.find(market => market.symbol === symbol)
 
   const navigate = (target:View) => {
+    if (target === 'testnet' as View) target = 'dashboard'
     setView(target)
     setMobileMenuOpen(false)
     if (target === 'pricing' || target === 'billing' || target === 'master-trade') {
@@ -373,19 +374,31 @@ export default function TestnetFirstApp() {
     </header>
 
     <nav className="v26Nav">
-      <button className={view === 'testnet' ? 'active' : ''} onClick={() => setView('testnet')}><TestTube2/><span><b>TESTNET KOMUTA</b><small>Binance Futures Demo · Ana çalışma alanı</small></span></button>
+      <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}><TestTube2/><span><b>DASHBOARD</b><small>Kontrol merkezi ve hızlı seçim</small></span></button>
+      <button className={view === 'trading' ? 'active' : ''} onClick={() => setView('trading')}><Activity/><span><b>İŞLEM MASASI</b><small>Market, sinyal ve işlem yönetimi</small></span></button>
       <button className={view === 'ops' ? 'active' : ''} onClick={() => setView('ops')}><Cloud/><span><b>OPERASYON & KANIT</b><small>Karar, pozisyon ve kalıcı PostgreSQL kaydı</small></span></button>
       <button className={view === 'live' ? 'active liveTab' : ''} onClick={() => setView('live')}><ShieldCheck/><span><b>CANLI HAZIRLIK</b><small>API yoksa kesin kilitli · Gerçek kanal</small></span></button>
-      <button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><CloudCog/><span><b>YAYIN KAPILARI</b><small>Render secret ve geçiş kontrolü</small></span></button>
+      <button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><CloudCog/><span><b>AYARLAR</b><small>API, hesap ve güvenlik tercihleri</small></span></button>
     </nav>
     {mobileMenuOpen && <div className="mobileMenuBackdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget) setMobileMenuOpen(false) }}><aside className="mobileMenuDrawer" role="dialog" aria-modal="true" aria-label="Mobil menü"><header><div><small>PROTREBOT ELITE X</small><b>Workspace</b></div><button type="button" aria-label="Menüyü kapat" onClick={() => setMobileMenuOpen(false)}><X/></button></header><button onClick={() => navigate('testnet')}><TestTube2/><span><b>Dashboard</b><small>Demo command center</small></span></button><button onClick={() => navigate('ops')}><Cloud/><span><b>Operasyon</b><small>Evidence and cloud ops</small></span></button><button onClick={() => navigate('live')}><ShieldCheck/><span><b>Canlı</b><small>Fail-closed live gates</small></span></button><button onClick={() => navigate('setup')}><CloudCog/><span><b>Ayarlar</b><small>API connections</small></span></button><button onClick={() => navigate('billing')}><Sparkles/><span><b>Billing</b><small>Subscription workspace</small></span></button></aside></div>}
 
-    <section className="v26ModeBar">
-      <div><small>AKTİF ÇALIŞMA ALANI</small><h1>{view === 'testnet' ? 'Binance Futures Demo Merkezi' : view === 'ops' ? 'Bulut Operasyon ve Kanıt Merkezi' : view === 'live' ? 'Gerçek Futures Hazırlık Merkezi' : view === 'pricing' ? 'Plans & Pricing' : view === 'billing' ? 'Billing & Subscription' : 'Sunucu ve Anahtar Kapıları'}</h1><p>{view === 'testnet' ? 'Gerçek Binance motoruna en yakın test ortamı; sanal bakiye, gerçek emir akışı ve borsa yanıtları.' : view === 'ops' ? 'Otonom taramanın son kararı, pozisyonlar ve yeniden başlatmaya dayanıklı PostgreSQL kanıt defteri.' : view === 'live' ? 'Şifreli canlı kasa kaydı ve tüm risk kapıları tamamlanana kadar emir gönderimi fail-closed olarak kilitli.' : view === 'pricing' || view === 'billing' ? 'Choose a subscription level for your trading intelligence workspace.' : 'Anahtar değerleri tarayıcıya veya GitHub’a yazılmaz; yalnızca sunucu tarafındaki şifreli kasa veya güvenli geçiş değişkenlerinde tutulur.'}</p></div>
+    {view !== 'dashboard' && <section className="v26ModeBar">
+      <div><small>AKTİF ÇALIŞMA ALANI</small><h1>{view === 'trading' ? 'İşlem Masası' : view === 'ops' ? 'Bulut Operasyon ve Kanıt Merkezi' : view === 'live' ? 'Gerçek Futures Hazırlık Merkezi' : view === 'pricing' ? 'Plans & Pricing' : view === 'billing' ? 'Billing & Subscription' : 'Sunucu ve Anahtar Kapıları'}</h1><p>{view === 'trading' ? 'Market, sinyal, grafik ve testnet işlem yönetimi.' : view === 'ops' ? 'Otonom taramanın son kararı, pozisyonlar ve yeniden başlatmaya dayanıklı PostgreSQL kanıt defteri.' : view === 'live' ? 'Şifreli canlı kasa kaydı ve tüm risk kapıları tamamlanana kadar emir gönderimi fail-closed olarak kilitli.' : view === 'pricing' || view === 'billing' ? 'Choose a subscription level for your trading intelligence workspace.' : 'Anahtar değerleri tarayıcıya veya GitHub’a yazılmaz; yalnızca sunucu tarafındaki şifreli kasa veya güvenli geçiş değişkenlerinde tutulur.'}</p></div>
       <aside><span><CircleDollarSign/>GERÇEK PARA</span><b>{view === 'live' ? 'KİLİTLİ' : '0 USDT'}</b><em>Paper devre dışı</em></aside>
-    </section>
+    </section>}
 
-    {view === 'testnet' && <>
+    {view === 'dashboard' && <section className="v26Dashboard" aria-labelledby="dashboard-title">
+      <header className="v26DashboardHero"><div><small>PROTREBOT ELITE X</small><h1 id="dashboard-title">Trading Control Center</h1><p>Bugün ne yapmak istiyorsun?</p></div><div className="v26DashboardMode"><i/>TESTNET FIRST</div></header>
+      <div className="v26DashboardStatus" aria-label="Genel sistem durumu"><span><i className={health?.status === 'ok' ? 'ok' : 'pending'}/>API {health?.status === 'ok' ? 'BAĞLI' : 'KONTROL EDİLİYOR'}</span><span><i className="ok"/>SİSTEM AKTİF</span><span><i className="ok"/>TESTNET ANA MOD</span><span><i className={connectionStatus?.connections?.TESTNET?.active ? 'ok' : 'pending'}/>BAĞLANTI {connectionStatus?.connections?.TESTNET?.active ? 'AKTİF' : 'BEKLİYOR'}</span></div>
+      <div className="v26DashboardChoices">
+        <button type="button" onClick={() => setView('trading')}><Activity/><span><b>İşlem Masası</b><small>Piyasa, sinyaller ve işlem yönetimi</small></span><em>→</em></button>
+        <button type="button" onClick={() => setView('live')}><ShieldCheck/><span><b>Canlı</b><small>Canlı işlem durumu ve güvenlik kontrolleri</small></span><em>→</em></button>
+        <button type="button" onClick={() => setView('ops')}><Cloud/><span><b>Operasyon</b><small>Bot, bağlantılar ve sistem durumu</small></span><em>→</em></button>
+        <button type="button" onClick={() => setView('setup')}><CloudCog/><span><b>Ayarlar</b><small>Hesap ve sistem ayarları</small></span><em>→</em></button>
+      </div>
+    </section>}
+
+    {view === 'trading' && <>
       <section className="v26MarketBar">
         <div className="v26MarketTitle"><Activity/><span><small>SEÇİLİ TESTNET PAZARI</small><b>{symbol.replace('USDT','/USDT')}</b></span><strong className={analysis?.direction === 'SHORT' ? 'short' : analysis?.direction === 'LONG' ? 'long' : ''}>{analysis?.direction || (analysisProgress < 0 ? 'ANALİZ HATASI' : 'HESAPLANIYOR')} <em>{analysis ? `%${analysis.confidence}` : analysisProgress < 0 ? 'TEKRAR DENEYİN' : analysisProgress > 0 ? `%${analysisProgress}` : 'BAŞLATILIYOR'}</em></strong></div>
         <div className="v26MarketPicker" ref={marketPickerRef}>
@@ -436,8 +449,8 @@ export default function TestnetFirstApp() {
     </section>}
 
     {showBackToTop && <button className="v26BackToTop" type="button" aria-label="Yukarı çık" onClick={() => window.scrollTo({top:0,behavior:'smooth'})}><ArrowUp/></button>}
-    <nav className={`terminalMobileNav ${headerHidden ? 'terminalMobileNavHidden' : ''}`} aria-label="Mobil ana navigasyon"><button className={view === 'testnet' ? 'active' : ''} onClick={() => setView('testnet')}><TestTube2/><span>Dashboard</span></button><button className={view === 'ops' ? 'active' : ''} onClick={() => setView('ops')}><Cloud/><span>Operasyon</span></button><button className={view === 'live' ? 'active' : ''} onClick={() => setView('live')}><ShieldCheck/><span>Canlı</span></button><button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><CloudCog/><span>Ayarlar</span></button></nav>
-    <section className="v26TrustStrip" style={{margin:'0 1rem 1rem',padding:'1rem 1.25rem',border:'1px solid rgba(148,163,184,0.18)',borderRadius:'16px',background:'rgba(15,23,42,0.82)',display:'grid',gap:'0.7rem'}}>
+    <nav className={`terminalMobileNav ${headerHidden ? 'terminalMobileNavHidden' : ''}`} aria-label="Mobil ana navigasyon"><button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}><TestTube2/><span>Dashboard</span></button><button className={view === 'trading' ? 'active' : ''} onClick={() => setView('trading')}><Activity/><span>İşlem</span></button><button className={view === 'ops' ? 'active' : ''} onClick={() => setView('ops')}><Cloud/><span>Operasyon</span></button><button className={view === 'live' ? 'active' : ''} onClick={() => setView('live')}><ShieldCheck/><span>Canlı</span></button><button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><CloudCog/><span>Ayarlar</span></button></nav>
+    {view === 'setup' && <section className="v26TrustStrip" style={{margin:'0 1rem 1rem',padding:'1rem 1.25rem',border:'1px solid rgba(148,163,184,0.18)',borderRadius:'16px',background:'rgba(15,23,42,0.82)',display:'grid',gap:'0.7rem'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'0.75rem',flexWrap:'wrap'}}>
         <div>
           <small style={{display:'block',letterSpacing:'0.12em',fontSize:'0.68rem',color:'#94a3b8'}}>CUSTOMER TRUST</small>
@@ -450,8 +463,8 @@ export default function TestnetFirstApp() {
           <button type="button" onClick={() => { setComplianceTab('support'); setComplianceOpen(true) }} style={{padding:'0.6rem 0.9rem',borderRadius:'10px',border:'1px solid rgba(168,85,247,0.35)',background:'rgba(168,85,247,0.08)',color:'#f3e8ff',fontWeight:700,cursor:'pointer'}}>Support</button>
         </div>
       </div>
-    </section>
-    <footer className="v26Footer"><span><RadioTower/>API: <b>{health?.status === 'ok' ? 'BAĞLI' : 'KONTROL EDİLİYOR'}</b></span><span>Veritabanı: <b>{health?.database || '—'}</b></span><span>Kanıt defteri: <b>{health?.cloud_evidence || '—'}</b></span><span>Çalışma modu: <b>TESTNET FIRST</b></span><span>Paper: <b>DEVRE DIŞI</b></span><em>Kâr garantisi yoktur. Testnet sonucu gerçek piyasa sonucunu garanti etmez.</em></footer>
+    </section>}
+    {view === 'dashboard' && <footer className="v26Footer"><span><RadioTower/>API: <b>{health?.status === 'ok' ? 'BAĞLI' : 'KONTROL EDİLİYOR'}</b></span><span>Sistem: <b>AKTİF</b></span><span>Çalışma modu: <b>TESTNET FIRST</b></span></footer>}
 
     {complianceOpen && <div className="v26ComplianceBackdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setComplianceOpen(false) }} style={{position:'fixed',inset:0,background:'rgba(2,6,23,0.76)',display:'grid',placeItems:'center',padding:'1rem',zIndex:1000}}>
       <aside className="v26ComplianceModal" role="dialog" aria-modal="true" aria-label="Trust and compliance" style={{width:'min(760px, 100%)',maxHeight:'80vh',overflowY:'auto',background:'#0f172a',border:'1px solid rgba(148,163,184,0.3)',borderRadius:'20px',padding:'1.25rem',boxShadow:'0 30px 80px rgba(2,6,23,0.6)'}} onClick={event => event.stopPropagation()}>

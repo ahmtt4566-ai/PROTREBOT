@@ -3762,7 +3762,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .v26HeaderActions button { border-radius: 7px; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
 .v26HeaderActions button:hover { transform: translateY(-1px); }
 .v26Refresh { min-height: 36px; border-color: rgba(200, 240, 106, .42); background: var(--polish-lime-soft); color: var(--polish-lime); }
-.v26Nav { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin-top: 10px; padding: 5px; border-radius: 10px; border-color: var(--polish-border); background: #0b141c; box-shadow: 0 12px 26px rgba(0, 0, 0, .14); }
+.v26Nav { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; margin-top: 10px; padding: 5px; border-radius: 10px; border-color: var(--polish-border); background: #0b141c; box-shadow: 0 12px 26px rgba(0, 0, 0, .14); }
 .v26Nav button { min-height: 52px; gap: 9px; padding: 8px 10px; border-radius: 7px; }
 .v26Nav button > svg { width: 18px; height: 18px; padding: 6px; border-radius: 7px; background: #16242d; color: #a9bdca; }
 .v26Nav button:hover { background: rgba(200, 240, 106, .06); }
@@ -3872,6 +3872,35 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .v26App .v26Footer { border-radius: 8px; background: #0f1720; }
 .v26App .v21DashboardWelcome { position: relative; overflow: hidden; }
 .v26App .v21DashboardWelcome::before { position: absolute; right: 11%; bottom: -38px; width: 180px; height: 90px; border-top: 1px solid rgba(34,211,238,.2); border-radius: 50%; content: ''; transform: rotate(-12deg); pointer-events: none; }
+
+.v26Dashboard { display: grid; gap: 14px; max-width: 1120px; margin: 14px auto 0; }
+.v26DashboardHero { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding: 28px; border: 1px solid rgba(200,240,106,.28); border-radius: 12px; background: linear-gradient(112deg, #13252c, #0f1921 70%, #17281f); }
+.v26DashboardHero small { color: #c8f06a; font-size: 10px; font-weight: 800; letter-spacing: .16em; }
+.v26DashboardHero h1 { margin: 7px 0 6px; color: #f3f8f2; font-size: clamp(28px, 4vw, 44px); line-height: 1.05; }
+.v26DashboardHero p { margin: 0; color: #a1b1b9; font-size: 14px; }
+.v26DashboardMode { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 9px 12px; border: 1px solid rgba(200,240,106,.35); border-radius: 999px; color: #d8f394; font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+.v26DashboardMode i, .v26DashboardStatus i { width: 7px; height: 7px; border-radius: 50%; background: #c8f06a; box-shadow: 0 0 0 4px rgba(200,240,106,.12); }
+.v26DashboardStatus { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.v26DashboardStatus span { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 12px 13px; border: 1px solid var(--polish-border); border-radius: 8px; background: #0f1922; color: #b8c8c9; font-size: 10px; font-weight: 750; letter-spacing: .04em; }
+.v26DashboardStatus i.pending { background: #e5b95d; box-shadow: 0 0 0 4px rgba(229,185,93,.12); }
+.v26DashboardChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.v26DashboardChoices button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 13px; min-width: 0; min-height: 112px; padding: 18px; border: 1px solid var(--polish-border); border-radius: 10px; background: #101b24; color: #dce8e6; text-align: left; cursor: pointer; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.v26DashboardChoices button:hover { border-color: rgba(200,240,106,.58); background: #15252a; transform: translateY(-2px); }
+.v26DashboardChoices button > svg { width: 22px; height: 22px; padding: 10px; box-sizing: content-box; border-radius: 9px; background: rgba(200,240,106,.12); color: #c8f06a; }
+.v26DashboardChoices span { display: grid; gap: 5px; min-width: 0; }
+.v26DashboardChoices b { font-size: 16px; }
+.v26DashboardChoices small { color: #8fa1b2; font-size: 11px; line-height: 1.4; }
+.v26DashboardChoices em { color: #c8f06a; font-size: 22px; font-style: normal; }
+
+@media (max-width: 700px) {
+  .v26Dashboard { gap: 10px; margin-top: 10px; }
+  .v26DashboardHero { display: grid; align-items: start; gap: 14px; padding: 20px 16px; }
+  .v26DashboardHero h1 { font-size: 30px; }
+  .v26DashboardStatus { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v26DashboardStatus span { min-height: 42px; padding: 9px 10px; font-size: 9px; }
+  .v26DashboardChoices { grid-template-columns: 1fr; }
+  .v26DashboardChoices button { min-height: 88px; padding: 14px; }
+}
 
 @media (max-width: 600px) {
   .v21WorkspaceHead,
@@ -4024,7 +4053,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
     left: 10px;
     width: auto;
     box-sizing: border-box;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 4px;
     min-width: 0;
     padding: 5px;
