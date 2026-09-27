@@ -321,6 +321,112 @@
 	font-size: 10px;
 	line-height: 1.35;
 }
+.coinAnalysisCenter .analystCoinSelector {
+	min-width: 0;
+	padding: 12px;
+	border: 1px solid var(--terminal-line);
+	border-radius: 7px;
+	background: #0f1720;
+}
+.coinAnalysisCenter .analystCoinSelector > header {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 12px;
+	padding-bottom: 9px;
+	border-bottom: 1px solid var(--terminal-line);
+}
+.coinAnalysisCenter .analystCoinSelector > header div { display: grid; gap: 4px; min-width: 0; }
+.coinAnalysisCenter .analystCoinSelector > header span {
+	color: var(--terminal-amber);
+	font-size: 10px;
+	font-weight: 800;
+	letter-spacing: .14em;
+}
+.coinAnalysisCenter .analystCoinSelector > header strong,
+.coinAnalysisCenter .analystCoinSelector > header small { color: var(--terminal-muted); font-size: 11px; }
+.coinAnalysisCenter .analystCoinSelector > header strong { color: var(--terminal-text); font-weight: 700; }
+.coinAnalysisCenter .analystSelectorToolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 10px 0 8px;
+	min-width: 0;
+}
+.coinAnalysisCenter .analystSelectorToolbar label {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	flex: 1 1 220px;
+	min-width: 0;
+	padding: 0 9px;
+	border: 1px solid var(--terminal-line);
+	border-radius: 5px;
+	background: #0b1118;
+}
+.coinAnalysisCenter .analystSelectorToolbar label svg { width: 14px; color: var(--terminal-cyan); flex-shrink: 0; }
+.coinAnalysisCenter .analystSelectorToolbar input { min-width: 0; padding: 8px 0; }
+.coinAnalysisCenter .analystSelectorFilters { display: flex; flex-wrap: wrap; gap: 4px; }
+.coinAnalysisCenter .analystSelectorFilters button {
+	min-height: 32px;
+	padding: 5px 8px;
+	border: 1px solid var(--terminal-line);
+	border-radius: 4px;
+	background: transparent;
+	color: var(--terminal-muted);
+	font-size: 10px;
+	font-weight: 800;
+	cursor: pointer;
+}
+.coinAnalysisCenter .analystSelectorFilters button.active,
+.coinAnalysisCenter .analystSelectorFilters button:hover { border-color: var(--terminal-amber); color: var(--terminal-amber); background: rgba(229,184,102,.1); }
+.coinAnalysisCenter .analystSelectorList {
+	display: grid;
+	gap: 4px;
+	max-height: 290px;
+	min-height: 72px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scroll-behavior: smooth;
+	padding-right: 4px;
+}
+.coinAnalysisCenter .analystSelectorList::-webkit-scrollbar { width: 6px; }
+.coinAnalysisCenter .analystSelectorList::-webkit-scrollbar-track { background: #0b1118; border-radius: 5px; }
+.coinAnalysisCenter .analystSelectorList::-webkit-scrollbar-thumb { background: #526577; border-radius: 5px; }
+.coinAnalysisCenter .analystSelectorList { scrollbar-color: #526577 #0b1118; scrollbar-width: thin; }
+.coinAnalysisCenter .analystSelectorList > button {
+	display: grid;
+	grid-template-columns: minmax(110px, 1fr) minmax(118px, auto) minmax(120px, 1.2fr);
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	padding: 8px 9px;
+	border: 1px solid transparent;
+	border-radius: 5px;
+	background: #111a23;
+	color: var(--terminal-text);
+	text-align: left;
+	cursor: pointer;
+}
+.coinAnalysisCenter .analystSelectorList > button:hover { border-color: #526577; background: #16222d; }
+.coinAnalysisCenter .analystSelectorList > button.selected { border-color: var(--terminal-amber); background: rgba(229,184,102,.1); }
+.coinAnalysisCenter .analystSelectorIdentity,
+.coinAnalysisCenter .analystSelectorSignal,
+.coinAnalysisCenter .analystSelectorSnapshot { display: grid; gap: 3px; min-width: 0; }
+.coinAnalysisCenter .analystSelectorIdentity b { font-size: 13px; }
+.coinAnalysisCenter .analystSelectorIdentity small,
+.coinAnalysisCenter .analystSelectorSignal small,
+.coinAnalysisCenter .analystSelectorSnapshot small { overflow: hidden; color: var(--terminal-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.coinAnalysisCenter .analystSelectorSignal strong { font-size: 11px; }
+.coinAnalysisCenter .analystSelectorSignal.positive strong { color: var(--terminal-long); }
+.coinAnalysisCenter .analystSelectorSignal.negative strong { color: var(--terminal-short); }
+.coinAnalysisCenter .analystSelectorSignal.neutral strong { color: var(--terminal-muted); }
+.coinAnalysisCenter .analystSelectorSnapshot { text-align: right; }
+.coinAnalysisCenter .analystSelectorSnapshot b { color: var(--terminal-amber); font-size: 12px; }
+.coinAnalysisCenter .analystSelectorEmpty { margin: 0; padding: 18px 8px; color: var(--terminal-muted); font-size: 11px; text-align: center; }
+.coinAnalysisCenter .analystSelectorSkeleton { display: grid; gap: 5px; max-height: 290px; overflow: hidden; }
+.coinAnalysisCenter .analystSelectorSkeleton i { display: block; height: 34px; border-radius: 5px; background: linear-gradient(90deg,#111a23,#1b2935,#111a23); background-size: 200% 100%; animation: analystSelectorShimmer 1.2s linear infinite; }
+@keyframes analystSelectorShimmer { to { background-position: -200% 0; } }
 .coinAnalysisCenter .analystResultWorkspace {
 	min-width: 0;
 	padding: 14px;
@@ -505,6 +611,12 @@
 	.coinAnalysisCenter .analystCommandItems { grid-template-columns: repeat(2, minmax(0,1fr)); }
 	.coinAnalysisCenter .analystResultMeta,
 	.coinAnalysisCenter .analystMetricCards { grid-template-columns: repeat(2, minmax(0,1fr)); }
+	.coinAnalysisCenter .analystSelectorToolbar { align-items: stretch; flex-direction: column; }
+	.coinAnalysisCenter .analystSelectorToolbar label { flex-basis: auto; }
+	.coinAnalysisCenter .analystSelectorFilters { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); }
+	.coinAnalysisCenter .analystSelectorFilters button { min-width: 0; }
+	.coinAnalysisCenter .analystSelectorList > button { grid-template-columns: minmax(0,1fr) auto; }
+	.coinAnalysisCenter .analystSelectorSnapshot { grid-column: 1 / -1; text-align: left; }
 	.coinAnalysisCenter .analystAskBar { grid-template-columns: minmax(0,1fr); }
 	.coinAnalysisCenter .analystPromptChips { grid-template-columns: repeat(2, minmax(0,1fr)); }
 	.coinAnalysisCenter .analystChips { grid-template-columns: repeat(2, minmax(0,1fr)); }

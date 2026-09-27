@@ -45,6 +45,8 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const [analystOpen,setAnalystOpen] = useState(false)
   const [analystAnswer,setAnalystAnswer] = useState('')
   const [analystSelection,setAnalystSelection] = useState('')
+  const [selectorQuery,setSelectorQuery] = useState('')
+  const [selectorDirection,setSelectorDirection] = useState('ALL')
   const [alertDraft,setAlertDraft] = useState({signal:'ANY',score_min:85,rsi_min:0,volume_spike:false,price_crosses_ema20:false,mtf:'ANY'})
 
   const load = async () => {
@@ -103,6 +105,8 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const anomalies = useMemo(() => rows.filter(row => row.anomaly).sort((left,right) => (right.anomaly?.strength || 0) - (left.anomaly?.strength || 0)).slice(0,5),[rows])
   const featured = useMemo(() => [...rows].filter(row => row.direction !== 'BEKLE').sort(rankRows).slice(0,5),[rows])
   const summary = useMemo(() => ({long:rows.filter(row => row.direction === 'LONG').length,short:rows.filter(row => row.direction === 'SHORT').length,watch:rows.filter(row => row.direction === 'BEKLE').length}),[rows])
+  const selectorRows = useMemo(() => rows.filter(row => row.display.toUpperCase().includes(selectorQuery.trim().toUpperCase()) && (selectorDirection === 'ALL' || (selectorDirection === 'WATCH' ? row.direction === 'BEKLE' : row.direction === selectorDirection))),[rows,selectorQuery,selectorDirection])
+  const selectorSignal = (direction:Direction) => direction === 'BEKLE' ? 'WATCH' : direction
   const chooseSort = (key:keyof Row) => { if (sort === key) setAscending(value => !value); else { setSort(key); setAscending(false) } }
   const sortIcon = (key:keyof Row) => sort === key ? ascending ? <ChevronUp/> : <ChevronDown/> : null
   const applyFilters = () => { setFilters(draftFilters); setFilterOpen(false) }
@@ -151,6 +155,11 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
           </div>
         </section>
       </div>
+      <section className="analystCoinSelector" aria-label="Analyst coin selector">
+        <header><div><span>COIN SELECTOR</span><strong>{rows.length ? `${selectorRows.length} of ${rows.length} markets` : 'Waiting for scanner data'}</strong></div><small>Choose from the current scanner snapshot</small></header>
+        <div className="analystSelectorToolbar"><label><Search/><input value={selectorQuery} onChange={event => setSelectorQuery(event.target.value)} placeholder="Search coin..." aria-label="Search scanner coins"/></label><div className="analystSelectorFilters" role="group" aria-label="Filter scanner coins">{[['ALL','ALL'],['LONG','LONG'],['SHORT','SHORT'],['WATCH','WATCH']].map(([value,label]) => <button type="button" key={value} className={selectorDirection === value ? 'active' : ''} aria-pressed={selectorDirection === value} onClick={() => setSelectorDirection(value)}>{label}</button>)}</div></div>
+        {loading ? <div className="analystSelectorSkeleton" aria-label="Loading scanner coins"><i/><i/><i/><i/></div> : error ? <p className="analystSelectorEmpty">Market data unavailable. Use RETRY below to refresh the scanner.</p> : <div className="analystSelectorList">{selectorRows.map(row => <button type="button" key={row.symbol} className={row.symbol === selected ? 'selected' : ''} onClick={() => setSelected(row.symbol)} aria-pressed={row.symbol === selected}><span className="analystSelectorIdentity"><b>{row.symbol}</b><small>{row.display}</small></span><span className={`analystSelectorSignal ${tone(row.direction)}`}><strong>{selectorSignal(row.direction)}</strong><small>{fmt(row.confidence)}% confidence</small></span><span className="analystSelectorSnapshot"><b>{fmt(row.price)}</b><small>{row.trend}</small></span></button>)}{!selectorRows.length && <p className="analystSelectorEmpty">No scanner markets match this search.</p>}</div>}
+      </section>
       <section className="analystResultWorkspace" aria-live="polite">
         <header><div><span>ANALYSIS RESULT</span><h3>{active?.display || 'No active market data'}</h3></div><strong className={active ? tone(active.direction) : 'neutral'}>{active?.direction || 'WAITING'}</strong></header>
         {loading ? <div className="analystLoadingState" aria-label="Loading market data"><i/><i/><i/><i/></div> : error ? <div className="analystDataError" role="alert"><strong>DATA UNAVAILABLE</strong><p>Unable to load current market data.</p><button type="button" onClick={() => void load()}>RETRY</button></div> : active ? <>
