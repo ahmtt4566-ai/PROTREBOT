@@ -1,5 +1,5 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ArrowUp, Award, BarChart3, Bell, Calculator, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Crosshair, FlaskConical, Gauge, History, LayoutDashboard, LineChart, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, ScrollText, Search, Send, Settings2, ShieldAlert, ShieldCheck, Sparkles, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, X, Zap } from 'lucide-react'
+import { Activity, Award, BarChart3, Bell, Calculator, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Crosshair, FlaskConical, Gauge, History, LayoutDashboard, LineChart, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, ScrollText, Search, Send, Settings2, ShieldAlert, ShieldCheck, Sparkles, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, X, Zap } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, loadDemoCredentials, saveDemoCredentials, userSessionToken } from './api'
 
 const API = `${API_BASE}/binance-demo`
@@ -342,7 +342,6 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
   const [symbolOpen,setSymbolOpen] = useState(false)
   const [symbolQuery,setSymbolQuery] = useState('')
   const [scannerFocus,setScannerFocus] = useState<{symbol:string;direction:'LONG'|'SHORT'|'WAIT';score:number;trend:string;volume:string;momentum:string;confidence:number;risk:string;status:string} | null>(null)
-  const [showScrollTop,setShowScrollTop] = useState(false)
   const [alertFilter,setAlertFilter] = useState<'ALL'|'CRITICAL'|'WARNING'|'INFO'>('ALL')
   const [advancedAnalyticsOpen,setAdvancedAnalyticsOpen] = useState(false)
   const [secondaryAnalyticsOpen,setSecondaryAnalyticsOpen] = useState(false)
@@ -354,13 +353,6 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
   const initialScanInFlight = useRef(false)
   const v21RequestId = useRef(0)
   const lastNotificationId = useRef<string|null>(null)
-
-  useEffect(() => {
-    const updateScrollTop = () => setShowScrollTop(window.scrollY >= 300)
-    updateScrollTop()
-    window.addEventListener('scroll',updateScrollTop,{passive:true})
-    return () => window.removeEventListener('scroll',updateScrollTop)
-  },[])
 
   const refreshStatus = async () => {
     try {
@@ -975,7 +967,6 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
   const previewRiskReward = previewEntry > 0 && previewStop > 0 && previewTp1 > 0 ? Math.abs(previewTp1 - previewEntry) / Math.abs(previewEntry - previewStop) : null
 
   return <section ref={demoDeckRef} className={`binanceDemoDeck${focusMode ? ' demoFocusMode' : ''}${isolatedRisk ? ' riskOnlyDeck' : ''}`} aria-label="Binance Futures Demo Köprüsü" data-build-marker="BUILD_COMMIT" data-build-commit={import.meta.env.VITE_BUILD_COMMIT} data-position-source="reconciled_active_positions" data-diagnostics="exchange_position_diagnostics">
-    <button type="button" className={`scrollTopFab${showScrollTop ? ' visible' : ''}`} aria-label="Sayfanın başına dön" onClick={() => window.scrollTo({top:0,behavior:'smooth'})}><ArrowUp/></button>
     {tab === 'trade' && <section className="demoHero">
       <div className="demoHeroCopy"><span>DEMO / TESTNET</span><h2>DEMO TRADING</h2><small className="demoHeroSymbol">{symbol.replace('USDT','/USDT')} · 15m</small><p>Binance Futures Demo hesabında piyasa akışını izle ve emirleri güvenlik kapılarıyla doğrula.</p><div><b><ShieldCheck/> DEMO ONLY</b><span>{status?.rest_host || 'https://demo-fapi.binance.com'}</span></div><button type="button" className="demoHeroConnect" onClick={connect} disabled={busy || !status?.configured}><Radio/> Binance Demo'ya Bağlan</button></div>
       <div className="demoHeroStatus">

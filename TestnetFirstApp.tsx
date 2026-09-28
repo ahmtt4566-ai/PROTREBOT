@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries, type IPriceLine } from 'lightweight-charts'
-import { Activity, ArrowLeft, ArrowUp, BarChart3, Bell, CheckCircle2, CircleDollarSign, Cloud, CloudCog, KeyRound, LockKeyhole, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2 } from 'lucide-react'
+import { Activity, ArrowLeft, BarChart3, Bell, CheckCircle2, CircleDollarSign, Cloud, CloudCog, KeyRound, LockKeyhole, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2 } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 import ScannerCenter from './ScannerCenter'
@@ -172,7 +172,6 @@ export default function TestnetFirstApp() {
   const [connectionStatus,setConnectionStatus] = useState<ConnectionStatus|null>(null)
   const [notificationsOpen,setNotificationsOpen] = useState(false)
   const [headerHidden,setHeaderHidden] = useState(false)
-  const [showBackToTop,setShowBackToTop] = useState(false)
   const [complianceOpen,setComplianceOpen] = useState(false)
   const [complianceTab,setComplianceTab] = useState<'risk'|'privacy'|'terms'|'support'>('risk')
   const notificationRef = useRef<HTMLDivElement>(null)
@@ -353,7 +352,6 @@ export default function TestnetFirstApp() {
       const delta = currentY - previousY
       if (currentY <= 12) setHeaderHidden(false)
       else if (Math.abs(delta) >= 8) setHeaderHidden(delta > 0)
-      setShowBackToTop(currentY >= 450)
       previousY = currentY
       ticking = false
     }
@@ -475,7 +473,6 @@ export default function TestnetFirstApp() {
       <section className="connectionSecurityPanel"><header><div><span>SECURITY &amp; SAFETY</span><h3>Fail-closed by design</h3></div><ShieldCheck/></header><div>{['Secrets are stored server-side','Secrets are never displayed in the UI','Live trading remains locked by default','Demo and Live credentials are separated','Orders require existing safety gates','No automatic live orders on startup'].map(item => <span key={item}><CheckCircle2/>{item}</span>)}</div></section>
     </section>}
 
-    {showBackToTop && <button className="v26BackToTop" type="button" aria-label="Yukarı çık" onClick={() => window.scrollTo({top:0,behavior:'smooth'})}><ArrowUp/></button>}
     {view === 'dashboard' && <nav className={`terminalMobileNav ${headerHidden ? 'terminalMobileNavHidden' : ''}`} aria-label="Mobil ana navigasyon"><button className="active" onClick={() => setView('dashboard')}><TestTube2/><span>Home</span></button></nav>}
     {view === 'setup' && <section className="v26TrustStrip" style={{margin:'0 1rem 1rem',padding:'1rem 1.25rem',border:'1px solid rgba(148,163,184,0.18)',borderRadius:'16px',background:'rgba(15,23,42,0.82)',display:'grid',gap:'0.7rem'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'0.75rem',flexWrap:'wrap'}}>
