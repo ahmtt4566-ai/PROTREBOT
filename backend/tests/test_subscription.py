@@ -1,108 +1,194 @@
 import unittest
+import re
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from app import v22_commercial
-from app.subscription_core import PLAN_CATALOG, TRIAL_DAYS, active_subscription, entitlement_snapshot
+from app import v22_commercial, v25_execution
+from app.subscription_core import (
+    MASTER_MODE_PRICE,
+    PLAN_CATALOG,
+    TRIAL_DAYS,
+    active_subscription,
+    entitlement_snapshot,
+)
+
+
+def stripe_subscription_event(event_id, status, *, plan="MASTER_MODE", customer="cus_1", subscription="sub_1", **extra):
+    future = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+    payload = {
+        "id": subscription,
+        "customer": customer,
+        "status": status,
+        "current_period_start": future - 100,
+        "current_period_end": future,
+        "cancel_at_period_end": False,
+        "metadata": {"user_id": "user-1", "plan": plan, "billing_interval": "monthly"},
+        "items": {"data": []},
+        **extra,
+    }
+    return {"id": event_id, "type": "customer.subscription.updated", "data": {"object": payload}}
 
 
 class SubscriptionCoreTests(unittest.TestCase):
-    def test_plan_prices_and_entitlements_are_centralized(self):
-        self.assertEqual(PLAN_CATALOG["STARTER"]["monthly_price"], 19)
-        self.assertEqual(PLAN_CATALOG["STARTER"]["annual_price"], 190)
-        self.assertEqual(PLAN_CATALOG["PRO"]["monthly_price"], 39)
-        self.assertEqual(PLAN_CATALOG["PRO"]["annual_price"], 390)
-        self.assertEqual(PLAN_CATALOG["ELITE"]["monthly_price"], 79)
-        self.assertEqual(PLAN_CATALOG["ELITE"]["annual_price"], 790)
-        self.assertFalse(PLAN_CATALOG["STARTER"]["entitlements"]["canUseLiveTrading"])
-        self.assertTrue(PLAN_CATALOG["PRO"]["entitlements"]["canUseLiveTrading"])
-        self.assertTrue(PLAN_CATALOG["ELITE"]["entitlements"]["canUseAdvancedAI"])
+    def test_exactly_two_products_and_trial_terms(self):
+        self.assertEqual(set(PLAN_CATALOG), {"TRIAL", "MASTER_MODE"})
+        self.assertEqual(TRIAL_DAYS, 7)
+        self.assertEqual(PLAN_CATALOG["TRIAL"]["monthly_price"], MASTER_MODE_PRICE)
+        self.assertEqual(PLAN_CATALOG["MASTER_MODE"]["monthly_price"], MASTER_MODE_PRICE)
+        self.assertTrue(PLAN_CATALOG["TRIAL"]["entitlements"]["canAccessMasterTrade"])
 
-    def test_trial_is_seven_days_and_expired_subscription_is_free(self):
+    def test_trial_and_active_grant_master_trade_access(self):
         now = datetime.now(timezone.utc)
-        state = {"subscriptions": [{"user_id": "user-1", "plan": "STARTER", "status": "TRIAL", "trialEnd": (now + timedelta(days=TRIAL_DAYS)).isoformat()}], "licenses": []}
-        snapshot = entitlement_snapshot(state, "user-1")
-        self.assertEqual(snapshot["status"], "TRIAL")
-        self.assertEqual(snapshot["plan"], "STARTER")
-        expired = {"subscriptions": [{"user_id": "user-1", "plan": "PRO", "status": "ACTIVE", "currentPeriodEnd": (now - timedelta(days=1)).isoformat()}], "licenses": []}
-        self.assertEqual(entitlement_snapshot(expired, "user-1")["status"], "FREE")
+        state = {"subscriptions": [{
+            "user_id": "user-1", "plan": "TRIAL", "status": "TRIALING",
+            "trial_end": (now + timedelta(days=TRIAL_DAYS)).isoformat(),
+        }]}
+        trial = entitlement_snapshot(state, "user-1")
+        self.assertEqual(trial["status"], "TRIALING")
+        self.assertTrue(trial["master_trade_access"])
 
-    def test_license_fallback_is_not_an_implicit_frontend_unlock(self):
-        state = {"subscriptions": [], "licenses": [{"user_id": "user-1", "plan": "PRO", "status": "ACTIVE", "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()}]}
-        self.assertIsNone(active_subscription(state, "user-1"))
-        self.assertEqual(entitlement_snapshot(state, "user-1")["status"], "FREE")
+        state["subscriptions"][0].update({
+            "plan": "MASTER_MODE", "status": "ACTIVE",
+            "current_period_end": (now + timedelta(days=30)).isoformat(),
+        })
+        active = entitlement_snapshot(state, "user-1")
+        self.assertEqual(active["status"], "ACTIVE")
+        self.assertTrue(active["master_trade_access"])
 
-    def test_stripe_price_mapping_is_server_side_and_rejects_missing_config(self):
-        env = {
-            "STRIPE_PRICE_STARTER_MONTHLY": "price_starter_monthly",
-            "STRIPE_PRICE_STARTER_YEARLY": "price_starter_yearly",
-        }
-        with patch.dict("os.environ", env, clear=False):
-            self.assertEqual(v22_commercial.stripe_price_id("STARTER", "monthly"), "price_starter_monthly")
+    def test_past_due_grace_allows_access_but_unpaid_and_cancelled_do_not(self):
+        now = datetime.now(timezone.utc)
+        row = {"user_id": "user-1", "plan": "MASTER_MODE", "status": "PAST_DUE", "grace_until": (now + timedelta(hours=1)).isoformat()}
+        state = {"subscriptions": [row]}
+        self.assertTrue(entitlement_snapshot(state, "user-1")["master_trade_access"])
+        row["status"] = "UNPAID"
+        self.assertFalse(entitlement_snapshot(state, "user-1")["master_trade_access"])
+        row["status"] = "CANCELLED"
+        self.assertFalse(entitlement_snapshot(state, "user-1")["master_trade_access"])
+
+    def test_expired_subscription_has_no_access(self):
+        state = {"subscriptions": [{
+            "user_id": "user-1", "plan": "MASTER_MODE", "status": "ACTIVE",
+            "current_period_end": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+        }]}
+        self.assertEqual(active_subscription(state, "user-1"), None)
+        self.assertFalse(entitlement_snapshot(state, "user-1")["master_trade_access"])
+
+    def test_server_side_price_mapping_accepts_only_the_two_monthly_products(self):
+        with patch.dict("os.environ", {"STRIPE_PRICE_MASTER_MODE_MONTHLY": "price_master"}, clear=False):
+            self.assertEqual(v22_commercial.stripe_price_id("TRIAL", "monthly"), "price_master")
+            self.assertEqual(v22_commercial.stripe_price_id("MASTER_MODE", "monthly"), "price_master")
             with self.assertRaises(v22_commercial.HTTPException):
-                v22_commercial.stripe_price_id("PRO", "annual")
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(v22_commercial.stripe_configured())
+                v22_commercial.stripe_price_id("MASTER_MODE", "annual")
+        with self.assertRaises(v22_commercial.HTTPException):
+            v22_commercial.stripe_price_id("PRO", "monthly")
 
-    def test_stripe_status_and_return_url_are_fail_closed(self):
+    def test_stripe_price_contract_requires_active_usd_monthly_119_90_price(self):
+        valid = {"active": True, "unit_amount": 11_990, "currency": "usd", "recurring": {"interval": "month", "interval_count": 1}}
+        v22_commercial.validate_master_mode_price(valid)
+        for invalid in (
+            {**valid, "unit_amount": 12_000},
+            {**valid, "currency": "eur"},
+            {**valid, "recurring": {"interval": "year", "interval_count": 1}},
+            {**valid, "active": False},
+        ):
+            with self.assertRaises(v22_commercial.HTTPException):
+                v22_commercial.validate_master_mode_price(invalid)
+
+    def test_stripe_status_mapping_uses_canonical_internal_states(self):
+        self.assertEqual(v22_commercial.normalize_stripe_status("trialing"), "TRIALING")
         self.assertEqual(v22_commercial.normalize_stripe_status("active"), "ACTIVE")
-        self.assertEqual(v22_commercial.normalize_stripe_status("trialing"), "TRIAL")
         self.assertEqual(v22_commercial.normalize_stripe_status("past_due"), "PAST_DUE")
-        self.assertEqual(v22_commercial.normalize_stripe_status("canceled"), "CANCELED")
-        with patch.dict("os.environ", {"APP_BASE_URL": "javascript:alert(1)"}, clear=False):
-            with self.assertRaises(v22_commercial.HTTPException):
-                v22_commercial.stripe_base_url()
+        self.assertEqual(v22_commercial.normalize_stripe_status("unpaid"), "UNPAID")
+        self.assertEqual(v22_commercial.normalize_stripe_status("canceled"), "CANCELLED")
 
-    def test_production_verification_link_uses_frontend_route(self):
-        with patch.dict("os.environ", {"APP_BASE_URL": "https://frontend-nu-two-18.vercel.app"}, clear=False):
-            verification_link = f"{v22_commercial.app_base_url()}/verify-email?token=opaque-test-token"
-        self.assertEqual(verification_link, "https://frontend-nu-two-18.vercel.app/verify-email?token=opaque-test-token")
-        self.assertNotIn("localhost:5173", verification_link)
-        with patch.dict("os.environ", {"APP_BASE_URL": "https://example.com/?redirect=https://evil.example"}, clear=False):
-            with self.assertRaises(v22_commercial.HTTPException):
-                v22_commercial.stripe_base_url()
+    def test_subscription_webhook_is_idempotent(self):
+        state = {"subscriptions": [], "stripe_event_ids": []}
+        event = stripe_subscription_event("evt_sub", "trialing", plan="TRIAL")
+        self.assertTrue(v22_commercial.apply_stripe_event(state, event))
+        self.assertFalse(v22_commercial.apply_stripe_event(state, event))
+        self.assertEqual(len(state["subscriptions"]), 1)
+        self.assertEqual(state["stripe_event_ids"].count("evt_sub"), 1)
 
-    def test_customer_id_lookup_is_scoped_to_the_authenticated_user(self):
-        state = {"subscriptions": [
-            {"user_id": "user-1", "stripeCustomerId": "cus_one"},
-            {"user_id": "user-2", "stripeCustomerId": "cus_two"},
-        ]}
-        self.assertEqual(v22_commercial.stripe_customer_for_user(state, "user-1"), "cus_one")
-        self.assertEqual(v22_commercial.subscription_user_for_customer(state, "cus_two"), "user-2")
-        self.assertIsNone(v22_commercial.stripe_customer_for_user(state, "user-3"))
-
-    def test_phase_routes_require_existing_auth_and_no_frontend_price_input(self):
-        source = (v22_commercial.Path(__file__).parents[1] / "app" / "v22_commercial.py").read_text(encoding="utf-8")
-        for route in ("/subscription/checkout", "/subscription/customer-portal", "/subscription/webhook"):
-            self.assertIn(route, source)
-        self.assertIn("authenticated_user(request)", source)
-        self.assertIn("stripe_price_id(payload.plan, payload.billing_interval)", source)
-        self.assertNotIn("payload.price_id", source)
-
-    def test_stripe_webhook_events_update_state_once(self):
+    def test_payment_failure_and_recovery_are_idempotent_state_transitions(self):
         future = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
-        state = {"subscriptions": [], "licenses": [], "stripe_event_ids": []}
-        completed = {"id":"evt_checkout", "type":"checkout.session.completed", "data":{"object":{"id":"cs_1", "customer":"cus_1", "subscription":"sub_1", "metadata":{"user_id":"user-1", "plan":"PRO", "billing_interval":"monthly"}}}}
-        self.assertTrue(v22_commercial.apply_stripe_event(state, completed))
-        subscription = {"id":"evt_sub", "type":"customer.subscription.created", "data":{"object":{"id":"sub_1", "customer":"cus_1", "status":"active", "current_period_start":future - 100, "current_period_end":future, "cancel_at_period_end":False, "metadata":{"user_id":"user-1", "plan":"PRO", "billing_interval":"monthly"}, "items":{"data":[]}}}}
-        with patch.dict("os.environ", {"STRIPE_PRICE_PRO_MONTHLY":"price_pro_monthly"}, clear=False):
-            self.assertTrue(v22_commercial.apply_stripe_event(state, subscription))
-            row = state["subscriptions"][-1]
-            self.assertEqual(row["status"], "ACTIVE")
-            self.assertEqual(row["plan"], "PRO")
-            self.assertEqual(row["stripeCustomerId"], "cus_1")
-            self.assertFalse(v22_commercial.apply_stripe_event(state, subscription))
-            self.assertEqual(state["stripe_event_ids"].count("evt_sub"), 1)
-
-    def test_payment_failed_and_deleted_map_to_safe_statuses(self):
-        future = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
-        state = {"subscriptions":[{"user_id":"user-1","plan":"PRO","status":"ACTIVE","stripeCustomerId":"cus_1","stripeSubscriptionId":"sub_1","currentPeriodEnd":datetime.fromtimestamp(future, timezone.utc).isoformat()}], "licenses":[], "stripe_event_ids":[]}
-        failed = {"id":"evt_failed", "type":"invoice.payment_failed", "data":{"object":{"customer":"cus_1"}}}
+        state = {"subscriptions": [{
+            "user_id": "user-1", "plan": "MASTER_MODE", "status": "ACTIVE",
+            "stripe_customer_id": "cus_1", "stripe_subscription_id": "sub_1",
+            "current_period_end": datetime.fromtimestamp(future, timezone.utc).isoformat(),
+        }], "stripe_event_ids": []}
+        failed = {"id": "evt_failed", "type": "invoice.payment_failed", "data": {"object": {"customer": "cus_1", "subscription": "sub_1"}}}
+        paid = {"id": "evt_paid", "type": "invoice.paid", "data": {"object": {"customer": "cus_1", "subscription": "sub_1"}}}
         self.assertTrue(v22_commercial.apply_stripe_event(state, failed))
         self.assertEqual(state["subscriptions"][0]["status"], "PAST_DUE")
-        deleted = {"id":"evt_deleted", "type":"customer.subscription.deleted", "data":{"object":{"id":"sub_1","customer":"cus_1","status":"canceled","current_period_end":future,"metadata":{"user_id":"user-1","plan":"PRO","billing_interval":"monthly"},"items":{"data":[]}}}}
-        self.assertTrue(v22_commercial.apply_stripe_event(state, deleted))
-        self.assertEqual(state["subscriptions"][0]["status"], "CANCELED")
+        self.assertEqual(state["subscriptions"][0]["failed_payment_attempts"], 1)
+        self.assertTrue(v22_commercial.apply_stripe_event(state, paid))
+        self.assertEqual(state["subscriptions"][0]["status"], "ACTIVE")
+        self.assertEqual(state["subscriptions"][0]["failed_payment_attempts"], 0)
+        self.assertFalse(v22_commercial.apply_stripe_event(state, paid))
+
+    def test_deleted_subscription_removes_access(self):
+        state = {"subscriptions": [{
+            "user_id": "user-1", "plan": "MASTER_MODE", "status": "ACTIVE",
+            "stripe_customer_id": "cus_1", "stripe_subscription_id": "sub_1",
+            "current_period_end": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+        }], "stripe_event_ids": []}
+        event = stripe_subscription_event("evt_deleted", "canceled")
+        event["type"] = "customer.subscription.deleted"
+        self.assertTrue(v22_commercial.apply_stripe_event(state, event))
+        self.assertEqual(state["subscriptions"][0]["status"], "CANCELLED")
+        self.assertFalse(entitlement_snapshot(state, "user-1")["master_trade_access"])
+
+    def test_legacy_plans_and_demo_license_cannot_grant_master_trade_access(self):
+        future = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        for plan in ("STARTER", "PRO", "ELITE"):
+            state = {"subscriptions": [{"user_id": "user-1", "plan": plan, "status": "ACTIVE", "current_period_end": future}], "licenses": []}
+            self.assertFalse(v22_commercial.subscription_for_user(state, "user-1")["master_trade_access"])
+        state = {
+            "subscriptions": [],
+            "licenses": [{"user_id": "user-1", "plan": "ELITE", "status": "ACTIVE", "starts_at": future, "expires_at": future}],
+        }
+        self.assertFalse(v22_commercial.subscription_for_user(state, "user-1")["master_trade_access"])
+
+    def test_duplicate_records_cannot_resurrect_access_after_canonical_denial(self):
+        future = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        state = {"subscriptions": [
+            {"user_id": "user-1", "plan": "MASTER_MODE", "status": "UNPAID", "current_period_end": future},
+            {"user_id": "user-1", "plan": "PRO", "status": "ACTIVE", "current_period_end": future},
+        ], "licenses": []}
+        self.assertFalse(v22_commercial.subscription_for_user(state, "user-1")["master_trade_access"])
+
+    def test_client_supplied_access_flags_cannot_grant_backend_access(self):
+        state = {"subscriptions": [], "licenses": []}
+        user = {"id": "user-1", "role": "CUSTOMER", "canAccessMasterTrade": True, "isPremium": True, "plan": "MASTER_MODE"}
+        self.assertFalse(v22_commercial.access_snapshot(state, user)["canAccessMasterTrade"])
+
+    def test_unauthenticated_execution_request_is_denied(self):
+        request = SimpleNamespace(state=SimpleNamespace(member=None, web_owner_authenticated=False))
+        with patch.object(v25_execution, "authenticated_user", side_effect=v22_commercial.HTTPException(401, "Authentication required")):
+            with self.assertRaises(v22_commercial.HTTPException):
+                v25_execution.execution_owner(request)
+
+    def test_owner_execution_bypass_is_explicit_and_preserved(self):
+        request = SimpleNamespace(state=SimpleNamespace(member={"id": "owner", "role": "OWNER"}, web_owner_authenticated=False))
+        self.assertEqual(v25_execution.execution_owner(request)["role"], "OWNER")
+
+    def test_every_v25_route_requires_execution_owner(self):
+        with open(v25_execution.__file__, encoding="utf-8") as source_file:
+            source = source_file.read()
+        routes = (
+            "/status", "/history", "/mtf/history", "/market/candles", "/connect/read-only",
+            "/policy", "/policy/acknowledge", "/consent", "/consent/revoke", "/order/test",
+            "/risk/preview", "/adopt-external-position/preview", "/adopt-external-position", "/arm",
+            "/disarm", "/recovery/check", "/order", "/auto/start", "/auto/stop", "/position/close", "/emergency",
+        )
+        for route in routes:
+            match = re.search(r'@router\.(?:get|post|put|patch|delete)\("' + re.escape(route) + r'"\)', source)
+            self.assertIsNotNone(match, route)
+            start = match.start()
+            end = source.find("@router.", start + 1)
+            block = source[start:] if end == -1 else source[start:end]
+            self.assertIn("execution_owner(request)", block, route)
 
 
 if __name__ == "__main__":

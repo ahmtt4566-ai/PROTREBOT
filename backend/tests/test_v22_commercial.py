@@ -64,7 +64,7 @@ class V22CommercialTests(unittest.TestCase):
 
         self.assertTrue(access_snapshot(state, owner)["isAdmin"])
         self.assertTrue(access_snapshot(state, owner)["canAccessMasterTrade"])
-        self.assertTrue(access_snapshot(state, pro_user)["canAccessMasterTrade"])
+        self.assertFalse(access_snapshot(state, pro_user)["canAccessMasterTrade"])
         self.assertFalse(access_snapshot(state, free_user)["canAccessMasterTrade"])
 
     def test_bootstrap_promotes_existing_admin_without_changing_password(self):

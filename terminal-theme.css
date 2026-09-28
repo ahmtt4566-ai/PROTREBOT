@@ -319,6 +319,269 @@
   font-weight: 800;
   letter-spacing: .12em;
 }
+.v26App .v21ScannerDashboard {
+  --scanner-ink: #080a0c;
+  --scanner-panel: #101317;
+  --scanner-panel-raised: #171a1e;
+  --scanner-inset: #0c0f12;
+  --scanner-orange: #f59e0b;
+  --scanner-orange-bright: #ffbd4a;
+  --scanner-copy: #f1ede7;
+  --scanner-muted: #a79f96;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 20px;
+  border: 1px solid rgba(245, 158, 11, .24);
+  border-radius: 22px;
+  background: linear-gradient(145deg, #0b0d10, #121316 62%, #17120c);
+  box-shadow: 0 22px 52px rgba(0, 0, 0, .3), inset 0 1px rgba(255, 255, 255, .035);
+  color: var(--scanner-copy);
+}
+.v26App .v21ScannerHeader {
+  min-width: 0;
+  padding: 2px 2px 16px;
+  border: 0;
+  border-bottom: 1px solid rgba(245, 158, 11, .18);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.v26App .v21ScannerHeader span,
+.v26App .v21ScannerTop header span,
+.v26App .v21ScannerTable header span,
+.v26App .v21ScannerTrades header span { color: var(--scanner-orange-bright); letter-spacing: .14em; }
+.v26App .v21ScannerHeader h2,
+.v26App .v21ScannerTop h3,
+.v26App .v21ScannerTable h3,
+.v26App .v21ScannerTrades h3 { color: var(--scanner-copy); }
+.v26App .v21ScannerHeader h2 { font-size: 22px; }
+.v26App .v21ScannerHeader p { color: var(--scanner-muted); line-height: 1.5; }
+.v26App .v21ScannerHeader button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--scanner-orange);
+  color: #1b1205;
+  box-shadow: 0 8px 20px rgba(245, 158, 11, .16);
+}
+.v26App .v21ScannerHeader button:hover:not(:disabled) { background: var(--scanner-orange-bright); color: #1b1205; }
+.v26App .v21ScannerMetrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+.v26App .v21ScannerMetrics > span {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--scanner-panel-raised);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .045);
+}
+.v26App .v21ScannerMetrics small { color: var(--scanner-muted); font-size: 10px; }
+.v26App .v21ScannerMetrics b { color: var(--scanner-orange-bright); font-size: 14px; }
+.v26App .v21ScannerError {
+  border: 0;
+  border-radius: 14px;
+  background: rgba(180, 54, 42, .16);
+  color: #ffb2a4;
+  box-shadow: inset 0 0 0 1px rgba(255, 129, 120, .2);
+}
+.v26App .v21ScannerColumns {
+  grid-template-columns: minmax(300px, .78fr) minmax(0, 1.6fr);
+  gap: 14px;
+}
+.v26App .v21ScannerTop,
+.v26App .v21ScannerTable,
+.v26App .v21ScannerTrades {
+  min-width: 0;
+  padding: 18px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--scanner-panel);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, .22), inset 0 1px rgba(255, 255, 255, .035);
+}
+.v26App .v21ScannerTop > header,
+.v26App .v21ScannerTable > header,
+.v26App .v21ScannerTrades > header { margin-bottom: 14px; border: 0; }
+.v26App .v21Candidate,
+.v26App .v21ScannerEmpty {
+  border: 0;
+  border-radius: 15px;
+  background: var(--scanner-inset);
+  color: var(--scanner-copy);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .045);
+}
+.v26App .v21Candidate { padding: 15px; }
+.v26App .v21Candidate:hover { border: 0; background: #1b1711; box-shadow: inset 0 0 0 1px rgba(245, 158, 11, .38); }
+.v26App .v21CandidateHead b { color: var(--scanner-copy); }
+.v26App .v21CandidateHead strong { color: var(--scanner-orange-bright); }
+.v26App .v21CandidateHead em { color: #d7c5a5; }
+.v26App .v21Candidate > small,
+.v26App .v21Candidate li { color: var(--scanner-muted); }
+.v26App .v21Candidate li { border-color: rgba(255, 255, 255, .06); }
+.v26App .v21TableScroll { overflow-x: auto; }
+.v26App .v21ScannerTable table { min-width: 620px; color: var(--scanner-copy); }
+.v26App .v21ScannerTable th {
+  background: #181512;
+  color: var(--scanner-orange-bright);
+  border: 0;
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+.v26App .v21ScannerTable td { border-bottom-color: rgba(255, 255, 255, .055); color: #ddd7cf; }
+.v26App .v21ScannerTable .scannerStatus { color: #e7b862; }
+.v26App .v21TradeRows { gap: 9px; }
+.v26App .v21TradeRows > div {
+  border: 0;
+  border-radius: 13px;
+  background: var(--scanner-inset);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .04);
+}
+.v26App .v21TradeRows strong { color: var(--scanner-copy); }
+.v26App .v21TradeRows span,
+.v26App .v21TradeRows small { color: var(--scanner-muted); }
+.v26App .v21TradeRows em { color: var(--scanner-orange-bright); }
+
+@media (max-width: 1100px) {
+  .v26App .v21ScannerMetrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .v26App .v21ScannerColumns { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  .v26App .v21ScannerDashboard { gap: 10px; padding: 13px; border-radius: 17px; }
+  .v26App .v21ScannerHeader { align-items: flex-start; flex-direction: column; padding: 1px 1px 13px; }
+  .v26App .v21ScannerHeader h2 { font-size: 19px; }
+  .v26App .v21ScannerHeader button { width: 100%; justify-content: center; }
+  .v26App .v21ScannerMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .v26App .v21ScannerMetrics > span { padding: 12px; border-radius: 14px; }
+  .v26App .v21ScannerTop,
+  .v26App .v21ScannerTable,
+  .v26App .v21ScannerTrades { padding: 14px; border-radius: 15px; }
+}
+
+@media (max-width: 380px) {
+  .v26App .v21ScannerMetrics { grid-template-columns: 1fr; }
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Workspace:has(.v21AutoScanner) {
+  grid-column: 1 / -1 !important;
+  width: auto;
+  min-width: 0;
+}
+
+.v26App .v21AutoScanner {
+  --scanner-card: #11161b;
+  --scanner-card-raised: #171c22;
+  --scanner-orange: #f59e0b;
+  --scanner-orange-soft: #ffc45c;
+  --scanner-copy: #f1f4f5;
+  --scanner-muted: #95a3aa;
+  padding: 22px !important;
+  border: 1px solid rgba(245, 158, 11, .32) !important;
+  border-radius: 22px !important;
+  background: linear-gradient(145deg, #0b0f13, #12171c 64%, #1b150d) !important;
+  box-shadow: 0 20px 46px rgba(0, 0, 0, .28), inset 0 1px rgba(255, 255, 255, .035);
+}
+.v26App .v21AutoScanner > header {
+  min-height: 64px;
+  padding: 4px 5px 18px;
+  border-bottom: 1px solid rgba(245, 158, 11, .2);
+}
+.v26App .v21ScannerTitle { gap: 14px; }
+.v26App .v21ScannerIcon {
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(245, 158, 11, .4);
+  border-radius: 15px;
+  background: rgba(245, 158, 11, .12);
+  color: var(--scanner-orange-soft);
+  box-shadow: 0 8px 24px rgba(245, 158, 11, .1);
+}
+.v26App .v21ScannerTitle small,
+.v26App .v21ScannerResultsHead small { color: var(--scanner-orange-soft) !important; letter-spacing: .14em; }
+.v26App .v21ScannerTitle h3 { margin-top: 6px; font-size: 21px !important; letter-spacing: .01em; }
+.v26App .v21ScannerStatus {
+  padding: 9px 13px;
+  border: 1px solid rgba(245, 158, 11, .34);
+  border-radius: 999px;
+  background: rgba(245, 158, 11, .12);
+  color: var(--scanner-orange-soft);
+  font-size: 10px;
+}
+.v26App .v21ScannerStatus-tamamlandı { border-color: rgba(88, 211, 154, .32); background: rgba(88, 211, 154, .1); color: #8ce8bb; }
+.v26App .v21ScannerStatus-hata { border-color: rgba(255, 129, 120, .34); background: rgba(255, 129, 120, .1); color: #ffaaa2; }
+
+.v26App .v21AutoScanner > .v21ScannerStats {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+.v26App .v21AutoScanner > .v21ScannerStats span {
+  min-height: 78px;
+  align-content: center;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--scanner-card);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05);
+}
+.v26App .v21AutoScanner > .v21ScannerStats small { color: var(--scanner-muted); font-size: 10px; }
+.v26App .v21AutoScanner > .v21ScannerStats b { color: var(--scanner-copy); font-size: 17px; }
+.v26App .v21AutoScanner > .v21ScannerStats em { color: #71818a; font-size: 10px; }
+
+.v26App .v21ScannerResults {
+  margin-top: 18px;
+  padding: 18px;
+  border: 0;
+  border-radius: 17px;
+  background: rgba(7, 10, 13, .64);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .045);
+}
+.v26App .v21ScannerResultsHead { align-items: center; }
+.v26App .v21ScannerResultsHead h4 { margin-top: 6px; color: var(--scanner-copy); font-size: 17px; }
+.v26App .v21ScannerResultsHead > span { padding: 7px 10px; border-radius: 999px; background: rgba(245, 158, 11, .1); color: var(--scanner-orange-soft); font-size: 10px; }
+.v26App .v21ScannerCards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 15px; }
+.v26App .v21Opportunity {
+  min-height: 176px;
+  padding: 17px;
+  border: 1px solid rgba(245, 158, 11, .18);
+  border-top: 3px solid var(--scanner-orange);
+  border-radius: 17px;
+  background: var(--scanner-card-raised);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .2), inset 0 1px rgba(255, 255, 255, .035);
+}
+.v26App .v21Opportunity:hover { border-color: rgba(255, 196, 92, .48); background: #1b2025; box-shadow: 0 16px 30px rgba(0, 0, 0, .28), 0 0 0 1px rgba(245, 158, 11, .08); }
+.v26App .v21Opportunity > header { margin-bottom: 14px; }
+.v26App .v21Opportunity > header b { color: var(--scanner-copy); font-size: 16px; }
+.v26App .v21Opportunity > header small { color: var(--scanner-orange-soft); font-size: 10px; }
+.v26App .v21Opportunity > header em { padding: 5px 8px; border-radius: 999px; background: rgba(245, 158, 11, .12); color: var(--scanner-orange-soft); font-size: 10px; font-style: normal; font-weight: 800; }
+.v26App .v21Opportunity-short { border-top-color: #ff8178; }
+.v26App .v21Opportunity-short > header em { background: rgba(255, 129, 120, .12); color: #ffaaa2; }
+.v26App .v21OpportunityScore strong { color: var(--scanner-orange-soft); font-size: 30px; }
+.v26App .v21OpportunityScore > span { color: var(--scanner-muted); font-size: 11px; }
+.v26App .v21OpportunityScore i { height: 6px; margin-top: 9px; border-radius: 999px; background: #293138; }
+.v26App .v21OpportunityScore i b { border-radius: inherit; background: linear-gradient(90deg, #d97706, var(--scanner-orange-soft)); }
+.v26App .v21OpportunityMeta { gap: 8px; margin-top: 14px; }
+.v26App .v21Opportunity .v21OpportunityMeta span { padding: 8px 9px; border-radius: 10px; background: rgba(255, 255, 255, .035); }
+.v26App .v21Opportunity .v21OpportunityMeta small { color: var(--scanner-muted); font-size: 9px; }
+.v26App .v21Opportunity .v21OpportunityMeta b { color: var(--scanner-copy); font-size: 11px; }
+
+@media (max-width: 900px) {
+  .v26App .v21AutoScanner > .v21ScannerStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .v26App .v21ScannerCards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .v26App .v21AutoScanner { padding: 14px !important; border-radius: 17px !important; }
+  .v26App .v21AutoScanner > header { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .v26App .v21ScannerStatus { align-self: flex-start; }
+  .v26App .v21AutoScanner > .v21ScannerStats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .v26App .v21AutoScanner > .v21ScannerStats span { min-height: 68px; padding: 12px; }
+  .v26App .v21ScannerResults { padding: 13px; }
+  .v26App .v21ScannerCards { grid-template-columns: 1fr; }
+}
 .v26App .v26HomeHeaderStatus i { width: 7px; height: 7px; border-radius: 50%; background: #64748b; }
 .v26App .v26HomeHeaderStatus i.ok { background: #4ade80; box-shadow: 0 0 0 3px rgba(74, 222, 128, .1); }
 .v26App .v26HeaderActions { gap: 6px; }
@@ -9131,4 +9394,434 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 }
 .masterTradeRoute .masterTradeLiveFlow {
   color: #7e93a0;
+}
+
+.v26App .v21AutoScanner {
+  border: 1px solid rgba(245, 158, 11, .32) !important;
+  border-radius: 22px !important;
+  background: linear-gradient(145deg, #0b0f13, #12171c 64%, #1b150d) !important;
+}
+.v26App .v21AutoScanner > header {
+  min-height: 64px;
+  padding: 4px 5px 18px;
+  border-bottom: 1px solid rgba(245, 158, 11, .2) !important;
+}
+.v26App .v21ScannerIcon {
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(245, 158, 11, .4);
+  border-radius: 15px;
+  background: rgba(245, 158, 11, .12);
+  color: #ffc45c;
+}
+.v26App .v21ScannerStatus {
+  padding: 9px 13px;
+  border: 1px solid rgba(245, 158, 11, .34) !important;
+  border-radius: 999px !important;
+  background: rgba(245, 158, 11, .12) !important;
+  color: #ffc45c !important;
+  font-size: 10px;
+}
+.v26App .v21AutoScanner > .v21ScannerStats span {
+  min-height: 78px;
+  padding: 14px 16px;
+  border: 0 !important;
+  border-radius: 15px !important;
+  background: #11161b !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05);
+}
+.v26App .v21AutoScanner > .v21ScannerStats small { color: #95a3aa !important; font-size: 10px !important; }
+.v26App .v21AutoScanner > .v21ScannerStats b { color: #f1f4f5 !important; font-size: 17px !important; }
+.v26App .v21AutoScanner > .v21ScannerStats em { color: #71818a !important; font-size: 10px !important; }
+.v26App .v21ScannerResults {
+  margin-top: 18px;
+  padding: 18px !important;
+  border: 0 !important;
+  border-radius: 17px !important;
+  background: rgba(7, 10, 13, .64) !important;
+}
+.v26App .v21ScannerResultsHead h4 { color: #f1f4f5 !important; font-size: 17px !important; }
+.v26App .v21ScannerResultsHead > span { background: rgba(245, 158, 11, .1) !important; color: #ffc45c !important; }
+.v26App .v21Opportunity {
+  min-height: 176px;
+  padding: 17px;
+  border: 1px solid rgba(245, 158, 11, .18) !important;
+  border-top: 3px solid #f59e0b !important;
+  border-radius: 17px !important;
+  background: #171c22 !important;
+}
+.v26App .v21Opportunity > header b { color: #f1f4f5 !important; font-size: 16px !important; }
+.v26App .v21Opportunity > header em { border-radius: 999px; background: rgba(245, 158, 11, .12); color: #ffc45c; }
+.v26App .v21OpportunityScore strong { color: #ffc45c !important; font-size: 30px !important; }
+.v26App .v21OpportunityScore i { background: #293138 !important; }
+.v26App .v21OpportunityScore i b { background: linear-gradient(90deg, #d97706, #ffc45c) !important; }
+@media (max-width: 900px) {
+  .v26App .v21AutoScanner > .v21ScannerStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .v26App .v21ScannerCards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .v26App .v21AutoScanner { padding: 14px !important; border-radius: 17px !important; }
+  .v26App .v21AutoScanner > header { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .v26App .v21AutoScanner > .v21ScannerStats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .v26App .v21ScannerCards { grid-template-columns: 1fr; }
+}
+
+.v26App .v21Workspace:has(.v21AutoLayout) {
+  padding: 22px !important;
+  border: 1px solid rgba(245, 158, 11, .28) !important;
+  border-radius: 24px !important;
+  background: linear-gradient(145deg, #090d11, #11171c 68%, #1a140c) !important;
+  box-shadow: 0 24px 54px rgba(0, 0, 0, .3), inset 0 1px rgba(255, 255, 255, .035);
+}
+.v26App .v21Workspace:has(.v21AutoLayout) > .v21WorkspaceHead {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center !important;
+  gap: 24px;
+  padding: 4px 4px 20px !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(245, 158, 11, .18) !important;
+}
+.v26App .v21Workspace:has(.v21AutoLayout) > .v21WorkspaceHead h2 { color: #f5f1e9 !important; font-size: 24px !important; }
+.v26App .v21Workspace:has(.v21AutoLayout) > .v21WorkspaceHead p { color: #a5afb3 !important; font-size: 12px !important; line-height: 1.55; }
+.v26App .v21Workspace:has(.v21AutoLayout) > .v21WorkspaceHead > div:first-child > span { color: #ffc45c !important; letter-spacing: .14em; }
+.v26App .v21Workspace:has(.v21AutoLayout) .v21HeaderActions {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 300px;
+}
+.v26App .v21Workspace:has(.v21AutoLayout) .v21HeaderActions .v21Stopped,
+.v26App .v21Workspace:has(.v21AutoLayout) .v21HeaderActions .v21Running {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid rgba(245, 158, 11, .38) !important;
+  border-radius: 999px !important;
+  background: rgba(245, 158, 11, .1) !important;
+  color: #ffc45c !important;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.v26App .v21Workspace:has(.v21AutoLayout) .v21HeaderActions .v21ContextCta {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 15px;
+  border: 1px solid rgba(245, 158, 11, .5) !important;
+  border-radius: 999px !important;
+  background: #f59e0b !important;
+  color: #1c1305 !important;
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.v26App .v21Workspace:has(.v21AutoLayout) .v21HeaderActions .v21ContextCta:hover { background: #ffc45c !important; }
+.v26App .v21Workspace:has(.v21AutoLayout) .v21AutoLayout { gap: 14px; margin-top: 18px; }
+.v26App .v21Workspace:has(.v21AutoLayout) .v21AutoLayout > .v21AutoControl,
+.v26App .v21Workspace:has(.v21AutoLayout) .v21AutoRules,
+.v26App .v21Workspace:has(.v21AutoLayout) .v21AutoDiagnostics,
+.v26App .v21Workspace:has(.v21AutoLayout) .v21AutoScanner {
+  border: 0 !important;
+  border-radius: 18px !important;
+  background: #10161b !important;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .22), inset 0 1px rgba(255, 255, 255, .035);
+}
+.v26App .v21Workspace:has(.v21AutoLayout) .v21AutoLayout > .v21AutoControl > header,
+.v26App .v21Workspace:has(.v21AutoLayout) .v21AutoRules > header {
+  border: 0 !important;
+  padding-bottom: 13px;
+}
+.v26App .v21Workspace:has(.v21AutoLayout) .v21AutoDecision {
+  border: 0 !important;
+  border-radius: 14px !important;
+  background: #171d22 !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .045);
+}
+.v26App .v21ScannerTitle {
+  display: flex !important;
+  align-items: center;
+  min-width: 0;
+  gap: 14px;
+}
+.v26App .v21ScannerIcon {
+  display: grid !important;
+  place-items: center;
+  flex: 0 0 46px;
+  width: 46px !important;
+  height: 46px !important;
+  box-sizing: border-box;
+}
+.v26App .v21ScannerIcon svg { display: block; width: 21px; height: 21px; }
+.v26App .v21AutoScanner > header { gap: 18px; }
+.v26App .v21AutoScanner > header,
+.v26App .v21ScannerResults { border-bottom: 0 !important; }
+
+@media (max-width: 900px) {
+  .v26App .v21Workspace:has(.v21AutoLayout) > .v21WorkspaceHead { grid-template-columns: 1fr; gap: 15px; }
+  .v26App .v21Workspace:has(.v21AutoLayout) .v21HeaderActions { justify-content: flex-start; min-width: 0; }
+}
+@media (max-width: 600px) {
+  .v26App .v21Workspace:has(.v21AutoLayout) { padding: 14px !important; border-radius: 18px !important; }
+  .v26App .v21Workspace:has(.v21AutoLayout) > .v21WorkspaceHead h2 { font-size: 20px !important; }
+  .v26App .v21Workspace:has(.v21AutoLayout) .v21HeaderActions { display: grid !important; grid-template-columns: 1fr; }
+  .v26App .v21Workspace:has(.v21AutoLayout) .v21HeaderActions > * { width: 100%; box-sizing: border-box; }
+}
+
+.v26App .v21AutoDiagnostics {
+  margin-top: 14px;
+  padding: 19px !important;
+  border: 0 !important;
+  border-radius: 19px !important;
+  background: #0d1318 !important;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, .22), inset 0 1px rgba(255, 255, 255, .035);
+}
+.v26App .v21AutoDiagnostics > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 0 15px !important;
+  border: 0 !important;
+}
+.v26App .v21AutoDiagnostics > header small { color: #ffc45c !important; letter-spacing: .14em; font-size: 10px !important; }
+.v26App .v21AutoDiagnostics > header h3 { margin-top: 6px; color: #f1f4f5 !important; font-size: 19px !important; }
+.v26App .v21AutoDiagnostics > header > b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(245, 158, 11, .34);
+  border-radius: 999px;
+  background: rgba(245, 158, 11, .1);
+  color: #ffc45c;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.v26App .v21AutoDiagnostics > .v21ScannerStats {
+  display: grid !important;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 0;
+}
+.v26App .v21AutoDiagnostics > .v21ScannerStats > span {
+  display: grid !important;
+  gap: 6px;
+  min-width: 0;
+  min-height: 75px;
+  align-content: center;
+  padding: 12px 13px;
+  border: 0 !important;
+  border-radius: 13px;
+  background: #151b20 !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .045);
+}
+.v26App .v21AutoDiagnostics > .v21ScannerStats small { color: #95a3aa !important; font-size: 9px !important; letter-spacing: .08em; }
+.v26App .v21AutoDiagnostics > .v21ScannerStats b { overflow: hidden; color: #f1f4f5 !important; font-size: 14px !important; text-overflow: ellipsis; white-space: nowrap; }
+.v26App .v21AutoDiagnostics > .v21ScannerStats em { overflow: hidden; color: #71818a !important; font-size: 9px !important; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.v26App .v21AutoDiagnostics > .v21OpportunityMeta {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+.v26App .v21AutoDiagnostics > .v21OpportunityMeta > span {
+  display: grid !important;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: rgba(245, 158, 11, .055);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, .12);
+}
+.v26App .v21AutoDiagnostics > .v21OpportunityMeta small { color: #a9a097 !important; font-size: 9px !important; letter-spacing: .08em; }
+.v26App .v21AutoDiagnostics > .v21OpportunityMeta b { overflow: hidden; color: #e9e5df !important; font-size: 11px !important; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1100px) {
+  .v26App .v21AutoDiagnostics > .v21ScannerStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .v26App .v21AutoDiagnostics { padding: 14px !important; border-radius: 16px !important; }
+  .v26App .v21AutoDiagnostics > header { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .v26App .v21AutoDiagnostics > .v21ScannerStats,
+  .v26App .v21AutoDiagnostics > .v21OpportunityMeta { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .v26App .v21AutoDiagnostics > .v21OpportunityMeta > span:last-child { grid-column: 1 / -1; }
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21PerformanceCenter {
+  grid-column: 1 / -1 !important;
+  width: auto;
+  min-width: 0;
+}
+.v26App .v21PerformanceCenter {
+  padding: 22px !important;
+  border: 1px solid rgba(245, 158, 11, .28) !important;
+  border-radius: 24px !important;
+  background: linear-gradient(145deg, #090d11, #11171c 68%, #1a140c) !important;
+  box-shadow: 0 24px 54px rgba(0, 0, 0, .3), inset 0 1px rgba(255, 255, 255, .035);
+}
+.v26App .v21PerformanceCenter > .v21WorkspaceHead {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center !important;
+  gap: 22px;
+  padding: 4px 4px 20px !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(245, 158, 11, .18) !important;
+}
+.v26App .v21PerformanceCenter > .v21WorkspaceHead h2 { color: #f5f1e9 !important; font-size: 24px !important; }
+.v26App .v21PerformanceCenter > .v21WorkspaceHead p { color: #a5afb3 !important; font-size: 12px !important; line-height: 1.55; }
+.v26App .v21PerformanceCenter > .v21WorkspaceHead > div:first-child > span { color: #ffc45c !important; letter-spacing: .14em; }
+.v26App .v21PerformanceCenter .v21HeaderActions {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.v26App .v21PerformanceCenter .v21PeriodPicker {
+  display: flex !important;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent;
+}
+.v26App .v21PerformanceCenter .v21PeriodPicker button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 0 !important;
+  border-radius: 9px !important;
+  background: #151b20 !important;
+  color: #9aa8ae !important;
+  font-size: 10px;
+  font-weight: 800;
+}
+.v26App .v21PerformanceCenter .v21PeriodPicker button:hover,
+.v26App .v21PerformanceCenter .v21PeriodPicker button.active {
+  background: #f59e0b !important;
+  color: #1b1205 !important;
+}
+.v26App .v21PerformanceCenter .v21PeriodPicker button + button { margin-left: 2px; }
+.v26App .v21PerformanceCenter .v21ContextCta {
+  min-height: 38px;
+  padding: 0 15px;
+  border: 1px solid rgba(245, 158, 11, .5) !important;
+  border-radius: 999px !important;
+  background: #f59e0b !important;
+  color: #1b1205 !important;
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.v26App .v21PerformanceCenter .v21PerformanceHero {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+}
+.v26App .v21PerformanceCenter .v21PerformanceHero > span,
+.v26App .v21PerformanceCenter .v21PerformanceHero > article {
+  min-width: 0;
+  min-height: 106px;
+  padding: 17px;
+  border: 0 !important;
+  border-radius: 16px;
+  background: #151b20 !important;
+}
+.v26App .v21PerformanceCenter .v21PerformanceHero small { color: #95a3aa !important; font-size: 10px !important; letter-spacing: .08em; }
+.v26App .v21PerformanceCenter .v21PerformanceHero b { display: block; margin-top: 13px; color: #ffc45c !important; font-size: 23px !important; }
+.v26App .v21PerformanceCenter .v21PerformanceHero em { display: block; margin-top: 7px; color: #71818a !important; font-size: 10px; font-style: normal; }
+.v26App .v21PerformanceCenter .v21PerformanceGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+.v26App .v21PerformanceCenter .v21PerformanceGrid > article {
+  min-width: 0;
+  padding: 14px;
+  border: 0 !important;
+  border-radius: 13px;
+  background: #10161b !important;
+}
+.v26App .v21PerformanceCenter .v21PerformanceGrid small { color: #95a3aa !important; font-size: 9px !important; }
+.v26App .v21PerformanceCenter .v21PerformanceGrid b { display: block; margin-top: 7px; color: #f1f4f5 !important; font-size: 14px !important; }
+.v26App .v21PerformanceCenter .v21MetricRow {
+  display: grid !important;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 14px;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+}
+.v26App .v21PerformanceCenter .v21MetricRow > span {
+  min-width: 0;
+  padding: 13px;
+  border: 0 !important;
+  border-radius: 13px;
+  background: #151b20 !important;
+}
+.v26App .v21PerformanceCenter .v21MetricRow small { color: #95a3aa !important; font-size: 9px !important; }
+.v26App .v21PerformanceCenter .v21MetricRow b { display: block; margin-top: 6px; color: #f1f4f5 !important; font-size: 14px !important; }
+.v26App .v21PerformanceCenter .v21VerifiedAnalytics {
+  margin-top: 14px;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+.v26App .v21PerformanceCenter .v21EquityCurve {
+  margin-top: 14px;
+  padding: 18px;
+  border: 0 !important;
+  border-radius: 16px;
+  background: #10161b !important;
+}
+@media (max-width: 900px) {
+  .v26App .v21PerformanceCenter > .v21WorkspaceHead { grid-template-columns: 1fr; gap: 15px; }
+  .v26App .v21PerformanceCenter .v21HeaderActions { justify-content: flex-start; }
+  .v26App .v21PerformanceCenter .v21PerformanceHero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v26App .v21PerformanceCenter .v21PerformanceGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .v26App .v21PerformanceCenter .v21MetricRow { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .v26App .v21PerformanceCenter { padding: 14px !important; border-radius: 18px !important; }
+  .v26App .v21PerformanceCenter > .v21WorkspaceHead h2 { font-size: 20px !important; }
+  .v26App .v21PerformanceCenter .v21HeaderActions { display: grid !important; grid-template-columns: 1fr; width: 100%; }
+  .v26App .v21PerformanceCenter .v21PeriodPicker { justify-content: space-between; }
+  .v26App .v21PerformanceCenter .v21PeriodPicker button { flex: 1; padding: 0 6px; }
+  .v26App .v21PerformanceCenter .v21ContextCta { width: 100%; }
+  .v26App .v21PerformanceCenter .v21PerformanceHero,
+  .v26App .v21PerformanceCenter .v21PerformanceGrid,
+  .v26App .v21PerformanceCenter .v21MetricRow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21PerformanceCenter {
+  border: 0 !important;
+  border-radius: 24px !important;
+  background: linear-gradient(145deg, #090d11, #11171c 68%, #1a140c) !important;
+  box-shadow: 0 24px 54px rgba(0, 0, 0, .3) !important;
+}
+#root .v26App.workspaceRoute .binanceDemoDeck > section.v21PerformanceCenter {
+  border: 0 !important;
+  border-radius: 24px !important;
+  background: linear-gradient(145deg, #090d11, #11171c 68%, #1a140c) !important;
+}
+#root .v26App.workspaceRoute .binanceDemoDeck > section.v21PerformanceCenter .v21PeriodPicker button {
+  border: 0 !important;
+  border-radius: 9px !important;
 }

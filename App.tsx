@@ -5,6 +5,7 @@ import { API_BASE } from './api'
 
 const BinanceDemo = lazy(() => import('./BinanceDemo'))
 const CommercialHub = lazy(() => import('./CommercialHub'))
+const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
 
 type Market = { symbol:string; display:string; price:number; change:number; volume:number; direction?:string; confidence?:number; volume_ratio?:number; breakout?:boolean }
 type Candle = { time:number; open:number; high:number; low:number; close:number; volume:number }
@@ -129,7 +130,7 @@ type V11Event = { kind:string;message:string;created_at:string;paper_only:boolea
 type V11Intervention = { active:boolean;status:string;reason:string;triggered_at:string|null;paper_orchestrator_stopped:boolean;stopped_engines?:string[] }
 type V11Risk = { version:string;enabled:boolean;busy:boolean;status:string;interval:string;capital:number;universe:string[];simulations:number;horizon_candles:number;cycles:number;latest_report:V11Report|null;approved_allocations:V11Allocation[];intervention:V11Intervention;events:V11Event[];started_at:string|null;stopped_at:string|null;last_tick_at:string|null;last_action:string;orders_enabled:boolean;testnet_orders_enabled:boolean;mode:string;safety_note:string }
 type WorkspaceTab = 'dashboard'|'risk'|'strategy'|'live'|'automation'|'records'
-type WorkspaceView = 'dashboard'|'v22-commercial'|'v20-demo'|'v20-limit'|'v20-autopilot'|'v20-ghost'|'v20-certification'|'risk-command'|'strategy-evolution'|'strategy-future'|'strategy-lab'|'live-health'|'live-twin'|'automation-orchestra'|'automation-grid'|'automation-plan'|'records-command'|'records-journal'|'records-archive'
+type WorkspaceView = 'dashboard'|'v22-commercial'|'pricing'|'billing'|'v20-demo'|'v20-limit'|'v20-autopilot'|'v20-ghost'|'v20-certification'|'risk-command'|'strategy-evolution'|'strategy-future'|'strategy-lab'|'live-health'|'live-twin'|'automation-orchestra'|'automation-grid'|'automation-plan'|'records-command'|'records-journal'|'records-archive'
 
 const objectValue = (value:unknown):Record<string,unknown>|null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string,unknown> : null
 const numberValue = (value:unknown, fallback=0):number => {
@@ -1115,6 +1116,8 @@ export default function App() {
   const workspaceViews: {key:WorkspaceView;parent:WorkspaceTab;label:string;version:string;title:string;description:string}[] = [
     {key:'dashboard',parent:'dashboard',label:'Ana Kokpit',version:'V20',title:'Ultimate Unified Kokpit',description:'Canlı piyasa, grafik, yapay zekâ kararı ve Paper hesap özeti.'},
     {key:'v22-commercial',parent:'dashboard',label:'V25 Yönetim & Canlı Kasa',version:'V25',title:'Live Guard, Satış, Lisans ve Robot Operasyon Merkezi',description:'Yerel DPAPI anahtar kasası, 30 gün/100 Demo yayın kapısı, kullanıcı risk limitleri, süreli canlı emir kilidi, otomatik karar ve acil durdurma.'},
+    {key:'pricing',parent:'dashboard',label:'Master Trade Aboneliği',version:'BILL',title:'Master Trade aboneliği',description:'7 günlük deneme veya Master Mode ile güvenli Stripe erişimi.'},
+    {key:'billing',parent:'dashboard',label:'Abonelik Yönetimi',version:'BILL',title:'Abonelik yönetimi',description:'Deneme, ödeme, yenileme ve Master Trade erişim durumunu yönet.'},
     {key:'v20-demo',parent:'dashboard',label:'V21 Demo Complete',version:'V21',title:'Binance Futures Demo Komuta Merkezi',description:'İşlem Masası, Risk Kasası, Canlı Günlük, kontrollü otomasyon, backtest ve Demo sertifikası; gerçek hesap kanalı yok.'},
     {key:'v20-limit',parent:'dashboard',label:'Limit & Pozisyon Haritası',version:'V20.2',title:'Manuel Limit ve Pozisyon Haritası',description:'Kendi limit, stop, hedef ve grid kademelerini ayarla; bekleyen ve açık Paper planını grafikte izle.'},
     {key:'v20-autopilot',parent:'dashboard',label:'Paper Autopilot',version:'V20',title:'Çok Aşamalı Paper Autopilot',description:'TP1–TP3 kısmi kâr, zarar durdurma, zaman aşımı ve profil kontrolü.'},
@@ -1169,6 +1172,7 @@ export default function App() {
     {activeWorkspaceViews.length > 1 && <nav className="extensionNav" aria-label="Uzantı sekmeleri">{activeWorkspaceViews.map(item => <button type="button" key={item.key} className={workspaceView === item.key ? 'activeExtension' : ''} aria-current={workspaceView === item.key ? 'page' : undefined} onClick={() => setWorkspaceView(item.key)}><span>{item.version}</span><b>{item.label}</b></button>)}</nav>}
     <Suspense fallback={<section className="moduleLazyLoading">Profesyonel çalışma alanı yükleniyor…</section>}>
       <CommercialHub active={workspaceView === 'v22-commercial'} onNavigate={target => navigateWorkspace(target as WorkspaceView)}/>
+      <SubscriptionCenter mode={workspaceView === 'billing' ? 'billing' : 'pricing'} onNavigate={target => navigateWorkspace(target)}/>
       <BinanceDemo active={workspaceView === 'v20-demo'} symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} chart={workspaceView === 'v20-demo' ? <Chart symbol={symbol} interval={interval} horizon={v8Horizon} notional={v8Notional} onAnalysis={setAnalysis} onFutureLab={setFutureLab} onLivePrice={setLivePrice} onStream={setStreamLive}/> : null}/>
     </Suspense>
     <section className={`paperPilotRibbon${panelVisibility('dashboard')}`}>

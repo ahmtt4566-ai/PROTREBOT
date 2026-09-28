@@ -48,7 +48,16 @@ from .commercial_core import (
 from .commerce_core import sanitize_business_settings
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .web_security import MIN_ACCESS_TOKEN_LENGTH, bootstrap_access_allowed, env_flag
-from .subscription_core import PLAN_CATALOG as SUBSCRIPTION_PLAN_CATALOG, TRIAL_DAYS, active_subscription, entitlement_snapshot
+from .subscription_core import (
+    ACCESS_STATUSES,
+    MASTER_MODE_PRICE,
+    PAST_DUE_GRACE_SECONDS,
+    PLAN_CATALOG as SUBSCRIPTION_PLAN_CATALOG,
+    TRIAL_DAYS,
+    active_subscription,
+    canonical_status,
+    entitlement_snapshot,
+)
 
 try:
     import stripe
@@ -191,7 +200,7 @@ def sanitize_state(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return base
     for key in (
-        "users", "profiles", "subscriptions", "auth_tokens", "stripe_event_ids", "licenses", "pairing_codes", "agents", "audit", "plans",
+        "users", "profiles", "subscriptions", "auth_tokens", "stripe_event_ids", "stripe_checkout_sessions", "licenses", "pairing_codes", "agents", "audit", "plans",
         "release_evidence", "leads", "demo_invoices", "support_tickets", "acceptances",
     ):
         if key in payload and isinstance(payload[key], type(base[key])):
@@ -265,6 +274,52 @@ async def ensure_commercial_schema(application: Any) -> None:
         ON trading_accounts (user_id)
         """
     )
+    await pool.execute(
+        """
+        CREATE TABLE IF NOT EXISTS subscriptions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          stripe_customer_id TEXT,
+          stripe_subscription_id TEXT UNIQUE,
+          stripe_price_id TEXT,
+          plan TEXT NOT NULL CHECK (plan IN ('TRIAL', 'MASTER_MODE')),
+          status TEXT NOT NULL CHECK (status IN ('TRIALING', 'ACTIVE', 'PAST_DUE', 'UNPAID', 'CANCELLED', 'EXPIRED')),
+          trial_start TIMESTAMPTZ,
+          trial_end TIMESTAMPTZ,
+          current_period_start TIMESTAMPTZ,
+          current_period_end TIMESTAMPTZ,
+          cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+          canceled_at TIMESTAMPTZ,
+          last_payment_status TEXT,
+          last_payment_at TIMESTAMPTZ,
+          failed_payment_attempts INTEGER NOT NULL DEFAULT 0,
+          grace_until TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    await pool.execute("CREATE INDEX IF NOT EXISTS subscriptions_user_id_idx ON subscriptions (user_id)")
+    await pool.execute("CREATE INDEX IF NOT EXISTS subscriptions_stripe_customer_id_idx ON subscriptions (stripe_customer_id)")
+    await pool.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_one_recoverable_per_user_idx
+        ON subscriptions (user_id)
+        WHERE status IN ('TRIALING', 'ACTIVE', 'PAST_DUE')
+        """
+    )
+    await pool.execute(
+        """
+        CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+          id TEXT PRIMARY KEY,
+          stripe_event_id TEXT NOT NULL UNIQUE,
+          event_type TEXT NOT NULL,
+          processed BOOLEAN NOT NULL DEFAULT FALSE,
+          processed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
 
 
 async def persist_v22_commercial(application: Any) -> bool:
@@ -294,6 +349,59 @@ async def persist_v22_commercial(application: Any) -> bool:
     except Exception:
         rt["storage_status"] = "YEREL_YEDEK"
         return False
+
+
+async def persist_subscription_record(application: Any, row: dict[str, Any]) -> None:
+    pool = getattr(application.state, "db_pool", None)
+    subscription_id = str(row.get("stripe_subscription_id") or row.get("stripeSubscriptionId") or "").strip()
+    if pool is None or not subscription_id:
+                return
+    await pool.execute(
+                """
+                INSERT INTO subscriptions (
+                    id, user_id, stripe_customer_id, stripe_subscription_id, stripe_price_id,
+                    plan, status, trial_start, trial_end, current_period_start, current_period_end,
+                    cancel_at_period_end, canceled_at, last_payment_status, last_payment_at,
+                    failed_payment_attempts, grace_until, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9::timestamptz,
+                                    $10::timestamptz, $11::timestamptz, $12, $13::timestamptz, $14,
+                                    $15::timestamptz, $16, $17::timestamptz, NOW())
+                ON CONFLICT (stripe_subscription_id) DO UPDATE SET
+                    user_id = EXCLUDED.user_id,
+                    stripe_customer_id = EXCLUDED.stripe_customer_id,
+                    stripe_price_id = EXCLUDED.stripe_price_id,
+                    plan = EXCLUDED.plan,
+                    status = EXCLUDED.status,
+                    trial_start = EXCLUDED.trial_start,
+                    trial_end = EXCLUDED.trial_end,
+                    current_period_start = EXCLUDED.current_period_start,
+                    current_period_end = EXCLUDED.current_period_end,
+                    cancel_at_period_end = EXCLUDED.cancel_at_period_end,
+                    canceled_at = EXCLUDED.canceled_at,
+                    last_payment_status = EXCLUDED.last_payment_status,
+                    last_payment_at = EXCLUDED.last_payment_at,
+                    failed_payment_attempts = EXCLUDED.failed_payment_attempts,
+                    grace_until = EXCLUDED.grace_until,
+                    updated_at = NOW()
+                """,
+                str(row.get("id") or uuid.uuid4().hex),
+                str(row.get("user_id") or ""),
+                row.get("stripe_customer_id") or row.get("stripeCustomerId"),
+                subscription_id,
+                row.get("stripe_price_id"),
+                str(row.get("plan") or "MASTER_MODE"),
+                canonical_status(row.get("status")),
+                row.get("trial_start"),
+                row.get("trial_end"),
+                row.get("current_period_start"),
+                row.get("current_period_end"),
+                bool(row.get("cancel_at_period_end", False)),
+                row.get("canceled_at"),
+                row.get("last_payment_status"),
+                row.get("last_payment_at"),
+                int(row.get("failed_payment_attempts", 0)),
+                row.get("grace_until"),
+        )
 
 
 async def restore_v22_commercial(application: Any) -> bool:
@@ -545,8 +653,12 @@ class SubscriptionRequest(BaseModel):
 
 
 class CheckoutRequest(BaseModel):
-    plan: Literal["STARTER", "PRO", "ELITE"]
-    billing_interval: Literal["monthly", "annual"] = "monthly"
+    plan: Literal["TRIAL", "MASTER_MODE"]
+    billing_interval: Literal["monthly"] = "monthly"
+
+
+class CancellationRequest(BaseModel):
+    immediate: bool = False
 
 
 class TradingAccountLinkRequest(BaseModel):
@@ -900,38 +1012,24 @@ async def v22_delete_profile(request: Request):
 
 
 def subscription_for_user(state: dict[str, Any], user_id: str) -> dict[str, Any]:
-    subscription = active_subscription(state, user_id)
-    if subscription:
-        return entitlement_snapshot(state, user_id)
-    license_row = active_license(state, user_id)
-    if not license_row:
-        return entitlement_snapshot(state, user_id)
-    plan = str(license_row.get("plan") or "STARTER").upper()
-    catalog = SUBSCRIPTION_PLAN_CATALOG.get(plan, SUBSCRIPTION_PLAN_CATALOG["STARTER"])
-    return {
-        "status": "ACTIVE", "plan": plan, "billingInterval": "annual", "trialStart": None,
-        "trialEnd": None, "currentPeriodStart": license_row.get("starts_at"),
-        "currentPeriodEnd": license_row.get("expires_at"), "currentPrice": catalog["annual_price"],
-        "features": catalog["features"], "entitlements": catalog["entitlements"],
-        "cancelAtPeriodEnd": False, "mode": "DEVELOPMENT",
-    }
+    # Legacy licenses remain available to admin/reporting surfaces, but never
+    # authorize the Stripe-backed Master Trade entitlement.
+    return entitlement_snapshot(state, user_id)
 
 
 def access_snapshot(state: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     subscription = subscription_for_user(state, user["id"])
-    plan = str(subscription.get("plan") or "FREE").upper()
     is_admin = user.get("role") == "OWNER"
     return {
         "isAdmin": is_admin,
-        "canAccessMasterTrade": is_admin or plan in {"PRO", "ELITE"},
+        "canAccessMasterTrade": is_admin or bool(subscription.get("master_trade_access")),
         "entitlements": subscription.get("entitlements", {}),
     }
 
 
 def stripe_configured() -> bool:
-    required = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "APP_BASE_URL")
-    price_keys = tuple(f"STRIPE_PRICE_{plan}_{interval}" for plan in ("STARTER", "PRO", "ELITE") for interval in ("MONTHLY", "YEARLY"))
-    return bool(stripe and all(os.getenv(key, "").strip() for key in (*required, *price_keys)))
+    required = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "APP_BASE_URL", "STRIPE_PRICE_MASTER_MODE_MONTHLY")
+    return bool(stripe and all(os.getenv(key, "").strip() for key in required))
 
 
 def stripe_base_url() -> str:
@@ -943,9 +1041,9 @@ def stripe_base_url() -> str:
 
 
 def stripe_price_id(plan: str, interval: str) -> str:
-    if plan not in SUBSCRIPTION_PLAN_CATALOG or interval not in {"monthly", "annual"}:
-        raise HTTPException(422, "Invalid subscription plan or billing interval")
-    key = f"STRIPE_PRICE_{plan}_{'YEARLY' if interval == 'annual' else 'MONTHLY'}"
+    if plan not in {"TRIAL", "MASTER_MODE"} or interval != "monthly":
+        raise HTTPException(422, "Invalid subscription product")
+    key = "STRIPE_PRICE_MASTER_MODE_MONTHLY"
     price_id = os.getenv(key, "").strip()
     if not price_id:
         raise HTTPException(503, "Stripe price mapping is not configured")
@@ -956,6 +1054,19 @@ def stripe_value(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, dict):
         return value.get(key, default)
     return getattr(value, key, default)
+
+
+def validate_master_mode_price(price: Any) -> None:
+    """Fail closed unless the configured Stripe Price is the approved product."""
+    if bool(stripe_value(price, "active", True)) is False:
+        raise HTTPException(503, "Stripe Master Mode price is inactive")
+    if int(stripe_value(price, "unit_amount", 0) or 0) != 11_990:
+        raise HTTPException(503, "Stripe Master Mode price must be 119.90 USD")
+    if str(stripe_value(price, "currency", "")).lower() != "usd":
+        raise HTTPException(503, "Stripe Master Mode price must use USD")
+    recurring = stripe_value(price, "recurring", {}) or {}
+    if str(stripe_value(recurring, "interval", "")).lower() != "month" or int(stripe_value(recurring, "interval_count", 1) or 0) != 1:
+        raise HTTPException(503, "Stripe Master Mode price must recur monthly")
 
 
 def stripe_customer_for_user(state: dict[str, Any], user_id: str) -> str | None:
@@ -970,7 +1081,15 @@ def subscription_user_for_customer(state: dict[str, Any], customer_id: str | Non
 
 
 def normalize_stripe_status(value: Any) -> str:
-    return {"active": "ACTIVE", "trialing": "TRIAL", "past_due": "PAST_DUE", "canceled": "CANCELED", "unpaid": "PAST_DUE", "incomplete": "PAST_DUE", "incomplete_expired": "CANCELED"}.get(str(value or "").lower(), "FREE")
+    return {
+        "active": "ACTIVE",
+        "trialing": "TRIALING",
+        "past_due": "PAST_DUE",
+        "unpaid": "UNPAID",
+        "canceled": "CANCELLED",
+        "incomplete": "PAST_DUE",
+        "incomplete_expired": "EXPIRED",
+    }.get(str(value or "").lower(), "EXPIRED")
 
 
 def upsert_stripe_subscription(state: dict[str, Any], payload: Any, *, fallback_user_id: str | None = None, fallback_plan: str | None = None, fallback_interval: str | None = None) -> dict[str, Any]:
@@ -983,15 +1102,48 @@ def upsert_stripe_subscription(state: dict[str, Any], payload: Any, *, fallback_
     data = stripe_value(items, "data", []) or []
     price = stripe_value(data[0], "price", {}) if data else {}
     price_id = str(stripe_value(price, "id") or "")
-    reverse = next(((plan, interval) for plan in SUBSCRIPTION_PLAN_CATALOG for interval in ("monthly", "annual") if price_id and os.getenv(f"STRIPE_PRICE_{plan}_{'YEARLY' if interval == 'annual' else 'MONTHLY'}", "").strip() == price_id), (fallback_plan or metadata.get("plan") or "STARTER", fallback_interval or metadata.get("billing_interval") or "monthly"))
-    plan, interval = reverse
+    plan = str(fallback_plan or metadata.get("plan") or "MASTER_MODE").upper()
+    if plan == "TRIAL":
+        plan = "TRIAL"
+    elif plan != "MASTER_MODE":
+        plan = "MASTER_MODE"
+    interval = "monthly"
+    if price_id and price_id != os.getenv("STRIPE_PRICE_MASTER_MODE_MONTHLY", "").strip():
+        raise HTTPException(422, "Stripe price is not an approved ProTreBot price")
     status = normalize_stripe_status(stripe_value(payload, "status"))
     now = now_iso()
-    row = next((item for item in reversed(state.setdefault("subscriptions", [])) if item.get("stripeSubscriptionId") == str(stripe_value(payload, "id") or "")), None)
+    stripe_subscription_id = str(stripe_value(payload, "id") or "")
+    row = next(
+        (
+            item for item in reversed(state.setdefault("subscriptions", []))
+            if str(item.get("stripe_subscription_id") or item.get("stripeSubscriptionId") or "") == stripe_subscription_id
+        ),
+        None,
+    )
     if row is None:
         row = {"id": uuid.uuid4().hex, "user_id": user_id}
         state["subscriptions"].append(row)
-    row.update({"status": status, "plan": plan, "billingInterval": interval, "stripeCustomerId": customer_id, "stripeSubscriptionId": str(stripe_value(payload, "id") or "") or None, "currentPeriodStart": datetime.fromtimestamp(int(stripe_value(payload, "current_period_start") or 0), timezone.utc).isoformat() if stripe_value(payload, "current_period_start") else row.get("currentPeriodStart"), "currentPeriodEnd": datetime.fromtimestamp(int(stripe_value(payload, "current_period_end") or 0), timezone.utc).isoformat() if stripe_value(payload, "current_period_end") else row.get("currentPeriodEnd"), "cancelAtPeriodEnd": bool(stripe_value(payload, "cancel_at_period_end", False)), "currentPrice": SUBSCRIPTION_PLAN_CATALOG[plan]["annual_price"] if interval == "annual" else SUBSCRIPTION_PLAN_CATALOG[plan]["monthly_price"], "provider": "STRIPE", "updatedAt": now})
+    current_start = datetime.fromtimestamp(int(stripe_value(payload, "current_period_start") or 0), timezone.utc).isoformat() if stripe_value(payload, "current_period_start") else row.get("current_period_start")
+    current_end = datetime.fromtimestamp(int(stripe_value(payload, "current_period_end") or 0), timezone.utc).isoformat() if stripe_value(payload, "current_period_end") else row.get("current_period_end")
+    trial_start = datetime.fromtimestamp(int(stripe_value(payload, "trial_start") or 0), timezone.utc).isoformat() if stripe_value(payload, "trial_start") else row.get("trial_start")
+    trial_end = datetime.fromtimestamp(int(stripe_value(payload, "trial_end") or 0), timezone.utc).isoformat() if stripe_value(payload, "trial_end") else row.get("trial_end")
+    row.update({
+        "status": status,
+        "plan": plan,
+        "billing_interval": interval,
+        "stripe_customer_id": customer_id,
+        "stripe_subscription_id": str(stripe_value(payload, "id") or "") or None,
+        "stripe_price_id": price_id or os.getenv("STRIPE_PRICE_MASTER_MODE_MONTHLY", "").strip() or None,
+        "current_period_start": current_start,
+        "current_period_end": current_end,
+        "trial_start": trial_start,
+        "trial_end": trial_end,
+        "cancel_at_period_end": bool(stripe_value(payload, "cancel_at_period_end", False)),
+        "current_price": MASTER_MODE_PRICE,
+        "last_payment_status": row.get("last_payment_status"),
+        "provider": "STRIPE",
+        "updated_at": now,
+    })
     return row
 
 
@@ -1005,18 +1157,37 @@ def apply_stripe_event(state: dict[str, Any], event: Any) -> bool:
         return False
     event_data = stripe_value(stripe_value(event, "data", {}), "object", {})
     if event_type == "checkout.session.completed":
+        # Checkout completion only proves that Stripe created the session. The
+        # subscription webhook is the first authoritative entitlement event.
         metadata = stripe_value(event_data, "metadata", {}) or {}
-        upsert_stripe_subscription(state, {"id": stripe_value(event_data, "subscription"), "customer": stripe_value(event_data, "customer"), "status": "active", "metadata": metadata}, fallback_user_id=metadata.get("user_id"), fallback_plan=metadata.get("plan"), fallback_interval=metadata.get("billing_interval"))
+        state.setdefault("stripe_checkout_sessions", []).append({
+            "session_id": str(stripe_value(event_data, "id") or ""),
+            "subscription_id": str(stripe_value(event_data, "subscription") or ""),
+            "customer_id": str(stripe_value(event_data, "customer") or ""),
+            "user_id": metadata.get("user_id"),
+            "created_at": now_iso(),
+        })
     elif event_type in {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"}:
-        upsert_stripe_subscription(state, event_data)
+        row = upsert_stripe_subscription(state, event_data)
+        if event_type == "customer.subscription.deleted":
+            row["status"] = "CANCELLED"
+            row["canceled_at"] = now_iso()
+    elif event_type == "customer.subscription.trial_will_end":
+        row = upsert_stripe_subscription(state, event_data)
+        add_audit(state, "TRIAL_ENDING", "Free trial ends tomorrow; renewal is scheduled unless cancelled.", actor="SYSTEM", subject=row.get("user_id"))
     elif event_type in {"invoice.paid", "invoice.payment_failed"}:
         customer_id = str(stripe_value(event_data, "customer") or "")
-        user_id = subscription_user_for_customer(state, customer_id)
-        if user_id:
-            row = active_subscription(state, user_id)
-            if row:
-                row["status"] = "ACTIVE" if event_type == "invoice.paid" else "PAST_DUE"
-                row["updatedAt"] = now_iso()
+        subscription_id = str(stripe_value(event_data, "subscription") or "")
+        row = next((item for item in state.get("subscriptions", []) if str(item.get("stripe_subscription_id") or item.get("stripeSubscriptionId") or "") == subscription_id), None)
+        row = row or next((item for item in state.get("subscriptions", []) if str(item.get("stripe_customer_id") or item.get("stripeCustomerId") or "") == customer_id), None)
+        if row:
+            now = now_iso()
+            row["status"] = "ACTIVE" if event_type == "invoice.paid" else "PAST_DUE"
+            row["last_payment_status"] = "PAID" if event_type == "invoice.paid" else "FAILED"
+            row["last_payment_at"] = now
+            row["failed_payment_attempts"] = 0 if event_type == "invoice.paid" else int(row.get("failed_payment_attempts", 0)) + 1
+            row["grace_until"] = None if event_type == "invoice.paid" else (datetime.now(timezone.utc) + timedelta(seconds=PAST_DUE_GRACE_SECONDS)).isoformat()
+            row["updated_at"] = now
     else:
         raise HTTPException(400, "Unsupported Stripe event")
     processed.append(event_id)
@@ -1032,42 +1203,55 @@ async def v22_subscription(request: Request):
 
 @router.post("/subscription/trial")
 async def v22_start_trial(request: Request):
+    return await create_subscription_checkout(request, "TRIAL")
+
+
+def has_recoverable_or_active_subscription(state: dict[str, Any], user_id: str) -> bool:
+    return any(
+        row.get("user_id") == user_id and canonical_status(row.get("status")) in {"TRIALING", "ACTIVE", "PAST_DUE"}
+        for row in state.get("subscriptions", [])
+    )
+
+
+async def create_subscription_checkout(request: Request, plan: Literal["TRIAL", "MASTER_MODE"]) -> dict[str, Any]:
     user = authenticated_user(request)
-    rt = runtime(request)
-    async with rt["lock"]:
-        state = rt["state"]
-        if active_license(state, user["id"]):
-            raise HTTPException(409, "An active subscription or trial already exists")
-        started = now_iso()
-        expires = (datetime.now(timezone.utc) + timedelta(days=TRIAL_DAYS)).isoformat()
-        row = {"id": uuid.uuid4().hex, "user_id": user["id"], "plan": "STARTER", "status": "TRIAL", "billingInterval": "monthly", "trialStart": started, "trialEnd": expires, "currentPeriodStart": started, "currentPeriodEnd": expires, "currentPrice": 0, "stripeCustomerId": None, "stripeSubscriptionId": None, "cancelAtPeriodEnd": False, "provider": "DEVELOPMENT", "createdAt": started, "updatedAt": started}
-        state["subscriptions"].append(row)
-        state["licenses"].append({"id": uuid.uuid4().hex, "user_id": user["id"], "plan": "STARTER", "status": "ACTIVE", "starts_at": started, "expires_at": expires, "source": "FREE_TRIAL", "demo_only": True})
-        add_audit(state, "TRIAL_STARTED", "7-day Starter trial started.", actor=user["id"], subject=user["id"])
-        save_state(state)
-    return subscription_for_user(rt["state"], user["id"])
+    if not stripe_configured():
+        raise HTTPException(503, "Stripe billing is not configured; no subscription was activated")
+    state = runtime(request)["state"]
+    if has_recoverable_or_active_subscription(state, user["id"]):
+        raise HTTPException(409, "An active or recoverable subscription already exists")
+    price_id = stripe_price_id(plan, "monthly")
+    base_url = stripe_base_url()
+    stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+    try:
+        validate_master_mode_price(stripe.Price.retrieve(price_id))
+        customer_id = stripe_customer_for_user(state, user["id"])
+        if not customer_id:
+            customer = stripe.Customer.create(email=user["email"], name=user.get("display_name"), metadata={"user_id": user["id"]})
+            customer_id = str(stripe_value(customer, "id"))
+        metadata = {"user_id": user["id"], "plan": plan, "billing_interval": "monthly"}
+        subscription_data: dict[str, Any] = {"metadata": metadata}
+        if plan == "TRIAL":
+            subscription_data["trial_period_days"] = TRIAL_DAYS
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            customer=customer_id,
+            line_items=[{"price": price_id, "quantity": 1}],
+            payment_method_collection="always",
+            success_url=f"{base_url}/billing?checkout=success",
+            cancel_url=f"{base_url}/pricing?checkout=cancelled",
+            metadata=metadata,
+            subscription_data=subscription_data,
+        )
+    except Exception as exc:
+        logger.warning("Stripe checkout creation failed: user_id=%s plan=%s error_type=%s", user["id"], plan, type(exc).__name__)
+        raise HTTPException(502, "Checkout could not be created. Please try again.") from exc
+    return {"mode": "STRIPE", "checkout_url": stripe_value(session, "url"), "session_id": stripe_value(session, "id"), "plan": plan, "billing_interval": "monthly", "trial_days": TRIAL_DAYS if plan == "TRIAL" else 0, "amount_today": 0 if plan == "TRIAL" else MASTER_MODE_PRICE, "recurring_amount": MASTER_MODE_PRICE, "currency": "USD"}
 
 
 @router.post("/subscription/checkout")
 async def v22_subscription_checkout(payload: CheckoutRequest, request: Request):
-    user = authenticated_user(request)
-    if not stripe_configured():
-        raise HTTPException(503, "Stripe billing is not configured; no subscription was activated")
-    price_id = stripe_price_id(payload.plan, payload.billing_interval)
-    base_url = stripe_base_url()
-    state = runtime(request)["state"]
-    customer_id = stripe_customer_for_user(state, user["id"])
-    stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
-    if not customer_id:
-        customer = stripe.Customer.create(email=user["email"], name=user.get("display_name"), metadata={"user_id": user["id"]})
-        customer_id = str(stripe_value(customer, "id"))
-    metadata = {"user_id": user["id"], "plan": payload.plan, "billing_interval": payload.billing_interval}
-    session = stripe.checkout.Session.create(
-        mode="subscription", customer=customer_id, line_items=[{"price": price_id, "quantity": 1}],
-        success_url=f"{base_url}/billing?checkout=success", cancel_url=f"{base_url}/pricing?checkout=cancelled",
-        metadata=metadata, subscription_data={"metadata": metadata},
-    )
-    return {"mode": "STRIPE", "checkout_url": stripe_value(session, "url"), "session_id": stripe_value(session, "id"), "plan": payload.plan, "billing_interval": payload.billing_interval}
+    return await create_subscription_checkout(request, payload.plan)
 
 
 @router.post("/subscription/customer-portal")
@@ -1095,30 +1279,75 @@ async def v22_subscription_webhook(request: Request):
     except Exception as exc:
         raise HTTPException(400, "Invalid Stripe webhook signature") from exc
     rt = runtime(request)
+    pool = getattr(request.app.state, "db_pool", None)
     async with rt["lock"]:
         state = rt["state"]
         event_id = str(stripe_value(event, "id") or "")
         event_type = str(stripe_value(event, "type") or "")
+        if pool is not None:
+            existing_event = await pool.fetchrow("SELECT processed FROM stripe_webhook_events WHERE stripe_event_id = $1", event_id)
+            if existing_event and existing_event["processed"]:
+                return {"ok": True, "duplicate": True, "event_id": event_id}
         applied = apply_stripe_event(state, event)
         if not applied:
             return {"ok": True, "duplicate": True, "event_id": event_id}
         save_state(state)
     await persist_v22_commercial(request.app)
+    event_object = stripe_value(stripe_value(event, "data", {}), "object", {})
+    if event_type in {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end"}:
+        row = next((item for item in reversed(rt["state"].get("subscriptions", [])) if str(item.get("stripe_subscription_id") or item.get("stripeSubscriptionId") or "") == str(stripe_value(event_object, "id") or "")), None)
+        if row:
+            await persist_subscription_record(request.app, row)
+    elif event_type in {"invoice.paid", "invoice.payment_failed"}:
+        subscription_id = str(stripe_value(event_object, "subscription") or "")
+        customer_id = str(stripe_value(event_object, "customer") or "")
+        row = next((item for item in reversed(rt["state"].get("subscriptions", [])) if str(item.get("stripe_subscription_id") or item.get("stripeSubscriptionId") or "") == subscription_id), None)
+        row = row or next((item for item in reversed(rt["state"].get("subscriptions", [])) if str(item.get("stripe_customer_id") or item.get("stripeCustomerId") or "") == customer_id), None)
+        if row:
+            await persist_subscription_record(request.app, row)
+    if pool is not None:
+        await pool.execute(
+            """
+            INSERT INTO stripe_webhook_events (id, stripe_event_id, event_type, processed, processed_at)
+            VALUES ($1, $2, $3, TRUE, NOW())
+            ON CONFLICT (stripe_event_id) DO UPDATE SET processed = TRUE, processed_at = NOW(), event_type = EXCLUDED.event_type
+            """,
+            uuid.uuid4().hex,
+            event_id,
+            event_type,
+        )
     return {"ok": True, "event_id": event_id, "event_type": event_type}
 
 
 @router.post("/subscription/cancel")
-async def v22_subscription_cancel(request: Request):
+async def v22_subscription_cancel(payload: CancellationRequest, request: Request):
     user = authenticated_user(request)
     rt = runtime(request)
     async with rt["lock"]:
         row = active_subscription(rt["state"], user["id"])
         if not row:
             raise HTTPException(409, "No active subscription exists")
-        row["cancelAtPeriodEnd"] = True
-        row["updatedAt"] = now_iso()
-        add_audit(rt["state"], "SUBSCRIPTION_CANCEL_SCHEDULED", "Subscription cancellation scheduled for period end.", actor=user["id"], subject=user["id"])
+        subscription_id = str(row.get("stripe_subscription_id") or row.get("stripeSubscriptionId") or "")
+        if not subscription_id or not stripe_configured():
+            raise HTTPException(409, "A Stripe subscription is not linked to this account")
+        stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+        try:
+            if payload.immediate:
+                stripe.Subscription.cancel(subscription_id)
+                audit_kind = "SUBSCRIPTION_CANCEL_REQUESTED"
+                audit_message = "Immediate subscription cancellation requested; Stripe webhook confirmation is pending."
+            else:
+                stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
+                audit_kind = "SUBSCRIPTION_CANCEL_SCHEDULED"
+                audit_message = "Subscription cancellation scheduled for the end of the current billing period."
+        except Exception as exc:
+            logger.warning("Stripe cancellation failed: user_id=%s subscription_id=%s error_type=%s", user["id"], subscription_id, type(exc).__name__)
+            raise HTTPException(502, "The subscription could not be cancelled. Please try again.") from exc
+        row["cancel_at_period_end"] = not payload.immediate
+        row["updated_at"] = now_iso()
+        add_audit(rt["state"], audit_kind, audit_message, actor=user["id"], subject=user["id"])
         save_state(rt["state"])
+    await persist_v22_commercial(request.app)
     return subscription_for_user(rt["state"], user["id"])
 
 

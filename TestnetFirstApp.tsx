@@ -11,7 +11,6 @@ const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
 const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
 const MasterTrade = lazy(() => import('./MasterTrade'))
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT
-const LOCAL_DEV_AUTO_ACCESS = import.meta.env.DEV && ['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)
 type View = 'dashboard'|'trading'|'risk'|'analyst'|'scanner'|'performance'|'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'|'master-trade'
 type Market = {symbol:string;display:string;price:number;change:number;volume:number}
 type Candle = {time:number;open:number;high:number;low:number;close:number;volume:number}
@@ -197,10 +196,6 @@ export default function TestnetFirstApp() {
 
   useEffect(() => {
     if (view !== 'master-trade') return
-    if (LOCAL_DEV_AUTO_ACCESS) {
-      setMasterTradeAccess('granted')
-      return
-    }
     const token = userSessionToken()
     if (!token) {
       window.location.assign('/login')

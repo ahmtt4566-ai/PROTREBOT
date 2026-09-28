@@ -76,7 +76,7 @@ from .exchange_connections import session_account_identity, session_credentials_
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .trade_review import write_trade_review
 from .v21_demo import certificate_payload
-from .v22_commercial import authenticated_user
+from .v22_commercial import authenticated_user, subscription_for_user
 
 
 PersistenceWriteResult = Literal["INSERTED", "UPDATED", "SKIPPED"]
@@ -1046,7 +1046,12 @@ def execution_owner(request: Request) -> dict[str, Any]:
         return {"id": str(member.get("id") or ""), "role": "OWNER"}
     if member and member.get("role") == "OWNER":
         return member
-    return authenticated_user(request, owner=True)
+    user = authenticated_user(request)
+    if user.get("role") != "OWNER":
+        subscription = subscription_for_user(request.app.state.v22_commercial["state"], user["id"])
+        if not subscription.get("master_trade_access"):
+            raise HTTPException(403, "Master Trade aboneliğiniz bu özelliğe erişim vermiyor")
+    return user
 
 
 def is_armed(state: dict[str, Any]) -> bool:
