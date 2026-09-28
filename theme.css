@@ -33,6 +33,13 @@ html, body, #root, .app, .workspace, .page,
   border-radius: 10px !important;
 }
 
+/* Standalone Scanner page: the outer section wrappers only exist to group content, so drop the extra boxed layer here.
+   The repeated .workspaceRoute selector matches (and slightly exceeds) the specificity of the global card/section rule above so this wins. */
+.v26App.workspaceRoute.workspaceRoute.workspaceRoute.workspaceRoute.workspaceRoute .scannerCenter > :is(header, section):not(.scannerState) {
+  background: transparent !important;
+  border: 0 !important;
+}
+
 .v26App.workspaceRoute :is(.action-button, .cta-button, [data-variant="primary"], .demoHeroConnect, .demoSubmit, .demoTest, .demoConnect, .demoCredentialActions button, .v27OpsActions .sync, .v27Loading button, .analystDataError button) {
   background: var(--orange) !important;
   color: #05070c !important;
