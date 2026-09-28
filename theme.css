@@ -3983,11 +3983,9 @@ html, body, #root, .app, .workspace, .page,
   background-image: none !important;
 }
 
-/* Low-contrast trading grid for the workspace canvas. */
 #root main.v26App.workspaceRoute {
   background-color: #070b10 !important;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 56 56'%3E%3Cpath d='M56 0H0V56' fill='none' stroke='%231b2835' stroke-opacity='.48' stroke-width='1'/%3E%3C/svg%3E") !important;
-  background-size: 56px 56px !important;
+  background-image: none !important;
 }
 
 /* Replace the high-saturation green text with calmer terminal accents. */
