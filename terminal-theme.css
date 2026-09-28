@@ -15,7 +15,7 @@
   --border: #25303b;
   --border-strong: #344454;
   --text: #cbd5e1;
-  --text-muted: #64748b;
+  --text-muted: #8397a3;
   --accent: #d4a84f;
   --accent-strong: #f59e0b;
   --success: #16a34a;
@@ -29,7 +29,7 @@
   --ui-surface-2: #121820;
   --ui-border: #25303b;
   --ui-text: #cbd5e1;
-  --ui-muted: #64748b;
+  --ui-muted: #8397a3;
   --ui-accent: #d4a84f;
   --ui-danger: #ef4444;
   --ui-success: #16a34a;
@@ -301,6 +301,231 @@
   .v26App .connectionActions button { width: 100%; }
 }
 
+/* Shared Home-style shell for workspace routes and a quieter Demo command surface. */
+.v26App .v26Header {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-height: 64px;
+  padding: 12px 16px;
+  background: #05070c;
+  border-color: rgba(148, 163, 184, .16);
+  border-radius: 8px;
+}
+.v26App .v26HomeHeaderStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #9aa7b8;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+.v26App .v26HomeHeaderStatus i { width: 7px; height: 7px; border-radius: 50%; background: #64748b; }
+.v26App .v26HomeHeaderStatus i.ok { background: #4ade80; box-shadow: 0 0 0 3px rgba(74, 222, 128, .1); }
+.v26App .v26HeaderActions { gap: 6px; }
+.v26App .v26Refresh, .v26App .v26NotificationButton, .v26App .mobileMenuButton {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-color: rgba(148, 163, 184, .16);
+  border-radius: 7px;
+  background: #0d131c;
+}
+.v26App .v26Nav {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+  padding: 5px;
+  background: #05070c;
+  border-color: rgba(148, 163, 184, .16);
+  border-radius: 8px;
+}
+.v26App .v26Nav button { min-height: 48px; gap: 7px; padding: 8px 9px; border-radius: 6px; }
+.v26App .v26Nav button > svg { width: 16px; height: 16px; padding: 5px; border-radius: 5px; background: #111923; color: #9aa7b8; }
+.v26App .v26Nav button:hover { background: #0d131c; }
+.v26App .v26Nav button.active { border-color: rgba(212, 168, 79, .7); background: rgba(212, 168, 79, .1); color: #f1f5f9; }
+.v26App .v26Nav button.active > svg { color: #f2c86b; }
+.v26App .v26Nav b { font-size: 10px; }
+.v26App .v26Nav small { display: none; }
+.v26App .v26TradeNavHidden { display: none; }
+.v26App .demoHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, .75fr);
+  gap: 24px;
+  padding: 22px 24px;
+  background: #0d131c;
+  border-color: rgba(148, 163, 184, .16);
+  border-radius: 8px;
+}
+.v26App .demoHeroCopy > span { border-color: rgba(212, 168, 79, .42); background: rgba(212, 168, 79, .08); color: #e8bf67; }
+.v26App .demoHeroCopy h2 { color: #f1f5f9; font-size: 22px; }
+.v26App .demoHeroCopy p { max-width: 620px; color: #8f9dad; }
+.v26App .demoHeroCopy > div { color: #8f9dad; }
+.v26App .demoHeroCopy > div b { display: inline-flex; align-items: center; gap: 6px; color: #e8bf67; }
+.v26App .demoHeroCopy > div span { padding-left: 10px; border-left: 1px solid rgba(148, 163, 184, .2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v26App .demoHeroStatus { align-self: center; gap: 7px; }
+.v26App .demoHeroStatus > span { min-height: 64px; padding: 11px; border-color: rgba(148, 163, 184, .16); border-radius: 7px; background: #080d14; }
+.v26App .demoHeroStatus > span.demoOk { border-color: rgba(74, 222, 128, .28); }
+.v26App .demoHeroStatus > span.demoWait { border-color: rgba(245, 158, 11, .3); }
+.v26App .demoHeroStatus > span.demoSafe { border-color: rgba(148, 163, 184, .2); }
+.v26App .demoHeroStatus > span > svg { color: #9aa7b8; }
+.v26App .demoHeroStatus > span.demoOk > svg { color: #4ade80; }
+.v26App .demoHeroStatus > span.demoWait > svg { color: #f59e0b; }
+.v26App .demoHeroStatus small { color: #718096; letter-spacing: .08em; }
+.v26App .demoHeroStatus b { color: #d7dee8; font-size: 11px; }
+
+@media (max-width: 900px) {
+  .v26App .v26Nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .v26App .demoHero { grid-template-columns: 1fr; gap: 16px; }
+}
+@media (max-width: 560px) {
+  .v26App .v26Header { grid-template-columns: minmax(0, 1fr) auto auto; padding: 10px 11px; }
+  .v26App .v26Brand b { font-size: 14px; }
+  .v26App .v26Brand small { font-size: 8px; }
+  .v26App .v26Nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v26App .demoHero { padding: 17px; }
+  .v26App .demoHeroStatus { grid-template-columns: 1fr; }
+}
+
+/* :root {
+  --bg: #05070c;
+  --card-bg: #0a0f16;
+  --border: rgba(255,255,255,.08);
+  --border-hover: rgba(255,255,255,.18);
+  --text: #e7ecf3;
+  --text-dim: #8794a6;
+  --text-faint: #71808e;
+  --orange: #ff8a3d;
+  --green: #37c98a;
+  --red: #e35b5b;
+}
+:root {
+  --bg: #05070c;
+  --card-bg: #0a0f16;
+  --border: rgba(255,255,255,.08);
+  --border-hover: rgba(255,255,255,.18);
+  --text: #e7ecf3;
+  --text-dim: #8794a6;
+  --text-faint: #4d5866;
+  --orange: #ff8a3d;
+  --green: #37c98a;
+  --red: #e35b5b;
+}
+.v26App {
+  min-height: 100vh;
+  padding: 18px 20px 40px;
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+.v26App .workspaceBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  margin: 0 0 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+.v26App .workspaceBack:hover { color: #fff; }
+.v26App .workspaceBack svg { width: 15px; height: 15px; }
+.v26App .v26ModeBar {
+  display: block;
+  min-height: 0;
+  margin: 0 0 32px;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.v26App .v26ModeBar h1 { margin: 6px 0 5px; color: var(--text); font-size: 26px; font-weight: 700; }
+.v26App .v26ModeBar p { max-width: 720px; color: var(--text-dim); font-size: 13px; }
+.v26App .v26ModeBar small { color: var(--text-faint); font-size: 10px; letter-spacing: .14em; }
+.v26App .v26MarketBar { margin: 0 0 32px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--card-bg) !important; box-shadow: none !important; }
+.v26App .v26MarketTitle { border-color: var(--border); }
+.v26App .v26MarketTitle > svg { color: var(--orange); }
+.v26App .v26MarketTitle small, .v26App .v26MarketPicker small { color: var(--text-faint); }
+.v26App .v26MarketTitle b, .v26App .v26MarketTrigger b { color: var(--text); }
+.v26App .v26MarketTrigger, .v26App .v26MarketPopover, .v26App .v26Intervals { border-color: var(--border); background: var(--card-bg); color: var(--text); box-shadow: none; }
+.v26App .v26MarketTrigger:hover, .v26App .v26MarketTrigger[aria-expanded="true"] { border-color: var(--border-hover); background: var(--card-bg); box-shadow: none; }
+.v26App .v26MarketTrigger em, .v26App .v26Intervals button.active { color: var(--orange); }
+.v26App .v26Intervals button.active { background: rgba(255,138,61,.12); }
+.v26App .v26Intervals button { color: var(--text-dim); }
+.v26App .binanceDemoDeck { gap: 32px; margin-top: 0; }
+.v26App .demoHero {
+  grid-template-columns: minmax(0,1fr) minmax(380px,.8fr);
+  gap: 24px;
+  padding: 22px 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg) !important;
+  box-shadow: none !important;
+}
+.v26App .demoHeroCopy > span { border-color: var(--border); background: transparent; color: var(--text-dim); }
+.v26App .demoHeroCopy h2 { color: var(--text); font-size: 20px; }
+.v26App .demoHeroCopy p { color: var(--text-dim); }
+.v26App .demoHeroCopy > div { color: var(--text-dim); }
+.v26App .demoHeroCopy > div b { color: var(--orange); }
+.v26App .demoHeroStatus { gap: 8px; }
+.v26App .demoHeroStatus > span { min-height: 0; grid-template-columns: auto 1fr; padding: 9px 10px; border-color: var(--border); border-radius: 999px; background: transparent; }
+.v26App .demoHeroStatus > span.demoWait { border-color: rgba(255,138,61,.32); }
+.v26App .demoHeroStatus > span.demoOk { border-color: rgba(55,201,138,.32); }
+.v26App .demoHeroStatus > span.demoSafe { border-color: var(--border); }
+.v26App .demoHeroStatus > span > svg { width: 12px; height: 12px; color: var(--text-faint); }
+.v26App .demoHeroStatus > span.demoWait > svg { color: var(--orange); }
+.v26App .demoHeroStatus > span.demoOk > svg { color: var(--green); }
+.v26App .demoHeroStatus small { color: var(--text-faint); }
+.v26App .demoHeroStatus b { margin-top: 0; color: var(--text-dim); font-size: 10px; }
+.v26App .demoHeroConnect { display: inline-flex; align-items: center; gap: 7px; width: max-content; margin-top: 18px; padding: 10px 13px; border: 0; border-radius: 8px; background: var(--orange); color: #1d120b; font-size: 12px; font-weight: 800; cursor: pointer; }
+.v26App .demoHeroConnect:hover { background: #ff9b58; }
+.v26App .demoHeroConnect:disabled { opacity: .45; cursor: not-allowed; }
+.v26App .demoHeroConnect svg { width: 14px; height: 14px; }
+.v26App .demoCommandBar .demoConnect { display: none; }
+.v26App .v21Tabs {
+  display: flex;
+  gap: 3px;
+  margin: 0;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg) !important;
+  box-shadow: none !important;
+}
+.v26App .v21Tabs button { min-height: 42px; padding: 8px 10px; border-color: transparent; border-radius: 7px; background: transparent; color: var(--text-dim); }
+.v26App .v21Tabs button:hover { border-color: var(--border-hover); background: rgba(255,255,255,.03); color: var(--text); }
+.v26App .v21Tabs button.active { border-color: var(--orange); border-bottom-color: var(--orange); background: rgba(255,138,61,.08); color: var(--text); box-shadow: inset 0 -2px var(--orange); }
+.v26App .v21Tabs button.active > svg { color: var(--orange); }
+.v26App .v21Tabs b { font-size: 10px; }
+.v26App .v21Tabs small { display: none; }
+.v26App :is(.v21Workspace,.v21Card,.v21Pulse,.v21DashboardHome > *,.v21InsightPanel,.v21DecisionHistoryPanel,.v21SmartAlertCenter,.v21AdvancedAnalytics,.v21AiTradeJournal,.v21StrategyPerformance,.v21MarketRegime,.v21BotHealthMonitor,.v21TradeIntelligenceStack > article,.v27OpsHero,.v27Panel,.v27Pulse,.v27Metrics > article,.liveUxHero,.liveUxCard,.connectionCenterHeader,.connectionStatusRail,.connectionWorkflow span,.connectionDemoPanel,.connectionLivePanel,.connectionSecurityPanel,.analystWorkspace,.analystResultWorkspace,.anomalyPanel,.heatmapPanel,.coinTablePanel,.coinDetailPanel,.webAccessCard) {
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  background: var(--card-bg) !important;
+  box-shadow: none !important;
+}
+.v26App :is(.v21Workspace,.v21Card,.v21InsightPanel,.v27Panel,.liveUxCard,.connectionDemoPanel,.connectionLivePanel,.connectionSecurityPanel,.analystWorkspace,.analystResultWorkspace,.anomalyPanel,.heatmapPanel,.coinTablePanel,.coinDetailPanel,.webAccessCard) { padding: 20px; }
+.v26App :is(.v21WorkspaceHead,.v21ScannerHeader,.v27OpsTitle,.liveUxHero,.connectionCenterHeader,.analystWorkspaceHeader) h2,
+.v26App :is(.v21WorkspaceHead,.v21ScannerHeader,.v27OpsTitle,.liveUxHero,.connectionCenterHeader,.analystWorkspaceHeader) h3 { color: var(--text); }
+.v26App :is(.v21WorkspaceHead,.v21ScannerHeader,.v27OpsTitle,.liveUxHero,.connectionCenterHeader,.analystWorkspaceHeader) p,
+.v26App :is(.v21WorkspaceHead,.v21ScannerHeader,.v27OpsTitle,.liveUxHero,.connectionCenterHeader,.analystWorkspaceHeader) small { color: var(--text-dim); }
+.v26App :is(.v21WorkspaceHead > div > span,.v21ScannerHeader > div > span,.v21Eyebrow,.v27OpsTitle small,.liveKicker,.connectionCenterHeader span,.analystWorkspaceHeader span) { color: var(--text-faint) !important; }
+.v26App :is(.v21DashboardSubscription button,.demoSubmit,.demoHeroConnect,.connectionPrimary,.masterTradeLivePrimary) { background: var(--orange) !important; border-color: var(--orange) !important; color: #1d120b !important; box-shadow: none !important; }
+.v26App :is(.demoProfit,.positive,.ready,.ok,.connected) { color: var(--green) !important; }
+.v26App :is(.demoLoss,.negative,.blocked,.error,.disconnected) { color: var(--red) !important; }
+.v26App input, .v26App select, .v26App textarea { border-color: var(--border) !important; border-radius: 8px !important; background: #080c12 !important; color: var(--text) !important; }
+.v26App input:focus, .v26App select:focus, .v26App textarea:focus { border-color: var(--border-hover) !important; box-shadow: none !important; }
+.v26App .v26Footer { border-color: var(--border); border-radius: 10px; background: var(--card-bg); color: var(--text-dim); box-shadow: none; }
+@media (max-width: 900px) {
+  .v26App { padding: 14px 12px 30px; }
+  .v26App .demoHero { grid-template-columns: 1fr; }
+  .v26App .v21Tabs { overflow-x: auto; }
+  .v26App .v21Tabs button { flex: 0 0 128px; }
+}
+
 @media (max-width: 700px) {
   .v26App .v21Workspace,
   .v26App .v21CockpitSummary,
@@ -322,13 +547,33 @@
   .v26App .v21ScannerTable { overflow: hidden; }
   .v26App .v21ScannerTable .v21TableScroll { overflow-x: auto; }
 }
+}
+
+@media (max-width: 700px) {
+  .v26App .v21Workspace,
+  .v26App .v21CockpitSummary,
+  .v26App .v21SystemHealthCenter,
+  .v26App .v21RiskRadar,
+  .v26App .v21SmartAlerts,
+  .v26App .v21ActivityTimeline,
+  .v26App .v21ScannerDashboard,
+  .v26App .v21AutoActivityCenter { padding: 13px; }
+  .v26App .v21PerformanceMini { grid-template-columns: 1fr 1fr; }
+  .v26App .v21PerformanceMini > span:last-child { grid-column: 1 / -1; }
+  .v26App .v21WorkspaceHead h2,
+  .v26App .v21ScannerHeader h2 { font-size: 21px; }
+  .v26App .v21AutoActivityCard,
+  .v26App .v21ScannerTop,
+  .v26App .v21ScannerTable,
+  .v26App .v21ScannerTrades,
+  .v26App .v21Card { min-width: 0; }
+  .v26App .v21ScannerTable { overflow: hidden; }
+  .v26App .v21ScannerTable .v21TableScroll { overflow-x: auto; }
+}
+}
+*/
 
 /* Phase 7H: Risk Vault terminal surface */
-.v26App .v21RiskLayout {
-  grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
-  gap: 12px;
-  margin-top: 12px;
-}
 
 .v26App .v21RiskLayout .v21Card {
   min-width: 0;
@@ -1007,10 +1252,10 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   --terminal-panel: rgba(15, 23, 32, 0.92);
   --terminal-panel-soft: rgba(20, 28, 38, 0.94);
   --terminal-panel-alt: rgba(13, 19, 27, 0.96);
-  --terminal-line: rgba(148, 163, 184, 0.18);
-  --terminal-line-strong: rgba(212, 168, 79, 0.35);
+  --terminal-line: rgba(148, 163, 184, 0.11);
+  --terminal-line-strong: rgba(212, 168, 79, 0.28);
   --terminal-text: #e5edf6;
-  --terminal-muted: #8ea0b5;
+  --terminal-muted: #a6b3b8;
   --terminal-positive: #4ade80;
   --terminal-negative: #f87171;
   --terminal-warning: #fbbf24;
@@ -2846,7 +3091,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   --terminal-line: #26313a;
   --terminal-line-strong: #3b4a56;
   --terminal-text: #e6edf2;
-  --terminal-muted: #8d9aa5;
+  --terminal-muted: #a6b3b8;
   --terminal-positive: #35c878;
   --terminal-negative: #ef6b73;
   --terminal-warning: #e4b45f;
@@ -3023,7 +3268,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
 .masterTradeRoute .marketStatsStrip b { font-family: "IBM Plex Mono", "Cascadia Mono", monospace; font-size: 9px; }
 .masterTradeRoute .chartToolbar { margin: 4px 0 6px; }
 .masterTradeRoute .chartToolbar .chartControls button,
-.masterTradeRoute .chartViewControls button { min-height: 26px; padding: 4px 7px; border-radius: 2px; font-size: 8px; }
+.masterTradeRoute .chartViewControls button { min-height: 26px; padding: 4px 7px; border-radius: 8px; font-size: 8px; }
 .masterTradeRoute .chartCanvas,
 .masterTradeRoute .marketOhlcChart { min-height: 315px; border-radius: 2px; border-color: var(--terminal-line); background: #0a1015; }
 .masterTradeRoute .chartCanvas svg,
@@ -3066,11 +3311,16 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); }
   --live-amber: var(--terminal-warning);
   --live-red: var(--terminal-negative);
 }
+.masterTradeRoute .masterTradeLiveAccountMetrics small,
+.masterTradeRoute .masterTradeLiveAccountMetrics em,
+.masterTradeRoute .liveStatusGrid small,
+.masterTradeRoute .liveMetricList small,
+.masterTradeRoute .liveReadOnlyStrip small { color: #9aaab0; }
 .masterTradeRoute .masterTradeLiveHeader { gap: 12px; padding: 12px; border-radius: 3px; background: #11181e; }
 .masterTradeRoute .masterTradeLiveTitle h2 { margin: 4px 0 3px; font-family: "IBM Plex Sans", "Segoe UI", sans-serif; font-size: 20px; letter-spacing: .01em; }
 .masterTradeRoute .masterTradeLiveHeadline strong { font-family: "IBM Plex Mono", "Cascadia Mono", monospace; font-size: 16px; }
 .masterTradeRoute .masterTradeLiveChips { gap: 3px; }
-.masterTradeRoute .masterTradeLiveChips span { padding: 5px 6px; border-radius: 2px; font-size: 8px; }
+.masterTradeRoute .masterTradeLiveChips span { padding: 5px 6px; border-radius: 8px; font-size: 8px; }
 .masterTradeRoute .masterTradeLiveAssistant { padding: 9px 11px; border-left-width: 1px; }
 .masterTradeRoute .masterTradeLiveAssistant strong { font-size: 11px; }
 .masterTradeRoute .masterTradeLiveAssistant small { font-size: 8px; }
@@ -3129,6 +3379,261 @@ input:hover, select:hover, textarea:hover { border-color: var(--border-strong); 
 input:focus, select:focus, textarea:focus { border-color: var(--accent); background: #0b1016; }
 .webAccessIcon { border: 1px solid rgba(245,158,11,.35); color: var(--accent-strong); }
 .webAccessCard footer { background: transparent; }
+
+/* Master Trade readability pass: preserve terminal density while easing the text scale. */
+.masterTradeRoute .masterTradePanel,
+.masterTradeRoute .masterTradeLiveSection,
+.masterTradeRoute .masterTradeLiveApiDrawer {
+  padding: 13px;
+}
+
+.masterTradeRoute .masterTradePanel {
+  border-radius: 8px;
+  background: #0d1318 !important;
+  box-shadow: none;
+}
+
+.masterTradeRoute .masterTradeLiveSection {
+  border-radius: 8px;
+  background: #0b1117 !important;
+  box-shadow: none;
+}
+
+.masterTradeRoute .tradeDecisionPanel,
+.masterTradeRoute .marketAnalysisPanel,
+.masterTradeRoute .chartPanel,
+.masterTradeRoute .watchlistPanel,
+.masterTradeRoute .riskMonitorPanel,
+.masterTradeRoute .positionsPanel,
+.masterTradeRoute .ordersPanel,
+.masterTradeRoute .historyPanel,
+.masterTradeRoute .performancePanel,
+.masterTradeRoute .scannerPanel,
+.masterTradeRoute .activityPanel,
+.masterTradeRoute .safetyPanel {
+  background: #0d1318 !important;
+}
+
+.masterTradeRoute .panelHeader {
+  margin-bottom: 9px;
+  padding-bottom: 8px;
+  border-bottom-color: rgba(148, 163, 184, .11);
+}
+
+.masterTradeRoute .panelEyebrow,
+.masterTradeRoute .masterTradeEyebrow,
+.masterTradeRoute .masterTradeLiveKicker {
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.masterTradeRoute .panelHeader h3,
+.masterTradeRoute .masterTradeLiveSection h3 {
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.masterTradeRoute .masterTradeLiveTitle h2 {
+  font-size: 21px;
+  line-height: 1.2;
+}
+
+.masterTradeRoute .masterTradeLiveTitle p,
+.masterTradeRoute .masterTradeLiveAssistant small,
+.masterTradeRoute .masterTradeLiveSection p {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.masterTradeRoute .watchlistMeta b,
+.masterTradeRoute .watchlistStats strong,
+.masterTradeRoute .marketAnalysisMetrics strong,
+.masterTradeRoute .riskMonitorGrid strong,
+.masterTradeRoute .performanceMetrics strong {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.masterTradeRoute .watchlistMeta span,
+.masterTradeRoute .watchlistStats em,
+.masterTradeRoute .marketAnalysisMetrics small,
+.masterTradeRoute .marketStatsStrip small,
+.masterTradeRoute .indicatorGrid small,
+.masterTradeRoute .indicatorTerminalGrid header span {
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.masterTradeRoute .marketStatsStrip b,
+.masterTradeRoute .indicatorGrid strong,
+.masterTradeRoute .indicatorTerminalGrid header b,
+.masterTradeRoute .decisionMetricGrid strong,
+.masterTradeRoute .masterTradeLiveSignalGrid b {
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.masterTradeRoute .marketAnalysisDecision strong,
+.masterTradeRoute .masterTradeLiveHeadline strong {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.masterTradeRoute .chartPriceSummary strong,
+.masterTradeRoute .tradeDecisionHeader h3,
+.masterTradeRoute .marketAnalysisDecision strong {
+  line-height: 1.15;
+}
+
+.masterTradeRoute .chartPriceSummary strong {
+  font-size: clamp(1.4rem, 2vw, 2rem);
+}
+
+.masterTradeRoute .tradeDecisionHeader h3 {
+  font-size: 18px;
+}
+
+.masterTradeRoute .decisionScore strong {
+  color: var(--terminal-warning);
+  font-size: 22px;
+}
+
+.masterTradeRoute .decisionMetricGrid > div,
+.masterTradeRoute .marketAnalysisMetrics div,
+.masterTradeRoute .riskMonitorGrid > div,
+.masterTradeRoute .performanceMetrics > div {
+  border-color: rgba(148, 163, 184, .1);
+}
+
+.masterTradeRoute .marketAnalysisMetrics {
+  border-top-color: rgba(148, 163, 184, .1);
+}
+
+.masterTradeRoute .marketAnalysisMetrics div {
+  padding: 8px;
+}
+
+.masterTradeRoute .masterTradeLiveChips span,
+.masterTradeRoute .masterTradeLiveFlow span,
+.masterTradeRoute .masterTradeLivePrimary,
+.masterTradeRoute .masterTradeLiveSecondary,
+.masterTradeRoute .masterTradeLiveTextButton {
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.masterTradeRoute .masterTradeLiveChips span {
+  padding: 5px 7px;
+}
+
+.masterTradeRoute .masterTradeLiveAssistant strong,
+.masterTradeRoute .masterTradeLiveControlBody b {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody small,
+.masterTradeRoute .masterTradeLiveOperationalNote,
+.masterTradeRoute .masterTradeLiveSignal p,
+.masterTradeRoute .masterTradeLiveEmpty span {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.masterTradeRoute .masterTradeLiveConfirmationGrid article h4 {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.masterTradeRoute .tableWrap th {
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.masterTradeRoute .tableWrap td {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.masterTradeRoute .masterTradeLiveSetup {
+  overflow: hidden;
+}
+
+/* Keep the hierarchy in surfaces and spacing, not repeated divider lines. */
+.masterTradeRoute .masterTradeTerminalHeader,
+.masterTradeRoute .terminalStatusStrip,
+.masterTradeRoute .masterTradePanel,
+.masterTradeRoute .masterTradeLiveSection,
+.masterTradeRoute .masterTradeLiveApiDrawer,
+.masterTradeRoute .masterTradeSafetyBanner,
+.masterTradeRoute .tableWrap,
+.masterTradeRoute .tradeDecisionPanel,
+.masterTradeRoute .marketAnalysisMetrics,
+.masterTradeRoute .decisionMetricGrid,
+.masterTradeRoute .masterTradeLiveConfirmationGrid article,
+.masterTradeRoute .masterTradeLiveConnection,
+.masterTradeRoute .masterTradeLiveEmergency {
+  border-color: transparent;
+}
+
+.masterTradeRoute .panelHeader,
+.masterTradeRoute .tradeDecisionHeader,
+.masterTradeRoute .marketAnalysisFooter,
+.masterTradeRoute .marketAnalysisMetrics div,
+.masterTradeRoute .decisionMetricGrid > div,
+.masterTradeRoute .tableWrap th,
+.masterTradeRoute .tableWrap td,
+.masterTradeRoute .masterTradeLiveControlMeta,
+.masterTradeRoute .masterTradeLiveSafetyList details,
+.masterTradeRoute .masterTradeLiveTableWrap td {
+  border-color: transparent;
+}
+
+.masterTradeRoute .terminalStatusItem {
+  border-right-color: transparent;
+}
+
+.masterTradeRoute .marketStatsStrip span,
+.masterTradeRoute .indicatorGrid article,
+.masterTradeRoute .indicatorTerminalGrid article,
+.masterTradeRoute .scoreMeters > div,
+.masterTradeRoute .riskMonitorGrid > div,
+.masterTradeRoute .performanceMetrics > div,
+.masterTradeRoute .scannerList article,
+.masterTradeRoute .watchlistItem,
+.masterTradeRoute .marketAnalysisDecision,
+.masterTradeRoute .masterTradeLiveChips span,
+.masterTradeRoute .masterTradeLiveConfirmationGrid article,
+.masterTradeRoute .masterTradeLiveControl,
+.masterTradeRoute .masterTradeLiveSetup,
+.masterTradeRoute .masterTradeLiveAccountTable,
+.masterTradeRoute .masterTradeLiveSignal,
+.masterTradeRoute .masterTradeLiveActivity,
+.masterTradeRoute .masterTradeLiveSafety {
+  border: 0;
+}
+
+.masterTradeRoute .masterTradePanel,
+.masterTradeRoute .masterTradeLiveSection,
+.masterTradeRoute .masterTradeLiveApiDrawer {
+  box-shadow: none;
+}
+
+.masterTradeRoute .tableWrap,
+.masterTradeRoute .terminalStatusStrip {
+  background: #0d1318;
+}
+
+.masterTradeRoute .masterTradeLiveConfirmationGrid,
+.masterTradeRoute .decisionMetricGrid {
+  gap: 6px;
+  background: transparent;
+}
+
+.masterTradeRoute .masterTradeLiveConfirmationGrid article,
+.masterTradeRoute .decisionMetricGrid > div {
+  background: #0e1419;
+}
 
 /* Mobile-first stabilization layer. Desktop rules remain unchanged above. */
 @media (max-width: 900px) {
@@ -3762,7 +4267,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .v26HeaderActions button { border-radius: 7px; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
 .v26HeaderActions button:hover { transform: translateY(-1px); }
 .v26Refresh { min-height: 36px; border-color: rgba(200, 240, 106, .42); background: var(--polish-lime-soft); color: var(--polish-lime); }
-.v26Nav { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; margin-top: 10px; padding: 5px; border-radius: 10px; border-color: var(--polish-border); background: #0b141c; box-shadow: 0 12px 26px rgba(0, 0, 0, .14); }
+.v26Nav { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; margin-top: 10px; padding: 5px; border-radius: 10px; border-color: var(--polish-border); background: #0b141c; box-shadow: 0 12px 26px rgba(0, 0, 0, .14); }
 .v26Nav button { min-height: 52px; gap: 9px; padding: 8px 10px; border-radius: 7px; }
 .v26Nav button > svg { width: 18px; height: 18px; padding: 6px; border-radius: 7px; background: #16242d; color: #a9bdca; }
 .v26Nav button:hover { background: rgba(200, 240, 106, .06); }
@@ -4053,7 +4558,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
     left: 10px;
     width: auto;
     box-sizing: border-box;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 4px;
     min-width: 0;
     padding: 5px;
@@ -4598,6 +5103,91 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .v21DashboardActivity article { grid-template-columns: 8px minmax(0,1fr); }
   .v21DashboardActivity article time { grid-column: 2; font-size: 10px; }
 }
+
+  /* Home terminal surface */
+  .v26App:has(.v26Dashboard) { display: flex; flex-direction: column; background-color: #05070c; background-image: none; }
+  body:has(.v26Dashboard) { background-color: #05070c; background-image: none; }
+  .v26App:has(.v26Dashboard) > .v26Header { grid-template-columns: minmax(0, 1fr) auto; border: 0; border-bottom: 1px solid rgba(255,255,255,.06); border-radius: 0; background: #05070c; box-shadow: none; }
+  .v26HomeHeader { grid-template-columns: minmax(0, 1fr) auto; }
+  .v26HomeHeader .v26HeaderSignals, .v26HomeHeader .v26HeaderActions { display: none; }
+  .v26HomeHeaderStatus { display: inline-flex; align-items: center; justify-self: end; gap: 6px; color: #aeb8c4; font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+  .v26HomeHeaderStatus i { width: 6px; height: 6px; border-radius: 50%; background: #e5b95d; }
+  .v26HomeHeaderStatus i.ok { background: #37c98a; }
+  .v26HomeNav { display: none !important; }
+  .v26Dashboard { width: min(100%, 1180px); max-width: 1180px; min-height: 0; box-sizing: border-box; gap: 44px; margin: 22px auto 0; padding: 0 0 36px; background: transparent; }
+  .v26DashboardHero { display: flex; align-items: center; justify-content: flex-start; gap: 24px; min-height: 0; padding: 48px 0 18px; border: 0; border-radius: 0; background: transparent; box-shadow: none; animation: v26DashboardRise .35s ease both; }
+  .v26DashboardHero h1 { margin: 7px 0 8px; color: #f4f7fb; font-size: clamp(30px, 4vw, 42px); letter-spacing: .01em; }
+  .v26DashboardHero p { margin: 0; color: #93a6b7; font-size: 14px; }
+  .v26DashboardHeroStatus { display: inline-flex; align-items: center; gap: 7px; margin-top: 18px; color: #8396a5; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+  .v26DashboardHeroStatus i { width: 6px; height: 6px; border-radius: 50%; background: #d6a64c; }
+  .v26DashboardHeroStatus i.ok { background: #63c98d; }
+  .v26DashboardPulse { display: grid; gap: 12px; padding: 16px 18px; border: 1px solid rgba(148,163,184,.15); border-radius: 10px; background: #05070c; }
+  .v26DashboardPulse > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .v26DashboardPulse > header h2 { margin: 0; color: #cbd7df; font-size: 11px; font-weight: 800; letter-spacing: .14em; }
+  .v26DashboardPulse > header p { margin: 4px 0 0; color: #718697; font-size: 11px; }
+  .v26DashboardPulse > header > small { color: #718697; font-size: 9px; font-weight: 800; letter-spacing: .1em; }
+  .v26DashboardPulseItems { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .v26DashboardPulseItems button { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 5px 16px; border: 0; border-left: 1px solid rgba(148,163,184,.16); border-radius: 0; background: transparent; color: #dbe7ee; text-align: left; transition: background .2s ease; }
+  .v26DashboardPulseItems button:first-child { border-left: 0; padding-left: 0; }
+  .v26DashboardPulseItems button:last-child { padding-right: 0; }
+  .v26DashboardPulseItems button:hover, .v26DashboardPulseItems button:focus-visible { background: rgba(103,232,249,.05); }
+  .v26DashboardPulseItems button:focus-visible { outline: 2px solid rgba(103,232,249,.7); outline-offset: 2px; }
+  .v26DashboardPulseItems button > span { display: grid; gap: 4px; min-width: 0; }
+  .v26DashboardPulseItems b { color: #cbd7df; font-size: 11px; letter-spacing: .04em; }
+  .v26DashboardPulseItems small { color: #f1f5f8; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .v26DashboardPulseItems em { color: #8fa2b3; font-size: 10px; font-style: normal; white-space: nowrap; }
+  .v26DashboardPulseItems em.up { color: #63c98d; }
+  .v26DashboardPulseItems em.down { color: #e35b5b; }
+  .v26DashboardHeroStatus { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+  .v26DashboardHeroStatus span { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; padding: 6px 10px; border: 1px solid rgba(148,163,184,.22); border-radius: 999px; background: rgba(8,15,23,.56); color: #b7c5d1; font-size: 9px; font-weight: 800; letter-spacing: .08em; white-space: nowrap; }
+  .v26DashboardHeroStatus i { width: 6px; height: 6px; border-radius: 50%; background: #d6a64c; }
+  .v26DashboardHeroStatus i.ok { background: #63c98d; }
+  .v26DashboardWorkspaces { display: grid; gap: 16px; }
+  .v26DashboardWorkspaces > div:first-child { display: grid; gap: 5px; }
+  .v26DashboardWorkspaces h2 { margin: 0; color: #aebdca; font-size: 11px; font-weight: 800; letter-spacing: .14em; }
+  .v26DashboardWorkspaces p { margin: 0; color: #718697; font-size: 12px; }
+  .v26DashboardChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .v26DashboardChoices button { min-height: 142px; padding: 22px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background-color: #0a0f16; color: #e5edf3; box-shadow: none; transition: border-color .2s ease, transform .2s ease; animation: v26DashboardCardIn .38s ease both; }
+  .v26DashboardChoices button:nth-child(2) { animation-delay: .04s; }
+  .v26DashboardChoices button:nth-child(3) { animation-delay: .08s; }
+  .v26DashboardChoices button:nth-child(4) { animation-delay: .12s; }
+  .v26DashboardChoices button:nth-child(5) { animation-delay: .16s; }
+  .v26DashboardChoices button:nth-child(6) { animation-delay: .2s; }
+  .v26DashboardChoices button:hover, .v26DashboardChoices button:focus-visible { border-color: rgba(255,255,255,.18); background-color: #0a0f16; transform: translateY(-2px); }
+  .v26App:has(.v26Dashboard) .v26DashboardChoices button:hover:not(:disabled), .v26App:has(.v26Dashboard) .v26DashboardChoices button:focus-visible { border-color: rgba(255,255,255,.18); background: #0a0f16; color: #e5edf3; transform: translateY(-2px); }
+  .v26DashboardChoices button:focus-visible { outline: 1px solid rgba(255,255,255,.18); outline-offset: 2px; }
+  .v26DashboardChoices button > svg { width: 20px; height: 20px; padding: 9px; border-radius: 8px; background: transparent; color: #ff8a3d; transition: transform .18s ease; }
+  .v26DashboardChoices button:hover > svg, .v26DashboardChoices button:focus-visible > svg { transform: none; }
+  .v26DashboardChoices b { color: #f1f5f8; font-size: 12px; letter-spacing: .08em; }
+  .v26DashboardChoices small { color: #8fa2b3; font-size: 11px; line-height: 1.4; }
+  .v26DashboardChoices em { color: #ff8a3d; font-size: 20px; transition: transform .18s ease; }
+  .v26DashboardChoices button:hover em, .v26DashboardChoices button:focus-visible em { transform: none; }
+  .v26App:has(.v26Dashboard) > .v26Footer { display: flex; align-items: center; justify-content: center; gap: 18px; width: min(100%, 1180px); min-height: 42px; box-sizing: border-box; margin: 0 auto 18px; padding: 10px 16px; border: 1px solid rgba(255,255,255,.06); border-radius: 0; background-color: #05070c; color: var(--text-dim, #8fa2b3); font-size: 12px; }
+  .v26App:has(.v26Dashboard) > .v26Footer span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .v26App:has(.v26Dashboard) > .v26Footer i { width: 6px; height: 6px; border-radius: 50%; background: #e5b95d; }
+  .v26App:has(.v26Dashboard) > .v26Footer i.ok { background: #37c98a; }
+  .v26App:has(.v26Dashboard) > .v26Footer i.error { background: #e35b5b; }
+  @media (max-width: 600px) {
+    .v26Dashboard { min-height: 0; gap: 20px; margin-top: 14px; }
+    .v26DashboardHero { display: grid; align-items: start; gap: 16px; min-height: 0; padding: 40px 0 18px; }
+    .v26DashboardHero h1 { font-size: clamp(38px, 10vw, 42px); }
+    .v26DashboardHero p { font-size: 13px; }
+    .v26DashboardHeroStatus { justify-content: flex-start; }
+    .v26DashboardPulse { padding: 14px; }
+    .v26DashboardPulseItems { display: flex; gap: 0; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+    .v26DashboardPulseItems button, .v26DashboardPulseItems button:first-child, .v26DashboardPulseItems button:last-child { flex: 0 0 142px; padding: 5px 12px; border-left: 1px solid rgba(148,163,184,.16); }
+    .v26DashboardPulseItems button:first-child { padding-left: 0; border-left: 0; }
+    .v26DashboardChoices { grid-template-columns: 1fr; gap: 20px; }
+    .v26DashboardChoices button { min-height: 190px; padding: 24px; }
+    .v26DashboardChoices b, .v26DashboardChoices small { overflow-wrap: anywhere; }
+    .v26App:has(.v26Dashboard) > .v26Footer { justify-content: flex-start; gap: 16px; margin-bottom: 14px; padding: 10px 12px; overflow-x: auto; }
+  }
+
+  @keyframes v26DashboardRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes v26DashboardCardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) {
+    .v26DashboardHero, .v26DashboardChoices button { animation: none; transition: none; }
+  }
 
 .demoOrdersGrid > .demoOrderPanel,
 .demoOrdersGrid > .demoEventPanel { min-height: 218px; padding: 16px; border-color: rgba(37,48,59,.9); box-shadow: 0 12px 28px rgba(0,0,0,.18); }
@@ -6338,8 +6928,182 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .masterTradeRoute .masterTradeLiveAccountHud { position: relative; }
 .masterTradeRoute .masterTradeLiveAccountHud > header { position: absolute; top: 8px; right: 10px; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 0; border: 0; }
 .masterTradeRoute .masterTradeLiveAccountHud > header > div { display: none; }
-.masterTradeRoute .masterTradeLiveAccountHud > header strong { font-size: 8px; }
-.masterTradeRoute .masterTradeLiveAccountMetrics { margin-top: 0; padding-right: 118px; }
+.masterTradeRoute .masterTradeLiveAccountHud > header strong {
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #ee907d;
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-shadow: none;
+}
+.masterTradeRoute .masterTradeLiveAccountHud > header strong i {
+  box-shadow: none !important;
+}
+.masterTradeRoute .masterTradeLiveAccountHud {
+  border: 0 !important;
+  background: transparent !important;
+}
+.masterTradeRoute .masterTradeLiveAccountHud > header {
+  background: transparent !important;
+}
+
+/* The live Master Trade page uses masterTradePage/masterTrade, not masterTradeRoute. */
+.masterTradeLiveAccountHud {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.masterTradeLiveAccountHud > header {
+  background: transparent !important;
+}
+
+.masterTradeLiveAccountHud > header strong {
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #ee907d !important;
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-shadow: none;
+}
+
+.masterTradeLiveAccountHud > header strong i {
+  box-shadow: none !important;
+}
+
+.masterTradeLiveAccountMetrics > span {
+  min-height: 52px;
+  padding: 8px 7px;
+  gap: 4px;
+}
+
+.masterTradeLiveAccountMetrics small {
+  font-size: 9px;
+  line-height: 1.15;
+  letter-spacing: .02em;
+}
+
+.masterTradeLiveAccountMetrics b {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.masterTradeLiveAccountMetrics em {
+  font-size: 8px;
+  line-height: 1.15;
+}
+
+.masterTradePage .masterTradeLiveAccountHud {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+/* The metrics grid behind this header shows a lighter gap color through its transparent
+   background; stretch the header to the row's full height so the status card lines up
+   with the neighboring metric cards. */
+.masterTradePage .masterTradeLiveAccountHud > header {
+  top: 8px;
+  bottom: 8px;
+  right: 0;
+  height: auto;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+/* Match the rounded metric-card shape instead of a pill, so the status reads as one of
+   the same cards rather than a mismatched badge. */
+.masterTradePage .masterTradeLiveAccountHud > header > strong {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 10px !important;
+  border-radius: 10px;
+  box-shadow: none !important;
+}
+
+.masterTradePage .masterTradeLiveAccountHud > header > strong.blocked {
+  border: 1px solid rgba(240, 124, 115, .35) !important;
+  background: rgba(240, 124, 115, .1) !important;
+}
+
+.masterTradePage .masterTradeLiveAccountHud > header > strong.ready {
+  border: 1px solid rgba(85, 215, 155, .35) !important;
+  background: rgba(85, 215, 155, .1) !important;
+}
+
+.masterTradePage .masterTradeLiveAccountHud > header > strong i {
+  box-shadow: none !important;
+}
+
+.masterTradeLiveSafety {
+  padding: 10px 12px;
+  background: #0e151b;
+  border-radius: 7px;
+}
+
+.masterTradeLiveSafety > header {
+  margin-bottom: 8px;
+}
+
+.masterTradeLiveSafety > header h3 {
+  font-size: 13px;
+}
+
+.masterTradeLiveSafetyList {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.masterTradeLiveSafetyList details {
+  min-width: 0;
+  border: 0;
+  border-radius: 5px;
+  background: #111c22;
+}
+
+.masterTradeLiveSafetyList summary {
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.masterTradeLiveSafetyList summary span {
+  min-width: 0;
+  overflow: hidden;
+  gap: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.masterTradeLiveSafetyList summary b {
+  flex: 0 0 auto;
+  font-size: 8px;
+}
+
+.masterTradeLiveSafetyList details p {
+  margin: 0 8px 7px 21px;
+  font-size: 9px;
+}
+
+@media (max-width: 700px) {
+  .masterTradeLiveSafetyList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.masterTradeRoute .masterTradeLiveAccountMetrics { margin-top: 0; padding-right: 144px; }
+.masterTradeRoute .masterTradeLiveAccountMetrics > span { min-height: 52px; padding: 8px 7px; gap: 4px; }
+.masterTradeRoute .masterTradeLiveAccountMetrics small { font-size: 9px; line-height: 1.15; letter-spacing: .02em; }
+.masterTradeRoute .masterTradeLiveAccountMetrics b { font-size: 12px; line-height: 1.2; }
+.masterTradeRoute .masterTradeLiveAccountMetrics em { font-size: 8px; line-height: 1.15; }
 
 .masterTradeRoute .liveUxOrderGrid { align-items: stretch; }
 .masterTradeRoute .liveUxSummary { align-content: start; }
@@ -7569,4 +8333,802 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 @keyframes v26RefreshIconSpin {
   from { transform: translate(-50%, -50%) rotate(0deg); }
   to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.masterTradeRoute > .workspaceBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  margin: -5px 0 2px;
+  padding: 0 10px 0 7px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  border-radius: 7px;
+  background: rgba(17, 24, 30, .72);
+  color: var(--terminal-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  transition: border-color .18s ease, background .18s ease, color .18s ease, transform .18s ease;
+}
+
+.masterTradeRoute > .workspaceBack svg {
+  width: 14px;
+  height: 14px;
+  color: var(--terminal-accent-strong);
+}
+
+.masterTradeRoute > .workspaceBack:hover {
+  border-color: rgba(212, 168, 79, .46);
+  background: rgba(29, 38, 44, .94);
+  color: var(--terminal-text);
+  transform: translateY(-1px);
+}
+
+.masterTradeRoute .masterTradeFocusPanel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.35fr) minmax(150px, .9fr) minmax(170px, 1fr) repeat(2, minmax(120px, .7fr));
+  align-items: center;
+  gap: 18px;
+  margin: 12px 0;
+  padding: 15px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(105deg, #121c23, #0d141a 65%, #111a20);
+  box-shadow: inset 3px 0 0 var(--terminal-accent);
+}
+
+.masterTradeRoute .masterTradeFocusIdentity,
+.masterTradeRoute .masterTradeFocusPrice,
+.masterTradeRoute .masterTradeFocusDecision,
+.masterTradeRoute .masterTradeFocusMetric {
+  min-width: 0;
+}
+
+.masterTradeRoute .masterTradeFocusIdentity strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--terminal-text);
+  font-size: 20px;
+  letter-spacing: .04em;
+}
+
+.masterTradeRoute .masterTradeFocusIdentity > span:last-child,
+.masterTradeRoute .masterTradeFocusPanel small {
+  color: var(--terminal-muted);
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.masterTradeRoute .masterTradeFocusPrice strong,
+.masterTradeRoute .masterTradeFocusDecision strong,
+.masterTradeRoute .masterTradeFocusMetric strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--terminal-text);
+  font-size: 16px;
+  line-height: 1.15;
+}
+
+.masterTradeRoute .masterTradeFocusPrice strong {
+  color: var(--terminal-accent-strong);
+  font-size: 21px;
+}
+
+.masterTradeRoute .masterTradeFocusDecision strong {
+  color: var(--terminal-positive);
+}
+
+.masterTradeRoute .masterTradeFocusPanel.offline {
+  box-shadow: inset 3px 0 0 var(--terminal-warning);
+}
+
+.masterTradeRoute .masterTradeFocusPanel.offline .masterTradeFocusDecision strong {
+  color: var(--terminal-warning);
+}
+
+.masterTradeRoute .masterTradeFocusNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: 9px;
+  color: var(--terminal-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+  .masterTradeRoute .masterTradeFocusPanel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 13px;
+  }
+
+  .masterTradeRoute .masterTradeFocusIdentity,
+  .masterTradeRoute .masterTradeFocusPrice {
+    grid-column: span 2;
+  }
+}
+
+/* Keep Master Trade separated by surfaces and spacing, not stacked rules. */
+.masterTradeRoute .panelHeader,
+.masterTradeRoute .tradeDecisionHeader,
+.masterTradeRoute .marketAnalysisFooter,
+.masterTradeRoute .masterTradeLiveSection > header,
+.masterTradeRoute .masterTradeLiveControlMeta,
+.masterTradeRoute .tableWrap th,
+.masterTradeRoute .tableWrap td,
+.masterTradeRoute .masterTradeLiveTableWrap td {
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+}
+
+.masterTradeRoute .marketAnalysisMetrics {
+  gap: 6px;
+  border: 0;
+  background: transparent;
+}
+
+.masterTradeRoute .marketAnalysisMetrics > div,
+.masterTradeRoute .decisionMetricGrid > div,
+.masterTradeRoute .performanceMetrics > div,
+.masterTradeRoute .riskMonitorGrid > div,
+.masterTradeRoute .marketStatsStrip span,
+.masterTradeRoute .indicatorGrid article,
+.masterTradeRoute .indicatorTerminalGrid article {
+  border: 0;
+  border-radius: 6px;
+  background: #0e1419;
+}
+
+.masterTradeRoute .masterTradeLiveOperations,
+.masterTradeRoute .masterTradeLivePrimaryGrid,
+.masterTradeRoute .masterTradeLivePrimaryGrid > .masterTradeLiveSection {
+  border: 0;
+}
+
+.masterTradeRoute .masterTradeLiveOperations,
+.masterTradeRoute .masterTradeLivePrimaryGrid {
+  gap: 10px;
+  background: transparent;
+}
+
+.masterTradeRoute .masterTradeLivePrimaryGrid > .masterTradeLiveSection {
+  border-radius: 8px;
+  background: #0b1117;
+}
+
+.masterTradeRoute .terminalStatusItem {
+  border: 0;
+}
+
+.masterTradeRoute .tableWrap,
+.masterTradeRoute .masterTradeLiveTableWrap {
+  border: 0;
+}
+
+.masterTradeRoute .masterTradeLiveConnectionActionBar {
+  display: grid;
+  grid-template-columns: minmax(150px, .75fr) minmax(180px, .95fr) auto;
+  align-items: stretch;
+  gap: 9px;
+  margin-top: 2px;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #0e171c;
+}
+
+.masterTradeRoute .masterTradeLiveActionMeta {
+  display: grid;
+  align-content: center;
+  min-height: 48px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: #111c22;
+}
+
+.masterTradeRoute .masterTradeLiveActionMeta b {
+  margin-top: 3px;
+  color: var(--terminal-text);
+  font-size: 12px;
+}
+
+.masterTradeRoute .masterTradeLiveActionMeta small {
+  margin-top: 2px;
+  color: var(--terminal-muted);
+  font-size: 9px;
+}
+
+.masterTradeRoute .masterTradeLiveConnectionActionBar .masterTradeLiveApiActions {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.masterTradeRoute .masterTradeLiveConnectionActionBar .masterTradeLiveApiActions button {
+  min-height: 48px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 6px;
+  background: #18262d;
+  color: var(--live-ink);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .06em;
+}
+
+.masterTradeRoute .masterTradeLiveConnectionActionBar .masterTradeLiveApiActions button:hover:not(:disabled) {
+  background: #21343d;
+}
+
+.masterTradeRoute .masterTradeLiveConnectionActionBar .masterTradeLiveApiActions .masterTradeLiveSaveButton {
+  background: #2c8c68;
+  color: #f2fff8;
+  box-shadow: 0 6px 18px rgba(44, 140, 104, .18);
+}
+
+.masterTradeRoute .masterTradeLiveConnectionActionBar .masterTradeLiveApiActions .masterTradeLiveSaveButton:hover:not(:disabled) {
+  background: #36a77d;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialBlock .masterTradeLiveCheck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 6px;
+  background: rgba(85, 215, 155, .06);
+}
+
+@media (max-width: 900px) {
+  .masterTradeRoute .masterTradeLiveConnectionActionBar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .masterTradeRoute .masterTradeLiveConnectionActionBar .masterTradeLiveApiActions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+
+  .masterTradeRoute .masterTradeLiveConnectionActionBar .masterTradeLiveApiActions button {
+    flex: 1 1 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .masterTradeRoute .masterTradeLiveConnectionActionBar {
+    grid-template-columns: 1fr;
+  }
+
+  .masterTradeRoute .masterTradeLiveConnectionActionBar .masterTradeLiveApiActions {
+    grid-column: auto;
+  }
+}
+
+.masterTradeRoute .masterTradeLiveCredentialBlock {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialLabel {
+  align-items: center;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialLabel .masterTradeLiveKicker {
+  color: var(--terminal-text);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-size: 11px;
+  letter-spacing: .1em;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialLabel small {
+  color: var(--terminal-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialBlock .masterTradeLiveApiGrid label {
+  gap: 7px;
+  color: var(--terminal-copy);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialBlock .masterTradeLiveApiGrid input {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(148, 163, 184, .26);
+  border-radius: 7px;
+  background: #0a1116;
+  color: #f2f7f5;
+  font-family: "IBM Plex Mono", "Cascadia Mono", monospace;
+  font-size: 13px;
+  letter-spacing: .02em;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialBlock .masterTradeLiveApiGrid input::placeholder {
+  color: #7f9299;
+  font-size: 12px;
+  opacity: 1;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialBlock .masterTradeLiveApiGrid input:focus {
+  border-color: rgba(85, 215, 155, .7);
+  outline: 2px solid rgba(85, 215, 155, .12);
+  outline-offset: 1px;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialBlock .masterTradeLiveCheck {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.masterTradeRoute .masterTradeLiveCredentialBlock .masterTradeLiveCheck span {
+  color: #b6c6c8;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.masterTradeRoute .masterTradeLiveOperations {
+  padding: 13px 15px;
+  border-radius: 8px;
+  background: #0d171c;
+  box-shadow: inset 3px 0 0 rgba(90, 169, 214, .72);
+}
+
+.masterTradeRoute .masterTradeLiveOperations > header {
+  align-items: center;
+  margin-bottom: 9px;
+}
+
+.masterTradeRoute .masterTradeLiveOperations > header h3 {
+  font-size: 15px;
+}
+
+.masterTradeRoute .masterTradeLiveControl {
+  padding: 15px;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #132521, #0d171b 68%);
+  box-shadow: inset 3px 0 0 rgba(85, 215, 155, .72);
+}
+
+.masterTradeRoute .masterTradeLiveControl > header {
+  margin-bottom: 12px;
+}
+
+.masterTradeRoute .masterTradeLiveControl > header h3 {
+  font-size: 16px;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(245px, .82fr);
+  align-items: center;
+  gap: 13px;
+}
+
+.masterTradeRoute .masterTradeLiveControlMain {
+  min-width: 0;
+}
+
+.masterTradeRoute .masterTradeLiveActivityRail {
+  min-width: 0;
+  padding: 10px 11px;
+  border-radius: 7px;
+  background: rgba(5, 12, 15, .62);
+}
+
+.masterTradeRoute .masterTradeLiveActivityRailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 7px;
+}
+
+.masterTradeRoute .masterTradeLiveActivityRailHeader b {
+  color: var(--terminal-muted);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.masterTradeRoute .masterTradeLiveActivityRailList {
+  display: grid;
+  gap: 5px;
+  max-height: 116px;
+  overflow-y: auto;
+  scrollbar-color: rgba(90, 169, 214, .45) transparent;
+  scrollbar-width: thin;
+}
+
+.masterTradeRoute .masterTradeLiveActivityRailItem {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 5px 0;
+}
+
+.masterTradeRoute .masterTradeLiveActivityRailItem time {
+  color: var(--terminal-accent-strong);
+  font-family: "IBM Plex Mono", "Cascadia Mono", monospace;
+  font-size: 10px;
+}
+
+.masterTradeRoute .masterTradeLiveActivityRailItem span {
+  overflow: hidden;
+  color: #c0ced0;
+  font-size: 10px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.masterTradeRoute .masterTradeLiveActivityRailList > p {
+  margin: 8px 0 3px;
+  color: var(--terminal-muted);
+  font-size: 10px;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody b {
+  color: #effaf5;
+  font-size: 14px;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody small {
+  max-width: 360px;
+  color: #9fb5b3;
+  font-size: 11px;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody .primaryAction,
+.masterTradeRoute .masterTradeLiveControlBody .dangerAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 164px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .07em;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody .primaryAction {
+  background: #2c8c68;
+  color: #f2fff8;
+  box-shadow: 0 8px 20px rgba(44, 140, 104, .18);
+}
+
+.masterTradeRoute .masterTradeLiveControlBody .primaryAction:hover:not(:disabled) {
+  background: #36a77d;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody .dangerAction {
+  background: #9d4d4d;
+  color: #fff6f4;
+}
+
+.masterTradeRoute .masterTradeLiveControlMeta {
+  gap: 6px;
+  margin: 13px 0 0;
+  padding: 0;
+}
+
+.masterTradeRoute .masterTradeLiveControlMeta span {
+  padding: 7px 8px;
+  border-radius: 5px;
+  background: rgba(7, 14, 17, .46);
+  font-size: 9px;
+}
+
+.masterTradeRoute .masterTradeLiveControlMeta b {
+  font-size: 11px;
+}
+
+.masterTradeRoute .masterTradeLiveControl > .masterTradeLiveSecondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 10px;
+  padding: 0 12px;
+  border: 1px solid rgba(237, 189, 103, .42);
+  border-radius: 7px;
+  background: rgba(237, 189, 103, .12);
+  color: #f1cb7b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .1em;
+}
+
+.masterTradeRoute .masterTradeLiveControl > .masterTradeLiveSecondary:hover:not(:disabled) {
+  border-color: rgba(237, 189, 103, .72);
+  background: rgba(237, 189, 103, .2);
+  color: #ffe4a6;
+}
+
+.masterTradeRoute .masterTradeLiveControl > .masterTradeLiveSecondary:disabled {
+  border-color: rgba(148, 163, 184, .18);
+  background: rgba(148, 163, 184, .08);
+  color: #7c8b90;
+}
+
+@media (max-width: 600px) {
+  .masterTradeRoute .masterTradeLiveControlBody {
+    grid-template-columns: 1fr;
+  }
+
+  .masterTradeRoute .masterTradeLiveControlBody .primaryAction,
+  .masterTradeRoute .masterTradeLiveControlBody .dangerAction {
+    width: 100%;
+  }
+}
+
+/* Keep the operational rail beside Auto Trade, with setup as the third surface. */
+.masterTradeRoute .masterTradeLivePrimaryGrid {
+  grid-template-columns: minmax(260px, .95fr) minmax(245px, .8fr) minmax(300px, 1.2fr);
+  align-items: stretch;
+}
+
+.masterTradeRoute .masterTradeLivePrimaryGrid > .masterTradeLiveSection,
+.masterTradeRoute .masterTradeLivePrimaryGrid > .masterTradeLiveActivityRail {
+  min-width: 0;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody {
+  display: block;
+}
+
+.masterTradeRoute .masterTradeLiveControlMain {
+  display: grid;
+  gap: 12px;
+}
+
+.masterTradeRoute .masterTradeLiveControlBody .primaryAction,
+.masterTradeRoute .masterTradeLiveControlBody .dangerAction {
+  width: 100%;
+}
+
+.masterTradeRoute .masterTradeLivePrimaryGrid > .masterTradeLiveActivityRail {
+  display: grid;
+  align-content: start;
+  min-height: 0;
+  padding: 10px 11px;
+  border-radius: 7px;
+  background: linear-gradient(145deg, #101d23, #0b1318);
+  box-shadow: inset 3px 0 0 rgba(90, 169, 214, .72);
+}
+
+.masterTradeRoute .masterTradeLivePrimaryGrid .masterTradeLiveActivityRailList {
+  max-height: 142px;
+}
+
+.masterTradeRoute .masterTradeLiveLowerGrid {
+  grid-template-columns: minmax(0, .9fr) minmax(240px, .7fr);
+  gap: 7px;
+}
+
+.masterTradeRoute .masterTradeLiveLowerGrid > .masterTradeLiveSection {
+  padding: 9px 11px;
+  border-radius: 7px;
+}
+
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveSafetyList {
+  gap: 1px 8px;
+}
+
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveSafetyList summary {
+  min-height: 27px;
+  font-size: 9px;
+}
+
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveSafetyList summary b {
+  font-size: 8px;
+}
+
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveSafetyList details p {
+  margin-bottom: 5px;
+  font-size: 9px;
+}
+
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveActivity ol {
+  max-height: 108px;
+}
+
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveActivity li {
+  min-height: 25px;
+  grid-template-columns: 7px 48px minmax(0, 1fr);
+  gap: 6px;
+  font-size: 8px;
+}
+
+.masterTradeRoute .masterTradeLivePrimaryGrid .masterTradeLiveActivityRailItem span {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.masterTradeRoute .masterTradeLiveConfirmationGrid article,
+.masterTradeRoute .masterTradeLiveConfirmationGrid article > div,
+.masterTradeRoute .masterTradeLivePolicyCheck {
+  min-width: 0;
+}
+
+.masterTradeRoute .masterTradeLiveConfirmationGrid article h4,
+.masterTradeRoute .masterTradeLiveConfirmationGrid article small,
+.masterTradeRoute .masterTradeLivePolicyCheck span,
+.masterTradeRoute .masterTradeLiveSafetyList details p {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.masterTradeRoute .masterTradeLiveConfirmationGrid article h4 {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.masterTradeRoute .masterTradeLiveConfirmationGrid article small,
+.masterTradeRoute .masterTradeLivePolicyCheck span {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.masterTradeRoute .masterTradeLivePolicyCheck {
+  align-items: flex-start;
+  min-height: 32px;
+  height: auto;
+}
+
+.masterTradeRoute .masterTradeLivePolicyCheck input {
+  width: 15px;
+  min-width: 15px;
+  height: 15px;
+  min-height: 15px;
+  margin: 2px 0 0;
+  padding: 0;
+}
+
+.masterTradeRoute .masterTradeLivePolicyCheck span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.masterTradeRoute .masterTradeLiveConfirmationGrid article .masterTradeLiveSecondary {
+  width: min(100%, 260px);
+  min-height: 38px;
+  padding: 0 12px;
+  color: #dbe9e9;
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.masterTradeRoute .masterTradeLiveSafetyList details p {
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1200px) {
+  .masterTradeRoute .masterTradeLivePrimaryGrid {
+    grid-template-columns: minmax(260px, 1fr) minmax(245px, .9fr);
+  }
+
+  .masterTradeRoute .masterTradeLivePrimaryGrid > .masterTradeLiveSetup {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .masterTradeRoute .masterTradeLivePrimaryGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .masterTradeRoute .masterTradeLivePrimaryGrid > .masterTradeLiveSetup {
+    grid-column: auto;
+  }
+
+  .masterTradeRoute .masterTradeLivePrimaryGrid > .masterTradeLiveActivityRail {
+    min-height: 0;
+  }
+
+  .masterTradeRoute .masterTradeLiveConfirmationGrid article .masterTradeLiveSecondary {
+    width: 100%;
+  }
+}
+
+/* Readability pass: the smallest labels/values on this page (6-9px) sit below a comfortable
+   reading size. Bump them a notch and lighten the muted color for contrast; sizes stay in
+   min-height/auto-growing containers so nothing reflows or clips. */
+.masterTradeRoute {
+  --terminal-muted: #9fb2bd;
+}
+
+.masterTradeRoute .terminalStatusStrip { font-size: 10px; }
+.masterTradeRoute .terminalStatusItem small { color: #93a4af; font-size: 9px; }
+.masterTradeRoute .masterTradeTerminalIdentity,
+.masterTradeRoute .masterTradeTerminalMode { font-size: 10px; }
+.masterTradeRoute .masterTradeSafetyBanner strong { font-size: 10px; }
+.masterTradeRoute .masterTradeSafetyBanner span { font-size: 9px; }
+.masterTradeRoute .chartToolbar .chartControls button,
+.masterTradeRoute .chartViewControls button { font-size: 10px; }
+.masterTradeRoute .chartViewControls span { font-size: 9px; }
+.masterTradeRoute .scoreMeters span { font-size: 9px; }
+.masterTradeRoute .indicatorTerminalGrid small { font-size: 9px; }
+.masterTradeRoute .indicatorScale em { font-size: 9px; }
+.masterTradeRoute .chartSymbol { font-size: 10px; }
+.masterTradeRoute .delta { font-size: 10px; }
+.masterTradeRoute .marketAnalysisState { font-size: 10px; }
+.masterTradeRoute .marketAnalysisDecision span,
+.masterTradeRoute .marketAnalysisDecision em,
+.masterTradeRoute .marketAnalysisFooter span,
+.masterTradeRoute .marketAnalysisFooter em { font-size: 9px; }
+.masterTradeRoute .marketSearch span { font-size: 10px; }
+.masterTradeRoute .marketCount { font-size: 10px; }
+.masterTradeRoute .liveUxSummary .liveUxMetrics small { font-size: 9px; }
+.masterTradeRoute .liveUxSummary .liveUxMetrics b { font-size: 11px; }
+.masterTradeRoute .liveUxManual .liveChoice > span { font-size: 10px; }
+.masterTradeRoute .liveUxManual .liveChoice button { font-size: 11px; }
+.masterTradeRoute .liveUxManual .liveUxFormActions button { font-size: 10px; }
+.masterTradeRoute .masterTradeLiveAccountHud h3 { font-size: 12px; }
+.masterTradeRoute .masterTradeLiveAccountMetrics small { font-size: 10px; }
+.masterTradeRoute .masterTradeLiveAccountMetrics em { font-size: 9px; }
+
+/* Modern stat-card grid: real spacing and rounded cells instead of a flat hairline table,
+   from the leftmost metric through to the status pill on the right. */
+.masterTradeRoute .masterTradeLiveAccountHud .masterTradeLiveAccountMetrics {
+  gap: 8px;
+  background: transparent;
+}
+.masterTradeRoute .masterTradeLiveAccountHud .masterTradeLiveAccountMetrics > span {
+  border: 1px solid var(--terminal-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .03);
+  transition: border-color .15s ease, background-color .15s ease;
+}
+.masterTradeRoute .masterTradeLiveAccountHud .masterTradeLiveAccountMetrics > span:hover {
+  border-color: var(--terminal-line-strong);
+  background: rgba(255, 255, 255, .05);
+}
+.masterTradeRoute .masterTradeLiveDataGrid > .masterTradeLiveAccountTable .masterTradeLiveEmpty strong { font-size: 11px; }
+.masterTradeRoute .masterTradeLiveDataGrid > .masterTradeLiveAccountTable .masterTradeLiveEmpty span { font-size: 10px; }
+.masterTradeRoute .masterTradeLiveTableWrap table { font-size: 10px; }
+.masterTradeRoute .masterTradeLiveReason { font-size: 10px; }
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveSafetyList summary { font-size: 10px; }
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveSafetyList summary b { font-size: 10px; }
+.masterTradeRoute .masterTradeLiveLowerGrid .masterTradeLiveActivity li {
+  grid-template-columns: 7px 54px minmax(0, 1fr);
+  font-size: 9px;
+}
+
+/* Clarity pass: several label groups were still stuck at 8px (below comfortable reading
+   size) and the pending-step flow text was too dim to read against the dark background. */
+.masterTradeRoute .decisionMetricGrid small,
+.masterTradeRoute .decisionBreakdown small,
+.masterTradeRoute .masterTradeLiveActionMeta span,
+.masterTradeRoute .masterTradeLiveMarkets > span,
+.masterTradeRoute .triggerSummary small,
+.masterTradeRoute .triggerPreviewGrid small,
+.masterTradeRoute .preTradeCheckGrid small,
+.masterTradeRoute .masterTradeLiveHeadline small,
+.masterTradeRoute .preTradeCheckGrid b,
+.masterTradeRoute .masterTradeLiveConfirmationGrid article > strong,
+.masterTradeRoute .decisionAutoTrade span,
+.masterTradeRoute .masterTradeTerminalIdentity span,
+.masterTradeRoute .masterTradeTerminalMode,
+.masterTradeRoute .triggerSummary em,
+.masterTradeRoute .preTradeCheckGrid em,
+.masterTradeRoute .masterTradeLiveSignalGrid small {
+  font-size: 10px;
+}
+.masterTradeRoute .masterTradeLiveFlow {
+  color: #7e93a0;
 }

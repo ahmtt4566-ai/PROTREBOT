@@ -11,6 +11,7 @@ import './master-trade-live.css'
 import './terminal-theme.css'
 import './subscription.css'
 import './coin-analysis.css'
+import './theme.css'
 
 installAuthorizedFetch()
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><CopyProtection/><AppErrorBoundary><WebAccessGate><AuthGate><TestnetFirstApp/></AuthGate></WebAccessGate></AppErrorBoundary></React.StrictMode>)

@@ -89,15 +89,15 @@ export default function CloudOpsCenter() {
   const certificate = data?.evidence.certificate
   const pendingGate = useMemo(() => certificate?.gates.find(gate => !gate.passed),[certificate])
 
-  if (!data) return <div className="v27Loading"><CloudCog className="spin"/><b>V27 BULUT OPERASYON MERKEZİ BAĞLANIYOR</b><span>{error || 'Testnet kanıtları ve kalıcı kayıtlar okunuyor…'}</span><button onClick={() => refresh()}>YENİDEN DENE</button></div>
+  if (!data) return <div className="v27Loading"><CloudCog className="spin"/><b>OPERASYON MERKEZİ HAZIRLANIYOR</b><span>Sunucu bağlantısı bekleniyor.</span><button onClick={() => refresh()}>YENİDEN DENE</button></div>
 
   return <section className="v27Ops">
     <header className="v27OpsHero">
-      <div className="v27OpsTitle"><span><Cloud/></span><div><small>V27 · CLOUD OPERATIONS & EVIDENCE</small><h2>Bulut Operasyon ve Kanıt Merkezi</h2><p>Botun ne yaptığını, neden beklediğini ve Testnet kayıtlarının kalıcı olup olmadığını tek ekranda izleyin.</p></div></div>
+      <div className="v27OpsTitle"><span><Cloud/></span><div><small>OPERASYON VE KANIT MERKEZİ</small><h2>Bulut Operasyon ve Kanıt Merkezi</h2><p>Botun ne yaptığını, neden beklediğini ve Testnet kayıtlarının kalıcı olup olmadığını tek ekranda izleyin.</p></div></div>
       <div className="v27OpsActions"><div><i/><span>SON CANLI YENİLEME</span><b>{updated}</b></div><button onClick={() => refresh()} disabled={busy}><RefreshCw className={busy ? 'spin' : ''}/>YENİLE</button><button className="sync" onClick={sync} disabled={busy || !data.evidence.persistent}><Database/>KANITI ŞİMDİ KAYDET</button></div>
     </header>
 
-    {error && <div className="v27Error"><AlertTriangle/><b>Bağlantı uyarısı</b><span>{error}</span></div>}
+    {error && <div className="v27Error"><AlertTriangle/><b>Sunucu bağlantısı bekleniyor</b><span>Veriler güncellenemiyor.</span></div>}
     {!data.deployment.always_on && <div className="v27SleepNotice"><TimerReset/><div><b>ÖNİZLEME SUNUCUSU UYUYABİLİR</b><span>{data.deployment.tier} katmanında servis boşta durabilir; Testnet otomasyonunun 7/24 taraması için sürekli çalışan sunucu gerekir.</span></div><em>İŞLEM DEĞİL · ALTYAPI UYARISI</em></div>}
 
     <div className="v27Pulse">
@@ -106,7 +106,7 @@ export default function CloudOpsCenter() {
       <article className={data.testnet.auto.enabled ? 'hot' : 'wait'}><Bot/><small>OTONOM TARAMA</small><b>{data.testnet.auto.enabled ? 'ÇALIŞIYOR' : 'KAPALI'}</b><span>{data.testnet.auto.cycles || 0} tur · {date(data.testnet.auto.last_scan)}</span></article>
       <article className={data.evidence.persistent ? 'ok' : 'wait'}><Database/><small>KALICI KANIT</small><b>{data.evidence.status}</b><span>{data.evidence.count} olay · {date(data.evidence.last_sync)}</span></article>
       <article className={positions.length ? 'hot' : 'ok'}><WalletCards/><small>AÇIK TESTNET POZİSYONU</small><b>{positions.length} ADET</b><span>{data.testnet.account.open_orders.length} normal · {data.testnet.account.open_algo_orders.length} koruma emri</span></article>
-      <article className="locked"><ShieldCheck/><small>GERÇEK PARA</small><b>KİLİTLİ</b><span>V27 operasyon ekranı gerçek emir açmaz.</span></article>
+      <article className="locked"><ShieldCheck/><small>GERÇEK PARA</small><b>KİLİTLİ</b><span>Bu operasyon ekranı gerçek emir açmaz.</span></article>
     </div>
 
     <div className="v27Metrics">

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries, type IPriceLine } from 'lightweight-charts'
-import { Activity, ArrowUp, Bell, CheckCircle2, CircleDollarSign, Cloud, CloudCog, KeyRound, LockKeyhole, Menu, RadioTower, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2, X } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowUp, BarChart3, Bell, CheckCircle2, CircleDollarSign, Cloud, CloudCog, KeyRound, LockKeyhole, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2 } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 
@@ -11,7 +11,8 @@ const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
 const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
 const MasterTrade = lazy(() => import('./MasterTrade'))
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT
-type View = 'dashboard'|'trading'|'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'|'master-trade'
+const LOCAL_DEV_AUTO_ACCESS = import.meta.env.DEV && ['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)
+type View = 'dashboard'|'trading'|'risk'|'analyst'|'scanner'|'performance'|'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'|'master-trade'
 type Market = {symbol:string;display:string;price:number;change:number;volume:number}
 type Candle = {time:number;open:number;high:number;low:number;close:number;volume:number}
 type Point = {time:number;value:number}
@@ -139,7 +140,7 @@ function TestnetMarketChart({symbol,interval,onAnalysis,onAnalysisProgress,showL
   },[symbol,interval,onAnalysis,showLevels,showEma])
 
   return <div className="v26ChartShell">
-    <div className="v26ChartStatus"><span className={stream === 'CANLI' ? 'live' : stream === 'HATA' ? 'error' : ''}><i/>{stream}</span><em>Binance piyasa verisi · 15 sn yenileme · {updated}</em></div>
+    <div className="v26ChartStatus"><span className={stream === 'CANLI' ? 'live' : stream === 'HATA' ? 'error' : ''}><i/>{stream}</span></div>
     <div className="v26Chart" ref={host}/>
   </div>
 }
@@ -158,6 +159,7 @@ export default function TestnetFirstApp() {
   const [health,setHealth] = useState<Health|null>(null)
   const [loading,setLoading] = useState(false)
   const [marketError,setMarketError] = useState(false)
+  const [connectionOffline,setConnectionOffline] = useState(false)
   const [credentials,setCredentials] = useState({demoApiKey:'',demoSecretKey:'',liveApiKey:'',liveSecretKey:''})
   const [demoSaveState,setDemoSaveState] = useState<'idle'|'saving'|'saved'|'error'>('idle')
   const [demoVerifyState,setDemoVerifyState] = useState<'idle'|'verifying'|'verified'|'error'>('idle')
@@ -166,18 +168,18 @@ export default function TestnetFirstApp() {
   const [notificationsOpen,setNotificationsOpen] = useState(false)
   const [headerHidden,setHeaderHidden] = useState(false)
   const [showBackToTop,setShowBackToTop] = useState(false)
-  const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
   const [complianceOpen,setComplianceOpen] = useState(false)
   const [complianceTab,setComplianceTab] = useState<'risk'|'privacy'|'terms'|'support'>('risk')
   const notificationRef = useRef<HTMLDivElement>(null)
   const marketPickerRef = useRef<HTMLDivElement>(null)
   const notifications = healthNotifications(health)
   const selectedMarket = markets.find(market => market.symbol === symbol)
+  const pulseSymbols = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT']
+  const pulseMarkets = pulseSymbols.map(pulseSymbol => markets.find(market => market.symbol.replace('/','').toUpperCase() === pulseSymbol))
 
   const navigate = (target:View) => {
     if (target === 'testnet' as View) target = 'dashboard'
     setView(target)
-    setMobileMenuOpen(false)
     if (target === 'pricing' || target === 'billing' || target === 'master-trade') {
       window.history.pushState({},'', `/${target}`)
     } else if (window.location.pathname === '/pricing' || window.location.pathname === '/billing' || window.location.pathname === '/master-trade') {
@@ -195,6 +197,10 @@ export default function TestnetFirstApp() {
 
   useEffect(() => {
     if (view !== 'master-trade') return
+    if (LOCAL_DEV_AUTO_ACCESS) {
+      setMasterTradeAccess('granted')
+      return
+    }
     const token = userSessionToken()
     if (!token) {
       window.location.assign('/login')
@@ -224,6 +230,9 @@ export default function TestnetFirstApp() {
         fetch(`${API_BASE}/markets?limit=100`),
         fetch(`${API_BASE}/health`),
       ])
+      const marketUnavailable = marketResult.status !== 'fulfilled' || !marketResult.value.ok
+      const healthUnavailable = healthResult.status !== 'fulfilled' || !healthResult.value.ok
+      setConnectionOffline(marketUnavailable && healthUnavailable)
       if (marketResult.status === 'fulfilled' && marketResult.value.ok) {
         try {
           const payload = await marketResult.value.json() as Market[]
@@ -258,43 +267,43 @@ export default function TestnetFirstApp() {
       return
     }
     setDemoSaveState('saving')
-    setDemoVerification({kind:'info',message:'Saving… Demo anahtarları güvenli kasaya kaydediliyor.'})
+    setDemoVerification({kind:'info',message:'Kaydediliyor… Demo anahtarları güvenli kasaya kaydediliyor.'})
     try {
       const headers = new Headers({'Content-Type':'application/json'}); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`)
       const saveResponse = await fetch(`${API_BASE}/exchange-connections/save`,{
         method:'POST',headers,
         body:JSON.stringify(buildDemoSavePayload(apiKey, secretKey)),
       })
-      const savePayload = await saveResponse.json().catch(() => null) as {detail?:unknown}|null
-      if (!saveResponse.ok) throw new Error(typeof savePayload?.detail === 'string' ? savePayload.detail : 'Demo credentials securely save edilemedi.')
+      await saveResponse.json().catch(() => null)
+      if (!saveResponse.ok) throw new Error('Demo bağlantı bilgileri kaydedilemedi.')
       setCredentials(current => ({...current,demoApiKey:'',demoSecretKey:''}))
       setDemoSaveState('saved')
-      setDemoVerification({kind:'ok',message:'Credentials saved · Ready to verify.'})
+      setDemoVerification({kind:'ok',message:'Bağlantı bilgileri kaydedildi · Doğrulamaya hazır.'})
       await refreshConnectionStatus()
-    } catch (error) {
+    } catch {
       setDemoSaveState('error')
-      setDemoVerification({kind:'error',message:error instanceof Error ? error.message : 'Save failed. Ağ ve vault durumunu kontrol edin.'})
+      setDemoVerification({kind:'error',message:'Bağlantı bilgileri kaydedilemedi. Sunucu bağlantısını kontrol edin.'})
     }
   }
 
   const verifyDemoConnection = async () => {
     setDemoVerifyState('verifying')
-    setDemoVerification({kind:'info',message:'Verifying… Kayıtlı Demo credential context kullanılıyor.'})
+    setDemoVerification({kind:'info',message:'Doğrulanıyor… Kayıtlı Demo bağlantı bilgileri kullanılıyor.'})
     try {
       const headers = new Headers({'Content-Type':'application/json'}); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`)
       const testResponse = await fetch(`${API_BASE}/exchange-connections/test`,{method:'POST',headers,body:JSON.stringify({mode:'TESTNET'})})
-      const testPayload = await testResponse.json().catch(() => null) as {detail?:unknown}|null
-      if (!testResponse.ok) throw new Error(typeof testPayload?.detail === 'string' ? testPayload.detail : 'Saved Demo connection could not be verified.')
+      await testResponse.json().catch(() => null)
+      if (!testResponse.ok) throw new Error('Demo bağlantısı doğrulanamadı.')
       const activateResponse = await fetch(`${API_BASE}/exchange-connections/activate`,{method:'POST',headers,body:JSON.stringify({mode:'TESTNET',confirmation:'TESTNET BAĞLANTIYI AÇ'})})
-      const activatePayload = await activateResponse.json().catch(() => null) as {detail?:unknown}|null
-      if (!activateResponse.ok) throw new Error(typeof activatePayload?.detail === 'string' ? activatePayload.detail : 'Demo connection could not be activated.')
+      await activateResponse.json().catch(() => null)
+      if (!activateResponse.ok) throw new Error('Demo bağlantısı etkinleştirilemedi.')
       setDemoVerifyState('verified')
-      setDemoVerification({kind:'ok',message:'DEMO CONNECTED · API connection verified. Trading channel: DEMO.'})
+      setDemoVerification({kind:'ok',message:'DEMO BAĞLANDI · Bağlantı doğrulandı. İşlem kanalı: DEMO.'})
       await refreshConnectionStatus()
       await refresh()
-    } catch (error) {
+    } catch {
       setDemoVerifyState('error')
-      setDemoVerification({kind:'error',message:error instanceof Error ? error.message : 'Verification failed. Saved Demo connection could not be verified.'})
+      setDemoVerification({kind:'error',message:'Bağlantı doğrulanamadı. Sunucu bağlantısını kontrol edin.'})
       await refreshConnectionStatus()
     }
   }
@@ -331,6 +340,11 @@ export default function TestnetFirstApp() {
   },[marketPickerOpen])
 
   useEffect(() => {
+    if (view !== 'setup') setComplianceOpen(false)
+    if (view !== 'trading') setMarketPickerOpen(false)
+  },[view])
+
+  useEffect(() => {
     let previousY = window.scrollY
     let ticking = false
     const updateScrollState = () => {
@@ -349,53 +363,55 @@ export default function TestnetFirstApp() {
     return () => window.removeEventListener('scroll',onScroll)
   },[])
 
-  return <main className={`v26App ${view === 'master-trade' ? 'masterTradeRoute' : ''}`}>
-    <header className={`v26Header ${headerHidden ? 'v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
-      <div className="v26Brand"><span>X</span><div><b>PROTREBOT ELITE X</b><small>V27 · CLOUD OPERATIONS / TESTNET-FIRST</small></div></div>
-      <div className="v26HeaderSignals">
-        <span className="ok"><i/>SUNUCU CANLI</span>
-        <span className="ok"><i/>TESTNET ANA MOD</span>
-        <span className={health?.cloud_evidence === 'KALICI' ? 'ok' : 'locked'}><Cloud/>{health?.cloud_evidence || 'KANIT BAĞLANIYOR'}</span>
-        <span className={health?.live_guard === 'SALT OKUNUR BAĞLI' ? 'ok' : 'locked'}><LockKeyhole/>{health?.live_guard || 'CANLI API BEKLİYOR'}</span>
-      </div>
+  return <main className={`v26App ${view === 'dashboard' ? 'homeRoute' : 'workspaceRoute'} ${view === 'master-trade' ? 'masterTradeRoute' : ''}${connectionOffline ? ' backendOffline' : ''}`}>
+    {connectionOffline && <section className="v26OfflineNotice" role="status" aria-live="polite"><span><i/><b>Sunucu bağlantısı bekleniyor</b><small>Veriler güncellenemiyor. Bağlantı kurulduğunda otomatik olarak yeniden denenecek.</small></span><button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'KONTROL EDİLİYOR…' : 'YENİDEN DENE'}</button></section>}
+    {view === 'dashboard' ? <header className={`v26Header v26HomeHeader ${headerHidden ? 'v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
+      <div className="v26Brand"><span>X</span><div><b>PROTREBOT ELITE X</b><small>TESTNET ÖNCELİKLİ İŞLEM PLATFORMU</small></div></div>
+      <div className="v26HomeHeaderStatus" aria-label="Sistem durumu"><i className={connectionOffline ? 'pending' : health?.status === 'ok' ? 'ok' : 'pending'}/>{connectionOffline ? 'BAĞLANTI BEKLENİYOR' : 'ÇEVRİMİÇİ'}</div>
       <div className="v26HeaderActions">
-        <button className="v26MasterTradeButton" onClick={() => navigate('master-trade')}><ShieldCheck/><span><b>MASTER TRADE</b></span></button>
-        <button className="v26SubscriptionBadge" onClick={() => navigate('billing')}><Sparkles/> PLANS &amp; BILLING</button>
-        <button className="v26Refresh" aria-label="Piyasa verisini yenile" title="Piyasa verisini yenile" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? 'YENİLENİYOR' : 'YENİLE'}</button>
-        <button className="mobileMenuButton" type="button" aria-label={mobileMenuOpen ? 'Menüyü kapat' : 'Menüyü aç'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? <X/> : <Menu/>}</button>
+        <button className="v26Refresh" aria-label="Piyasa verisini yenile" title="Piyasa verisini yenile" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/></button>
         <div className="v26Notifications" ref={notificationRef}>
-          <button className="v26NotificationButton" type="button" aria-label="Notifications" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}><Bell/></button>
-          {notificationsOpen && <section className="v26NotificationPanel" role="dialog" aria-label="Notifications">
-            <header><div><small>STATUS CENTER</small><h2>Notifications</h2></div><span>{notifications.length}</span></header>
-            {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <article key={item.id} className={item.kind}><i><Bell/></i><div><b>{item.title}</b><p>{item.description}</p><small>Current status</small></div></article>)}</div> : <div className="v26NotificationEmpty"><Bell/><b>No notifications</b><p>You're all caught up.<br/>New system notifications will appear here.</p></div>}
+          <button className="v26NotificationButton" type="button" aria-label="Bildirimler" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}><Bell/></button>
+          {notificationsOpen && <section className="v26NotificationPanel" role="dialog" aria-label="Bildirimler">
+            <header><div><small>DURUM MERKEZİ</small><h2>Bildirimler</h2></div><span>{notifications.length}</span></header>
+            {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <article key={item.id} className={item.kind}><i><Bell/></i><div><b>{item.title}</b><p>{item.description}</p><small>Güncel durum</small></div></article>)}</div> : <div className="v26NotificationEmpty"><Bell/><b>Bildirim yok</b><p>Şu anda yeni bir bildiriminiz yok.</p></div>}
           </section>}
         </div>
       </div>
-    </header>
-
-    <nav className="v26Nav">
-      <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}><TestTube2/><span><b>DASHBOARD</b><small>Kontrol merkezi ve hızlı seçim</small></span></button>
-      <button className={view === 'trading' ? 'active' : ''} onClick={() => setView('trading')}><Activity/><span><b>İŞLEM MASASI</b><small>Market, sinyal ve işlem yönetimi</small></span></button>
-      <button className={view === 'ops' ? 'active' : ''} onClick={() => setView('ops')}><Cloud/><span><b>OPERASYON & KANIT</b><small>Karar, pozisyon ve kalıcı PostgreSQL kaydı</small></span></button>
-      <button className={view === 'live' ? 'active liveTab' : ''} onClick={() => setView('live')}><ShieldCheck/><span><b>CANLI HAZIRLIK</b><small>API yoksa kesin kilitli · Gerçek kanal</small></span></button>
-      <button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><CloudCog/><span><b>AYARLAR</b><small>API, hesap ve güvenlik tercihleri</small></span></button>
-    </nav>
-    {mobileMenuOpen && <div className="mobileMenuBackdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget) setMobileMenuOpen(false) }}><aside className="mobileMenuDrawer" role="dialog" aria-modal="true" aria-label="Mobil menü"><header><div><small>PROTREBOT ELITE X</small><b>Workspace</b></div><button type="button" aria-label="Menüyü kapat" onClick={() => setMobileMenuOpen(false)}><X/></button></header><button onClick={() => navigate('testnet')}><TestTube2/><span><b>Dashboard</b><small>Demo command center</small></span></button><button onClick={() => navigate('ops')}><Cloud/><span><b>Operasyon</b><small>Evidence and cloud ops</small></span></button><button onClick={() => navigate('live')}><ShieldCheck/><span><b>Canlı</b><small>Fail-closed live gates</small></span></button><button onClick={() => navigate('setup')}><CloudCog/><span><b>Ayarlar</b><small>API connections</small></span></button><button onClick={() => navigate('billing')}><Sparkles/><span><b>Billing</b><small>Subscription workspace</small></span></button></aside></div>}
+    </header> : <button type="button" className="workspaceBack" onClick={() => setView('dashboard')}><ArrowLeft/> <span>Home</span></button>}
 
     {view !== 'dashboard' && <section className="v26ModeBar">
-      <div><small>AKTİF ÇALIŞMA ALANI</small><h1>{view === 'trading' ? 'İşlem Masası' : view === 'ops' ? 'Bulut Operasyon ve Kanıt Merkezi' : view === 'live' ? 'Gerçek Futures Hazırlık Merkezi' : view === 'pricing' ? 'Plans & Pricing' : view === 'billing' ? 'Billing & Subscription' : 'Sunucu ve Anahtar Kapıları'}</h1><p>{view === 'trading' ? 'Market, sinyal, grafik ve testnet işlem yönetimi.' : view === 'ops' ? 'Otonom taramanın son kararı, pozisyonlar ve yeniden başlatmaya dayanıklı PostgreSQL kanıt defteri.' : view === 'live' ? 'Şifreli canlı kasa kaydı ve tüm risk kapıları tamamlanana kadar emir gönderimi fail-closed olarak kilitli.' : view === 'pricing' || view === 'billing' ? 'Choose a subscription level for your trading intelligence workspace.' : 'Anahtar değerleri tarayıcıya veya GitHub’a yazılmaz; yalnızca sunucu tarafındaki şifreli kasa veya güvenli geçiş değişkenlerinde tutulur.'}</p></div>
-      <aside><span><CircleDollarSign/>GERÇEK PARA</span><b>{view === 'live' ? 'KİLİTLİ' : '0 USDT'}</b><em>Paper devre dışı</em></aside>
+      <div><small>WORKSPACE</small><h1>{view === 'trading' ? 'İşlem Masası' : view === 'risk' ? 'Risk Kasası' : view === 'analyst' ? 'Analyst' : view === 'scanner' ? 'Scanner' : view === 'performance' ? 'Performance' : view === 'ops' ? 'Bulut Operasyon ve Kanıt Merkezi' : view === 'live' ? 'Gerçek Futures Hazırlık Merkezi' : view === 'pricing' ? 'Plans & Pricing' : view === 'billing' ? 'Billing & Subscription' : view === 'master-trade' ? 'Master Trade' : 'Sunucu ve Anahtar Kapıları'}</h1><p>{view === 'trading' ? 'Market, sinyal, grafik ve testnet işlem yönetimi.' : view === 'risk' ? 'Risk limiti, pozisyon boyutu ve koruma ayarları.' : view === 'analyst' ? 'Scanner snapshot üzerinden market intelligence ve sinyal analizi.' : view === 'scanner' ? 'Piyasadaki uygun adayları ve sinyalleri tara.' : view === 'performance' ? 'İşlem sonuçlarını, PnL ve risk ölçümlerini incele.' : view === 'ops' ? 'Otonom taramanın son kararı, pozisyonlar ve yeniden başlatmaya dayanıklı PostgreSQL kanıt defteri.' : view === 'live' ? 'Şifreli canlı kasa kaydı ve tüm risk kapıları tamamlanana kadar emir gönderimi fail-closed olarak kilitli.' : view === 'pricing' || view === 'billing' ? 'Choose a subscription level for your trading intelligence workspace.' : 'Anahtar değerleri tarayıcıya veya GitHub’a yazılmaz; yalnızca sunucu tarafındaki şifreli kasa veya güvenli geçiş değişkenlerinde tutulur.'}</p></div>
     </section>}
 
     {view === 'dashboard' && <section className="v26Dashboard" aria-labelledby="dashboard-title">
-      <header className="v26DashboardHero"><div><small>PROTREBOT ELITE X</small><h1 id="dashboard-title">Trading Control Center</h1><p>Bugün ne yapmak istiyorsun?</p></div><div className="v26DashboardMode"><i/>TESTNET FIRST</div></header>
-      <div className="v26DashboardStatus" aria-label="Genel sistem durumu"><span><i className={health?.status === 'ok' ? 'ok' : 'pending'}/>API {health?.status === 'ok' ? 'BAĞLI' : 'KONTROL EDİLİYOR'}</span><span><i className="ok"/>SİSTEM AKTİF</span><span><i className="ok"/>TESTNET ANA MOD</span><span><i className={connectionStatus?.connections?.TESTNET?.active ? 'ok' : 'pending'}/>BAĞLANTI {connectionStatus?.connections?.TESTNET?.active ? 'AKTİF' : 'BEKLİYOR'}</span></div>
-      <div className="v26DashboardChoices">
-        <button type="button" onClick={() => setView('trading')}><Activity/><span><b>İşlem Masası</b><small>Piyasa, sinyaller ve işlem yönetimi</small></span><em>→</em></button>
-        <button type="button" onClick={() => setView('live')}><ShieldCheck/><span><b>Canlı</b><small>Canlı işlem durumu ve güvenlik kontrolleri</small></span><em>→</em></button>
-        <button type="button" onClick={() => setView('ops')}><Cloud/><span><b>Operasyon</b><small>Bot, bağlantılar ve sistem durumu</small></span><em>→</em></button>
-        <button type="button" onClick={() => setView('setup')}><CloudCog/><span><b>Ayarlar</b><small>Hesap ve sistem ayarları</small></span><em>→</em></button>
-      </div>
+      <header className="v26DashboardHero"><div><small>PROTREBOT ELITE X</small><h1 id="dashboard-title">İşlem Terminali</h1><p>Devam etmek için bir çalışma alanı seçin.</p></div></header>
+      <section className="v26DashboardWorkspaces" aria-labelledby="workspace-title">
+        <div><h2 id="workspace-title">NE YAPMAK İSTİYORSUNUZ?</h2><p>Bir çalışma alanı seçin</p></div>
+        <div className="v26DashboardChoices">
+          <button type="button" onClick={() => setView('trading')}><Activity/><span><b>İŞLEM</b><small>İşlem açın ve yönetin</small></span><em>→</em></button>
+          <button type="button" onClick={() => navigate('master-trade')}><ShieldCheck/><span><b>MASTER TRADE</b><small>Profesyonel işlem alanı</small></span><em>→</em></button>
+          <button type="button" onClick={() => setView('analyst')}><BarChart3/><span><b>ANALİST</b><small>Piyasa zekâsı ve sinyaller</small></span><em>→</em></button>
+          <button type="button" onClick={() => setView('scanner')}><Radar/><span><b>TARAMA</b><small>Piyasa fırsatlarını tarayın</small></span><em>→</em></button>
+          <button type="button" onClick={() => setView('performance')}><BarChart3/><span><b>PERFORMANS</b><small>Kâr, kazanma oranı ve düşüş</small></span><em>→</em></button>
+          <button type="button" onClick={() => setView('live')}><RadioTower/><span><b>CANLI</b><small>Canlı işlem hazırlığı</small></span><em>→</em></button>
+          <button type="button" onClick={() => setView('ops')}><Cloud/><span><b>OPERASYON</b><small>Sistem operasyonları</small></span><em>→</em></button>
+          <button type="button" onClick={() => setView('setup')}><CloudCog/><span><b>AYARLAR</b><small>Hesap ve güvenlik</small></span><em>→</em></button>
+          <button type="button" onClick={() => navigate('billing')}><Sparkles/><span><b>ABONELİK</b><small>Planlar ve abonelik</small></span><em>→</em></button>
+          <button type="button" onClick={() => setView('risk')}><ShieldCheck/><span><b>RİSK</b><small>Pozisyon ve risk kontrolü</small></span><em>→</em></button>
+        </div>
+      </section>
+      <section className="v26DashboardPulse" aria-labelledby="market-pulse-title">
+          <header><div><h2 id="market-pulse-title">Piyasa Nabzı</h2><p>{markets.length ? 'Canlı piyasa özeti' : 'Piyasa verisi bekleniyor'}</p></div><small>{markets.length ? 'CANLI VERİ' : 'VERİ BEKLENİYOR'}</small></header>
+        <div className="v26DashboardPulseItems">
+          {pulseSymbols.map((pulseSymbol,index) => {
+            const market = pulseMarkets[index]
+            const hasPrice = typeof market?.price === 'number' && Number.isFinite(market.price)
+            const hasChange = typeof market?.change === 'number' && Number.isFinite(market.change)
+            return <button type="button" key={pulseSymbol} onClick={() => {setSymbol(pulseSymbol);setView('trading')}}><span><b>{pulseSymbol.replace('USDT','/USDT')}</b><small>{hasPrice ? `$${format(market.price)}` : '$—'}</small></span><em className={hasChange ? market.change >= 0 ? 'up' : 'down' : ''}>{hasChange ? `${market.change >= 0 ? '+' : ''}${format(market.change)}%` : '—%'}</em></button>
+          })}
+        </div>
+      </section>
     </section>}
 
     {view === 'trading' && <>
@@ -409,13 +425,20 @@ export default function TestnetFirstApp() {
           </div>}
         </div>
         <div className="v26Intervals">{['1m','5m','15m','1h','4h'].map(item => <button key={item} className={interval === item ? 'active' : ''} onClick={() => setInterval(item)}>{item}</button>)}</div>
-        {marketError && <div className="v26MarketError" role="alert"><span>Market verisi yüklenemedi.</span><button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'YENİLENİYOR…' : 'TEKRAR DENE'}</button></div>}
+        {marketError && <div className="v26MarketError" role="alert"><span>Market verisi yüklenemedi.</span><button className="action-button" type="button" aria-label="Market verisini yeniden dene" title="Market verisini yeniden dene" onClick={() => void refresh()} disabled={loading}>{loading ? <RefreshCw className="spin"/> : 'TEKRAR DENE'}</button></div>}
       </section>
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Testnet merkezi hazırlanıyor…</div>}>
-        <BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis} onAnalysisProgress={setAnalysisProgress}/>}/>
+        <BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} workspace="trade" chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis} onAnalysisProgress={setAnalysisProgress}/>}/>
       </Suspense>
-      <CoinAnalysisCenter interval={interval} onIntervalChange={setInterval} chart={(selectedSymbol,selectedInterval,showLevels,showEma) => <TestnetMarketChart symbol={selectedSymbol} interval={selectedInterval} showLevels={showLevels} showEma={showEma} onAnalysis={() => undefined}/>}/>
     </>}
+
+    {view === 'risk' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Risk Kasası hazırlanıyor…</div>}><BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} workspace="risk"/></Suspense>}
+
+    {view === 'scanner' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Scanner hazırlanıyor…</div>}><BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} initialTab="auto" workspace="trade"/></Suspense>}
+
+    {view === 'performance' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Performance hazırlanıyor…</div>}><BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} initialTab="performance" workspace="trade"/></Suspense>}
+
+    {view === 'analyst' && <CoinAnalysisCenter interval={interval} onIntervalChange={setInterval} chart={(selectedSymbol,selectedInterval,showLevels,showEma) => <TestnetMarketChart symbol={selectedSymbol} interval={selectedInterval} showLevels={showLevels} showEma={showEma} onAnalysis={() => undefined}/>}/>}
 
     {view === 'master-trade' && (
       masterTradeAccess === 'loading' ? <div className="v26Loading"><RefreshCw className="spin"/>Master Trade erişim kontrol ediliyor…</div> :
@@ -449,7 +472,7 @@ export default function TestnetFirstApp() {
     </section>}
 
     {showBackToTop && <button className="v26BackToTop" type="button" aria-label="Yukarı çık" onClick={() => window.scrollTo({top:0,behavior:'smooth'})}><ArrowUp/></button>}
-    <nav className={`terminalMobileNav ${headerHidden ? 'terminalMobileNavHidden' : ''}`} aria-label="Mobil ana navigasyon"><button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}><TestTube2/><span>Dashboard</span></button><button className={view === 'trading' ? 'active' : ''} onClick={() => setView('trading')}><Activity/><span>İşlem</span></button><button className={view === 'ops' ? 'active' : ''} onClick={() => setView('ops')}><Cloud/><span>Operasyon</span></button><button className={view === 'live' ? 'active' : ''} onClick={() => setView('live')}><ShieldCheck/><span>Canlı</span></button><button className={view === 'setup' ? 'active' : ''} onClick={() => setView('setup')}><CloudCog/><span>Ayarlar</span></button></nav>
+    {view === 'dashboard' && <nav className={`terminalMobileNav ${headerHidden ? 'terminalMobileNavHidden' : ''}`} aria-label="Mobil ana navigasyon"><button className="active" onClick={() => setView('dashboard')}><TestTube2/><span>Home</span></button></nav>}
     {view === 'setup' && <section className="v26TrustStrip" style={{margin:'0 1rem 1rem',padding:'1rem 1.25rem',border:'1px solid rgba(148,163,184,0.18)',borderRadius:'16px',background:'rgba(15,23,42,0.82)',display:'grid',gap:'0.7rem'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'0.75rem',flexWrap:'wrap'}}>
         <div>
@@ -464,8 +487,7 @@ export default function TestnetFirstApp() {
         </div>
       </div>
     </section>}
-    {view === 'dashboard' && <footer className="v26Footer"><span><RadioTower/>API: <b>{health?.status === 'ok' ? 'BAĞLI' : 'KONTROL EDİLİYOR'}</b></span><span>Sistem: <b>AKTİF</b></span><span>Çalışma modu: <b>TESTNET FIRST</b></span></footer>}
-
+    {view === 'dashboard' && <footer className="v26Footer"><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'API CONNECTED' : health ? 'API DISCONNECTED' : 'API CHECKING'}</span><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'SYSTEM ONLINE' : health ? 'SYSTEM OFFLINE' : 'SYSTEM CHECKING'}</span><span>TESTNET FIRST</span></footer>}
     {complianceOpen && <div className="v26ComplianceBackdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setComplianceOpen(false) }} style={{position:'fixed',inset:0,background:'rgba(2,6,23,0.76)',display:'grid',placeItems:'center',padding:'1rem',zIndex:1000}}>
       <aside className="v26ComplianceModal" role="dialog" aria-modal="true" aria-label="Trust and compliance" style={{width:'min(760px, 100%)',maxHeight:'80vh',overflowY:'auto',background:'#0f172a',border:'1px solid rgba(148,163,184,0.3)',borderRadius:'20px',padding:'1.25rem',boxShadow:'0 30px 80px rgba(2,6,23,0.6)'}} onClick={event => event.stopPropagation()}>
         <header style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'1rem',marginBottom:'1rem'}}>

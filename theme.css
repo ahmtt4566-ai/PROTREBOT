@@ -1,0 +1,5257 @@
+:root {
+  --bg: #05070c;
+  --card: #1e293b;
+  --card-alt: #17243a;
+  --card-bg: #0a0f16 !important;
+  --border: rgba(255,255,255,.08);
+  --border-hover: rgba(255,255,255,.18);
+  --text: #e7ecf3;
+  --muted: #94a3b8;
+  --text-dim: #a9b6c2;
+  --text-faint: #71808e;
+  --orange: #d97838;
+  --orange-hover: #c96930;
+  --green: #37c98a;
+  --red: #e35b5b;
+}
+
+html, body, #root, .app, .workspace, .page,
+.v26App.workspaceRoute, .v26App.workspaceRoute main {
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+.v26App.workspaceRoute *,
+.v26App.workspaceRoute *::before,
+.v26App.workspaceRoute *::after {
+  background-image: none !important;
+}
+
+.v26App.workspaceRoute :is(div[class*="card"], div[class*="panel"], div[class*="box"], div[class*="widget"], section, [class*="Card"], [class*="Panel"], [class*="Box"], [class*="Widget"]):not([class*="Header"]):not([class*="header"]):not([class*="Footer"]):not([class*="footer"]) {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+}
+
+.v26App.workspaceRoute :is(.action-button, .cta-button, [data-variant="primary"], .demoHeroConnect, .demoSubmit, .demoTest, .demoConnect, .demoCredentialActions button, .v27OpsActions .sync, .v27Loading button, .analystDataError button) {
+  background: var(--orange) !important;
+  color: #05070c !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute :is(.action-button, .cta-button, [data-variant="primary"], .demoHeroConnect, .demoSubmit, .demoTest, .demoConnect, .demoCredentialActions button, .v27OpsActions .sync, .v27Loading button, .analystDataError button):hover {
+  background: var(--orange-hover) !important;
+  color: #05070c !important;
+}
+
+.v26App.workspaceRoute :is(.v21Tabs button, .v21AlertFilters button, .v21WorkflowStep, .v21Pulse span, .demoHeroStatus > span, [class*="Status"] button, [class*="status"] button) {
+  background: var(--card-bg) !important;
+  color: var(--text-dim) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button.active,
+.v26App.workspaceRoute .v21Tabs button[aria-selected="true"],
+.v26App.workspaceRoute .v21AlertFilters button.active,
+.v26App.workspaceRoute .v21WorkflowStep.current,
+.v26App.workspaceRoute .v21WorkflowStep.active {
+  background: var(--card-bg) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--orange) !important;
+  border-bottom: 2px solid var(--orange) !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowStep.current,
+.v26App.workspaceRoute .v21WorkflowStep.active {
+  border-bottom-width: 1px !important;
+}
+
+.v26App.workspaceRoute :is(.status-online, .status-connected, [class*="online"], .connected, .demoOk, .positive, .summaryPositive) {
+  color: var(--green) !important;
+}
+
+.v26App.workspaceRoute :is(.status-offline, .status-error, [class*="disconnected"], .error, .negative, .summaryNegative) {
+  color: var(--red) !important;
+}
+
+.v26App.workspaceRoute :is(.stat-value-box, .empty-icon-placeholder, [class*="badge"]:empty, .v21EmptyIcon) {
+  background: var(--card-bg) !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip article,
+.v26App.workspaceRoute .demoAccountStrip article > svg {
+  background: var(--card-bg) !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip small,
+.v26App.workspaceRoute .demoAccountStrip b:not(.demoProfit):not(.demoLoss) {
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute :is(input, select, .market-type-button, .demoTypePicker button, .safety-status-box) {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+}
+
+/* Risk Management terminal surface. Keep this scoped to the active Risk tab. */
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement {
+  grid-column: 1 / -1 !important;
+  width: min(calc(100% - 28px), 1360px) !important;
+  min-height: 0 !important;
+  margin: 0 auto !important;
+  padding: 18px !important;
+  overflow: hidden !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement > .v21WorkspaceHead {
+  min-height: 0 !important;
+  margin-bottom: 16px !important;
+  padding: 4px 2px 14px !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement > .v21WorkspaceHead h2 {
+  margin: 5px 0 6px !important;
+  font-size: clamp(20px, 2.1vw, 30px) !important;
+  letter-spacing: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement > .v21WorkspaceHead p {
+  max-width: 640px !important;
+  margin: 0 !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskLayout {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr) !important;
+  gap: 16px !important;
+  align-items: start !important;
+  min-width: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card {
+  min-width: 0 !important;
+  width: 100% !important;
+  overflow: hidden !important;
+  background: #0a0f16 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 12px 28px rgba(0,0,0,.2) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card > header {
+  min-height: 54px !important;
+  padding: 13px 15px !important;
+  background: #0d141d !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card > header h3 {
+  margin: 3px 0 0 !important;
+  color: var(--text) !important;
+  font-size: 14px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card > header small,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote small,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult small {
+  color: var(--text-faint) !important;
+  font-size: 9px !important;
+  letter-spacing: .08em !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+  margin: 14px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote > span,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote > label,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid > label:not(.v21Switch) {
+  min-width: 0 !important;
+  padding: 10px !important;
+  background: #080d14 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote b,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult b {
+  color: var(--text) !important;
+  font-size: 14px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote > label {
+  grid-column: 1 / -1 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card > .action-button {
+  width: calc(100% - 28px) !important;
+  min-height: 40px !important;
+  margin: 0 14px 14px !important;
+  background: var(--orange) !important;
+  color: #05070c !important;
+  border: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  margin: 0 14px 14px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult > span {
+  min-width: 0 !important;
+  padding: 10px !important;
+  background: rgba(55,201,138,.06) !important;
+  border: 1px solid rgba(55,201,138,.18) !important;
+  border-radius: 7px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21MetricRow {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  margin-top: 14px !important;
+}
+
+@media (max-width: 760px) {
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement {
+    width: calc(100% - 16px) !important;
+    padding: 12px !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskLayout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21MetricRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote,
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid,
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult,
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21MetricRow {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* Risk is the only active deck surface on this route; avoid unused implicit rows. */
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-areas:
+    "topnav topnav topnav"
+    "risk risk risk" !important;
+  grid-template-rows: max-content max-content !important;
+  grid-auto-rows: max-content !important;
+  align-content: start !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck > .v21RiskManagement {
+  grid-area: risk !important;
+  align-self: start !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* Final Risk Kassası polish: compact terminal hierarchy only. */
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21WorkspaceHead {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 20px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21HeaderActions {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  flex-wrap: wrap !important;
+  gap: 14px !important;
+  min-width: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskStatus {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-height: 26px !important;
+  padding: 5px 9px !important;
+  border: 1px solid rgba(79, 183, 181, .28) !important;
+  border-radius: 5px !important;
+  background: rgba(79, 183, 181, .08) !important;
+  color: #76c9c3 !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: .06em !important;
+  white-space: nowrap !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskStatus svg {
+  width: 13px !important;
+  height: 13px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskReturn {
+  min-height: 32px !important;
+  padding: 7px 10px !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+  color: var(--text-dim) !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: .06em !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskReturn:hover {
+  background: rgba(255,255,255,.04) !important;
+  border-color: var(--border-hover) !important;
+  color: var(--text) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card {
+  box-shadow: none !important;
+  border-radius: 8px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card > header {
+  min-height: 48px !important;
+  padding: 10px 13px !important;
+  background: #0b1119 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid {
+  gap: 6px !important;
+  margin: 10px 12px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote > span,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote > label,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid > label:not(.v21Switch) {
+  padding: 8px !important;
+  border-radius: 6px !important;
+  background: #080d14 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote input,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid input[type='number'],
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid select {
+  min-height: 38px !important;
+  padding: 8px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card > .action-button {
+  min-height: 38px !important;
+  margin: 0 12px 12px !important;
+  width: calc(100% - 24px) !important;
+  border-radius: 6px !important;
+  font-size: 9px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21EmptyMini {
+  min-height: 0 !important;
+  margin: 0 12px 12px !important;
+  padding: 9px 10px !important;
+  border: 0 !important;
+  border-left: 2px solid rgba(217,102,42,.55) !important;
+  border-radius: 0 !important;
+  background: rgba(217,102,42,.06) !important;
+  color: var(--text-dim) !important;
+  font-size: 11px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult {
+  gap: 6px !important;
+  margin: 0 12px 12px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult > span {
+  padding: 8px !important;
+  border: 1px solid rgba(79,183,181,.18) !important;
+  border-radius: 6px !important;
+  background: rgba(79,183,181,.05) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult p {
+  margin: 0 !important;
+  padding: 7px 9px !important;
+  border: 0 !important;
+  border-left: 2px solid rgba(79,183,181,.5) !important;
+  border-radius: 0 !important;
+  background: rgba(79,183,181,.05) !important;
+  color: var(--text-dim) !important;
+  font-size: 10px !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary {
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+  min-height: 70px !important;
+  margin-top: 12px !important;
+  padding: 10px 0 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  background: #080d14 !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary::before {
+  position: absolute !important;
+  top: 7px !important;
+  left: 11px !important;
+  content: 'RISK SUMMARY' !important;
+  color: var(--text-faint) !important;
+  font-size: 8px !important;
+  font-weight: 800 !important;
+  letter-spacing: .12em !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary > span {
+  display: grid !important;
+  align-content: end !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+  min-height: 42px !important;
+  padding: 12px 14px 2px !important;
+  border: 0 !important;
+  border-right: 1px solid var(--border) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary > span:last-child {
+  border-right: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary small {
+  color: var(--text-faint) !important;
+  font-size: 8px !important;
+  font-weight: 700 !important;
+  letter-spacing: .06em !important;
+  white-space: nowrap !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary b {
+  color: var(--text) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+}
+
+@media (max-width: 900px) {
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskLayout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary > span:nth-child(2) {
+    border-right: 0 !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary > span:nth-child(-n+2) {
+    border-bottom: 1px solid var(--border) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21WorkspaceHead {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21HeaderActions {
+    justify-content: flex-start !important;
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21HeaderActions,
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskStatus,
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskReturn {
+    width: 100% !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskStatus,
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskReturn {
+    justify-content: center !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary > span:nth-child(2) {
+    border-right: 0 !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary > span:nth-child(-n+2) {
+    border-bottom: 1px solid var(--border) !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary > span {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary small {
+    font-size: 7px !important;
+  }
+}
+
+.v26App.workspaceRoute :is(.toggle-option.selected, .demoTypePicker button.activeType) {
+  background: var(--card-bg) !important;
+  border-color: var(--orange) !important;
+}
+
+.v26App.workspaceRoute .demoSidePicker button,
+.v26App.workspaceRoute :is(.side-toggle.long, .side-toggle.short) {
+  background: var(--card-bg) !important;
+  background-color: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+}
+
+.v26App.workspaceRoute .demoSidePicker button.activeLong,
+.v26App.workspaceRoute .demoSidePicker button.activeShort,
+.v26App.workspaceRoute :is(.side-toggle.selected, .side-toggle.active) {
+  background: var(--card-bg) !important;
+  background-color: var(--card-bg) !important;
+  border-color: var(--orange) !important;
+  color: var(--text) !important;
+}
+
+#root main.v26App.workspaceRoute .demoSidePicker button,
+#root main.v26App.workspaceRoute :is(.side-toggle.long, .side-toggle.short) {
+  background: #0a0f16 !important;
+  background-color: #0a0f16 !important;
+  border: 1px solid rgba(255,255,255,.08) !important;
+  color: #e7ecf3 !important;
+}
+
+#root main.v26App.workspaceRoute .demoSidePicker button.activeLong,
+#root main.v26App.workspaceRoute .demoSidePicker button.activeShort,
+#root main.v26App.workspaceRoute :is(.side-toggle.selected, .side-toggle.active) {
+  background: #0a0f16 !important;
+  background-color: #0a0f16 !important;
+  border-color: var(--orange) !important;
+  color: #e7ecf3 !important;
+}
+
+.v26App.workspaceRoute .demoHeroCopy > div > b,
+.v26App.workspaceRoute .v21SafetyLock > strong {
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute :is(.empty-state-icon, .position-map-placeholder, .demoMapMark i) {
+  background: rgba(255,255,255,.06) !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute :is(.empty-state-icon, .position-map-placeholder, .demoMapMark i) svg,
+.v26App.workspaceRoute :is(.empty-state-icon, .position-map-placeholder, .demoMapMark i) svg path {
+  color: var(--text-dim) !important;
+  fill: var(--text-dim) !important;
+  stroke: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute :is(
+  .v26Nav,
+  .v26ModeBar,
+  .v26MarketBar,
+  .demoHero,
+  .demoSetupCard,
+  .demoCommandBar,
+  .demoMessage,
+  .demoAccountStrip,
+  .demoLiveChart,
+  .demoTicket,
+  .demoPositions,
+  .demoOrderPanel,
+  .demoEventPanel,
+  input,
+  select,
+  textarea
+) {
+  background-color: var(--card-bg) !important;
+}
+
+.v26App.workspaceRoute .demoTicketFeedback {
+  background: var(--card-bg) !important;
+  border-color: var(--border) !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute .demoTicketFeedback svg {
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button > svg,
+.v26App.workspaceRoute .tab-icon-box svg,
+.v26App.workspaceRoute .tab-icon-box path {
+  background: rgba(255,255,255,.05) !important;
+  color: var(--text-dim) !important;
+  fill: var(--text-dim) !important;
+  stroke: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute .tab-icon-box {
+  background: rgba(255,255,255,.05) !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button.active > svg,
+.v26App.workspaceRoute .tab-item.active .tab-icon-box {
+  background: rgba(217,102,42,.12) !important;
+}
+
+.v26App.workspaceRoute .workspaceBack,
+.v26App.workspaceRoute .v26Header,
+.v26App.workspaceRoute .v26Nav,
+.v26App.workspaceRoute .v26ModeBar,
+.v26App.workspaceRoute .v26MarketBar,
+.v26App.workspaceRoute .v21Tabs {
+  background: var(--card-bg) !important;
+  border-color: var(--border) !important;
+}
+
+.v26App.workspaceRoute .workspaceBack {
+  background: transparent !important;
+  color: var(--text-dim) !important;
+  border: 0 !important;
+}
+
+.v26App.workspaceRoute .workspaceBack:hover {
+  background: transparent !important;
+  color: #fff !important;
+}
+
+/* Remove the old circular/ring decorations from the active workspace surfaces. */
+.v26App.workspaceRoute .demoHero::before,
+.v26App.workspaceRoute .demoHero::after,
+.v26App.workspaceRoute .v21DashboardWelcome::before,
+.v26App.workspaceRoute .v21DashboardWelcome::after,
+.v26App.workspaceRoute .v21DashboardSubscription::before,
+.v26App.workspaceRoute .v21DashboardSubscription::after {
+  display: none !important;
+  content: none !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  align-items: stretch !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus > span {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 4px !important;
+  min-height: 0 !important;
+  padding: 10px 12px !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  background: var(--card-bg) !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus > span > svg {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus small {
+  color: var(--text-faint) !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus b {
+  color: var(--text) !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus .demoOk b,
+.v26App.workspaceRoute .demoHeroStatus .demoOk small {
+  color: var(--green) !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus .demoWait b,
+.v26App.workspaceRoute .demoHeroStatus .demoWait small {
+  color: var(--orange) !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus .demoArmed b,
+.v26App.workspaceRoute .demoHeroStatus .demoArmed small {
+  color: var(--red) !important;
+}
+
+/* Keep the next-action callout in normal flow so it cannot cover summary text. */
+.v26App.workspaceRoute .v21ExecutiveSummary,
+.v26App.workspaceRoute .v21SummaryIntro,
+.v26App.workspaceRoute .v21NextAction {
+  position: static !important;
+  overflow: visible !important;
+  z-index: 1 !important;
+}
+
+.v26App.workspaceRoute .v21NextAction {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 16px !important;
+  align-items: center !important;
+  margin-top: 18px !important;
+  padding: 14px !important;
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+
+.v26App.workspaceRoute .v21NextAction > span {
+  min-width: 0 !important;
+  position: static !important;
+}
+
+.v26App.workspaceRoute .v21NextAction button {
+  position: static !important;
+  z-index: 2 !important;
+  white-space: nowrap;
+}
+
+.v26App.workspaceRoute .v21Workflow,
+.v26App.workspaceRoute .v21Pulse,
+.v26App.workspaceRoute .v21ExecutiveSummary {
+  background: var(--card-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+}
+
+/* Final workspace polish: readable action copy, restrained surfaces, and dark controls. */
+.v26App.workspaceRoute {
+  background:
+    radial-gradient(ellipse 1200px 600px at 50% -10%, #0d1420 0%, #05070c 60%),
+    #05070c !important;
+}
+
+.v26App.workspaceRoute :is(.next-best-action, .action-hint, .v21NextAction em) {
+  color: var(--text) !important;
+  font-style: normal !important;
+  font-weight: 500 !important;
+}
+
+.v26App.workspaceRoute .v21NextAction {
+  border-left: 2px solid var(--orange) !important;
+}
+
+.v26App.workspaceRoute .v21NextAction button span {
+  color: var(--orange) !important;
+}
+
+.v26App.workspaceRoute :is(
+  div[class*="card"],
+  div[class*="panel"],
+  div[class*="box"],
+  div[class*="widget"],
+  [class*="Card"],
+  [class*="Panel"],
+  [class*="Box"],
+  [class*="Widget"]
+):not([class*="Header"]):not([class*="header"]):not([class*="Footer"]):not([class*="footer"]) {
+  background: linear-gradient(180deg, #0c111a, #080c12) !important;
+  border-color: rgba(255,255,255,.09) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.03) inset !important;
+}
+
+.v26App.workspaceRoute .demoEmpty > svg,
+.v26App.workspaceRoute .demoEmpty > svg path,
+.v26App.workspaceRoute .demoAccountStrip article:nth-child(3) .demoProfit,
+.v26App.workspaceRoute .demoAccountStrip article:nth-child(3) .demoLoss {
+  background: var(--card-bg) !important;
+  color: var(--text-dim) !important;
+  fill: var(--text-dim) !important;
+  stroke: var(--text-dim) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip article:nth-child(3) .demoProfit {
+  color: var(--green) !important;
+}
+
+.v26App.workspaceRoute .v21Switch input {
+  appearance: none !important;
+  width: 36px !important;
+  height: 20px !important;
+  margin: 0 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,.08) !important;
+  position: relative !important;
+  cursor: pointer !important;
+}
+
+.v26App.workspaceRoute .v21Switch input::after {
+  content: "" !important;
+  position: absolute !important;
+  top: 3px !important;
+  left: 3px !important;
+  width: 12px !important;
+  height: 12px !important;
+  border-radius: 50% !important;
+  background: #111820 !important;
+  transition: transform .16s ease !important;
+}
+
+.v26App.workspaceRoute .v21Switch input:checked {
+  background: var(--orange) !important;
+  border-color: var(--orange) !important;
+}
+
+.v26App.workspaceRoute .v21Switch input:checked::after {
+  transform: translateX(16px) !important;
+}
+
+.v26App.workspaceRoute :is(h1, h2, h3, h4, section > header) {
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button.active,
+.v26App.workspaceRoute .v21Tabs button[aria-selected="true"],
+.v26App.workspaceRoute .tab-item.active {
+  box-shadow: 0 0 12px rgba(217,102,42,.15) !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button > svg,
+.v26App.workspaceRoute .v21WorkflowStep > svg {
+  width: 19px !important;
+  height: 19px !important;
+  stroke-width: 1.8 !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button.active > svg,
+.v26App.workspaceRoute .v21WorkflowStep.current > svg,
+.v26App.workspaceRoute .v21WorkflowStep.active > svg {
+  color: var(--orange) !important;
+}
+
+.v26App.workspaceRoute .v21Workflow {
+  margin-top: 28px !important;
+  padding: 16px 14px !important;
+  background: linear-gradient(160deg, #0d131c 0%, #090d13 100%) !important;
+  border: 1px solid rgba(255,255,255,.09) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 8px 24px rgba(0,0,0,.25) !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowSteps {
+  gap: 8px !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowSteps::before {
+  left: 28px !important;
+  right: 28px !important;
+  top: 28px !important;
+  height: 1px !important;
+  background: rgba(255,255,255,.12) !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowStep {
+  grid-template-columns: 20px 19px minmax(0, 1fr) !important;
+  grid-template-rows: 1fr !important;
+  align-items: center !important;
+  min-height: 76px !important;
+  padding: 16px 14px !important;
+  background: linear-gradient(180deg, #0d131c, #0a0e15) !important;
+  border: 1px solid rgba(255,255,255,.08) !important;
+  border-radius: 10px !important;
+  transition: border-color .15s ease, box-shadow .15s ease !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowStep.current,
+.v26App.workspaceRoute .v21WorkflowStep.active {
+  border-color: var(--orange) !important;
+  background: linear-gradient(180deg, #0d131c, #0a0e15) !important;
+  box-shadow: 0 0 16px rgba(217,102,42,.12) !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowStep i {
+  width: 20px !important;
+  height: 20px !important;
+  border: 1px solid rgba(255,255,255,.15) !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  color: var(--text-dim) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowStep.current i,
+.v26App.workspaceRoute .v21WorkflowStep.completed i,
+.v26App.workspaceRoute .v21WorkflowStep.available i,
+.v26App.workspaceRoute .v21WorkflowStep.locked i {
+  background: transparent !important;
+  border-color: rgba(255,255,255,.15) !important;
+  color: var(--text-dim) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowStep em {
+  top: 50% !important;
+  right: -5px !important;
+  width: 8px !important;
+  height: 1px !important;
+  border-top: 1px solid rgba(255,255,255,.12) !important;
+  color: transparent !important;
+  font-size: 0 !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowStep b {
+  color: var(--text) !important;
+  font-weight: 600 !important;
+}
+
+.v26App.workspaceRoute .v21WorkflowStep small {
+  color: var(--text-faint) !important;
+}
+
+/* Trade uses the full workspace width so its chart, ticket, and position panels do not compress into each other. */
+.v26App.workspaceRoute:has(.demoHero) {
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
+
+.v26App.workspaceRoute:has(.demoHero) .v26ModeBar,
+.v26App.workspaceRoute:has(.demoHero) .v26MarketBar,
+.v26App.workspaceRoute:has(.demoHero) .binanceDemoDeck {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.v26App.workspaceRoute:has(.demoHero) .demoMainGrid {
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) !important;
+  gap: 16px !important;
+}
+
+.v26App.workspaceRoute:has(.demoHero) .v21WorkflowSteps {
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.v26App.workspaceRoute:has(.demoHero) .v21WorkflowStep {
+  overflow: visible !important;
+}
+
+.v26App.workspaceRoute:has(.demoHero) .v21WorkflowStep em {
+  right: -8px !important;
+  width: 8px !important;
+  pointer-events: none !important;
+  z-index: 2 !important;
+}
+
+.v26App.workspaceRoute:has(.demoHero) .v21NextAction button,
+.v26App.workspaceRoute:has(.demoHero) .v21NextAction button span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  line-height: 1 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.demoHero) .binanceDemoDeck > .v21Pulse {
+  min-height: 78px !important;
+  height: 78px !important;
+  grid-auto-rows: minmax(56px, auto) !important;
+  align-items: stretch !important;
+  overflow: visible !important;
+}
+
+#root main.v26App.workspaceRoute:has(.demoHero) .demoAccountStrip {
+  gap: 10px !important;
+  overflow: visible !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.demoHero) .demoAccountStrip article {
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--card-bg) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.demoHero) :is(
+  .demoLiveChart > header,
+  .demoTicket > header,
+  .demoPositions > header,
+  .demoOrderPanel > header,
+  .demoEventPanel > header,
+  .v21SummaryIntro,
+  .v21SummaryMetrics,
+  .v21InsightMetrics,
+  .v21PortfolioMetrics
+) {
+  border-bottom: 0 !important;
+  border-top: 0 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.demoHero) :is(
+  .demoOrderPanel article,
+  .demoEventPanel article,
+  .demoActivityList article,
+  .v21ActivityList article,
+  .v21HistoryList article
+) {
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--card-bg) !important;
+  margin-bottom: 6px !important;
+}
+
+.v26App.workspaceRoute:has(.demoHero) .v21Pulse > span {
+  min-height: 56px !important;
+  box-sizing: border-box !important;
+  align-content: center !important;
+  gap: 4px !important;
+  overflow: visible !important;
+}
+
+.v26App.workspaceRoute .v21NextAction {
+  margin-top: 28px !important;
+}
+
+.v26App.workspaceRoute .v21NextAction .next-best-action-label {
+  color: var(--text-faint) !important;
+  font-size: 11px !important;
+  text-transform: uppercase !important;
+  letter-spacing: .04em !important;
+}
+
+.v26App.workspaceRoute .v21NextAction .next-best-action-text {
+  color: var(--text) !important;
+  font-style: normal !important;
+}
+
+.v26App.workspaceRoute .v21NextAction button {
+  min-width: 108px !important;
+  border: 1px solid var(--orange) !important;
+  background: transparent !important;
+  color: var(--orange) !important;
+}
+
+.v26App.workspaceRoute .v21Pulse + .v21Workflow,
+.v26App.workspaceRoute .v21Workflow + .v21ExecutiveSummary {
+  margin-top: 28px !important;
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute .demoHeroStatus {
+    grid-template-columns: 1fr !important;
+  }
+
+  .v26App.workspaceRoute .v21NextAction {
+    grid-template-columns: 1fr !important;
+  }
+
+  .v26App.workspaceRoute .v21NextAction button {
+    width: 100% !important;
+  }
+}
+
+/* Final ordering guard: Risk must end at its content on every breakpoint. */
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) {
+  grid-template-areas:
+    "topnav topnav topnav"
+    "risk risk risk" !important;
+  grid-template-rows: max-content max-content !important;
+  grid-auto-rows: max-content !important;
+  align-content: start !important;
+  height: fit-content !important;
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) > .v21RiskManagement {
+  grid-area: risk !important;
+  align-self: start !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-areas: none !important;
+  grid-template-rows: max-content max-content !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) > .v21Tabs {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) > .v21RiskManagement {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  --card: #111214 !important;
+  --card-alt: #18191c !important;
+  --muted: #c4c4c8 !important;
+  background: #050505 !important;
+  background-image: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card, .v21RiskSummary) {
+  background: #111214 !important;
+  border-color: rgba(255, 255, 255, .12) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card > header, .v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskResult > span, .v21RiskSummary > span, .v21RiskSummary .v21MetricPrimary) {
+  background: #18191c !important;
+  border-color: rgba(255, 255, 255, .09) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  background: rgba(245, 158, 11, .10) !important;
+  border-left-color: rgba(245, 158, 11, .72) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  --card: #111214 !important;
+  --card-alt: #18191c !important;
+  --muted: #c4c4c8 !important;
+  background: #050505 !important;
+  background-image: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card, .v21RiskSummary) {
+  background: #111214 !important;
+  border-color: rgba(255, 255, 255, .12) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card > header, .v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskResult > span, .v21RiskSummary > span, .v21RiskSummary .v21MetricPrimary) {
+  background: #18191c !important;
+  border-color: rgba(255, 255, 255, .09) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  background: rgba(245, 158, 11, .10) !important;
+  border-left-color: rgba(245, 158, 11, .72) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  background: #050505 !important;
+  background-image: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskResult > span, .v21RiskSummary > span) {
+  border-color: rgba(255, 255, 255, .09) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  background: rgba(245, 158, 11, .10) !important;
+  border-left-color: rgba(245, 158, 11, .72) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span {
+  border-right-color: rgba(255, 255, 255, .09) !important;
+  border-bottom-color: rgba(255, 255, 255, .09) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21Tabs button {
+  color: #e6e6e8 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21Tabs button b {
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 700 !important;
+  color: #f1f1f1 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21Tabs button small {
+  font-size: 11px !important;
+  line-height: 16px !important;
+  font-weight: 500 !important;
+  color: #c4c4c8 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21Tabs button.active,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21Tabs button[aria-selected='true'] {
+  border-color: #f59e0b !important;
+  box-shadow: inset 0 -2px 0 #f59e0b, 0 0 16px rgba(245, 158, 11, .10) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v26ModeBar h1 {
+  font-size: 28px !important;
+  line-height: 34px !important;
+  font-weight: 700 !important;
+  color: #f1f1f1 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v26ModeBar p {
+  font-size: 14px !important;
+  line-height: 20px !important;
+  color: #c4c4c8 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v26ModeBar small {
+  font-size: 11px !important;
+  line-height: 16px !important;
+  color: #c4c4c8 !important;
+}
+
+.v26App.homeRoute :is(.v26DashboardChoices button b, .mobileMenuDrawer button b) {
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 700 !important;
+  color: #f1f1f1 !important;
+}
+
+.v26App.homeRoute :is(.v26DashboardChoices button small, .mobileMenuDrawer button small) {
+  font-size: 11px !important;
+  line-height: 16px !important;
+  font-weight: 500 !important;
+  color: #c4c4c8 !important;
+}
+
+.v26App.homeRoute .v26DashboardChoices button:hover,
+.v26App.homeRoute .mobileMenuDrawer button:hover {
+  border-color: #f59e0b !important;
+  color: #f59e0b !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  --muted: #c4c4c8 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card > header small, .v21CalcQuote small, .v21CalcQuote em, .v21SettingsGrid small, .v21SettingsUnavailable small, .v21RiskResult small, .v21RiskSummary small, .v21EmptyMini, .v21RiskResult p) {
+  font-size: 13px !important;
+  line-height: 19px !important;
+  font-weight: 500 !important;
+  color: var(--muted) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote b, .v21SettingsUnavailable b, .v21RiskResult b, .v21RiskSummary b) {
+  font-size: 14px !important;
+  line-height: 21px !important;
+  font-weight: 700 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskResult > span) {
+  min-height: 48px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) {
+  --bg: #050505;
+  --card: #111214;
+  --card-alt: #18191c;
+  --border: rgba(255, 255, 255, .12);
+  --border-hover: rgba(245, 158, 11, .5);
+  --muted: #a7a7aa;
+  --orange: #f59e0b;
+  --orange-hover: #fbbf24;
+  background: #050505 !important;
+  color: #f1f1f1 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) :is(main, .riskOnlyDeck, .v21RiskManagement) {
+  background: #050505 !important;
+  color: #f1f1f1 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card, .v21RiskSummary) {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, .28) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card > header, .v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskResult > span, .v21RiskSummary > span) {
+  background: var(--card-alt) !important;
+  border-color: rgba(255, 255, 255, .09) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskLayout {
+  gap: 16px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  gap: 16px !important;
+  padding: 16px !important;
+  background: var(--card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  background: var(--card-alt) !important;
+  border: 1px solid rgba(255, 255, 255, .09) !important;
+  border-radius: 10px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  background: rgba(245, 158, 11, .10) !important;
+  border-left: 2px solid rgba(245, 158, 11, .72) !important;
+  color: var(--muted) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:disabled {
+  background: rgba(245, 158, 11, .25) !important;
+  color: rgba(255, 255, 255, .5) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskStatus, .v21RiskReturn) {
+  border-color: rgba(245, 158, 11, .42) !important;
+  background: rgba(245, 158, 11, .08) !important;
+  color: #fbbf24 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskSummary.risk-warning, .v21RiskSummary.risk-critical) .v21MetricPrimary {
+  background: var(--card-alt) !important;
+  border-left: 1px solid rgba(255, 255, 255, .09) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) :is(.v26ModeBar h1, .v21RiskManagement > .v21WorkspaceHead h2) {
+  font-size: 28px !important;
+  line-height: 34px !important;
+  font-weight: 700 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v26ModeBar p {
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 400 !important;
+  color: var(--muted) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) :is(.v26ModeBar small, .v21Tabs button small, .v21RiskSummary::before) {
+  font-size: 11px !important;
+  line-height: 16px !important;
+  font-weight: 600 !important;
+  color: var(--muted) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  --card: #1e293b;
+  --card-alt: #17243a;
+  --muted: #94a3b8;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskLayout {
+  gap: 16px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 14px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskResult > span) {
+  background: var(--card-alt) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskResult > span, .v21RiskSummary > span) {
+  border-color: rgba(96, 165, 250, .12) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  gap: 16px !important;
+  padding: 16px !important;
+  border-top: 1px solid var(--border) !important;
+  background: var(--card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  min-height: 58px !important;
+  padding: 12px !important;
+  border: 1px solid rgba(96, 165, 250, .12) !important;
+  border-radius: 10px !important;
+  background: var(--card-alt) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span:not(.v21MetricPrimary) b,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary b {
+  font-size: 14px !important;
+  line-height: 20px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  background: rgba(59, 130, 246, .10) !important;
+  border-left: 2px solid rgba(96, 165, 250, .72) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:disabled {
+  background: rgba(245, 158, 11, .25) !important;
+  color: rgba(255, 255, 255, .5) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(h1, h2) {
+  font-size: 28px !important;
+  line-height: 34px !important;
+  font-weight: 700 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(h3, h4) {
+  font-size: 18px !important;
+  line-height: 24px !important;
+  font-weight: 600 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(p, label, b, strong, em, button, input, select, textarea) {
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 500 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(small, .v21RiskStatus, .v21RiskReturn) {
+  font-size: 11px !important;
+  line-height: 16px !important;
+  font-weight: 600 !important;
+  color: var(--muted) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskSummary b, .v21CalcQuote b, .v21SettingsUnavailable b, .v21RiskResult b) {
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 700 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21SettingsUnavailable span, .v21CalcQuote > span, .v21CalcQuote > label) {
+  min-height: 44px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21SettingsUnavailable b, .v21CalcQuote b) {
+  min-width: 0 !important;
+  text-align: right !important;
+  white-space: nowrap !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskSummary.risk-warning, .v21RiskSummary.risk-critical) .v21MetricPrimary {
+  border-left: 1px solid rgba(96, 165, 250, .12) !important;
+  background: var(--card-alt) !important;
+}
+
+/* Final Risk Kasasi surface contract. Keep these rules last in the cascade. */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span),
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span {
+  background: var(--card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-warning,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-critical {
+  background: var(--card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  border-left: 0 !important;
+  background: var(--card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskSummary > span) {
+  border-color: rgba(255, 255, 255, .10) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  background: rgba(59, 130, 246, .10) !important;
+  border-left: 2px solid rgba(96, 165, 250, .72) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:disabled {
+  background: rgba(245, 158, 11, .25) !important;
+  color: rgba(255, 255, 255, .5) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote b, .v21SettingsUnavailable b, .v21RiskSummary b) {
+  min-height: 18px !important;
+  font-size: 13px !important;
+  line-height: 18px !important;
+  font-weight: 700 !important;
+  color: #f1f5f7 !important;
+  white-space: nowrap !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span b,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary b {
+  min-height: 18px !important;
+  font-size: 13px !important;
+  line-height: 18px !important;
+  font-weight: 700 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span:not(.v21MetricPrimary) b,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span.v21MetricPrimary b {
+  font-size: 13px !important;
+  line-height: 18px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  min-height: 0 !important;
+  padding: 18px !important;
+  border: 1px solid var(--border) !important;
+  border-top: 2px solid var(--orange) !important;
+  border-radius: 14px !important;
+  background: var(--card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary::before {
+  top: 10px !important;
+  left: 18px !important;
+  color: var(--muted) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: .08em !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  min-height: 64px !important;
+  padding: 20px 12px 10px !important;
+  border: 0 !important;
+  border-right: 1px solid rgba(255, 255, 255, .10) !important;
+  border-radius: 0 !important;
+  background: var(--card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span:last-child {
+  border-right: 0 !important;
+}
+
+/* Risk page theme: map the supplied visual language onto the active V21 markup. */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  --risk-bg: #050505;
+  --risk-card: #111214;
+  --risk-border: rgba(255, 255, 255, .12);
+  --risk-border-soft: rgba(255, 255, 255, .09);
+  --risk-text: #f1f5f7;
+  --risk-muted: #c4c4c8;
+  --risk-accent: #f59e0b;
+  --risk-accent-hover: #fbbf24;
+  --card: var(--risk-card) !important;
+  --card-alt: var(--risk-card) !important;
+  --muted: var(--risk-muted) !important;
+  background: var(--risk-bg) !important;
+  color: var(--risk-text) !important;
+  font-family: "Segoe UI", system-ui, sans-serif !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  background: var(--risk-card) !important;
+  border: 1px solid var(--risk-border) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, .28) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > label,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsGrid > label:not(.v21Switch),
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskResult > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(input, select, textarea) {
+  background: var(--risk-card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsGrid > label:not(.v21Switch), .v21SettingsUnavailable span, .v21RiskResult > span, .v21RiskSummary > span) {
+  border-color: var(--risk-border-soft) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21WorkspaceHead p, .v21Card > header small, .v21CalcQuote small, .v21CalcQuote em, .v21SettingsGrid label > span, .v21SettingsGrid label > em, .v21SettingsUnavailable small, .v21RiskResult small, .v21RiskSummary small, .v21EmptyMini) {
+  color: var(--risk-muted) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21WorkspaceHead h2, .v21Card > header h3, .v21CalcQuote b, .v21SettingsGrid input, .v21SettingsGrid select, .v21SettingsUnavailable b, .v21RiskResult b, .v21RiskSummary b) {
+  color: var(--risk-text) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:disabled {
+  background: var(--risk-accent) !important;
+  color: #1a1205 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:hover:not(:disabled) {
+  background: var(--risk-accent-hover) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  background: rgba(245, 158, 11, .10) !important;
+  border-left-color: rgba(245, 158, 11, .72) !important;
+  color: var(--risk-muted) !important;
+}
+
+@media (max-width: 860px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement .v21Card > header,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement .v21CalcQuote > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement .v21CalcQuote > label,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement .v21SettingsGrid > label:not(.v21Switch),
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement .v21SettingsUnavailable span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement .v21RiskResult > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement .v21RiskSummary .v21MetricPrimary,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement input,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement select,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement.v21RiskManagement textarea {
+  background: #111214 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck.riskOnlyDeck {
+  grid-template: max-content max-content / minmax(0, 1fr) !important;
+  grid-template-areas: none !important;
+  grid-auto-rows: max-content !important;
+  align-content: start !important;
+  height: fit-content !important;
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck.riskOnlyDeck > .v21Tabs {
+  grid-area: 1 / 1 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck.riskOnlyDeck > .v21RiskManagement {
+  grid-area: 2 / 1 !important;
+  align-self: start !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute:has(.v21RiskManagement) main {
+  background-color: #071019 !important;
+  background-image: linear-gradient(180deg, #071019 0%, #09131d 58%, #071019 100%) !important;
+}
+
+.v26App.workspaceRoute:has(.riskOnlyDeck),
+.v26App.workspaceRoute:has(.riskOnlyDeck) main,
+.v26App.workspaceRoute:has(.riskOnlyDeck) .riskOnlyDeck,
+.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  background-image: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) {
+  min-height: 100vh !important;
+  background-color: #0b1220 !important;
+  background-image: radial-gradient(circle at 50% 0%, rgba(105, 185, 205, .07), transparent 38%), linear-gradient(180deg, #0b1220 0%, #09111d 58%, #0b1220 100%) !important;
+  background-size: auto !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: max(653px, calc(100vh - 270px)) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card {
+  border: 1px solid rgba(255, 255, 255, .08) !important;
+  background: rgba(255, 255, 255, .04) !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header {
+  background: transparent !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > label,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsGrid > label:not(.v21Switch),
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskResult > span {
+  background: rgba(255, 255, 255, .025) !important;
+  border: 1px solid rgba(255, 255, 255, .05) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21EmptyMini {
+  border-left-color: rgba(105, 185, 205, .35) !important;
+  background: rgba(105, 185, 205, .04) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-warning {
+  border-top-color: rgba(231, 173, 71, .72) !important;
+  background: rgba(231, 173, 71, .06) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-critical {
+  border-top-color: rgba(226, 91, 91, .78) !important;
+  background: rgba(226, 91, 91, .06) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  margin-top: auto !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 0 !important;
+  margin: 10px 14px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > label {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  min-height: 42px !important;
+  padding: 8px 2px !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, .07) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span:last-of-type,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > label {
+  border-bottom-color: transparent !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span small,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > label > small {
+  color: var(--text-dim) !important;
+  font-size: 9px !important;
+  letter-spacing: .08em !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span b {
+  color: var(--text) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  text-align: right !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable {
+  display: grid !important;
+  gap: 0 !important;
+  margin: 10px 14px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable span {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  min-height: 42px !important;
+  padding: 8px 2px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, .07) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable small {
+  color: var(--text-dim) !important;
+  font-size: 9px !important;
+  letter-spacing: .08em !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable b {
+  color: var(--text-faint) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  border-top-color: rgba(255, 255, 255, .08) !important;
+  background: transparent !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span {
+  align-content: center !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span:not(.v21MetricPrimary) b {
+  font-size: 11px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  grid-column: auto !important;
+  min-height: 42px !important;
+  border-left: 2px solid rgba(105, 185, 205, .35) !important;
+  border-right: 1px solid var(--border) !important;
+  background: rgba(105, 185, 205, .04) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary b {
+  font-size: 14px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:disabled {
+  background: rgba(255, 255, 255, .10) !important;
+  color: rgba(241, 245, 247, .42) !important;
+  cursor: not-allowed !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-warning .v21MetricPrimary,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-critical .v21MetricPrimary {
+  grid-column: auto !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .workspaceBack {
+  min-height: 28px !important;
+  margin: 4px 0 0 !important;
+  padding: 0 6px !important;
+  font-size: 12px !important;
+}
+
+/* Final Risk Kasasi readability pass. Keep every visible label legible on the dark surface. */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(h1, h2, h3, h4, h5, h6, p, label, small, strong, b, em, span, button) {
+  color: #dce5eb !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21WorkspaceHead p, .v21Card > header small, .v21CalcQuote small, .v21CalcQuote em, .v21RiskResult small, .v21RiskResult p, .v21RiskSummary small, .v21SettingsGrid small, .v21SettingsUnavailable small, .v21SettingsUnavailable b) {
+  color: #a9b6c2 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21WorkspaceHead h2, .v21Card > header h3, .v21CalcQuote b, .v21RiskResult b, .v21RiskSummary b, .v21SettingsGrid > label > span, .v21SettingsUnavailable span) {
+  color: #f1f5f7 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(input, select, textarea) {
+  color: #f1f5f7 !important;
+  caret-color: #f1a45b !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(input, select, textarea)::placeholder {
+  color: #91a2ae !important;
+  opacity: 1 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.status-online, .status-connected, .connected, .positive, .summaryPositive, .risk-warning) {
+  color: #63d6a3 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.status-offline, .status-error, .disconnected, .negative, .summaryNegative, .risk-critical) {
+  color: #ff8b82 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:disabled {
+  color: #b8c4cd !important;
+}
+
+/* Use a brighter neutral gray for Risk labels so they remain clear without competing with values. */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(h1, h2, h3, h4, h5, h6, p, label, small, strong, b, em, span, button) {
+  color: #e3e9ed !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21WorkspaceHead p, .v21Card > header small, .v21CalcQuote small, .v21CalcQuote em, .v21RiskResult small, .v21RiskResult p, .v21RiskSummary small, .v21SettingsGrid small, .v21SettingsUnavailable small, .v21SettingsUnavailable b) {
+  color: #bcc6cf !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(input, select, textarea)::placeholder {
+  color: #b4c0c9 !important;
+}
+
+/* Keep Risk surfaces solid and consistent instead of washing them with white alpha. */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  --card: #111214 !important;
+  --card-alt: #111214 !important;
+  --muted: #c4c4c8 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  background: var(--card) !important;
+  border-color: var(--border) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > label,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsGrid > label:not(.v21Switch),
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskResult > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(input, select, textarea) {
+  background: var(--card) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  border-left: 0 !important;
+  border-right-color: rgba(255, 255, 255, .10) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span) {
+  border-bottom-color: rgba(255, 255, 255, .10) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span {
+  border-right-color: rgba(255, 255, 255, .10) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskResult p,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21EmptyMini {
+  background: rgba(245, 158, 11, .10) !important;
+  border-left: 2px solid rgba(245, 158, 11, .72) !important;
+  color: var(--muted) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:disabled {
+  background: rgba(245, 158, 11, .25) !important;
+  color: rgba(255, 255, 255, .5) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote b, .v21SettingsUnavailable b, .v21RiskSummary b) {
+  min-height: 18px !important;
+  font-size: 13px !important;
+  line-height: 18px !important;
+  font-weight: 700 !important;
+  color: #f1f5f7 !important;
+  white-space: nowrap !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable b {
+  min-width: 150px !important;
+  text-align: right !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v26ModeBar {
+  min-height: 0 !important;
+  margin-top: 2px !important;
+  padding: 8px 18px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v26ModeBar small {
+  font-size: 10px !important;
+  line-height: 14px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v26ModeBar h1 {
+  margin: 1px 0 2px !important;
+  font-size: 22px !important;
+  line-height: 26px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v26ModeBar p {
+  font-size: 11px !important;
+  line-height: 15px !important;
+}
+
+@media (max-width: 900px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-warning,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-critical {
+  border-top-color: rgba(255, 255, 255, .08) !important;
+  background: transparent !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-warning .v21MetricPrimary {
+  border-left-color: rgba(231, 173, 71, .78) !important;
+  background: rgba(231, 173, 71, .08) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary.risk-critical .v21MetricPrimary {
+  border-left-color: rgba(226, 91, 91, .82) !important;
+  background: rgba(226, 91, 91, .08) !important;
+}
+
+.v26App.workspaceRoute {
+  --text-dim: #a9b6c2 !important;
+  --text-faint: #71808e !important;
+  --orange: #d97838 !important;
+  --orange-hover: #c96930 !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button,
+.v26App.workspaceRoute .v21Tabs button b,
+.v26App.workspaceRoute .v21Tabs button small,
+.v26App.workspaceRoute .v26ModeBar small,
+.v26App.workspaceRoute .v26ModeBar p,
+.v26App.workspaceRoute .workspaceBack {
+  color: #a9b6c2 !important;
+  opacity: 1 !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button b,
+.v26App.workspaceRoute .v26ModeBar h1,
+.v26App.workspaceRoute .v21WorkspaceHead h2 {
+  color: #f1f5f7 !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button small,
+.v26App.workspaceRoute .v26ModeBar small {
+  color: #91a2ae !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button.active,
+.v26App.workspaceRoute .v21Tabs button[aria-selected="true"] {
+  border-color: rgba(217, 120, 56, .72) !important;
+  box-shadow: inset 0 -2px 0 rgba(217, 120, 56, .85), 0 0 18px rgba(217, 120, 56, .06) !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button.active > svg,
+.v26App.workspaceRoute .v21Tabs button[aria-selected="true"] > svg {
+  color: #e3a06f !important;
+  stroke: #e3a06f !important;
+}
+
+.v26App.workspaceRoute .v21Tabs button:hover,
+.v26App.workspaceRoute .workspaceBack:hover {
+  color: #f1f5f7 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .workspaceBack {
+  transform: translate(-3px, -2px) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement > .v21WorkspaceHead,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card > header {
+  border-bottom: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21Card {
+  border: 0 !important;
+  background: rgba(16, 28, 39, .72) !important;
+  box-shadow: inset 0 1px 0 rgba(150, 180, 195, .06), 0 14px 30px rgba(0, 0, 0, .16) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote > span,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21CalcQuote > label,
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21SettingsGrid > label:not(.v21Switch),
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskResult > span {
+  border: 0 !important;
+  background: rgba(19, 34, 45, .48) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement .v21RiskSummary {
+  border: 0 !important;
+  border-top: 1px solid var(--border) !important;
+  border-radius: 0 !important;
+  background: rgba(8, 13, 20, .32) !important;
+}
+
+/* Order ticket: three calm, scannable groups with one clear action hierarchy. */
+.v26App.workspaceRoute .demoTicket {
+  display: grid !important;
+  gap: 16px !important;
+  align-content: start !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoTicket > header {
+  margin: 0 !important;
+  padding: 0 2px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoTicketGroup {
+  display: grid !important;
+  gap: 16px !important;
+  margin: 0 !important;
+  padding: 18px !important;
+  background: var(--card-bg) !important;
+  background-color: #0a0f16 !important;
+  background-image: none !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.03) inset !important;
+}
+
+#root main.v26App.workspaceRoute .demoTicketGroup {
+  background: #0a0f16 !important;
+  background-color: #0a0f16 !important;
+  background-image: none !important;
+}
+
+.v26App.workspaceRoute .demoTicketGroupHead {
+  display: flex !important;
+  align-items: end !important;
+  justify-content: space-between !important;
+  gap: 14px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.v26App.workspaceRoute .demoTicketGroupHead > div {
+  display: grid !important;
+  gap: 4px !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute .demoTicketGroupHead span,
+.v26App.workspaceRoute .demoTicketGroupHead small {
+  color: var(--text-faint) !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  letter-spacing: .04em !important;
+  text-transform: uppercase !important;
+}
+
+.v26App.workspaceRoute .demoTicketGroupHead h3 {
+  margin: 0 !important;
+  color: var(--text) !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+}
+
+/* Final Risk surface override. This block must remain last in the stylesheet. */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+  background: #111214 !important;
+  border-color: rgba(255, 255, 255, .12) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > label,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsGrid > label:not(.v21Switch),
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskResult > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  background: #111214 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement input,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement select,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement textarea {
+  background: #111214 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  background: rgba(245, 158, 11, .10) !important;
+  border-left-color: rgba(245, 158, 11, .72) !important;
+}
+
+@media (max-width: 860px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+.v26App.workspaceRoute .demoTicketGroupHead > small {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.v26App.workspaceRoute .demoTicketControlRow {
+  display: grid !important;
+  grid-template-columns: minmax(150px, .8fr) minmax(0, 1.2fr) !important;
+  gap: 16px !important;
+  align-items: stretch !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSymbolPicker,
+.v26App.workspaceRoute .demoTicketControls .demoSidePicker,
+.v26App.workspaceRoute .demoTicketControls .demoTypePicker {
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSymbolTrigger,
+.v26App.workspaceRoute .demoTicketControls .demoSidePicker button,
+.v26App.workspaceRoute .demoTicketControls .demoTypePicker button {
+  min-height: 48px !important;
+  background: var(--card-bg) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSymbolTrigger {
+  width: 100% !important;
+  justify-content: space-between !important;
+  color: var(--text) !important;
+}
+
+.v26App.workspaceRoute .demoSidePicker,
+.v26App.workspaceRoute .demoTypePicker {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSidePicker button {
+  min-height: 56px !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSidePicker button.side-toggle.long.selected,
+#root main.v26App.workspaceRoute .demoSidePicker button.activeLong {
+  background: rgba(55,201,138,.12) !important;
+  border-color: var(--green) !important;
+  color: var(--green) !important;
+  box-shadow: 0 0 0 1px rgba(55,201,138,.12) inset !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSidePicker button.side-toggle.short.selected,
+#root main.v26App.workspaceRoute .demoSidePicker button.activeShort {
+  background: rgba(227,91,91,.12) !important;
+  border-color: var(--red) !important;
+  color: var(--red) !important;
+  box-shadow: 0 0 0 1px rgba(227,91,91,.12) inset !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoTypePicker button.type-toggle.selected,
+.v26App.workspaceRoute .demoTypePicker button.activeType {
+  background: rgba(217,102,42,.15) !important;
+  border-color: var(--orange) !important;
+  color: var(--text) !important;
+  box-shadow: 0 0 0 1px rgba(217,102,42,.12) inset !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoAnalysisFill {
+  width: 100% !important;
+  min-height: 42px !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 1px solid rgba(217,102,42,.7) !important;
+  color: var(--orange) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoTicketRisk .demoFieldGrid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+  margin: 0 !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute .demoTicketRisk .demoFieldGrid label {
+  display: grid !important;
+  gap: 7px !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute .demoTicketRisk .demoFieldGrid .fullField {
+  grid-column: 1 / -1 !important;
+}
+
+.v26App.workspaceRoute .demoTicketRisk .demoFieldGrid label > span,
+.v26App.workspaceRoute .demoTicketRisk .demoFieldGrid label .field-label {
+  color: var(--text-faint) !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  letter-spacing: .04em !important;
+  text-transform: uppercase !important;
+}
+
+.v26App.workspaceRoute .demoTicketRisk :is(input, select, label > div) {
+  min-height: 42px !important;
+  background: #080d14 !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoTicketRisk :is(input, select):focus {
+  background: #0b111a !important;
+  border-color: var(--orange) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(217,102,42,.12) !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure {
+  display: grid !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure > span {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  min-height: 38px !important;
+  padding: 8px 0 !important;
+  border-bottom: 1px solid rgba(255,255,255,.06) !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure > span:last-child {
+  border-bottom: 0 !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .stat-label,
+.v26App.workspaceRoute .demoTicketSummary .stat-value {
+  margin: 0 !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .stat-label {
+  color: var(--text-faint) !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  letter-spacing: .04em !important;
+  text-transform: uppercase !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .stat-value {
+  color: var(--text) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+}
+
+.v26App.workspaceRoute .demoTicketActions {
+  display: grid !important;
+  grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr) !important;
+  gap: 10px !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute .demoTicketActions .demoTest {
+  background: transparent !important;
+  border: 1px solid var(--border-hover) !important;
+  color: var(--text-dim) !important;
+}
+
+.v26App.workspaceRoute .demoTicketActions .demoSubmit {
+  background: var(--orange) !important;
+  border: 1px solid var(--orange) !important;
+  color: #05070c !important;
+}
+
+/* Consistent label/value rhythm across active workspace surfaces. */
+.v26App.workspaceRoute :is(.field-label, .stat-label, [class*="label"]) {
+  color: var(--text-faint) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: .04em !important;
+  line-height: 1.3 !important;
+  text-transform: uppercase !important;
+}
+
+.v26App.workspaceRoute :is(.field-value, .stat-value, [class*="value"]) {
+  color: var(--text) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+}
+
+.v26App.workspaceRoute :is(.field-value, .stat-value).unavailable,
+.v26App.workspaceRoute :is(.field-value, .stat-value)[data-status="unavailable"] {
+  color: var(--text-dim) !important;
+}
+
+/* Keep every active control and placeholder dark, including legacy component selectors. */
+.v26App.workspaceRoute :is(.toggle-switch, .v21Switch input) {
+  background: rgba(255,255,255,.08) !important;
+  border-color: var(--border) !important;
+}
+
+.v26App.workspaceRoute :is(.toggle-switch.active, .v21Switch input:checked) {
+  background: var(--orange) !important;
+  border-color: var(--orange) !important;
+}
+
+.v26App.workspaceRoute :is(.toggle-switch .thumb, .v21Switch input::after) {
+  background: #0a0f16 !important;
+}
+
+.v26App.workspaceRoute :is(.empty-state-icon, .map-placeholder-icon, .position-map-placeholder, .demoMapMark i) {
+  background: rgba(255,255,255,.06) !important;
+  color: var(--text-dim) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute :is(.empty-state-icon, .map-placeholder-icon, .position-map-placeholder, .demoMapMark i) svg {
+  color: var(--text-dim) !important;
+  fill: none !important;
+  stroke: currentColor !important;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty {
+  display: grid !important;
+  justify-items: center !important;
+  gap: 7px !important;
+  min-height: 132px !important;
+  align-content: center !important;
+  padding: 18px !important;
+  text-align: center !important;
+  background: transparent !important;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty .empty-state-icon {
+  display: grid !important;
+  place-items: center !important;
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 50% !important;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty .empty-state-icon svg {
+  width: 17px !important;
+  height: 17px !important;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty b {
+  color: var(--text-dim) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty small {
+  max-width: 260px !important;
+  color: var(--text-faint) !important;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+}
+
+@media (max-width: 820px) {
+  .v26App.workspaceRoute .demoTicketControlRow,
+  .v26App.workspaceRoute .demoTicketRisk .demoFieldGrid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .v26App.workspaceRoute .demoTicketRisk .demoFieldGrid .fullField {
+    grid-column: auto !important;
+  }
+}
+
+/* Trade terminal composition. The existing data blocks remain intact; only their
+   visual order and available space change inside this route. */
+.v26App.workspaceRoute .binanceDemoDeck {
+  display: grid !important;
+  grid-template-columns: minmax(360px, 1.5fr) minmax(280px, .95fr) minmax(320px, 1fr) !important;
+  grid-template-areas:
+    "topnav topnav topnav"
+    "hero hero hero"
+    "pulse pulse pulse"
+    "market market market"
+    "chart position order"
+    "chart . order"
+    "orders orders orders"
+    "setup setup setup"
+    "command command command"
+    "message message message"
+    "confirmation confirmation confirmation"
+    "workflow workflow workflow"
+    "summary summary summary"
+    "insights insights insights"
+    "history history history"
+    "alerts alerts alerts"
+    "advanced advanced advanced"
+    "journal journal journal"
+    "strategy strategy strategy"
+    "regime regime regime"
+    "health health health"
+    "intelligence intelligence intelligence" !important;
+  gap: 14px !important;
+  align-items: start !important;
+  min-width: 0 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs { grid-area: topnav; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero { grid-area: hero; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21Pulse { grid-area: pulse; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard { grid-area: setup; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip { grid-area: market; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart { grid-area: chart; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid { display: contents !important; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid.demoTabHidden { display: none !important; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoTicket { grid-area: order; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoPositions { grid-area: position; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid { grid-area: orders; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoCommandBar { grid-area: command; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoMessage { grid-area: message; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoOrderConfirmation { grid-area: confirmation; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21Workflow { grid-area: workflow; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21ExecutiveSummary { grid-area: summary; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights { grid-area: insights; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21DecisionHistoryPanel { grid-area: history; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21SmartAlertCenter { grid-area: alerts; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21AdvancedAnalytics { grid-area: advanced; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21AiTradeJournal { grid-area: journal; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21StrategyPerformance { grid-area: strategy; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21MarketRegime { grid-area: regime; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21BotHealthMonitor { grid-area: health; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21TradeIntelligenceStack { grid-area: intelligence; }
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
+  display: grid !important;
+  grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
+  gap: 5px !important;
+  padding: 5px !important;
+  border-radius: 12px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs button {
+  min-width: 0 !important;
+  min-height: 42px !important;
+  padding: 7px 9px !important;
+  border-radius: 8px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs button > svg {
+  width: 16px !important;
+  height: 16px !important;
+  padding: 5px !important;
+  border-radius: 7px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs button b {
+  font-size: 10px !important;
+  letter-spacing: .02em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs button small {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+  min-height: 0 !important;
+  padding: 20px 22px !important;
+  border-radius: 12px !important;
+  background: linear-gradient(120deg, #0d1722, #0a1018 72%) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero::after {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .demoHeroCopy h2 {
+  margin: 4px 0 !important;
+  color: var(--text) !important;
+  font-size: clamp(22px, 2.2vw, 30px) !important;
+  letter-spacing: 0 !important;
+}
+
+.v26App.workspaceRoute .demoHeroCopy p {
+  color: var(--text-dim) !important;
+  font-size: 12px !important;
+}
+
+.v26App.workspaceRoute .demoHeroCopy > div b {
+  background: rgba(217,102,42,.12) !important;
+  color: var(--orange) !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus {
+  gap: 8px !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus > span {
+  min-height: 0 !important;
+  padding: 10px !important;
+  border-radius: 8px !important;
+  background: rgba(255,255,255,.035) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus small {
+  color: var(--text-faint) !important;
+  font-size: 10px !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus b {
+  color: var(--text) !important;
+  font-size: 12px !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip {
+  display: grid !important;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  align-content: start !important;
+  gap: 1px !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip article {
+  min-width: 0 !important;
+  min-height: 78px !important;
+  padding: 13px 12px !important;
+  gap: 8px !important;
+  border: 0 !important;
+  background: #0a0f16 !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip article svg {
+  width: 15px !important;
+  height: 15px !important;
+  padding: 6px !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip small {
+  color: var(--text-faint) !important;
+  font-size: 9px !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip b {
+  overflow: hidden !important;
+  margin-top: 4px !important;
+  color: var(--text) !important;
+  font-size: 12px !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.v26App.workspaceRoute .demoMainGrid > .demoPositions,
+.v26App.workspaceRoute .demoMainGrid > .demoTicket {
+  align-self: start !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.v26App.workspaceRoute .demoMainGrid > .demoPositions {
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute .demoMainGrid > .demoPositions .demoPositionList {
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute .demoEmpty {
+  min-height: 130px !important;
+  max-width: 100% !important;
+  margin: 12px 0 0 !important;
+  padding: 18px !important;
+  border: 1px dashed var(--border) !important;
+  border-radius: 10px !important;
+  background: rgba(255,255,255,.02) !important;
+}
+
+.v26App.workspaceRoute .demoEmpty > svg {
+  width: 22px !important;
+  height: 22px !important;
+  padding: 10px !important;
+  border-radius: 50% !important;
+  background: rgba(255,255,255,.06) !important;
+}
+
+.v26App.workspaceRoute .demoEmpty b {
+  font-size: 13px !important;
+}
+
+.v26App.workspaceRoute .demoEmpty span {
+  max-width: 260px !important;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+}
+
+.v26App.workspaceRoute .demoLiveChart {
+  padding: 14px !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoChartCanvas {
+  height: clamp(260px, 31vw, 390px) !important;
+  background: #080d14 !important;
+  border-color: var(--border) !important;
+  border-radius: 8px !important;
+}
+.v26App.workspaceRoute .demoChartHeaderMeta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(70px, 1fr));
+  gap: 8px;
+  min-width: 360px;
+  text-align: right;
+}
+.v26App.workspaceRoute .demoChartHeaderMeta span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.v26App.workspaceRoute .demoChartHeaderMeta small,
+.v26App.workspaceRoute .demoAnalysisStrip small {
+  color: var(--text-faint) !important;
+  font-size: 9px !important;
+  letter-spacing: .06em;
+}
+.v26App.workspaceRoute .demoChartHeaderMeta b,
+.v26App.workspaceRoute .demoAnalysisStrip b {
+  overflow: hidden;
+  color: var(--text) !important;
+  font-size: 11px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v26App.workspaceRoute .demoAnalysisStrip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--border);
+}
+.v26App.workspaceRoute .demoAnalysisStrip span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px;
+  background: var(--surface-1);
+}
+.v26App.workspaceRoute .demoAnalysisStrip b {
+  font-size: 10px !important;
+}
+
+.v26App.workspaceRoute .demoSymbolStatus {
+  border-left: 1px solid rgba(255,255,255,.08) !important;
+}
+
+.v26App.workspaceRoute .demoConnectionState {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+}
+
+.v26App.workspaceRoute .demoConnectionState small {
+  color: var(--text-faint);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.v26App.workspaceRoute .demoConnectionState b {
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+
+.v26App.workspaceRoute .demoSetupCard .demoCredentialFields input {
+  min-width: 0;
+  height: 38px;
+  box-sizing: border-box;
+}
+
+.v26App.workspaceRoute .demoSetupCard .demoCredentialActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.v26App.workspaceRoute .demoSetupCard .demoCredentialActions button {
+  min-height: 34px;
+  padding: 8px 11px;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty {
+  min-height: 82px !important;
+  padding: 14px !important;
+  gap: 6px !important;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty b {
+  color: var(--text-dim) !important;
+  font-size: 10px !important;
+  letter-spacing: .08em;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty small {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty .empty-state-icon {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .demoOrdersGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+}
+
+.v26App.workspaceRoute .demoOrderPanel,
+.v26App.workspaceRoute .demoEventPanel {
+  min-height: 0 !important;
+  padding: 16px !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoOrderPanel > div,
+.v26App.workspaceRoute .demoEventPanel > div {
+  max-height: 220px !important;
+}
+
+.v26App.workspaceRoute :is(.v21Pulse, .v21Workflow, .v21ExecutiveSummary, .v21DashboardInsights, .v21DecisionHistoryPanel, .v21SmartAlertCenter, .v21AdvancedAnalytics, .v21AiTradeJournal, .v21StrategyPerformance, .v21MarketRegime, .v21BotHealthMonitor, .v21TradeIntelligenceStack) {
+  min-width: 0 !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .v21DashboardInsights::before {
+  content: 'ADVANCED ANALYTICS';
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+
+@media (max-width: 540px) {
+  .v26App.workspaceRoute .demoChartHeaderMeta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    text-align: left;
+  }
+
+  .v26App.workspaceRoute .demoSymbolStatus {
+    border-left: 0 !important;
+  }
+
+  .v26App.workspaceRoute .demoSetupCard .demoCredentialFields {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Final Demo terminal hierarchy polish. */
+.v26App.workspaceRoute .demoHero {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto minmax(230px, auto) !important;
+  align-items: center !important;
+  gap: 22px !important;
+  padding: 16px 18px !important;
+}
+
+.v26App.workspaceRoute .demoHeroCopy p {
+  max-width: 520px;
+  margin: 5px 0 10px !important;
+}
+
+.v26App.workspaceRoute .demoHeroMarket {
+  display: grid;
+  gap: 3px;
+  min-width: 108px;
+  padding-left: 20px;
+  border-left: 1px solid rgba(255,255,255,.09);
+}
+
+.v26App.workspaceRoute .demoHeroMarket strong {
+  color: var(--text);
+  font-size: 18px;
+  letter-spacing: .04em;
+}
+
+.v26App.workspaceRoute .demoHeroMarket small {
+  color: var(--text-faint);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.v26App.workspaceRoute .demoHeroStatus {
+  justify-content: end;
+}
+
+.v26App.workspaceRoute .demoHeroStatus > span {
+  min-width: 108px !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip article:nth-child(n+5) {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip article em {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v26App.workspaceRoute .demoLiveChart {
+  border-color: rgba(217,102,42,.42) !important;
+  box-shadow: 0 0 0 1px rgba(217,102,42,.08) inset !important;
+}
+
+.v26App.workspaceRoute .demoLiveChart header h3 small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .06em;
+}
+
+.v26App.workspaceRoute .demoTicket > header {
+  display: flex !important;
+  align-items: end;
+  justify-content: space-between;
+  min-height: 34px;
+}
+
+.v26App.workspaceRoute .demoTicket > header h3 {
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 18px;
+  letter-spacing: .04em;
+}
+
+.v26App.workspaceRoute .demoTicket > header span {
+  color: var(--text-faint);
+  font-size: 9px;
+  letter-spacing: .1em;
+}
+
+.v26App.workspaceRoute .demoTicket > header > b {
+  color: var(--orange);
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure {
+  border: 1px solid rgba(217,102,42,.18) !important;
+  border-radius: 7px;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px !important;
+  padding: 8px !important;
+  background: rgba(217,102,42,.035) !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoTicketGroupHead {
+  align-items: center !important;
+  min-width: 0;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoTicketGroupHead h3,
+.v26App.workspaceRoute .demoTicketSummary .demoTicketGroupHead > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure > span {
+  display: grid !important;
+  align-content: center;
+  justify-content: initial !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+  min-height: 48px !important;
+  padding: 8px !important;
+  border: 1px solid rgba(255,255,255,.07) !important;
+  border-radius: 5px;
+  background: rgba(0,0,0,.12) !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure > span:last-child {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid rgba(255,255,255,.07) !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure .stat-label,
+.v26App.workspaceRoute .demoTicketSummary .demoExposure .stat-value {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure .stat-label {
+  font-size: 9px !important;
+  letter-spacing: .08em;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure .stat-value {
+  font-size: 13px !important;
+  line-height: 1.15 !important;
+}
+
+.v26App.workspaceRoute :is(.v21DashboardInsights, .v21DecisionHistoryPanel, .v21SmartAlertCenter, .v21AdvancedAnalytics, .v21AiTradeJournal, .v21StrategyPerformance, .v21MarketRegime, .v21BotHealthMonitor, .v21TradeIntelligenceStack) {
+  opacity: .88;
+}
+
+.v26App.workspaceRoute .v21DashboardInsights::before {
+  content: 'ADVANCED ANALYTICS · SECONDARY';
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute .demoHero {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .v26App.workspaceRoute .demoHeroMarket {
+    grid-row: 2;
+    padding: 0;
+    border-left: 0;
+  }
+
+  .v26App.workspaceRoute .demoHeroStatus {
+    justify-content: stretch;
+  }
+
+  .v26App.workspaceRoute .demoAccountStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute .demoAccountStrip article {
+    min-height: 68px !important;
+    padding: 10px !important;
+  }
+
+  .v26App.workspaceRoute .demoTicketControls .demoSidePicker button,
+  .v26App.workspaceRoute .demoTicketControls .demoTypePicker button,
+  .v26App.workspaceRoute .demoTicketRisk :is(input, select, label > div) {
+    min-height: 44px !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .v26App.workspaceRoute .binanceDemoDeck {
+    grid-template-columns: minmax(190px, 1fr) minmax(280px, 1.35fr) !important;
+    grid-template-areas:
+      "topnav topnav"
+      "hero hero"
+      "pulse pulse"
+      "market market"
+      "chart chart"
+      "order order"
+      "position position"
+      "orders orders"
+      "setup setup"
+      "command command"
+      "message message"
+      "confirmation confirmation"
+      "workflow workflow"
+      "summary summary"
+      "insights insights"
+      "history history"
+      "alerts alerts"
+      "advanced advanced"
+      "journal journal"
+      "strategy strategy"
+      "regime regime"
+      "health health"
+      "intelligence intelligence" !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute .demoOrdersGrid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .v26App.workspaceRoute .demoEventPanel {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute .binanceDemoDeck {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas:
+      "topnav"
+      "hero"
+      "pulse"
+      "chart"
+      "market"
+      "order"
+      "position"
+      "command"
+      "orders"
+      "setup"
+      "message"
+      "confirmation"
+      "workflow"
+      "summary"
+      "insights"
+      "history"
+      "alerts"
+      "advanced"
+      "journal"
+      "strategy"
+      "regime"
+      "health"
+      "intelligence" !important;
+    gap: 10px !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    position: static !important;
+  }
+
+  .v26App.workspaceRoute .demoHero {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+    padding: 16px !important;
+  }
+
+  .v26App.workspaceRoute .demoHeroStatus {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute .demoHeroStatus > span {
+    grid-template-columns: 1fr !important;
+    gap: 4px !important;
+  }
+
+  .v26App.workspaceRoute .demoHeroStatus > span > svg {
+    display: none !important;
+  }
+
+  .v26App.workspaceRoute .demoChartHeaderMeta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    margin-top: 8px;
+    text-align: left;
+  }
+
+  .v26App.workspaceRoute .demoAnalysisStrip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .v26App.workspaceRoute .demoAccountStrip,
+  .v26App.workspaceRoute .demoOrdersGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute .demoEventPanel {
+    grid-column: 1 / -1 !important;
+  }
+
+  .v26App.workspaceRoute .demoTicketGroup {
+    padding: 14px !important;
+  }
+
+  .v26App.workspaceRoute .demoTicketGroupHead {
+    align-items: start !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+  }
+
+  .v26App.workspaceRoute .demoTicketRisk .demoFieldGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute .demoCommandBar {
+    grid-template-columns: 1fr !important;
+  }
+
+  .v26App.workspaceRoute .demoCommandBar > div {
+    grid-column: auto !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .v26App.workspaceRoute .demoHeroStatus,
+  .v26App.workspaceRoute .demoAccountStrip,
+  .v26App.workspaceRoute .demoOrdersGrid,
+  .v26App.workspaceRoute .demoTicketRisk .demoFieldGrid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .v26App.workspaceRoute .demoEventPanel {
+    grid-column: auto !important;
+  }
+}
+
+/* Institutional Demo surface pass. Keep the existing grid and behavior intact. */
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero,
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip,
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart,
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard,
+.v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid,
+.v26App.workspaceRoute .binanceDemoDeck > .demoCommandBar,
+.v26App.workspaceRoute .binanceDemoDeck > .v21Workflow,
+.v26App.workspaceRoute .binanceDemoDeck > .v21ExecutiveSummary {
+  background: #0d1117 !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+  border-color: #25303b !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart {
+  border: 1px solid #344454 !important;
+  box-shadow: 0 0 0 1px rgba(52,68,84,.16) inset !important;
+}
+
+.v26App.workspaceRoute .demoLiveChart > header {
+  min-height: 54px;
+  padding-bottom: 12px !important;
+  border-bottom: 1px solid #25303b !important;
+}
+
+.v26App.workspaceRoute .demoLiveChart > header h3 {
+  color: #f1f5f9 !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  letter-spacing: .01em !important;
+}
+
+.v26App.workspaceRoute .demoChartHeaderMeta {
+  gap: 12px !important;
+}
+
+.v26App.workspaceRoute .demoChartHeaderMeta span {
+  padding-left: 10px;
+  border-left: 1px solid #25303b;
+}
+
+.v26App.workspaceRoute .demoAnalysisStrip {
+  border-color: #25303b !important;
+  background: #25303b !important;
+}
+
+.v26App.workspaceRoute .demoAnalysisStrip span {
+  min-height: 42px;
+  padding: 8px 10px !important;
+  background: #121820 !important;
+}
+
+.v26App.workspaceRoute .demoAnalysisStrip b {
+  color: #f1f5f9 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip {
+  border: 1px solid #25303b !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip article {
+  background: #0d1117 !important;
+  border-right: 1px solid #25303b !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip article:last-child {
+  border-right: 0 !important;
+}
+
+.v26App.workspaceRoute .demoAccountStrip b {
+  color: #f1f5f9 !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+
+.v26App.workspaceRoute .demoTicketGroup {
+  background: #0d1117 !important;
+  background-image: none !important;
+  border-color: #344454 !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSidePicker button,
+.v26App.workspaceRoute .demoTicketControls .demoTypePicker button {
+  min-height: 44px !important;
+  background: #121820 !important;
+  border-color: #25303b !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSidePicker button.side-toggle.long.selected {
+  background: rgba(55,201,138,.08) !important;
+  border-color: #37c98a !important;
+  color: #37c98a !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoSidePicker button.side-toggle.short.selected {
+  background: rgba(227,91,91,.08) !important;
+  border-color: #e35b5b !important;
+  color: #e35b5b !important;
+}
+
+.v26App.workspaceRoute .demoTicketControls .demoTypePicker button.type-toggle.selected {
+  background: rgba(217,168,74,.09) !important;
+  border-color: #d9a84a !important;
+  color: #f1f5f9 !important;
+}
+
+.v26App.workspaceRoute .demoTicketRisk :is(input, select, label > div),
+.v26App.workspaceRoute .demoSetupCard input {
+  min-height: 42px !important;
+  background: #080a0d !important;
+  border-color: #25303b !important;
+  color: #f1f5f9 !important;
+  box-shadow: none !important;
+  transition: border-color .15s ease, background-color .15s ease !important;
+}
+
+.v26App.workspaceRoute .demoTicketRisk :is(input, select):focus,
+.v26App.workspaceRoute .demoSetupCard input:focus {
+  border-color: #d9a84a !important;
+  background: #0d1117 !important;
+  box-shadow: 0 0 0 2px rgba(217,168,74,.10) !important;
+  outline: none !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary {
+  border-color: #344454 !important;
+}
+
+.v26App.workspaceRoute .demoTicketSummary .demoExposure {
+  border-color: #344454 !important;
+  background: #121820 !important;
+}
+
+.v26App.workspaceRoute .demoTicketActions .demoTest,
+.v26App.workspaceRoute .demoTicketActions .demoSubmit {
+  min-height: 44px !important;
+  box-shadow: none !important;
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease !important;
+}
+
+.v26App.workspaceRoute .demoTicketActions .demoTest {
+  background: #121820 !important;
+  border-color: #344454 !important;
+  color: #94a3b8 !important;
+}
+
+.v26App.workspaceRoute .demoTicketActions .demoSubmit {
+  background: #d9a84a !important;
+  border-color: #d9a84a !important;
+  color: #080a0d !important;
+}
+
+.v26App.workspaceRoute .demoPositions {
+  border-color: #25303b !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoPositionMetrics > span {
+  background: #121820 !important;
+  border-color: #25303b !important;
+}
+
+.v26App.workspaceRoute .demoPositions .demoProfit,
+.v26App.workspaceRoute .demoAccountStrip .demoProfit {
+  color: #37c98a !important;
+}
+
+.v26App.workspaceRoute .demoPositions .demoLoss,
+.v26App.workspaceRoute .demoAccountStrip .demoLoss {
+  color: #e35b5b !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid,
+.v26App.workspaceRoute .demoOrderPanel,
+.v26App.workspaceRoute .demoEventPanel,
+.v26App.workspaceRoute .demoSetupCard {
+  border-color: #25303b !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute .demoPanelEmpty,
+.v26App.workspaceRoute .demoEmpty {
+  border-color: #25303b !important;
+  background: #080a0d !important;
+}
+
+.v26App.workspaceRoute :is(.v21DashboardInsights, .v21DecisionHistoryPanel, .v21SmartAlertCenter, .v21AdvancedAnalytics, .v21AiTradeJournal, .v21StrategyPerformance, .v21MarketRegime, .v21BotHealthMonitor, .v21TradeIntelligenceStack) {
+  border-color: #25303b !important;
+  opacity: .82;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck button {
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck :is(
+  div[class*="card"],
+  div[class*="panel"],
+  div[class*="box"],
+  div[class*="widget"],
+  section,
+  [class*="Card"],
+  [class*="Panel"],
+  [class*="Box"],
+  [class*="Widget"]
+) {
+  background-image: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21WorkflowStep {
+  background: #0d1117 !important;
+  background-image: none !important;
+}
+
+/* Clarify the lower intelligence cards without changing their data or flow. */
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview {
+  grid-column: 1 / -1 !important;
+  border-top: 1px solid #344454 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview > header span,
+.v26App.workspaceRoute .binanceDemoDeck .v21SetupScore > header span,
+.v26App.workspaceRoute .binanceDemoDeck .v21DailyCoach > header span {
+  color: #aab7c6 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .09em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview > header h2,
+.v26App.workspaceRoute .binanceDemoDeck .v21SetupScore > header h2,
+.v26App.workspaceRoute .binanceDemoDeck .v21DailyCoach > header h2 {
+  color: #f1f5f9 !important;
+  font-size: 17px !important;
+  font-weight: 700 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview .v21InsightMetrics {
+  grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview .v21InsightMetrics small,
+.v26App.workspaceRoute .binanceDemoDeck .v21DailyCoach .v21CoachInsights small {
+  color: #8f9dad !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview .v21InsightMetrics b,
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview .v21InsightMetrics em,
+.v26App.workspaceRoute .binanceDemoDeck .v21DailyCoach .v21CoachInsights b,
+.v26App.workspaceRoute .binanceDemoDeck .v21DailyCoach .v21CoachNote {
+  color: #e3eaf2 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21SetupScore > header strong,
+.v26App.workspaceRoute .binanceDemoDeck .v21SetupScore .v21ScoreBreakdown em {
+  color: #e4b85b !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21SetupScore > header strong {
+  background: rgba(228,184,91,.12) !important;
+  border: 1px solid rgba(228,184,91,.28) !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21DailyCoach .v21CoachInsights > span,
+.v26App.workspaceRoute .binanceDemoDeck .v21SetupScore .v21ScoreBreakdown > div {
+  border-color: #2b3948 !important;
+  background: #111923 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21DailyCoach .v21CoachStatus {
+  background: rgba(93,142,190,.12) !important;
+  color: #9fc4e8 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel > header,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel > header {
+  position: relative !important;
+  z-index: 1 !important;
+  align-items: flex-start !important;
+  gap: 10px !important;
+  margin-bottom: 12px !important;
+  padding-bottom: 12px !important;
+  border-bottom: 1px solid #25303b !important;
+  line-height: 1.25 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel > header span,
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel > header h3,
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel > header b,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel > header span,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel > header h3,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel > header b,
+.v26App.workspaceRoute .binanceDemoDeck .demoPanelEmpty b,
+.v26App.workspaceRoute .binanceDemoDeck .demoPanelEmpty small {
+  text-decoration: none !important;
+  text-shadow: none !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel > header h3,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel > header h3 {
+  color: #f1f5f9 !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel > header span,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel > header span {
+  color: #9aa8b8 !important;
+  letter-spacing: .07em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel > header b,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel > header b {
+  color: #d7e0ea !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoPositions > header > b {
+  flex: 0 0 auto !important;
+  padding: 7px 10px !important;
+  border: 1px solid #344454 !important;
+  border-radius: 7px !important;
+  background: #18232f !important;
+  color: #b9c7d6 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .05em !important;
+  line-height: 1 !important;
+  text-decoration: none !important;
+  text-shadow: none !important;
+}
+
+/* Final readability pass for empty states and connection badges. */
+.v26App.workspaceRoute .binanceDemoDeck .demoPanelEmpty {
+  min-height: 96px !important;
+  gap: 7px !important;
+  background: #0d1117 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoPanelEmpty b {
+  color: #d7e0ea !important;
+  font-size: 11px !important;
+  letter-spacing: .02em !important;
+  line-height: 1.3 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoPanelEmpty small {
+  display: block !important;
+  max-width: 280px !important;
+  color: #8f9dad !important;
+  font-size: 10px !important;
+  line-height: 1.45 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoConnectionState b {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 24px !important;
+  padding: 0 8px !important;
+  border: 1px solid #344454 !important;
+  border-radius: 6px !important;
+  background: #18232f !important;
+  color: #b9c7d6 !important;
+  font-size: 9px !important;
+  line-height: 1 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoConnectionState b.demoProfit {
+  border-color: rgba(79,171,132,.4) !important;
+  background: rgba(79,171,132,.12) !important;
+  color: #9ed7bb !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoConnectionState b.demoLoss {
+  border-color: rgba(217,102,42,.45) !important;
+  background: rgba(217,102,42,.12) !important;
+  color: #e7ad83 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview .v21InsightMetrics {
+  gap: 2px !important;
+  background: #25303b !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview .v21InsightMetrics span {
+  padding: 13px 12px !important;
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute .binanceDemoDeck :is(.v21DashboardInsights, .v21DecisionHistoryPanel, .v21SmartAlertCenter, .v21AdvancedAnalytics, .v21AiTradeJournal, .v21StrategyPerformance, .v21MarketRegime, .v21BotHealthMonitor, .v21TradeIntelligenceStack) {
+    padding: 12px !important;
+  }
+}
+
+/* Improve scanability without enlarging the terminal's primary hierarchy. */
+.v26App.workspaceRoute .binanceDemoDeck {
+  --text-dim: #9aa8b8;
+  --text-faint: #718096;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck :is(
+  .v21InsightPanel > header span,
+  .v21InsightPanel small,
+  .v21DashboardInsights p,
+  .demoAccountStrip small,
+  .demoChartHeaderMeta small,
+  .demoAnalysisStrip small,
+  .demoTicketGroupHead > small,
+  .demoTicketNote,
+  .demoPositionMetrics small,
+  .demoOrderPanel article small,
+  .demoEventPanel article small
+) {
+  color: #9aa8b8 !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  line-height: 1.45 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck :is(
+  .v21InsightPanel p,
+  .v21CoachNote,
+  .v21InsightEmpty span,
+  .v21InsightEmpty small,
+  .demoEmpty span,
+  .demoPanelEmpty small
+) {
+  color: #aab7c6 !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  line-height: 1.5 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21DashboardInsights,
+.v26App.workspaceRoute .binanceDemoDeck .v21DecisionHistoryPanel,
+.v26App.workspaceRoute .binanceDemoDeck .v21SmartAlertCenter,
+.v26App.workspaceRoute .binanceDemoDeck .v21AdvancedAnalytics,
+.v26App.workspaceRoute .binanceDemoDeck .v21AiTradeJournal,
+.v26App.workspaceRoute .binanceDemoDeck .v21StrategyPerformance,
+.v26App.workspaceRoute .binanceDemoDeck .v21MarketRegime,
+.v26App.workspaceRoute .binanceDemoDeck .v21BotHealthMonitor,
+.v26App.workspaceRoute .binanceDemoDeck .v21TradeIntelligenceStack {
+  opacity: 1 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck :is(
+  .v21Tabs button small,
+  .v21SafetyCheck small,
+  .demoCommandBar small,
+  .demoTicketFeedback small,
+  .demoTicketSummary .stat-label,
+  .demoConnectionState small
+) {
+  color: #9aa8b8 !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  line-height: 1.4 !important;
+}
+
+/* Flat layered background: depth comes from tonal separation, not effects. */
+.v26App.workspaceRoute {
+  background-color: #070b10 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck {
+  background-color: #0b1016 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero,
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip,
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart,
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard,
+.v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid,
+.v26App.workspaceRoute .binanceDemoDeck > .demoCommandBar,
+.v26App.workspaceRoute .binanceDemoDeck > .v21Workflow,
+.v26App.workspaceRoute .binanceDemoDeck > .v21ExecutiveSummary,
+.v26App.workspaceRoute .binanceDemoDeck .demoTicketGroup,
+.v26App.workspaceRoute .binanceDemoDeck .demoPositions,
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel {
+  background-color: #111923 !important;
+  border-color: #2a3948 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoLiveChart,
+.v26App.workspaceRoute .binanceDemoDeck .demoTicketGroup,
+.v26App.workspaceRoute .binanceDemoDeck .demoPositions,
+.v26App.workspaceRoute .binanceDemoDeck .demoOrderPanel,
+.v26App.workspaceRoute .binanceDemoDeck .demoEventPanel {
+  box-shadow: 0 1px 0 rgba(255,255,255,.025) inset !important;
+}
+
+/* Final Demo workspace hierarchy pass. */
+@media (min-width: 701px) {
+  .v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
+    position: sticky !important;
+    top: 8px !important;
+    z-index: 20 !important;
+  }
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart,
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoTicket,
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoPositions {
+  border-color: #3a4d60 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoTicket,
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoPositions {
+  box-shadow: 0 2px 0 rgba(255,255,255,.025) inset !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartHeaderMeta {
+  gap: 8px !important;
+  align-items: stretch !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartHeaderMeta span {
+  min-width: 78px !important;
+  padding: 6px 9px !important;
+  border-left: 1px solid #304252 !important;
+  background: #121c27 !important;
+  border-radius: 5px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartHeaderMeta b {
+  color: #dbe7f2 !important;
+  font-size: 11px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoConnectionState b.demoProfit,
+.v26App.workspaceRoute .binanceDemoDeck .demoChartHeaderMeta b.demoProfit {
+  border-color: rgba(122,171,214,.42) !important;
+  background: rgba(122,171,214,.12) !important;
+  color: #9fc4e8 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoConnectionState b.demoLoss,
+.v26App.workspaceRoute .binanceDemoDeck .demoChartHeaderMeta b.demoLoss {
+  border-color: rgba(228,184,91,.45) !important;
+  background: rgba(228,184,91,.11) !important;
+  color: #e4c47e !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AdvancedAnalytics.is-collapsed {
+  padding-bottom: 12px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AdvancedAnalytics > header {
+  min-height: 48px !important;
+  margin-bottom: 0 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AdvancedAnalytics.is-open > header {
+  margin-bottom: 14px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoSectionToggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  min-width: 76px !important;
+  min-height: 32px !important;
+  padding: 6px 9px !important;
+  border: 1px solid #3a4d60 !important;
+  border-radius: 6px !important;
+  background: #121c27 !important;
+  color: #b9cbe0 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .05em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoSectionToggle:hover {
+  border-color: #7aabd6 !important;
+  color: #e7f0f8 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
+  grid-template-columns: repeat(8, minmax(0, 1fr)) minmax(150px, 1.25fr) !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs .demoFocusToggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 7px !important;
+  min-width: 0 !important;
+  padding: 7px 10px !important;
+  border: 1px solid #3a4d60 !important;
+  background: #121c27 !important;
+  color: #b9cbe0 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs .demoFocusToggle svg {
+  flex: 0 0 auto !important;
+  width: 16px !important;
+  height: 16px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  color: #9fc4e8 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs .demoFocusToggle small {
+  display: block !important;
+  color: #879bb0 !important;
+  font-size: 9px !important;
+  line-height: 1.2 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs .demoFocusToggle.active {
+  border-color: #caa45d !important;
+  background: rgba(228,184,91,.1) !important;
+  color: #e4c47e !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs .demoFocusToggle.active svg {
+  color: #e4c47e !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck.demoFocusMode > :is(
+  .demoHero,
+  .v21Pulse,
+  .demoSetupCard,
+  .demoAccountStrip,
+  .demoOrdersGrid,
+  .v21Workflow,
+  .v21ExecutiveSummary,
+  .v21DashboardInsights,
+  .v21DecisionHistoryPanel,
+  .v21SmartAlertCenter,
+  .v21AdvancedAnalytics,
+  .v21AiTradeJournal,
+  .v21StrategyPerformance,
+  .v21MarketRegime,
+  .v21BotHealthMonitor,
+  .v21TradeIntelligenceStack
+) {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck.demoFocusMode {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-areas:
+    "topnav"
+    "chart"
+    "position"
+    "order"
+    "command"
+    "message"
+    "confirmation" !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck.demoFocusMode > .demoMainGrid {
+  display: contents !important;
+}
+
+@media (max-width: 1100px) {
+  .v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(140px, 1.2fr) !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck > .v21Tabs .demoFocusToggle {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+/* Keep the active Demo surface focused on execution and protection. */
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus,
+.v26App.workspaceRoute .binanceDemoDeck > .v21Workflow,
+.v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights,
+.v26App.workspaceRoute .binanceDemoDeck > .v21DecisionHistoryPanel,
+.v26App.workspaceRoute .binanceDemoDeck > .v21SmartAlertCenter,
+.v26App.workspaceRoute .binanceDemoDeck > .v21AdvancedAnalytics,
+.v26App.workspaceRoute .binanceDemoDeck > .v21AiTradeJournal,
+.v26App.workspaceRoute .binanceDemoDeck > .v21StrategyPerformance,
+.v26App.workspaceRoute .binanceDemoDeck > .v21MarketRegime,
+.v26App.workspaceRoute .binanceDemoDeck > .v21BotHealthMonitor,
+.v26App.workspaceRoute .binanceDemoDeck > .v21TradeIntelligenceStack {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart .demoChartHeaderMeta {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoOrdersGrid .demoOrderPanel:has(.demoPanelEmpty),
+.v26App.workspaceRoute .binanceDemoDeck .demoOrdersGrid .demoEventPanel:has(.demoPanelEmpty) {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoOrdersGrid:has(.demoOrderPanel:nth-child(1) .demoPanelEmpty):has(.demoOrderPanel:nth-child(2) .demoPanelEmpty):has(.demoEventPanel .demoPanelEmpty) {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroMarket {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .scrollTopFab,
+.v26App.workspaceRoute .v26BackToTop {
+  display: none !important;
+}
+
+.v26App.workspaceRoute:has(.binanceDemoDeck) {
+  padding-bottom: 0 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoSectionToggle svg {
+  width: 14px !important;
+  height: 14px !important;
+  transition: transform .18s ease !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .v21AdvancedAnalytics.is-open .demoSectionToggle svg {
+  transform: rotate(180deg) !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoAdvancedAnalyticsBody {
+  display: grid !important;
+  gap: 14px !important;
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute .binanceDemoDeck .demoChartHeaderMeta span {
+    min-width: 0 !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck .demoSectionToggle {
+    min-width: 68px !important;
+  }
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartCanvas,
+.v26App.workspaceRoute .binanceDemoDeck .demoTicketRisk :is(input, select, label > div) {
+  background-color: #080d14 !important;
+}
+
+#root main.v26App.workspaceRoute .binanceDemoDeck {
+  background-color: #0b1016 !important;
+}
+
+#root main.v26App.workspaceRoute .binanceDemoDeck .demoTicketGroup {
+  background: #111923 !important;
+  background-color: #111923 !important;
+  background-image: none !important;
+}
+
+/* Low-contrast trading grid for the workspace canvas. */
+#root main.v26App.workspaceRoute {
+  background-color: #070b10 !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 56 56'%3E%3Cpath d='M56 0H0V56' fill='none' stroke='%231b2835' stroke-opacity='.48' stroke-width='1'/%3E%3C/svg%3E") !important;
+  background-size: 56px 56px !important;
+}
+
+/* Replace the high-saturation green text with calmer terminal accents. */
+#root main.v26App.workspaceRoute .binanceDemoDeck :is(.demoProfit, .summaryPositive) {
+  color: #9fc4e8 !important;
+}
+
+#root main.v26App.workspaceRoute .binanceDemoDeck .demoSidePicker button.activeLong,
+#root main.v26App.workspaceRoute .binanceDemoDeck .demoSidePicker button.side-toggle.long.selected {
+  background: rgba(228,184,91,.09) !important;
+  border-color: #caa45d !important;
+  color: #e4c47e !important;
+  box-shadow: 0 0 0 1px rgba(228,184,91,.1) inset !important;
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute .binanceDemoDeck .v21AccountOverview .v21InsightMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .v26App.workspaceRoute .demoTicketActions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .v26App.workspaceRoute .demoTicketActions .demoSubmit {
+    order: -1;
+  }
+}
+
+/* Active Demo terminal pass: compact primary surface, quiet secondary data. */
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
+  gap: 4px !important;
+  padding: 4px !important;
+  border-radius: 9px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs button {
+  min-height: 34px !important;
+  padding: 5px 7px !important;
+  border-radius: 6px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs button > svg {
+  width: 14px !important;
+  height: 14px !important;
+  padding: 3px !important;
+  border-radius: 5px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs button b {
+  font-size: 9px !important;
+  letter-spacing: .04em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21Tabs .demoFocusToggle {
+  min-height: 34px !important;
+  padding: 5px 7px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 14px !important;
+  min-height: 0 !important;
+  padding: 13px 17px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoHeroCopy h2 {
+  margin: 2px 0 !important;
+  font-size: 21px !important;
+  line-height: 1.05 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoHeroCopy p,
+.v26App.workspaceRoute .binanceDemoDeck .demoHeroCopy > div > span {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoHeroCopy > span,
+.v26App.workspaceRoute .binanceDemoDeck .demoHeroSymbol {
+  color: #9aa8b8 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .09em !important;
+  text-transform: uppercase !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoHeroSymbol {
+  display: block !important;
+  margin: 3px 0 0 !important;
+  color: #d4a84f !important;
+  letter-spacing: .04em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoHeroCopy > div {
+  margin-top: 6px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoHeroConnect {
+  min-height: 30px !important;
+  padding: 6px 9px !important;
+  font-size: 9px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(90px, 1fr)) !important;
+  gap: 6px !important;
+  align-self: stretch !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span {
+  min-height: 0 !important;
+  padding: 7px 9px !important;
+  border-radius: 6px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus small {
+  font-size: 9px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus b {
+  font-size: 10px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  min-height: 60px !important;
+  height: auto !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip article {
+  display: flex !important;
+  min-height: 60px !important;
+  padding: 8px 10px !important;
+  gap: 7px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip article:nth-child(n+5) {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip article svg {
+  width: 13px !important;
+  height: 13px !important;
+  padding: 4px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip article b {
+  font-size: 13px !important;
+  line-height: 1.15 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart {
+  padding: 10px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart > header {
+  min-height: 38px !important;
+  padding-bottom: 7px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart > header h3 {
+  font-size: 14px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartCanvas {
+  height: clamp(240px, 23vw, 300px) !important;
+  min-height: 240px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartEmpty {
+  display: grid !important;
+  min-height: 240px !important;
+  place-content: center !important;
+  justify-items: center !important;
+  gap: 6px !important;
+  padding: 18px !important;
+  background: #0d1117 !important;
+  color: #9aa8b8 !important;
+  text-align: center !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartEmpty svg {
+  width: 22px !important;
+  height: 22px !important;
+  color: #22d3ee !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartEmpty b {
+  color: #dbe7f2 !important;
+  font-size: 11px !important;
+  letter-spacing: .06em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoChartEmpty span {
+  color: #879bb0 !important;
+  font-size: 11px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoEmpty {
+  min-height: 112px !important;
+  padding: 16px !important;
+  gap: 5px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoEmpty > svg {
+  width: 22px !important;
+  height: 22px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard {
+  min-height: 0 !important;
+  padding: 10px 12px !important;
+  gap: 10px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard p {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard > div:first-child {
+  gap: 8px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard > div:first-child > span > b {
+  font-size: 11px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard > div:first-child > span::after {
+  content: 'BINANCE DEMO' !important;
+  display: block !important;
+  color: #879bb0 !important;
+  font-size: 9px !important;
+  letter-spacing: .08em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoPositions,
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoTicket {
+  min-width: 0 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoPositions {
+  padding: 10px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoTicket {
+  padding: 10px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoCommandBar {
+  min-height: 0 !important;
+  padding: 9px 11px !important;
+}
+
+/* Restore analytics as secondary content; focus mode remains the only intentional hide state. */
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DashboardInsights {
+  display: grid !important;
+  gap: 10px !important;
+  opacity: .86 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21TradeIntelligenceStack,
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DecisionHistoryPanel,
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21SmartAlertCenter,
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21AdvancedAnalytics,
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21AiTradeJournal,
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21StrategyPerformance,
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21MarketRegime,
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21BotHealthMonitor {
+  display: grid !important;
+  opacity: .86 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) :is(.v21InsightPanel, .v21SafetyGate, .v21SetupScore, .v21DailyCoach) {
+  padding: 12px !important;
+  border-radius: 8px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) :is(.v21InsightPanel > header h2, .v21SafetyGate h2, .v21SetupScore h2, .v21DailyCoach h2) {
+  font-size: 14px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DashboardInsights {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights > .demoSecondaryHeader {
+  display: flex !important;
+  grid-column: 1 / -1 !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  min-height: 44px !important;
+  padding: 8px 10px !important;
+  border: 1px solid #25303b !important;
+  border-radius: 8px !important;
+  background: #0d1117 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader span {
+  color: #879bb0 !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: .08em !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader h2 {
+  margin: 2px 0 0 !important;
+  color: #dbe7f2 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights.secondaryAnalyticsClosed > :not(.demoSecondaryHeader) {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights.secondaryAnalyticsClosed ~ :is(
+  .v21DecisionHistoryPanel,
+  .v21SmartAlertCenter,
+  .v21AdvancedAnalytics,
+  .v21AiTradeJournal,
+  .v21StrategyPerformance,
+  .v21MarketRegime,
+  .v21BotHealthMonitor,
+  .v21TradeIntelligenceStack
+) {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DashboardInsights.secondaryAnalyticsOpen ~ :is(
+  .v21DecisionHistoryPanel,
+  .v21SmartAlertCenter,
+  .v21AdvancedAnalytics,
+  .v21AiTradeJournal,
+  .v21StrategyPerformance,
+  .v21MarketRegime,
+  .v21BotHealthMonitor,
+  .v21TradeIntelligenceStack
+) {
+  display: grid !important;
+  opacity: .86 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid {
+  display: grid !important;
+  gap: 10px !important;
+}
+
+/* Secondary Analyst: clearer hierarchy and an explicit show/hide affordance. */
+#root .v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DashboardInsights {
+  min-width: 0 !important;
+  padding: 12px !important;
+  gap: 10px !important;
+  opacity: 1 !important;
+  border: 1px solid var(--workspace-line) !important;
+  border-top: 2px solid var(--workspace-accent) !important;
+  border-radius: 12px !important;
+  background: var(--workspace-surface) !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights > .demoSecondaryHeader {
+  min-height: 52px !important;
+  padding: 9px 12px !important;
+  border: 1px solid var(--workspace-line-strong) !important;
+  border-radius: 9px !important;
+  background: var(--workspace-surface-raised) !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .16) !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader span {
+  color: var(--workspace-accent) !important;
+  font-size: 9px !important;
+  font-weight: 850 !important;
+  letter-spacing: .12em !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader h2 {
+  margin: 3px 0 0 !important;
+  color: var(--text) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  line-height: 1.25 !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader .demoSectionToggle {
+  min-width: 92px !important;
+  min-height: 38px !important;
+  padding: 7px 12px !important;
+  border: 1px solid var(--workspace-accent) !important;
+  border-radius: 8px !important;
+  background: rgba(122, 171, 214, .14) !important;
+  color: #cfe5f8 !important;
+  font-size: 10px !important;
+  font-weight: 850 !important;
+  letter-spacing: .1em !important;
+  box-shadow: 0 0 0 1px rgba(122, 171, 214, .08), 0 6px 16px rgba(0, 0, 0, .18) !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader .demoSectionToggle:hover,
+#root .v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader .demoSectionToggle:focus-visible {
+  border-color: #b8dbf5 !important;
+  background: rgba(122, 171, 214, .28) !important;
+  color: #fff !important;
+  transform: translateY(-1px);
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader .demoSectionToggle svg {
+  width: 15px !important;
+  height: 15px !important;
+  transition: transform .18s ease !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights.secondaryAnalyticsOpen > .demoSecondaryHeader .demoSectionToggle svg {
+  transform: rotate(180deg) !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DashboardInsights > :is(
+  .v21InsightPanel,
+  .v21SafetyGate,
+  .v21SetupScore,
+  .v21DailyCoach
+) {
+  min-width: 0 !important;
+  border-color: var(--workspace-line) !important;
+  background: var(--workspace-surface-raised) !important;
+}
+
+@media (max-width: 700px) {
+  #root .v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DashboardInsights {
+    grid-template-columns: 1fr !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights > .demoSecondaryHeader {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck .demoSecondaryHeader .demoSectionToggle {
+    width: 100% !important;
+  }
+}
+
+/* Workspace cards: slightly roomier and consistently rounded. */
+#root .v26App.workspaceRoute :is(
+  div[class*="card"],
+  div[class*="panel"],
+  div[class*="box"],
+  div[class*="widget"],
+  section,
+  [class*="Card"],
+  [class*="Panel"],
+  [class*="Box"],
+  [class*="Widget"]
+):not([class*="Header"]):not([class*="header"]):not([class*="Footer"]):not([class*="footer"]) {
+  border-radius: 16px !important;
+}
+
+#root .v26App.workspaceRoute .v26ModeBar {
+  box-sizing: border-box !important;
+  width: 85% !important;
+  max-width: none !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  min-height: 112px !important;
+  padding: 22px 26px !important;
+  border-radius: 18px !important;
+}
+
+#root .v26App.workspaceRoute .v26MarketBar {
+  box-sizing: border-box !important;
+  width: 85% !important;
+  max-width: none !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  min-height: 86px !important;
+  padding: 14px 22px !important;
+  border-radius: 18px !important;
+}
+
+#root .v26App.workspaceRoute .v26MarketBar .v26MarketTrigger {
+  min-height: 52px !important;
+  padding: 10px 14px !important;
+  border-radius: 14px !important;
+}
+
+@media (max-width: 700px) {
+  #root .v26App.workspaceRoute .v26ModeBar {
+    width: 85% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    min-height: 0 !important;
+    padding: 18px !important;
+  }
+
+  #root .v26App.workspaceRoute .v26MarketBar {
+    width: 85% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    min-height: 0 !important;
+    padding: 12px !important;
+  }
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DashboardInsights.secondaryAnalyticsClosed {
+  min-height: 0 !important;
+  align-self: stretch !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights.secondaryAnalyticsClosed > .demoSecondaryHeader {
+  min-height: 52px !important;
+  box-sizing: border-box !important;
+  align-self: stretch !important;
+}
+
+.v26OfflineNotice {
+  position: sticky;
+  top: 10px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: min(100% - 32px, 1180px);
+  margin: 10px auto 0;
+  padding: 12px 16px;
+  border: 1px solid rgba(214, 168, 79, .42);
+  border-radius: 12px;
+  background: rgba(39, 31, 16, .96);
+  color: #f3d88b;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .2);
+}
+
+.v26OfflineNotice > span {
+  display: grid;
+  gap: 3px;
+}
+
+.v26OfflineNotice i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: #d6a84f;
+  box-shadow: 0 0 0 4px rgba(214, 168, 79, .12);
+}
+
+.v26OfflineNotice b {
+  color: #fff3c4;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.v26OfflineNotice small {
+  color: #e0e8e5;
+  font-size: 10px;
+}
+
+.v26OfflineNotice button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(214, 168, 79, .52);
+  border-radius: 7px;
+  background: rgba(214, 168, 79, .12);
+  color: #f7df9c;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+
+.v26OfflineNotice button:hover:not(:disabled) {
+  background: rgba(214, 168, 79, .24);
+}
+
+.v26OfflineNotice button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.v26App.backendOffline :is(.v26MarketError, .demoMessage-error, .v21ScannerError, .v27Error) {
+  display: none !important;
+}
+
+@media (max-width: 600px) {
+  .v26OfflineNotice {
+    align-items: stretch;
+    flex-direction: column;
+    width: calc(100% - 20px);
+    margin-top: 6px;
+  }
+
+  .v26OfflineNotice button {
+    width: 100%;
+  }
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck:has(> .v21DashboardInsights.secondaryAnalyticsClosed) {
+  grid-template-areas:
+    "topnav topnav topnav"
+    "hero hero hero"
+    "pulse pulse pulse"
+    "market market market"
+    "chart position order"
+    "chart . order"
+    "orders orders orders"
+    "setup setup setup"
+    "command command command"
+    "message message message"
+    "confirmation confirmation confirmation"
+    "workflow workflow workflow"
+    "summary summary summary"
+    "insights insights insights" !important;
+}
+
+@media (max-width: 1100px) and (min-width: 701px) {
+  #root .v26App.workspaceRoute .binanceDemoDeck:has(> .v21DashboardInsights.secondaryAnalyticsClosed) {
+    grid-template-areas:
+      "topnav topnav"
+      "hero hero"
+      "pulse pulse"
+      "market market"
+      "chart chart"
+      "order order"
+      "position position"
+      "orders orders"
+      "setup setup"
+      "command command"
+      "message message"
+      "confirmation confirmation"
+      "workflow workflow"
+      "summary summary"
+      "insights insights" !important;
+  }
+}
+
+@media (max-width: 700px) {
+  #root .v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21DashboardInsights.secondaryAnalyticsClosed {
+    min-height: 0 !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights.secondaryAnalyticsClosed > .demoSecondaryHeader {
+    min-height: 52px !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck:has(> .v21DashboardInsights.secondaryAnalyticsClosed) {
+    grid-template-areas:
+      "topnav"
+      "hero"
+      "pulse"
+      "market"
+      "chart"
+      "order"
+      "position"
+      "command"
+      "orders"
+      "setup"
+      "message"
+      "confirmation"
+      "workflow"
+      "summary"
+      "insights" !important;
+  }
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid > :is(.demoOrderPanel, .demoEventPanel) {
+  display: block !important;
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid .demoPanelEmpty {
+  min-height: 72px !important;
+  padding: 12px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck.binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid:has(.demoOrderPanel .demoPanelEmpty):has(.demoEventPanel .demoPanelEmpty) {
+  display: grid !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck.binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid > .demoOrderPanel:has(.demoPanelEmpty),
+#root .v26App.workspaceRoute .binanceDemoDeck.binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid > .demoEventPanel:has(.demoPanelEmpty) {
+  display: block !important;
+}
+
+/* Modern instrument header for the active Demo surface. */
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 24px !important;
+  min-height: 132px !important;
+  padding: 22px 24px 20px !important;
+  overflow: hidden !important;
+  border: 1px solid #2d4050 !important;
+  border-radius: 10px !important;
+  background: #101a24 !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero::before {
+  content: '' !important;
+  position: absolute !important;
+  inset: 0 auto 0 0 !important;
+  width: 3px !important;
+  background: #e4b85b !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy {
+  position: relative !important;
+  z-index: 1 !important;
+  min-width: 0 !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > span:first-child {
+  color: #e4b85b !important;
+  font-size: 9px !important;
+  font-weight: 800 !important;
+  letter-spacing: .16em !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy h2 {
+  margin: 5px 0 2px !important;
+  color: #f2f6f7 !important;
+  font-size: clamp(21px, 2vw, 28px) !important;
+  font-weight: 700 !important;
+  line-height: 1.05 !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroSymbol {
+  display: block !important;
+  color: #9db1c2 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: .03em !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy p,
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div,
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div > span {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div {
+  display: flex !important;
+  margin-top: 12px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div b {
+  padding: 5px 8px !important;
+  border: 1px solid rgba(228,184,91,.28) !important;
+  border-radius: 5px !important;
+  background: rgba(228,184,91,.08) !important;
+  color: #e4c47e !important;
+  font-size: 9px !important;
+  letter-spacing: .08em !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+  position: relative !important;
+  z-index: 1 !important;
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(98px, 1fr)) !important;
+  align-items: start !important;
+  gap: 6px !important;
+  min-width: 306px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span {
+  align-self: start !important;
+  min-height: 58px !important;
+  height: 58px !important;
+  padding: 10px 11px !important;
+  border: 1px solid #273847 !important;
+  border-radius: 7px !important;
+  background: #0b131c !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span > svg {
+  width: 14px !important;
+  height: 14px !important;
+  color: #e4b85b !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus small {
+  color: #71879a !important;
+  font-size: 8px !important;
+  letter-spacing: .08em !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus b {
+  color: #dbe7f2 !important;
+  font-size: 11px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroConnect {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+  align-self: start !important;
+  height: 58px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip {
+  min-height: 54px !important;
+  height: 54px !important;
+  padding: 6px 8px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip article {
+  min-height: 42px !important;
+  padding: 6px 8px !important;
+}
+
+@media (max-width: 700px) {
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    padding: 18px 18px 16px !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroConnect {
+    display: none !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+}
+
+@media (max-width: 430px) {
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+    grid-template-columns: 1fr !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span:not(:first-child) {
+    display: none !important;
+  }
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-height: 40px !important;
+  height: 40px !important;
+  padding: 5px 8px !important;
+  overflow: hidden !important;
+  border-radius: 7px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse > span {
+  display: grid !important;
+  grid-template-columns: auto 1fr !important;
+  align-items: center !important;
+  gap: 5px !important;
+  min-width: 0 !important;
+  padding: 0 6px !important;
+  border-right: 1px solid #25303b !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse > span small {
+  color: #71879a !important;
+  font-size: 8px !important;
+  white-space: nowrap !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse > span b {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: #cbd9e5 !important;
+  font-size: 9px !important;
+  font-weight: 600 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse > strong {
+  display: none !important;
+}
+
+@media (max-width: 700px) {
+  #root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    gap: 2px !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse > span {
+    display: block !important;
+    padding: 0 3px !important;
+    text-align: center !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse > span small,
+  #root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse > span b {
+    display: block !important;
+    font-size: 7px !important;
+    line-height: 1.15 !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip article {
+    min-height: 58px !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span:nth-child(n+2) {
+    display: none !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+    grid-template-columns: 1fr !important;
+  }
+
+  .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span {
+    display: grid !important;
+    grid-template-columns: auto 1fr !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid > .demoOrderPanel:has(.demoPanelEmpty) + .demoOrderPanel:has(.demoPanelEmpty),
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid > .demoEventPanel:has(.demoPanelEmpty) {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid > .demoOrderPanel:has(.demoPanelEmpty) {
+  min-height: 52px !important;
+  height: 52px !important;
+  padding: 8px 10px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid > .demoOrderPanel:has(.demoPanelEmpty) > div {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid > .demoOrderPanel:has(.demoPanelEmpty) header > div > span {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid > .demoOrderPanel:has(.demoPanelEmpty) header h3 {
+  font-size: 12px !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid > .demoOrderPanel:has(.demoPanelEmpty) header h3::after {
+  content: ' · No demo orders yet' !important;
+  color: #71879a !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck.binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid > .demoEventPanel:has(.demoPanelEmpty) {
+  display: none !important;
+}
+
+@media (min-width: 701px) and (max-width: 1100px) {
+  #root .v26App.workspaceRoute .binanceDemoDeck {
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1fr) !important;
+    grid-template-areas:
+      "topnav topnav"
+      "hero hero"
+      "pulse pulse"
+      "market market"
+      "chart chart"
+      "position order"
+      "orders orders"
+      "setup setup"
+      "command command"
+      "message message"
+      "confirmation confirmation"
+      "workflow workflow"
+      "summary summary"
+      "insights insights"
+      "history history"
+      "alerts alerts"
+      "advanced advanced"
+      "journal journal"
+      "strategy strategy"
+      "regime regime"
+      "health health"
+      "intelligence intelligence" !important;
+  }
+}
+
+@media (max-width: 520px) {
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+    grid-template-columns: minmax(0, 1fr) 92px !important;
+    gap: 10px !important;
+    min-height: 98px !important;
+    padding: 14px 16px !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    grid-template-columns: 1fr !important;
+    width: 92px !important;
+    min-width: 92px !important;
+    height: 44px !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span:first-child {
+    height: 44px !important;
+    min-height: 44px !important;
+    padding: 6px !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip {
+    grid-auto-rows: 50px !important;
+    padding: 5px !important;
+  }
+}
+
+/* Shared terminal language for every workspace except Home and Master Trade. */
+.v26App.workspaceRoute:not(.masterTradeRoute) {
+  --workspace-surface: #0a0f16;
+  --workspace-surface-raised: #0d141d;
+  --workspace-line: rgba(255,255,255,.09);
+  --workspace-line-strong: rgba(255,255,255,.17);
+  --workspace-muted: #8794a6;
+  --workspace-faint: #536171;
+  --workspace-accent: #d9662a;
+  --workspace-accent-hover: #c25a24;
+  --workspace-positive: #37c98a;
+  --workspace-negative: #e35b5b;
+  --workspace-warning: #d6a84f;
+  background: radial-gradient(ellipse 1100px 520px at 50% -8%, #111b29 0%, #05070c 64%) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(
+  .v26ModeBar,
+  .v26MarketBar,
+  .connectionCenter,
+  .connectionDemoPanel,
+  .connectionLivePanel,
+  .connectionSecurityPanel,
+  .coinAnalysisCenter,
+  .analystWorkspace,
+  .v27Ops,
+  .liveTradingPanel,
+  .v27Panel,
+  .v27OpsHero,
+  .subscriptionHub,
+  .subscriptionStatusCard,
+  .subscriptionPlanCard,
+  .commercialHub,
+  .commercialPanel,
+  .executionCard,
+  .executionHero,
+  .executionPulse article,
+  .executionActionArea,
+  .v26Loading,
+  .v27Loading,
+  .v27Pulse article,
+  .v27Metrics article,
+  .v27Error,
+  .v27SleepNotice
+) {
+  background: linear-gradient(180deg, var(--workspace-surface-raised), var(--workspace-surface)) !important;
+  border: 1px solid var(--workspace-line) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.03) inset !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(
+  .v26ModeBar,
+  .v26MarketBar,
+  .connectionCenter,
+  .coinAnalysisCenter,
+  .analystWorkspace,
+  .v27Ops,
+  .liveTradingPanel,
+  .commercialHub,
+  .executionV25
+) {
+  width: min(100% - 28px, 1440px) !important;
+  margin: 0 auto !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(h1, h2, h3, h4) {
+  color: var(--text) !important;
+  letter-spacing: .01em !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(p, small, label, time, .muted, .subtle) {
+  color: var(--workspace-muted) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(input, select, textarea) {
+  min-height: 36px !important;
+  border: 1px solid var(--workspace-line) !important;
+  border-radius: 6px !important;
+  background: #070b11 !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(input, select, textarea):focus {
+  border-color: var(--workspace-accent) !important;
+  outline: 2px solid rgba(217,102,42,.18) !important;
+  outline-offset: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) button {
+  min-height: 34px;
+  border: 1px solid var(--workspace-line) !important;
+  border-radius: 6px !important;
+  background: var(--workspace-surface-raised) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+  transition: border-color .16s ease, background-color .16s ease, color .16s ease !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) button:hover:not(:disabled) {
+  border-color: var(--workspace-line-strong) !important;
+  background: #111a25 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(
+  .action-button,
+  .connectionPrimary,
+  .commercialPrimary,
+  .executionActionArea button.primary,
+  .executionCard button.liveOrder,
+  .v27OpsActions .sync,
+  .v27Panel button.primary,
+  .demoOpenCompact
+) {
+  border-color: var(--workspace-accent) !important;
+  background: var(--workspace-accent) !important;
+  color: #0a0d11 !important;
+  font-weight: 700 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(
+  .action-button,
+  .connectionPrimary,
+  .commercialPrimary,
+  .executionActionArea button.primary,
+  .executionCard button.liveOrder,
+  .v27OpsActions .sync,
+  .v27Panel button.primary,
+  .demoOpenCompact
+):hover:not(:disabled) {
+  background: var(--workspace-accent-hover) !important;
+  border-color: var(--workspace-accent-hover) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(
+  .connectionSecondary,
+  .safeExport,
+  .executionCard button.testOrder,
+  .executionActionArea button,
+  .v27Panel button.secondary,
+  .commercialTabs button,
+  .v26MarketPicker button,
+  .v26Intervals button
+) {
+  background: var(--workspace-surface-raised) !important;
+  color: var(--workspace-muted) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(
+  .connectionSecondary:hover,
+  .commercialTabs button.active,
+  .v26MarketPicker button.active,
+  .v26Intervals button.active,
+  .v27Panel button.secondary:hover
+) {
+  border-color: var(--workspace-accent) !important;
+  color: var(--text) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(.ok, .ready, .connected, .positive, .up, .statusOn) {
+  color: var(--workspace-positive) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(.error, .blocked, .negative, .down, .statusOff, .danger) {
+  color: var(--workspace-negative) !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) :is(.waiting, .pending, .warning, .warn) {
+  color: var(--workspace-warning) !important;
+}
+
+@media (max-width: 700px) {
+  .v26App.workspaceRoute:not(.masterTradeRoute) :is(
+    .v26ModeBar,
+    .v26MarketBar,
+    .connectionCenter,
+    .coinAnalysisCenter,
+    .analystWorkspace,
+    .v27Ops,
+    .liveTradingPanel,
+    .commercialHub,
+    .executionV25
+  ) {
+    width: min(100% - 16px, 1440px) !important;
+  }
+}
+
+/* Risk Kassası must end at its own content after every shared breakpoint. */
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-areas:
+    "topnav topnav topnav"
+    "risk risk risk" !important;
+  grid-template-rows: max-content max-content !important;
+  grid-auto-rows: max-content !important;
+  align-content: start !important;
+  height: fit-content !important;
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) > .v21RiskManagement {
+  grid-area: risk !important;
+  align-self: start !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-areas: none !important;
+  grid-template-rows: max-content max-content !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) > .v21Tabs {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+}
+
+.v26App.workspaceRoute:not(.masterTradeRoute) .binanceDemoDeck:has(> .v21RiskManagement) > .v21RiskManagement {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+}

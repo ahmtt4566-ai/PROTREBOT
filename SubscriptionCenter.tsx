@@ -7,7 +7,7 @@ const SESSION_KEYS = ['protrebot-v25-session','protrebot-v24-session','protrebot
 type License = {plan?:PlanCode;status?:string;expires_at?:string|null;starts_at?:string|null}
 type SubscriptionView = {status:string;plan:PlanCode|null;billingInterval:BillingInterval|null;trialStart:string|null;trialEnd:string|null;currentPeriodEnd:string|null;currentPrice:number|null;features:string[];cancelAtPeriodEnd:boolean;mode:'DEVELOPMENT'|'STRIPE'}
 const token = () => SESSION_KEYS.map(key => localStorage.getItem(key) || sessionStorage.getItem(key)).find(Boolean) || ''
-const date = (value?:string|null) => value ? new Date(value).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}) : 'Unavailable'
+const date = (value?:string|null) => value ? new Date(value).toLocaleDateString('tr-TR',{year:'numeric',month:'short',day:'numeric'}) : 'Mevcut değil'
 const daysLeft = (value?:string|null) => value ? Math.max(0,Math.ceil((new Date(value).getTime() - Date.now()) / 86400000)) : 0
 
 export default function SubscriptionCenter({mode,onNavigate}:{mode:'pricing'|'billing';onNavigate:(target:'pricing'|'billing'|'live')=>void}) {
@@ -21,58 +21,56 @@ export default function SubscriptionCenter({mode,onNavigate}:{mode:'pricing'|'bi
   useEffect(() => {
     if (!currentToken) return
     fetch(`${API_BASE}/v22/subscription`,{headers:{Authorization:`Bearer ${currentToken}`}}).then(async response => {
-      if (!response.ok) throw new Error('Subscription status unavailable')
+      if (!response.ok) throw new Error('Abonelik durumu alınamadı')
       setSubscription(await response.json() as SubscriptionView)
     }).catch(() => setSubscription(null))
   },[currentToken])
 
   const startTrial = async () => {
-    if (!currentToken) { setNotice('Sign in through the existing account workspace to start your trial.'); onNavigate('live'); return }
+    if (!currentToken) { setNotice('Deneme süresini başlatmak için hesabınızla giriş yapın.'); onNavigate('live'); return }
     setBusy(true);setError('');setNotice('')
     try {
       const response = await fetch(`${API_BASE}/v22/subscription/trial`,{method:'POST',headers:{Authorization:`Bearer ${currentToken}`,'Content-Type':'application/json'}})
       const payload = await response.json().catch(() => null) as {detail?:string}|SubscriptionView|null
-      if (!response.ok) throw new Error(payload && 'detail' in payload ? payload.detail : 'Trial could not be started')
-      setSubscription(payload as SubscriptionView);setNotice('Your 7-day free trial is active.')
-    } catch (value) { setError(value instanceof Error ? value.message : 'Trial could not be started.') }
+      if (!response.ok) throw new Error('Deneme süresi başlatılamadı')
+      setSubscription(payload as SubscriptionView);setNotice('7 günlük ücretsiz deneme süreniz başladı.')
+    } catch { setError('Deneme süresi başlatılamadı.') }
     finally { setBusy(false) }
   }
 
   const requestPlan = async (plan:PlanCode) => {
-    if (!currentToken) { setNotice('Sign in through the existing account workspace to choose a plan.'); onNavigate('live'); return }
+    if (!currentToken) { setNotice('Plan seçmek için hesabınızla giriş yapın.'); onNavigate('live'); return }
     setBusy(true);setError('');setNotice('')
     try {
       const response = await fetch(`${API_BASE}/v22/subscription/checkout`,{method:'POST',headers:{Authorization:`Bearer ${currentToken}`,'Content-Type':'application/json'},body:JSON.stringify({plan,billing_interval:interval})})
       const payload = await response.json().catch(() => null) as {detail?:string;message?:string;checkout_url?:string}|null
-      if (!response.ok) throw new Error(payload?.detail || 'Checkout is unavailable')
-      if (!payload?.checkout_url) throw new Error(payload?.message || 'Stripe Checkout did not return a safe redirect URL')
+      if (!response.ok || !payload?.checkout_url) throw new Error('Ödeme sayfası şu anda kullanılamıyor')
       window.location.assign(payload.checkout_url)
-    } catch (value) { setError(value instanceof Error ? value.message : 'Checkout is unavailable.') }
+    } catch { setError('Ödeme sayfası şu anda kullanılamıyor.') }
     finally { setBusy(false) }
   }
 
   const cancelSubscription = async () => {
-    if (!currentToken) { setNotice('Sign in through the existing account workspace to manage cancellation.'); onNavigate('live'); return }
+    if (!currentToken) { setNotice('İptal işlemini yönetmek için hesabınızla giriş yapın.'); onNavigate('live'); return }
     setBusy(true);setError('');setNotice('')
     try {
       const response = await fetch(`${API_BASE}/v22/subscription/cancel`,{method:'POST',headers:{Authorization:`Bearer ${currentToken}`}})
       const payload = await response.json().catch(() => null) as {detail?:string}|SubscriptionView|null
-      if (!response.ok) throw new Error(payload && 'detail' in payload ? payload.detail : 'Cancellation could not be scheduled')
-      setSubscription(payload as SubscriptionView);setNotice('Cancellation is scheduled for the end of the current period.')
-    } catch (value) { setError(value instanceof Error ? value.message : 'Cancellation could not be scheduled.') }
+      if (!response.ok) throw new Error('İptal planlanamadı')
+      setSubscription(payload as SubscriptionView);setNotice('İptal, mevcut dönem sonunda gerçekleşecek şekilde planlandı.')
+    } catch { setError('İptal planlanamadı.') }
     finally { setBusy(false) }
   }
 
   const openCustomerPortal = async () => {
-    if (!currentToken) { setNotice('Sign in through the existing account workspace to manage billing.'); onNavigate('live'); return }
+    if (!currentToken) { setNotice('Faturalandırmayı yönetmek için hesabınızla giriş yapın.'); onNavigate('live'); return }
     setBusy(true);setError('');setNotice('')
     try {
       const response = await fetch(`${API_BASE}/v22/subscription/customer-portal`,{method:'POST',headers:{Authorization:`Bearer ${currentToken}`}})
       const payload = await response.json().catch(() => null) as {detail?:string;url?:string}|null
-      if (!response.ok) throw new Error(payload?.detail || 'Customer portal is unavailable')
-      if (!payload?.url) throw new Error('Customer portal did not return a safe redirect URL')
+      if (!response.ok || !payload?.url) throw new Error('Faturalandırma alanı şu anda kullanılamıyor')
       window.location.assign(payload.url)
-    } catch (value) { setError(value instanceof Error ? value.message : 'Customer portal is unavailable.') }
+    } catch { setError('Faturalandırma alanı şu anda kullanılamıyor.') }
     finally { setBusy(false) }
   }
 

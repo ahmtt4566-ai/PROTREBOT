@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Gauge, XCircle } from 'lucide-react'
+import { Gauge, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
@@ -602,15 +602,12 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
     { label: 'Margin Used', value: usedMargin === null ? '--' : `$${fmtCompact(usedMargin)}`, tone: 'muted' },
     { label: 'Loss Streak', value: dailyPerformance ? String(dailyPerformance.losing_streak) : '--', tone: 'muted' },
   ]
+  const masterTradeOffline = !snapshot && !markets.length && !marketLoading
 
   return (
-    <section className="masterTradePage masterTrade">
+    <section className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}`}>
       <div className="masterTradeShell">
         <header className="masterTradeTerminalHeader">
-          <button type="button" className="masterTradeDashboardButton" onClick={() => onBack?.()} disabled={!onBack}>
-            <ArrowLeft size={15} aria-hidden="true" />
-            <span>Dashboard</span>
-          </button>
           <div className="masterTradeTerminalIdentity">
             <span>INSTITUTIONAL EXECUTION DESK</span>
             <strong>MASTER TRADE</strong>
@@ -625,6 +622,31 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           <span className={`terminalStatusItem dataHealth-${dataHealth.toLowerCase().replaceAll(' ', '-')}`}><small>DATA HEALTH</small> {dataHealth}{marketAgeSeconds !== null ? ` · ${Math.floor(marketAgeSeconds)}s ago` : ''}</span>
           <span className="terminalStatusItem online">LIVE ACCOUNT</span>
         </div>
+
+        <section className={`masterTradeFocusPanel${masterTradeOffline ? ' offline' : ''}`} aria-label="Primary trade decision">
+          <div className="masterTradeFocusIdentity">
+            <span className="panelEyebrow">PRIMARY DECISION</span>
+            <strong>{draft.market}</strong>
+            <span>{interval} · {masterTradeOffline ? 'WAITING FOR MARKET DATA' : 'CONTROLLED EXECUTION'}</span>
+          </div>
+          <div className="masterTradeFocusPrice">
+            <small>MARKET PRICE</small>
+            <strong>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</strong>
+          </div>
+          <div className="masterTradeFocusDecision">
+            <small>SIGNAL / STATUS</small>
+            <strong>{masterTradeOffline ? 'DATA UNAVAILABLE' : tradeDecision.status}</strong>
+          </div>
+          <div className="masterTradeFocusMetric">
+            <small>CONFIDENCE</small>
+            <strong>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</strong>
+          </div>
+          <div className="masterTradeFocusMetric">
+            <small>RISK / REWARD</small>
+            <strong>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</strong>
+          </div>
+          {masterTradeOffline && <p className="masterTradeFocusNotice">Market bağlantısı bekleniyor. İşlem kararı ve canlı metrikler veri gelene kadar pasif tutuluyor.</p>}
+        </section>
 
         <div className="masterTradeWorkspace">
           <div className="masterTradeSafetyBanner" role="status">
