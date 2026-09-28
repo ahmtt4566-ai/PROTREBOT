@@ -169,6 +169,11 @@ class BacktestRequest(BaseModel):
     limit: int = Field(default=1000, ge=300, le=1500)
 
 
+class ScannerScanRequest(BaseModel):
+    timeframe: Literal["5m", "15m", "1h", "4h"] = "15m"
+    symbols: list[str] | None = None
+
+
 class DrillRequest(BaseModel):
     kind: Literal["RECONNECT", "EMERGENCY", "PROTECTION"]
 
@@ -841,19 +846,28 @@ def _enrich_scan_candidates(results: list[dict[str, Any]]) -> list[dict[str, Any
     return ranked
 
 
-async def scan_demo_universe(client: BinanceDemoClient, occupied: set[str], settings: dict[str, Any]) -> list[dict[str, Any]]:
+async def scan_demo_universe(
+    client: BinanceDemoClient,
+    occupied: set[str],
+    settings: dict[str, Any],
+    timeframe: str = "15m",
+    symbols: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Analyze the largest liquid Demo perpetual universe and rank opportunities."""
     exchange_info, tickers = await asyncio.gather(
         client.public_get("/fapi/v1/exchangeInfo"),
         client.public_get("/fapi/v1/ticker/24hr"),
     )
-    symbols = [symbol for symbol in dynamic_auto_universe(exchange_info, tickers, settings) if symbol not in occupied]
-    settings["_auto_universe"] = symbols
+    supported_symbols = dynamic_auto_universe(exchange_info, tickers, settings)
+    requested_symbols = {normalize_symbol(symbol) for symbol in symbols or [] if normalize_symbol(symbol)}
+    universe = [symbol for symbol in supported_symbols if not requested_symbols or symbol in requested_symbols]
+    universe = [symbol for symbol in universe if symbol not in occupied]
+    settings["_auto_universe"] = universe
 
     async def evaluate(symbol: str) -> dict[str, Any] | None:
         try:
             candles, candles_1h, candles_4h = await asyncio.gather(
-                demo_candles(client, symbol, "15m", 260),
+                demo_candles(client, symbol, timeframe, 260),
                 demo_candles(client, symbol, "1h", 220),
                 demo_candles(client, symbol, "4h", 220),
             )
@@ -1957,7 +1971,11 @@ async def automatic_cycle(
         )
 
 
-async def run_scanner_cycle(application: Any) -> None:
+async def run_scanner_cycle(
+    application: Any,
+    timeframe: str = "15m",
+    symbols: list[str] | None = None,
+) -> None:
     state = application.state.v21_demo
     scanner = state["scanner"]
     scan_lock = getattr(application.state, "v21_scanner_lock", None)
@@ -1977,7 +1995,7 @@ async def run_scanner_cycle(application: Any) -> None:
         if credentials_configured():
             snapshot = await account_snapshot(client_for(application))
         occupied = {item["symbol"] for item in snapshot.get("positions", []) + snapshot.get("open_orders", [])}
-        ranked = await scan_demo_universe(client, occupied, settings)
+        ranked = await scan_demo_universe(client, occupied, settings, timeframe=timeframe, symbols=symbols)
         threshold = float(settings.get("min_score_threshold", 70))
         gate_rejections = _new_gate_rejections(scanner_total=len(ranked))
         filtered = []
@@ -1994,6 +2012,9 @@ async def run_scanner_cycle(application: Any) -> None:
             elif candidate.get("status") != "REJECTED":
                 candidate["status"] = "WATCH"
         _apply_scan_completion_state(scanner, settings, ranked, top_candidates, eligible_count=len(filtered))
+        scanner["last_scan_timeframe"] = timeframe
+        scanner["last_scan_universe"] = "CUSTOM" if symbols else "MARKET"
+        scanner["last_scan_symbols"] = symbols or []
         scanner["gate_rejections"] = gate_rejections
         state["auto"]["last_scan"] = now_iso()
         persist_state(state)
@@ -2397,8 +2418,11 @@ async def v21_scanner(request: Request) -> dict[str, Any]:
 
 
 @router.post("/scanner/scan")
-async def v21_manual_scan(request: Request) -> dict[str, Any]:
-    await run_scanner_cycle(request.app)
+async def v21_manual_scan(request: Request, body: ScannerScanRequest | None = None) -> dict[str, Any]:
+    scan_request = body or ScannerScanRequest()
+    symbols = [normalize_symbol(symbol) for symbol in scan_request.symbols or []]
+    symbols = list(dict.fromkeys(symbol for symbol in symbols if symbol)) or None
+    await run_scanner_cycle(request.app, timeframe=scan_request.timeframe, symbols=symbols)
     return summary_payload(state_for(request))["scanner"]
 
 

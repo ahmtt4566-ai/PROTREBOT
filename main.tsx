@@ -11,6 +11,7 @@ import './master-trade-live.css'
 import './terminal-theme.css'
 import './subscription.css'
 import './coin-analysis.css'
+import './scanner-modern.css'
 import './theme.css'
 
 installAuthorizedFetch()

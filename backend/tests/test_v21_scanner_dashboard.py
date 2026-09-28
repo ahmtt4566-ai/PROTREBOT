@@ -21,6 +21,12 @@ ROOT_FRONTEND_CSS = Path(__file__).parents[2] / "binance-demo.css"
 
 
 class V21ScannerDashboardTests(unittest.TestCase):
+    def test_scanner_scan_request_contract_supports_timeframe_and_custom_symbols(self):
+        request = v21_demo.ScannerScanRequest(timeframe="1h", symbols=["BTC/USDT", "ETHUSDT"])
+
+        self.assertEqual(request.timeframe, "1h")
+        self.assertEqual(request.symbols, ["BTC/USDT", "ETHUSDT"])
+
     def test_invalid_allowed_symbols_do_not_abort_universe_selection(self):
         settings = v21_demo.initial_state()["settings"]
         settings["allowed_symbols"] = ["BTC/USDT", "BTCUSDT PERPETUAL", "ETHUSDT"]
@@ -129,7 +135,8 @@ class V21ScannerDashboardTests(unittest.TestCase):
     def test_tp1_trigger_requires_matching_trade_execution(self):
         state = v21_demo.initial_state()
         demo_state = {"plans": {"plan-a": {
-            "id": "plan-a", "symbol": "BTCUSDT", "tp1_client_id": "TP1_client",
+            "id": "plan-a", "symbol": "BTCUSDT", "provenance_state": "CONFIRMED",
+            "tp1_client_id": "TP1_client",
             "tp1_algo_id": 55,
         }}}
         triggered = {"e": "ALGO_UPDATE", "T": 124, "o": {
@@ -150,7 +157,7 @@ class V21ScannerDashboardTests(unittest.TestCase):
 
     def test_tp1_fill_only_updates_the_explicit_demo_state(self):
         state = v21_demo.initial_state()
-        demo_a = {"plans": {"plan-a": {"symbol": "BTCUSDT", "tp1_client_id": "A", "tp1_algo_id": 11}}}
+        demo_a = {"plans": {"plan-a": {"symbol": "BTCUSDT", "provenance_state": "CONFIRMED", "tp1_client_id": "A", "tp1_algo_id": 11}}}
         demo_b = {"plans": {"plan-b": {"symbol": "BTCUSDT", "tp1_client_id": "B", "tp1_algo_id": 22}}}
         algo = {"e": "ALGO_UPDATE", "T": 126, "o": {"s": "BTCUSDT", "ca": "A", "aid": 11, "X": "TRIGGERED", "ai": 701}}
         fill = {"e": "ORDER_TRADE_UPDATE", "T": 127, "o": {"s": "BTCUSDT", "x": "TRADE", "i": 701, "R": True}}
@@ -250,7 +257,7 @@ class V21ScannerDashboardTests(unittest.TestCase):
         self.assertFalse(any(method == "DELETE" for method, _, _ in client.calls))
 
     def test_protection_failure_is_explicitly_critical_and_retries(self):
-        state = {"plans": {"p": {"symbol":"BTCUSDT", "status":"DOLUM BEKLİYOR", "position_status":"PENDING", "stop_loss":"90", "direction":"LONG", "targets":["105","110","115"], "step":"0.001", "min_qty":"0.001"}}}
+        state = {"plans": {"p": {"id":"p", "symbol":"BTCUSDT", "provenance_state":"CONFIRMED", "status":"DOLUM BEKLİYOR", "position_status":"PENDING", "stop_loss":"90", "direction":"LONG", "targets":["105","110","115"], "step":"0.001", "min_qty":"0.001"}}}
         plan = state["plans"]["p"]
         class FakeClient:
             async def signed(self, method, path, params=None):
@@ -480,7 +487,7 @@ class V21ScannerDashboardTests(unittest.TestCase):
         release = asyncio.Event()
         scan_calls = 0
 
-        async def scan(_client, _occupied, _settings):
+        async def scan(_client, _occupied, _settings, *, timeframe="15m", symbols=None):
             nonlocal scan_calls
             scan_calls += 1
             started.set()

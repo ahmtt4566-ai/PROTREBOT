@@ -3,6 +3,7 @@ import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries,
 import { Activity, ArrowLeft, ArrowUp, BarChart3, Bell, CheckCircle2, CircleDollarSign, Cloud, CloudCog, KeyRound, LockKeyhole, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2 } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
+import ScannerCenter from './ScannerCenter'
 
 const BinanceDemo = lazy(() => import('./BinanceDemo'))
 const LiveTradingPanel = lazy(() => import('./frontend/src/LiveTradingPanel'))
@@ -429,7 +430,10 @@ export default function TestnetFirstApp() {
 
     {view === 'risk' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Risk Kasası hazırlanıyor…</div>}><BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} workspace="risk"/></Suspense>}
 
-    {view === 'scanner' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Scanner hazırlanıyor…</div>}><BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} initialTab="auto" workspace="trade"/></Suspense>}
+    {view === 'scanner' && <ScannerCenter
+      active markets={markets} symbol={symbol} onSymbolChange={setSymbol} analysis={analysis}
+      interval={interval} onIntervalChange={setInterval}
+      chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis} showLevels={false}/>} />}
 
     {view === 'performance' && <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Performance hazırlanıyor…</div>}><BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} initialTab="performance" workspace="trade"/></Suspense>}
 
