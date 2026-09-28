@@ -164,7 +164,7 @@ export default function ScannerCenter({active,markets,symbol,onSymbolChange,anal
 
     {error && <section className="scannerState scannerError" role="alert"><strong>MARKET DATA UNAVAILABLE</strong><span>{errorMessage}</span><button type="button" onClick={() => void loadSummary(true)}>RETRY</button></section>}
     {!error && scanning && <section className="scannerState"><Activity className="spin"/><strong>Scanning market...</strong><span>Analysing symbols...</span></section>}
-    {!error && !scanning && !loading && !visible.length && <section className="scannerState"><Activity/><strong>NO SETUPS FOUND</strong><span>Try changing the timeframe or scan filters.</span></section>}
+    {!error && !scanning && !loading && !visible.length && <section className="scannerState"><Activity/><strong>NO SETUPS FOUND</strong><span>{summary?.scanner?.coins_scanned ? `Try changing the timeframe or scan filters. (${summary.scanner.coins_scanned} symbols scanned, ${summary?.scanner?.eligible_count ?? 0} eligible)` : 'No market data could be scanned. The exchange connection may be unavailable right now.'}</span></section>}
 
     {!error && (loading || visible.length > 0) && <section className="scannerResults" aria-labelledby="scanner-results-title">
       <div className="scannerSectionHeading"><div><span>TECHNICAL OPPORTUNITIES</span><h3 id="scanner-results-title">SCANNER RESULTS</h3><small className="scannerResultMetadata">{scanMetadata}</small></div><div className="scannerFilters">{(['ALL','LONG','SHORT','STRONG','BREAKOUT','HIGH VOLUME'] as Filter[]).map(item => <button type="button" key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div>
