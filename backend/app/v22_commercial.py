@@ -819,6 +819,25 @@ async def v22_bootstrap(payload: BootstrapRequest, request: Request):
     return {"token": token, "user": public_user(user), "license": active_license(state, user_id), "demo_only": True}
 
 
+def _ensure_bootstrap_owner_privileges(state: dict[str, Any], user: dict[str, Any]) -> None:
+    """Self-heal the designated bootstrap owner's role and license on every successful login.
+
+    Guards against the account silently losing OWNER/ELITE status after a state
+    restore from non-durable storage, without ever bypassing the password check.
+    """
+    if user.get("email") != BOOTSTRAP_OWNER_EMAIL:
+        return
+    user["role"] = "OWNER"
+    user["active"] = True
+    state["owner_user_id"] = user["id"]
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=3650)).isoformat()
+    license_item = next((item for item in state["licenses"] if item.get("user_id") == user["id"]), None)
+    if license_item is None:
+        state["licenses"].append({"id": uuid.uuid4().hex, "user_id": user["id"], "plan": "ELITE", "status": "ACTIVE", "starts_at": now_iso(), "expires_at": expires_at, "source": "OWNER_BOOTSTRAP", "demo_only": True})
+    else:
+        license_item.update({"plan": "ELITE", "status": "ACTIVE", "expires_at": expires_at})
+
+
 @router.post("/auth/login")
 async def v22_login(payload: LoginRequest, request: Request):
     rt = runtime(request)
@@ -834,6 +853,7 @@ async def v22_login(payload: LoginRequest, request: Request):
         raise HTTPException(401, "E-posta veya parola hatalı")
     LOGIN_ATTEMPTS.pop(host, None)
     user["last_activity"] = now_iso()
+    _ensure_bootstrap_owner_privileges(rt["state"], user)
     save_state(rt["state"])
     await persist_v22_commercial(request.app)
     await restore_demo_state_for_user(request.app, user["id"])
