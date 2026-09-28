@@ -22,9 +22,10 @@ ROOT_FRONTEND_CSS = Path(__file__).parents[2] / "binance-demo.css"
 
 class V21ScannerDashboardTests(unittest.TestCase):
     def test_scanner_scan_request_contract_supports_timeframe_and_custom_symbols(self):
-        request = v21_demo.ScannerScanRequest(timeframe="1h", symbols=["BTC/USDT", "ETHUSDT"])
+        request = v21_demo.ScannerScanRequest(timeframe="1h", universe="CUSTOM", symbols=["BTC/USDT", "ETHUSDT"])
 
         self.assertEqual(request.timeframe, "1h")
+        self.assertEqual(request.universe, "CUSTOM")
         self.assertEqual(request.symbols, ["BTC/USDT", "ETHUSDT"])
 
     def test_invalid_allowed_symbols_do_not_abort_universe_selection(self):

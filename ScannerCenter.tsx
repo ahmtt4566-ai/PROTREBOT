@@ -49,6 +49,7 @@ export default function ScannerCenter({active,markets,symbol,onSymbolChange,anal
   const [loading,setLoading] = useState(true)
   const [scanning,setScanning] = useState(false)
   const [error,setError] = useState(false)
+  const [errorMessage,setErrorMessage] = useState('Unable to retrieve market data. Please try again.')
   const [filter,setFilter] = useState<Filter>('ALL')
   const [sort,setSort] = useState<Sort>('score')
   const [universe,setUniverse] = useState('TOP 20')
@@ -64,23 +65,34 @@ export default function ScannerCenter({active,markets,symbol,onSymbolChange,anal
       const response = await fetch(`${API_BASE}/v21/summary`)
       if (!response.ok) throw new Error('summary')
       const payload = await response.json() as Summary
-      setSummary(payload);setError(false)
-    } catch { setError(true) }
+      setSummary(payload);setError(false);setErrorMessage('Unable to retrieve market data. Please try again.')
+    } catch { setError(true);setErrorMessage('Unable to retrieve market data. Please try again.') }
     finally { setLoading(false) }
   }
   const scan = async () => {
     if (scanning) return
     if (universe === 'CUSTOM' && !selectedSymbols.length) { setCustomError(true); return }
     setCustomError(false)
-    setScanning(true);setError(false)
+    setScanning(true);setError(false);setErrorMessage('Unable to retrieve market data. Please try again.')
     try {
       const response = await fetch(`${API_BASE}/v21/scanner/scan`,{
         method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({timeframe:interval,universe,symbols:universe === 'CUSTOM' ? selectedSymbols : undefined}),
+        body:JSON.stringify({timeframe:interval,universe,symbols:universe === 'CUSTOM' ? selectedSymbols : []}),
       })
-      if (!response.ok) throw new Error('scan')
-      await loadSummary();setScanStale(false)
-    } catch { setError(true) }
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as {detail?:string;message?:string}|null
+        throw new Error(payload?.detail || payload?.message || `Scanner request failed (${response.status})`)
+      }
+      const payload = await response.json().catch(() => null) as Summary|null
+      if (payload?.scanner?.last_error) throw new Error(payload.scanner.last_error)
+      if (payload?.scanner) setSummary(payload)
+      else await loadSummary()
+      setScanStale(false)
+    } catch (scanError) {
+      const message = scanError instanceof Error ? scanError.message : 'Unable to retrieve market data. Please try again.'
+      setSummary(current => current ? {...current,scanner:{...current.scanner,all_candidates:[],top_candidates:[],last_scan_at:null,last_error:message,running:false}} : null)
+      setError(true);setErrorMessage(message)
+    }
     finally { setScanning(false) }
   }
 
@@ -110,7 +122,10 @@ export default function ScannerCenter({active,markets,symbol,onSymbolChange,anal
   }),[scopedCandidates,direction,filter,sort,strength])
   const selected = visible.find(candidate => candidate.symbol === symbol) || visible[0] || null
   useEffect(() => {
-    if (active && visible.length && !visible.some(candidate => candidate.symbol === symbol)) onSymbolChange(visible[0].symbol)
+    if (!active) return
+    const nextSymbol = visible[0]?.symbol || ''
+    const synchronizedSymbol = visible.some(candidate => candidate.symbol === symbol) ? symbol : nextSymbol
+    if (synchronizedSymbol !== symbol) onSymbolChange(synchronizedSymbol)
   },[active,visible,symbol,onSymbolChange])
 
   const strongLong = visible.filter(candidate => candidateDirection(candidate) === 'LONG' && candidateScore(candidate) >= 75).length
@@ -147,7 +162,7 @@ export default function ScannerCenter({active,markets,symbol,onSymbolChange,anal
       {[[TrendingUp,'STRONG LONG',strongLong], [TrendingDown,'STRONG SHORT',strongShort], [BarChart3,'BREAKOUT',breakout], [Volume2,'HIGH VOLUME',highVolume]].map(([Icon,label,value]) => <article key={String(label)}><Icon/><span><small>{label}</small><b>{loading ? '—' : value}</b></span></article>)}
     </section>
 
-    {error && <section className="scannerState scannerError" role="alert"><strong>MARKET DATA UNAVAILABLE</strong><span>Unable to retrieve market data. Please try again.</span><button type="button" onClick={() => void loadSummary(true)}>RETRY</button></section>}
+    {error && <section className="scannerState scannerError" role="alert"><strong>MARKET DATA UNAVAILABLE</strong><span>{errorMessage}</span><button type="button" onClick={() => void loadSummary(true)}>RETRY</button></section>}
     {!error && scanning && <section className="scannerState"><Activity className="spin"/><strong>Scanning market...</strong><span>Analysing symbols...</span></section>}
     {!error && !scanning && !loading && !visible.length && <section className="scannerState"><Activity/><strong>NO SETUPS FOUND</strong><span>Try changing the timeframe or scan filters.</span></section>}
 
@@ -157,10 +172,10 @@ export default function ScannerCenter({active,markets,symbol,onSymbolChange,anal
     </section>}
 
     <section className="scannerDetail" aria-labelledby="scanner-detail-title">
-      <div className="scannerDetailCopy"><div className="scannerSectionHeading"><div><span>SELECTED SYMBOL</span><h3 id="scanner-detail-title">{selected?.symbol || symbol || '—'}</h3></div><b className="scannerCandidateLabel">{selectedDirection === 'NO CLEAR SETUP' ? selectedDirection : `${selectedDirection} CANDIDATE`}</b></div>
+      <div className="scannerDetailCopy"><div className="scannerSectionHeading"><div><span>SELECTED SYMBOL</span><h3 id="scanner-detail-title">{selected?.symbol || 'NO SYMBOL SELECTED'}</h3></div><b className="scannerCandidateLabel">{selectedDirection === 'NO CLEAR SETUP' ? selectedDirection : `${selectedDirection} CANDIDATE`}</b></div>
         <div className="scannerSnapshot"><h4>TECHNICAL SNAPSHOT</h4>{[['EMA 20',analysisValue?.ema?.ema20],['EMA 50',analysisValue?.ema?.ema50],['EMA 200',analysisValue?.ema?.ema200],['MACD',analysisValue?.macd],['RSI 14',analysisValue?.rsi],['ADX 14',analysisValue?.adx],['ATR 14',analysisValue?.atr],['Volume Ratio',analysisValue?.volume_ratio ?? selected?.volume_ratio]].map(([label,value]) => <span key={String(label)}><small>{label}</small><b>{typeof value === 'number' ? formatNumber(value,2) : '—'}</b></span>)}</div>
         <div className="scannerExplanation"><h4>SIGNAL EXPLANATION</h4><p><b>Trend</b> {textValue(analysisValue?.trend || selected?.trend)}</p><p><b>Momentum</b> {textValue(analysisValue?.momentum || selected?.momentum)}</p><p><b>Volume</b> {hasHighVolume(selected || {}) ? 'Above average' : 'No confirmation'}</p><p><b>Structure</b> {setupLabel(selected || {})}</p><button type="button" className="scannerMasterTradeAction" onClick={() => window.dispatchEvent(new CustomEvent('protrebot-navigate',{detail:'master-trade'}))} disabled={!selected}>OPEN IN MASTER TRADE</button></div>
-      </div><div className="scannerChart"><div className="scannerChartHeader"><span>{selected?.symbol || symbol || '—'} · {interval.toUpperCase()}</span><small>MARKET DATA</small></div>{chart}</div>
+      </div><div className="scannerChart"><div className="scannerChartHeader"><span>{selected?.symbol || 'NO SYMBOL SELECTED'} · {interval.toUpperCase()}</span><small>MARKET DATA</small></div>{chart}</div>
     </section>
   </section>
 }

@@ -171,6 +171,7 @@ class BacktestRequest(BaseModel):
 
 class ScannerScanRequest(BaseModel):
     timeframe: Literal["5m", "15m", "1h", "4h"] = "15m"
+    universe: Literal["TOP 20", "TOP 50", "CUSTOM"] = "TOP 20"
     symbols: list[str] | None = None
 
 
@@ -1974,6 +1975,7 @@ async def automatic_cycle(
 async def run_scanner_cycle(
     application: Any,
     timeframe: str = "15m",
+    universe: str = "TOP 20",
     symbols: list[str] | None = None,
 ) -> None:
     state = application.state.v21_demo
@@ -2013,7 +2015,7 @@ async def run_scanner_cycle(
                 candidate["status"] = "WATCH"
         _apply_scan_completion_state(scanner, settings, ranked, top_candidates, eligible_count=len(filtered))
         scanner["last_scan_timeframe"] = timeframe
-        scanner["last_scan_universe"] = "CUSTOM" if symbols else "MARKET"
+        scanner["last_scan_universe"] = universe
         scanner["last_scan_symbols"] = symbols or []
         scanner["gate_rejections"] = gate_rejections
         state["auto"]["last_scan"] = now_iso()
@@ -2422,7 +2424,9 @@ async def v21_manual_scan(request: Request, body: ScannerScanRequest | None = No
     scan_request = body or ScannerScanRequest()
     symbols = [normalize_symbol(symbol) for symbol in scan_request.symbols or []]
     symbols = list(dict.fromkeys(symbol for symbol in symbols if symbol)) or None
-    await run_scanner_cycle(request.app, timeframe=scan_request.timeframe, symbols=symbols)
+    if scan_request.universe == "CUSTOM" and not symbols:
+        raise HTTPException(status_code=422, detail="CUSTOM scanner universe requires at least one symbol.")
+    await run_scanner_cycle(request.app, timeframe=scan_request.timeframe, universe=scan_request.universe, symbols=symbols)
     return summary_payload(state_for(request))["scanner"]
 
 

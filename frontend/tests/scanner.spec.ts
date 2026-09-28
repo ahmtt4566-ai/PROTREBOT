@@ -35,13 +35,17 @@ const summary = (candidates: Candidate[] = [candidate]) => ({
   },
 })
 
-const openScanner = async (page: Page, scannerSummary = summary(), scanBodies: Record<string, unknown>[] = []) => {
+const openScanner = async (page: Page, scannerSummary = summary(), scanBodies: Record<string, unknown>[] = [], scanResponse = scannerSummary, scanFailure = false) => {
   await page.route('**/api/**', async route => {
     const request = route.request()
     const url = request.url()
     if (url.includes('/v21/scanner/scan')) {
       if (request.method() === 'POST') scanBodies.push(request.postDataJSON() as Record<string, unknown>)
-      await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(scannerSummary)})
+      if (scanFailure) {
+        await route.fulfill({status: 502, contentType: 'application/json', body: JSON.stringify({detail: 'Exchange scanner unavailable'})})
+      } else {
+        await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(scanResponse)})
+      }
       return
     }
     if (url.includes('/v21/summary')) {
@@ -92,7 +96,41 @@ test('SCAN MARKET sends the selected timeframe', async ({page}) => {
   await page.getByLabel('TIMEFRAME').selectOption('1h')
   await page.getByRole('button', {name: 'SCAN MARKET'}).click()
   await expect.poll(() => scanBodies.length).toBe(1)
-  expect(scanBodies[0]).toMatchObject({timeframe: '1h', universe: 'TOP 20'})
+  expect(scanBodies[0]).toMatchObject({timeframe: '1h', universe: 'TOP 20', symbols: []})
+})
+
+test('selects the first real candidate when Scanner opens', async ({page}) => {
+  const eth = {...candidate, symbol: 'ETHUSDT'}
+  await openScanner(page, summary([eth]))
+  await expect(page.getByRole('heading', {name: 'ETHUSDT', exact: true})).toBeVisible()
+  await expect(page.getByRole('heading', {name: 'BTCUSDT', exact: true})).toHaveCount(0)
+})
+
+test('moves selected symbol to the first visible candidate after filtering', async ({page}) => {
+  const eth = {...candidate, symbol: 'ETHUSDT'}
+  const sol = {...candidate, symbol: 'SOLUSDT', direction: 'SHORT'}
+  await openScanner(page, summary([eth, sol]))
+  await page.getByLabel('DIRECTION').selectOption('SHORT')
+  await expect(page.getByRole('heading', {name: 'SOLUSDT', exact: true})).toBeVisible()
+  await expect(page.getByRole('heading', {name: 'ETHUSDT', exact: true})).toHaveCount(0)
+})
+
+test('clears selected symbol, detail, and chart when a scan returns no candidates', async ({page}) => {
+  const eth = {...candidate, symbol: 'ETHUSDT'}
+  await openScanner(page, summary([eth]), [], summary([]))
+  await page.getByRole('button', {name: 'SCAN MARKET'}).click()
+  await expect(page.getByRole('heading', {name: 'NO SYMBOL SELECTED', exact: true})).toBeVisible()
+  await expect(page.getByText('NO SYMBOL SELECTED · 15M', {exact: true})).toBeVisible()
+  await expect(page.getByRole('heading', {name: 'BTCUSDT', exact: true})).toHaveCount(0)
+})
+
+test('selecting another scanner row switches detail and chart symbol', async ({page}) => {
+  const eth = {...candidate, symbol: 'ETHUSDT'}
+  const sol = {...candidate, symbol: 'SOLUSDT'}
+  await openScanner(page, summary([eth, sol]))
+  await page.getByRole('row', {name: /SOLUSDT/}).click()
+  await expect(page.getByRole('heading', {name: 'SOLUSDT', exact: true})).toBeVisible()
+  await expect(page.getByText('SOLUSDT · 15M', {exact: true})).toBeVisible()
 })
 
 test('CUSTOM opens symbol selection and scans only selected symbols', async ({page}) => {
@@ -129,6 +167,24 @@ test('shows the generic error state when scanner API fails', async ({page}) => {
   await page.getByRole('button', {name: /TARAMA/}).click()
   await expect(page.getByText('MARKET DATA UNAVAILABLE', {exact: true})).toBeVisible()
   await expect(page.getByRole('button', {name: 'RETRY'})).toBeVisible()
+})
+
+test('shows the real controlled scan error and clears the previous result', async ({page}) => {
+  const eth = {...candidate, symbol: 'ETHUSDT'}
+  const scanBodies: Record<string, unknown>[] = []
+  await openScanner(page, summary([eth]), scanBodies, summary([eth]), true)
+  await page.getByRole('button', {name: 'SCAN MARKET'}).click()
+  await expect(page.getByRole('alert')).toContainText('Exchange scanner unavailable')
+  await expect(page.getByRole('heading', {name: 'NO SYMBOL SELECTED', exact: true})).toBeVisible()
+  await expect(page.getByRole('row', {name: /ETHUSDT/})).toHaveCount(0)
+})
+
+test('does not issue duplicate requests during one scan', async ({page}) => {
+  const scanBodies: Record<string, unknown>[] = []
+  await openScanner(page, summary(), scanBodies)
+  const scanButton = page.getByRole('button', {name: 'SCAN MARKET'})
+  await Promise.all([scanButton.click(), scanButton.click()])
+  await expect.poll(() => scanBodies.length).toBe(1)
 })
 
 test('Scanner keeps execution controls isolated', async ({page}) => {

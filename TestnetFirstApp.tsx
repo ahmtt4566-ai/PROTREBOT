@@ -71,6 +71,11 @@ function TestnetMarketChart({symbol,interval,onAnalysis,onAnalysisProgress,showL
 
   useEffect(() => {
     if (!host.current) return
+    if (!symbol) {
+      setStream('HATA')
+      onAnalysis(null)
+      return
+    }
     let active = true
     let activeController:AbortController|null = null
     let priceLines:IPriceLine[] = []
