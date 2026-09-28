@@ -706,6 +706,7 @@
 
   #root > main.v26App .v26DashboardWorkspaces {
     gap: 10px;
+    padding-top: 11px;
   }
 
   #root > main.v26App .v26DashboardWorkspaces > div:first-child,
@@ -730,7 +731,7 @@
 
   #root > main.v26App .v26DashboardChoices > button {
     min-height: 58px;
-    padding: 9px 10px;
+    padding: 8px 10px;
     gap: 8px;
     border-radius: 9px;
     border-color: rgba(148, 163, 184, .12);
@@ -782,6 +783,50 @@
     border-radius: 8px;
     border-color: rgba(148, 163, 184, .11);
     background: rgba(255, 255, 255, .018);
+  }
+
+  #root > main.v26App .v26Footer {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 10px;
+    padding: 8px 0;
+  }
+
+  #root > main.v26App .v26Footer > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 26px;
+    padding: 5px 6px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, .12);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .018);
+    color: var(--mobile-muted);
+    font-size: 8px;
+    line-height: 1.1;
+    letter-spacing: .035em;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  #root > main.v26App .v26Footer > span i {
+    flex: 0 0 6px;
+    width: 6px;
+    height: 6px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: #64748b;
+  }
+
+  #root > main.v26App .v26Footer > span i.ok {
+    background: #4ade80;
+    box-shadow: 0 0 0 2px rgba(74, 222, 128, .1);
+  }
+
+  #root > main.v26App .v26Footer > span i.error {
+    background: #f59e0b;
   }
 
   #root > main.v26App :is(.v21Pulse, .v21AutoBotGrid, .v21AutoActivityGrid, .v21ScannerMetrics, .masterTradeLiveAccountMetrics) {
@@ -982,6 +1027,883 @@
   }
 
   #root > main.v26App .v26DashboardChoices > button em {
+    display: none;
+  }
+}
+
+/* Mobile trading terminal: keep the existing execution surface, reorder only its presentation. */
+@media (max-width: 700px) {
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) {
+    display: flex !important;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .demoSetupCard {
+    order: 1;
+    align-self: stretch;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    min-height: 0;
+    gap: 4px;
+    padding: 8px !important;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .demoSetupCard .demoConnectionState {
+    min-height: 0;
+    padding-top: 5px;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .demoAccountStrip {
+    order: 2;
+    align-self: stretch;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 0;
+    padding: 4px !important;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .demoAccountStrip article {
+    min-height: 42px;
+    padding: 6px 8px;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .demoOrdersGrid {
+    order: 3;
+    align-self: stretch;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 0;
+    gap: 6px;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .demoOrdersGrid .demoOrderPanel {
+    min-height: 42px;
+    padding: 7px 9px;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .demoOrdersGrid .demoOrderPanel > div {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .v21PerformanceCenter {
+    order: 4;
+    padding: 12px !important;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck:has(.v21PerformanceCenter) > .v21VerifiedAnalytics {
+    order: 5;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21WorkspaceHead {
+    gap: 8px;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21WorkspaceHead p {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21ContextCta {
+    min-height: 31px;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21PerformanceHero {
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21PerformanceHero > span {
+    min-height: 74px !important;
+    padding: 7px !important;
+    gap: 3px;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21PerformanceHero > span b {
+    margin-top: 8px !important;
+    font-size: 21px !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21PerformanceHero > span em {
+    margin-top: 4px !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21PerformanceGrid {
+    gap: 5px;
+    margin-top: 6px;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21PerformanceGrid > article {
+    min-height: 50px !important;
+    padding: 5px !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v21PerformanceCenter .v21PerformanceGrid > article b {
+    margin-top: 4px !important;
+  }
+
+  #root > main.v26App.workspaceRoute :is(.v21PerformanceCenter, .v21VerifiedAnalytics) {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v21VerifiedAnalytics {
+    gap: 10px;
+    padding: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v21VerifiedAnalytics .v21MetricRow {
+    gap: 8px;
+    padding: 12px !important;
+    border: 0 !important;
+    border-radius: 12px;
+    background: var(--mobile-card) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v21VerifiedAnalytics .v21MetricRow > span {
+    min-height: 59px !important;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 9px !important;
+    border: 0 !important;
+    border-radius: 8px;
+    background: #121e29 !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+  }
+
+  #root > main.v26App.workspaceRoute .v21VerifiedAnalytics .v21MetricRow > span small {
+    overflow: hidden;
+    color: #8fa2b3;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #root > main.v26App.workspaceRoute .v21VerifiedAnalytics .v21MetricRow > span b {
+    overflow: hidden;
+    color: #edf3f5;
+    font-size: 14px;
+    margin-top: 4px !important;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #root > main.v26App.workspaceRoute .v21VerifiedAnalytics .v21EmptyMini {
+    position: relative;
+    z-index: 1;
+    clear: both;
+    min-height: 52px;
+    margin-top: 8px;
+    padding: 9px 10px;
+    border: 0 !important;
+    border-radius: 12px;
+    background: #101a24 !important;
+    color: #8fa2b3;
+    font-size: 10px;
+    line-height: 1.3;
+    text-align: center;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #root > main.v26App.workspaceRoute .coinAnalysisCenter {
+    gap: 10px;
+    margin-top: 10px;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .coinAnalysisCenter .analystWorkspace {
+    gap: 10px;
+    padding: 12px !important;
+    border: 1px solid var(--mobile-line) !important;
+    border-radius: 12px;
+    background: var(--mobile-card) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .coinAnalysisCenter .analystWorkspaceHeader {
+    padding-bottom: 0;
+    border-bottom: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute .coinAnalysisCenter .analystCommandGrid {
+    gap: 8px;
+  }
+
+  #root > main.v26App.workspaceRoute .coinAnalysisCenter :is(.analystCommandGroup, .analystCoinSelector, .analystResultWorkspace, .analystAskBar) {
+    border: 0 !important;
+    border-radius: 8px;
+    background: var(--mobile-card-raised) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .coinAnalysisCenter :is(.analystCommandGroup, .analystCoinSelector, .analystResultWorkspace, .analystAskBar) > header {
+    border-bottom-color: transparent !important;
+  }
+
+  #root > main.v26App.workspaceRoute .coinAnalysisCenter :is(.topOpportunityGrid, .marketSignalsRow, .featuredOpportunities, .coinToolsGrid) {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v26MarketBar {
+    margin-top: 10px !important;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 58px;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck > * {
+    flex: 0 0 auto;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHero {
+    order: 1;
+    display: block !important;
+    grid-template-columns: 1fr !important;
+    min-height: 0;
+    padding: 13px 14px;
+    border: 1px solid var(--mobile-line) !important;
+    background: var(--mobile-card) !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroCopy > span,
+  #root > main.v26App.workspaceRoute .demoHeroCopy > p,
+  #root > main.v26App.workspaceRoute .demoHeroCopy > div,
+  #root > main.v26App.workspaceRoute .demoHeroConnect {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroCopy h2 {
+    margin: 0;
+    color: var(--mobile-text);
+    font-size: 16px;
+    line-height: 1.2;
+    letter-spacing: .02em;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroCopy {
+    width: 100% !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroSymbol {
+    display: block;
+    margin-top: 4px;
+    color: var(--mobile-muted);
+    font-size: 11px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroStatus {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroStatus > span {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: center;
+    min-height: 52px;
+    padding: 8px;
+    border: 0 !important;
+    border-radius: 9px;
+    background: var(--mobile-card-raised);
+    box-shadow: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroStatus > span svg {
+    grid-row: 1 / 3;
+    width: 13px;
+    height: 13px;
+    padding: 0;
+    background: transparent;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroStatus small {
+    color: var(--mobile-muted);
+    font-size: 9px;
+    letter-spacing: .06em;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroStatus b {
+    margin-top: 3px;
+    color: var(--mobile-text);
+    font-size: 10px;
+  }
+
+  #root > main.v26App.workspaceRoute .mobileDemoActionBar {
+    position: sticky;
+    top: 8px;
+    order: 1;
+    align-self: stretch;
+    width: auto;
+    margin: 0 10px;
+    z-index: 40;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(0, 1.15fr));
+    gap: 6px;
+    align-items: center;
+    padding: 7px;
+    border: 1px solid var(--mobile-line);
+    border-radius: 12px;
+    background: rgba(13, 20, 29, .96);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .28);
+    backdrop-filter: blur(12px);
+  }
+
+  #root > main.v26App.workspaceRoute .mobileDemoActionBar span {
+    min-width: 0;
+    padding: 0 5px;
+  }
+
+  #root > main.v26App.workspaceRoute .mobileDemoActionBar small {
+    display: block;
+    color: var(--mobile-muted);
+    font-size: 9px;
+    letter-spacing: .08em;
+  }
+
+  #root > main.v26App.workspaceRoute .mobileDemoActionBar b {
+    display: block;
+    margin-top: 2px;
+    color: var(--mobile-text);
+    font-size: 11px;
+  }
+
+  #root > main.v26App.workspaceRoute .mobileDemoActionBar button {
+    min-height: 42px;
+    border: 1px solid var(--mobile-line);
+    border-radius: 8px;
+    background: var(--mobile-card-raised);
+    color: var(--mobile-text);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .04em;
+  }
+
+  #root > main.v26App.workspaceRoute .mobileDemoActionBar button.activeLong {
+    border-color: rgba(82, 210, 153, .65);
+    background: rgba(82, 210, 153, .18);
+    color: var(--terminal-green);
+  }
+
+  #root > main.v26App.workspaceRoute .mobileDemoActionBar button.activeShort {
+    border-color: rgba(255, 129, 120, .65);
+    background: rgba(255, 129, 120, .16);
+    color: var(--terminal-red);
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart {
+    order: 2;
+    padding: 10px;
+    border: 1px solid var(--mobile-line) !important;
+    border-radius: 12px;
+    background: var(--mobile-card) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: end;
+    padding: 2px 2px 9px;
+    border-bottom-color: var(--mobile-line);
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header h3 {
+    margin: 3px 0 0;
+    color: var(--mobile-text);
+    font-size: 15px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header > div:last-child {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    gap: 3px 8px;
+    text-align: right;
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header > div:last-child > span:nth-child(n+3) {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header span,
+  #root > main.v26App.workspaceRoute .demoLiveChart > header small {
+    font-size: 9px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header b {
+    font-size: 11px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoChartCanvas {
+    height: clamp(240px, 68vw, 280px);
+    min-height: 240px;
+    margin-top: 8px;
+    padding: 4px;
+    border: 1px solid var(--mobile-line);
+    border-radius: 9px;
+    background: var(--mobile-card-raised);
+  }
+
+  #root > main.v26App.workspaceRoute .demoAnalysisStrip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 7px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAnalysisStrip > span {
+    min-width: 0;
+    padding: 6px;
+    border: 0 !important;
+    border-radius: 6px;
+    background: var(--mobile-card-raised);
+  }
+
+  #root > main.v26App.workspaceRoute .demoAnalysisStrip > span:nth-child(n+4) {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAnalysisStrip small {
+    color: var(--mobile-muted);
+    font-size: 9px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAnalysisStrip b {
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--mobile-text);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #root > main.v26App.workspaceRoute .demoMainGrid {
+    display: contents;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAccountStrip {
+    order: 3;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0;
+    border: 1px solid var(--mobile-line) !important;
+    border-radius: 12px;
+    background: var(--mobile-card) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAccountStrip article {
+    min-height: 58px;
+    padding: 8px;
+    border: 0 !important;
+    background: transparent;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAccountStrip svg {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAccountStrip small {
+    color: var(--mobile-muted);
+    font-size: 9px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAccountStrip b {
+    margin-top: 3px;
+    color: var(--mobile-text);
+    font-size: 11px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoAccountStrip em {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoTicket {
+    order: 4;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--mobile-line) !important;
+    border-radius: 12px;
+    background: var(--mobile-card) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoTicket > header,
+  #root > main.v26App.workspaceRoute .demoTicketGroupHead {
+    padding-bottom: 9px;
+    border-bottom-color: var(--mobile-line);
+  }
+
+  #root > main.v26App.workspaceRoute .demoTicket > header h3,
+  #root > main.v26App.workspaceRoute .demoTicketGroupHead h3 {
+    color: var(--mobile-text);
+    font-size: 15px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoTicketGroup {
+    margin-top: 12px;
+    padding-top: 0;
+    border: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoTicketGroupHead small {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoTicketControlRow,
+  #root > main.v26App.workspaceRoute .demoFieldGrid,
+  #root > main.v26App.workspaceRoute .demoExposure {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App.workspaceRoute .demoTicketControlRow,
+  #root > main.v26App.workspaceRoute .demoFieldGrid {
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSidePicker,
+  #root > main.v26App.workspaceRoute .demoTypePicker {
+    gap: 6px;
+    margin-top: 0;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSidePicker button,
+  #root > main.v26App.workspaceRoute .demoTypePicker button,
+  #root > main.v26App.workspaceRoute .demoAnalysisFill,
+  #root > main.v26App.workspaceRoute .demoTest,
+  #root > main.v26App.workspaceRoute .demoSubmit {
+    min-height: 44px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoFieldGrid label > span,
+  #root > main.v26App.workspaceRoute .demoExposure small {
+    font-size: 10px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoFieldGrid input,
+  #root > main.v26App.workspaceRoute .demoFieldGrid select {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoExposure {
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoExposure span {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px;
+    border: 0;
+    background: var(--mobile-card-raised);
+  }
+
+  #root > main.v26App.workspaceRoute .demoExposure b {
+    margin-top: 0;
+    color: var(--mobile-text);
+    font-size: 12px;
+    text-align: right;
+  }
+
+  #root > main.v26App.workspaceRoute .demoTicketActions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSubmit {
+    order: -1;
+    background: #c18a32;
+    color: #101820;
+    box-shadow: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoPositions {
+    order: 5;
+    width: 100%;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSetupCard,
+  #root > main.v26App.workspaceRoute .demoCommandBar,
+  #root > main.v26App.workspaceRoute .demoMessage {
+    order: 6;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSetupCard {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--mobile-line) !important;
+    border-radius: 12px;
+    background: var(--mobile-card) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSetupCard > div:first-child {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSetupCard > div:first-child svg,
+  #root > main.v26App.workspaceRoute .demoSetupCard p,
+  #root > main.v26App.workspaceRoute .demoSetupCard .demoCredentialFields,
+  #root > main.v26App.workspaceRoute .demoSetupCard .demoCredentialActions {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSetupCard > div:first-child b {
+    color: var(--mobile-text);
+    font-size: 12px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoSetupCard .demoConnectionState {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 8px;
+    border-top: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoCommandBar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding: 10px;
+    border: 1px solid rgba(255, 129, 120, .25) !important;
+    border-radius: 12px;
+    background: var(--mobile-card) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .demoCommandBar > div {
+    grid-column: 1 / -1;
+    min-height: 42px;
+    padding: 8px;
+    border: 0 !important;
+    background: transparent;
+  }
+
+  #root > main.v26App.workspaceRoute .demoCommandBar > button {
+    min-height: 44px;
+    padding: 8px 6px;
+    font-size: 10px;
+  }
+
+  #root > main.v26App.workspaceRoute .demoEmergency {
+    background: rgba(255, 129, 120, .1);
+    color: var(--terminal-red);
+    box-shadow: none;
+  }
+
+  #root > main.v26App.workspaceRoute .v21Pulse,
+  #root > main.v26App.workspaceRoute .v21Workflow {
+    order: 7;
+  }
+
+  #root > main.v26App.workspaceRoute .v21ExecutiveSummary {
+    order: 8;
+  }
+
+  #root > main.v26App.workspaceRoute .v21DashboardInsights {
+    display: contents;
+  }
+
+  #root > main.v26App.workspaceRoute .v21DashboardInsights > .demoSecondaryHeader {
+    order: 9;
+  }
+
+  #root > main.v26App.workspaceRoute .v21DashboardInsights > .v21AccountOverview {
+    order: 10;
+  }
+
+  #root > main.v26App.workspaceRoute .v21DashboardInsights > .v21PortfolioOverview {
+    order: 11;
+  }
+
+  #root > main.v26App.workspaceRoute .v21DashboardInsights > .v21DecisionIntelligence {
+    order: 12;
+  }
+
+  #root > main.v26App.workspaceRoute .v21DashboardInsights > .v21RiskStatus {
+    order: 13;
+  }
+
+  #root > main.v26App.workspaceRoute .v21DashboardInsights > .v21ProtectionCenter {
+    order: 14;
+  }
+
+  #root > main.v26App.workspaceRoute .v21DashboardInsights > .v21SmartAlerts {
+    order: 15;
+  }
+
+  #root > main.v26App.workspaceRoute .v21AdvancedAnalytics {
+    order: 16;
+  }
+
+  #root > main.v26App.workspaceRoute :is(.v21AccountOverview, .v21PortfolioOverview, .v21DecisionIntelligence, .v21RiskStatus, .v21ProtectionCenter, .v21SmartAlerts, .v21AdvancedAnalytics) {
+    width: 100%;
+    min-width: 0;
+    padding: 13px;
+    border: 1px solid var(--mobile-line);
+    border-radius: 12px;
+    background: var(--mobile-card);
+    box-shadow: none;
+  }
+
+  #root > main.v26App.workspaceRoute :is(.v21AccountOverview, .v21PortfolioOverview, .v21DecisionIntelligence, .v21RiskStatus, .v21ProtectionCenter, .v21SmartAlerts, .v21AdvancedAnalytics) > header {
+    padding-bottom: 9px;
+    border-bottom-color: var(--mobile-line);
+  }
+
+  #root > main.v26App.workspaceRoute :is(.v21AccountOverview, .v21PortfolioOverview, .v21DecisionIntelligence, .v21RiskStatus, .v21ProtectionCenter, .v21SmartAlerts, .v21AdvancedAnalytics) h2 {
+    color: var(--mobile-text);
+    font-size: 14px;
+  }
+
+  #root > main.v26App.workspaceRoute :is(.v21InsightMetrics, .v21PortfolioMetrics, .v21DecisionChecks, .v21ProtectionMetrics, .v21AdvancedMetrics) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  #root > main.v26App.workspaceRoute :is(.v21InsightMetrics > span, .v21PortfolioMetrics > span, .v21DecisionChecks span, .v21ProtectionMetrics span, .v21AdvancedMetrics > span) {
+    min-width: 0;
+    padding: 8px;
+    border: 0 !important;
+    border-radius: 8px;
+    background: var(--mobile-card-raised);
+  }
+
+  #root > main.v26App.workspaceRoute .v21PortfolioOverview .v21EquityTrend,
+  #root > main.v26App.workspaceRoute .v21DecisionIntelligence .v21DecisionNarrative,
+  #root > main.v26App.workspaceRoute .v21DecisionIntelligence .v21IntelligenceActions,
+  #root > main.v26App.workspaceRoute .v21SmartAlerts .v21InsightEmpty small {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .v21AdvancedAnalytics.is-collapsed {
+    min-height: 0;
+  }
+
+  #root > main.v26App.workspaceRoute .v21AdvancedAnalytics.is-collapsed > header {
+    border-bottom: 0;
+  }
+
+  #root > main.v26App.workspaceRoute .v21AdvancedAnalytics .demoSectionToggle {
+    min-height: 34px;
+    padding: 6px 9px;
+  }
+
+  #root > main.v26App.workspaceRoute .v21InsightPanel > header > svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  #root > main.v26App.workspaceRoute .v21Pulse > span,
+  #root > main.v26App.workspaceRoute .v21ExecutiveSummary > *:not(header),
+  #root > main.v26App.workspaceRoute .v21NextAction > *,
+  #root > main.v26App.workspaceRoute .v21WorkflowSteps > span {
+    border: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute .v21Pulse > span {
+    background: transparent;
+  }
+
+  #root > main.v26App.workspaceRoute .v21Positions,
+  #root > main.v26App.workspaceRoute .v21DecisionHistoryPanel,
+  #root > main.v26App.workspaceRoute .v21SmartAlertCenter {
+    order: 17;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+    display: block !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    min-height: 0 !important;
+    padding: 13px 14px !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
+    grid-area: auto !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span {
+    min-height: 58px !important;
+    height: 58px !important;
+    padding: 10px 11px !important;
+  }
+
+  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span:first-child {
+    min-height: 58px !important;
+    height: 58px !important;
+    padding: 10px 11px !important;
+  }
+}
+
+@media (max-width: 430px) {
+  #root > main.v26App.workspaceRoute .demoHeroStatus,
+  #root > main.v26App.workspaceRoute :is(.v21InsightMetrics, .v21PortfolioMetrics, .v21DecisionChecks, .v21ProtectionMetrics, .v21AdvancedMetrics) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header > div:last-child {
+    display: block;
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header > div:last-child > span:nth-child(2) {
+    display: block;
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header > div:last-child > span:nth-child(2) small {
+    display: none;
+  }
+
+  #root > main.v26App.workspaceRoute .demoLiveChart > header > div:last-child > span:nth-child(2) b {
+    font-size: 12px;
+  }
+}
+
+@media (min-width: 701px) {
+  #root > main.v26App.workspaceRoute .mobileDemoActionBar {
     display: none;
   }
 }

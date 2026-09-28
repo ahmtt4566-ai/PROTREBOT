@@ -985,6 +985,12 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
       </div>
     </section>}
 
+    {tab === 'trade' && <div className="mobileDemoActionBar" aria-label="Mobil yön seçimi">
+      <span><small>YÖN</small><b>{form.direction}</b></span>
+      <button type="button" className={form.direction === 'LONG' ? 'activeLong' : ''} onClick={() => setForm({...form,direction:'LONG'})}>LONG</button>
+      <button type="button" className={form.direction === 'SHORT' ? 'activeShort' : ''} onClick={() => setForm({...form,direction:'SHORT'})}>SHORT</button>
+    </div>}
+
     {tab === 'dashboard' && <section className="v21DashboardHome" aria-label="ProTreBot dashboard">
       <header className="v21DashboardWelcome"><div><span>PROTREBOT ELITE X</span><h2>ProTreBot'a hoş geldin</h2><p>Botunu tek merkezden yönet, performansını izle ve sistem durumunu kontrol et.</p></div><strong className={v21?.stream.status === 'CANLI' ? 'active' : 'waiting'}><i/>{v21?.stream.status === 'CANLI' ? 'TESTNET AKTİF' : v21 ? 'TESTNET BEKLİYOR' : 'SİSTEM DURUMU YÜKLENİYOR'}</strong></header>
       <section className="v21DashboardSubscription"><div><span>ABONELİĞİN</span><h3>Billing &amp; Subscription</h3><p>Plan ve yenileme bilgileri mevcut Billing ekranından yönetilir.</p></div><button type="button" onClick={() => window.dispatchEvent(new CustomEvent('protrebot-navigate',{detail:'billing'}))}>ABONELİĞİ YÖNET <span>→</span></button></section>
