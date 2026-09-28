@@ -1,0 +1,987 @@
+/* Mobile premium system: layout-only rules for the shared application shell. */
+@media (max-width: 1024px) {
+  :root {
+    --mobile-edge: max(14px, env(safe-area-inset-left));
+    --mobile-edge-right: max(14px, env(safe-area-inset-right));
+    --mobile-top: max(12px, env(safe-area-inset-top));
+    --mobile-bottom: max(18px, env(safe-area-inset-bottom));
+    --mobile-gap: 12px;
+    --mobile-card: #101820;
+    --mobile-card-raised: #131f2a;
+    --mobile-line: rgba(148, 163, 184, .15);
+    --mobile-line-strong: rgba(148, 163, 184, .24);
+    --mobile-muted: #8fa2b3;
+    --mobile-text: #edf3f5;
+    --mobile-accent: #d9ab55;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-width: 0 !important;
+    max-width: 100%;
+    overflow-x: hidden !important;
+  }
+
+  body {
+    min-width: 0 !important;
+  }
+
+  #root > main.v26App {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: var(--mobile-top) var(--mobile-edge-right) var(--mobile-bottom) var(--mobile-edge);
+    overflow-x: clip;
+  }
+
+  #root > main.v26App .terminalMobileNav {
+    display: none !important;
+  }
+
+  #root > main.v26App,
+  #root > main.v26App * {
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  #root > main.v26App :is(h1, h2, h3, h4, p, small, b, strong, span, em, button, label, th, td) {
+    overflow-wrap: anywhere;
+  }
+
+  #root > main.v26App :is(input, select, textarea, button) {
+    max-width: 100%;
+  }
+
+  #root > main.v26App :is(input, select, textarea) {
+    width: 100%;
+  }
+
+  #root > main.v26App :is(button, input, select, textarea) {
+    font-size: max(12px, 1em);
+  }
+
+  #root > main.v26App .v26Header {
+    position: sticky;
+    top: var(--mobile-top);
+    z-index: 30;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 58px;
+    height: auto;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(13, 20, 27, .94);
+    border-color: var(--mobile-line-strong);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .2);
+    backdrop-filter: blur(16px);
+  }
+
+  #root > main.v26App .v26Brand {
+    min-width: 0;
+    gap: 9px;
+  }
+
+  #root > main.v26App .v26Brand > span {
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    font-size: 16px;
+  }
+
+  #root > main.v26App .v26Brand b {
+    display: block;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.15;
+    letter-spacing: .04em;
+  }
+
+  #root > main.v26App .v26Brand small {
+    display: block;
+    margin-top: 3px;
+    font-size: 7px;
+    line-height: 1.2;
+    letter-spacing: .08em;
+  }
+
+  #root > main.v26App .v26HomeHeaderStatus {
+    display: none;
+  }
+
+  #root > main.v26App .v26HeaderActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #root > main.v26App .v26HeaderActions button {
+    flex: 0 0 40px;
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border-radius: 10px;
+  }
+
+  #root > main.v26App .workspaceBack {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--mobile-line);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--mobile-muted);
+    font-size: 12px;
+  }
+
+  #root > main.v26App .workspaceBack svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  #root > main.v26App .v26Dashboard,
+  #root > main.v26App .v26ModeBar,
+  #root > main.v26App .v26MarketBar,
+  #root > main.v26App .binanceDemoDeck,
+  #root > main.v26App .connectionCenter,
+  #root > main.v26App .masterTradeLiveUx,
+  #root > main.v26App .subscriptionPage {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  #root > main.v26App .v26Dashboard {
+    display: grid;
+    gap: 16px;
+    margin-top: 14px;
+  }
+
+  #root > main.v26App .v26DashboardHero,
+  #root > main.v26App .v26DashboardWorkspaces,
+  #root > main.v26App .v26DashboardPulse {
+    min-width: 0;
+    padding: 16px;
+    border-radius: 14px;
+    background: var(--mobile-card);
+    border-color: var(--mobile-line);
+    box-shadow: none;
+  }
+
+  #root > main.v26App .v26DashboardHero h1 {
+    margin: 5px 0 7px;
+    font-size: clamp(25px, 8vw, 34px);
+    line-height: 1.02;
+    letter-spacing: -.025em;
+  }
+
+  #root > main.v26App .v26DashboardHero p,
+  #root > main.v26App .v26DashboardWorkspaces > div p,
+  #root > main.v26App .v26DashboardPulse header p {
+    margin: 0;
+    color: var(--mobile-muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  #root > main.v26App .v26DashboardWorkspaces > div:first-child,
+  #root > main.v26App .v26DashboardPulse > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  #root > main.v26App .v26DashboardWorkspaces h2,
+  #root > main.v26App .v26DashboardPulse h2 {
+    margin: 0 0 4px;
+    color: var(--mobile-text);
+    font-size: 14px;
+    line-height: 1.2;
+  }
+
+  #root > main.v26App .v26DashboardChoices {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    min-height: 64px;
+    padding: 11px;
+    text-align: left;
+    border: 1px solid var(--mobile-line);
+    border-radius: 10px;
+    background: var(--mobile-card-raised);
+    color: var(--mobile-text);
+  }
+
+  #root > main.v26App .v26DashboardChoices > button > svg {
+    width: 16px;
+    height: 16px;
+    color: var(--mobile-accent);
+  }
+
+  #root > main.v26App .v26DashboardChoices > button span {
+    display: grid;
+    gap: 4px;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button b {
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button small {
+    color: var(--mobile-muted);
+    font-size: 9px;
+    line-height: 1.3;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button em {
+    color: var(--mobile-accent);
+    font-size: 16px;
+    font-style: normal;
+  }
+
+  #root > main.v26App .v26DashboardPulseItems {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #root > main.v26App .v26DashboardPulseItems > button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    min-height: 52px;
+    padding: 10px;
+    border: 1px solid var(--mobile-line);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .025);
+    text-align: left;
+  }
+
+  #root > main.v26App .v26DashboardPulseItems > button span {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  #root > main.v26App .v26DashboardPulseItems > button b { font-size: 10px; }
+  #root > main.v26App .v26DashboardPulseItems > button small,
+  #root > main.v26App .v26DashboardPulseItems > button em { font-size: 9px; }
+
+  #root > main.v26App .v26ModeBar {
+    display: grid;
+    gap: 8px;
+    margin-top: 0;
+    padding: 14px 15px;
+    border-radius: 14px;
+  }
+
+  #root > main.v26App .v26ModeBar h1 {
+    margin: 2px 0 5px;
+    font-size: clamp(21px, 7vw, 29px);
+    line-height: 1.08;
+    letter-spacing: -.02em;
+  }
+
+  #root > main.v26App .v26ModeBar p {
+    margin: 0;
+    max-width: 60ch;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  #root > main.v26App .v26MarketBar {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 13px;
+  }
+
+  #root > main.v26App .v26MarketTitle {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+  }
+
+  #root > main.v26App .v26MarketTitle > span {
+    min-width: 0;
+  }
+
+  #root > main.v26App .v26MarketTitle strong {
+    max-width: 105px;
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: right;
+  }
+
+  #root > main.v26App .v26MarketPicker,
+  #root > main.v26App .v26MarketTrigger,
+  #root > main.v26App .v26Intervals {
+    width: 100%;
+    min-width: 0;
+  }
+
+  #root > main.v26App .v26MarketPicker {
+    position: relative;
+  }
+
+  #root > main.v26App .v26MarketTrigger {
+    min-height: 44px;
+    padding: 8px 10px;
+  }
+
+  #root > main.v26App .v26MarketPopover {
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-width: 100%;
+    z-index: 40;
+  }
+
+  #root > main.v26App .v26Intervals {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  #root > main.v26App .v26Intervals button {
+    min-width: 0;
+    min-height: 40px;
+    padding: 0 4px;
+  }
+
+  #root > main.v26App .binanceDemoDeck {
+    display: grid;
+    gap: 12px;
+    margin-top: 10px;
+    padding: 0;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  #root > main.v26App .demoHero {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    min-width: 0;
+    padding: 16px;
+    border: 0 !important;
+    border-radius: 14px;
+    background: var(--mobile-card) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App .demoHeroCopy h2 {
+    margin: 7px 0 8px;
+    font-size: clamp(22px, 7vw, 30px);
+    line-height: 1.05;
+  }
+
+  #root > main.v26App .demoHeroCopy p {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  #root > main.v26App .demoHeroCopy > div {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 7px;
+    margin-top: 12px;
+  }
+
+  #root > main.v26App .demoHeroCopy > div span {
+    min-width: 0;
+    padding-left: 0;
+    border-left: 0;
+    font-size: 9px;
+    overflow-wrap: anywhere;
+  }
+
+  #root > main.v26App .demoHeroConnect {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+    margin-top: 10px;
+  }
+
+  #root > main.v26App .demoHeroStatus {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #root > main.v26App .demoHeroStatus > span {
+    min-width: 0;
+    min-height: 64px;
+    padding: 10px;
+    border-radius: 9px;
+  }
+
+  #root > main.v26App :is(.demoCommandBar, .demoAccountStrip, .demoMainGrid, .demoOrdersGrid, .v21WorkflowSteps, .v21GateStrip, .v21JournalStats, .v21BacktestMetrics, .v21ScannerMetrics, .v21AutoBotGrid, .v21AutoActivityGrid, .v21RiskRadarGrid, .masterTradeLivePrimaryGrid, .masterTradeLiveDataGrid, .masterTradeLiveLowerGrid, .masterTradeLiveConfirmationGrid) {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App :is(.demoCommandBar, .demoAccountStrip, .demoLiveChart, .demoTicket, .demoPositions, .demoOrderPanel, .demoEventPanel, .v21Workspace, .v21Card, .v21ScannerHeader, .v21ScannerTop, .v21ScannerTable, .v21ScannerTrades, .masterTradeLiveSection, .masterTradeLiveAccountHud, .masterTradeLiveConnectionCard) {
+    min-width: 0;
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  #root > main.v26App :is(.demoTicket > header, .demoPositions > header, .demoOrderPanel > header, .demoEventPanel > header, .v21WorkspaceHead, .v21Card > header, .masterTradeLiveSection > header, .masterTradeLiveAccountHud > header) {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #root > main.v26App :is(.demoTicket > header h3, .demoPositions > header h3, .demoOrderPanel > header h3, .demoEventPanel > header h3, .v21WorkspaceHead h2, .v21Card > header h3, .masterTradeLiveSection h3, .masterTradeLiveAccountHud h3) {
+    font-size: 15px;
+    line-height: 1.2;
+  }
+
+  #root > main.v26App :is(.demoFieldGrid, .liveFormGrid, .liveOrderForm, .connectionFormGrid, .connectionLiveGrid, .executionFields, .policyGroup .executionFields, .commerceFields) {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App :is(.demoFieldGrid input, .demoFieldGrid select, .liveFormGrid input, .liveFormGrid select, .liveOrderForm input, .liveOrderForm select, .executionFields input, .executionFields select) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  #root > main.v26App :is(.demoTicketActions, .demoCredentialActions, .liveOrderFooter, .masterTradeLiveAssistantActions, .masterTradeLiveApiActions, .orderButtons, .policyFoot, .actionStepButtons) {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  #root > main.v26App :is(.demoTicketActions button, .demoCredentialActions button, .liveOrderFooter button, .masterTradeLiveAssistantActions button, .masterTradeLiveApiActions button, .orderButtons button, .policyFoot button, .actionStepButtons button) {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  #root > main.v26App :is(.demoAccountStrip article, .demoPositionMetrics span, .demoExposure span, .v21GateStrip span, .v21JournalStats span, .v21BacktestMetrics span, .v21ScannerMetrics span, .masterTradeLiveAccountMetrics span) {
+    min-width: 0;
+    padding: 10px;
+  }
+
+  #root > main.v26App :is(.demoChartCanvas, .v26ChartShell, .demoPositionMap, .liveExecutionChart, .masterTradeLiveChart) {
+    width: 100%;
+    max-width: 100%;
+    min-height: 260px;
+    height: 280px;
+  }
+
+  #root > main.v26App :is(.demoOrderPanel > div, .demoEventPanel > div, .v21ScannerTable > div, .masterTradeLiveFlow) {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  #root > main.v26App :is(.v21ScannerTable table) {
+    min-width: 560px;
+  }
+
+  #root > main.v26App :is(.v21ScannerTable, .v21ScannerTop, .v21ScannerTrades) {
+    overflow: hidden;
+  }
+
+  #root > main.v26App :is(.demoPositionList > article, .demoOrderPanel article, .demoEventPanel article, .v21TradeRows > div, .v21Alert, .v21ActivityList article, .executionEvents article, .positionRows article) {
+    grid-template-columns: 1fr;
+    min-width: 0;
+    gap: 7px;
+    padding: 11px;
+  }
+
+  #root > main.v26App :is(.demoPositionList > article > header, .v21CandidateHead, .positionRows article > header) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 6px;
+  }
+
+  #root > main.v26App :is(.demoOrderPanel article em, .demoOrderPanel article button, .demoEventPanel article time, .positionRows .positionActions) {
+    justify-self: start;
+  }
+
+  #root > main.v26App :is(.v21SectionKicker, .v21WorkspaceHead > div > span, .masterTradeLiveKicker) {
+    font-size: 8px;
+    letter-spacing: .1em;
+  }
+
+  #root > main.v26App :is(.masterTradeLiveHeader, .masterTradeLiveAssistant, .masterTradeLiveControlBody, .masterTradeLiveConnection, .masterTradeLiveEmergency) {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  #root > main.v26App .masterTradeLiveHeader {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App .masterTradeLiveChips {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  #root > main.v26App :is(.masterTradeLiveConnectionHeader, .masterTradeLiveConnectionActionBar) {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  #root > main.v26App :is(.masterTradeLiveConnectionStatus, .masterTradeLiveActionMeta) {
+    width: 100%;
+  }
+
+  #root > main.v26App :is(.subscriptionBilling, .subscriptionPricing) {
+    width: 100%;
+    margin: 0 !important;
+    padding: 14px 0 26px !important;
+  }
+
+  #root > main.v26App :is(.subscriptionPageHeader, .subscriptionCardHeading, .subscriptionPanel > header) {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  #root > main.v26App :is(.subscriptionPageHeader h1, .subscriptionPricing .subscriptionPageHeader h1) {
+    margin: 4px 0 6px;
+    font-size: clamp(25px, 8vw, 32px);
+    line-height: 1.08;
+  }
+
+  #root > main.v26App :is(.subscriptionPageHeader button, .subscriptionActionList button, .subscriptionSecondaryAction, .subscriptionPlan > button) {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  #root > main.v26App :is(.subscriptionStatusCard, .subscriptionPanel, .subscriptionPlan) {
+    min-width: 0;
+    padding: 16px !important;
+    border-radius: 12px !important;
+  }
+
+  #root > main.v26App :is(.subscriptionBillingGrid, .subscriptionLowerGrid, .subscriptionPlans, .subscriptionStatusTop, .subscriptionDetailList) {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App .subscriptionPlanHeadingMain {
+    padding-right: 0 !important;
+  }
+
+  #root > main.v26App .subscriptionPlanHeading .subscriptionStatusBadge {
+    position: static;
+    align-self: flex-start;
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  #root > main.v26App :is(.subscriptionStatusTop > div, .subscriptionDetailList > div, .subscriptionStatusRows > div) {
+    padding: 9px 0 !important;
+  }
+
+  #root > main.v26App :is(.connectionCenterHeader, .connectionDemoPanel, .connectionLivePanel, .connectionSecurityPanel) {
+    min-width: 0;
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  #root > main.v26App .connectionCenterHeader {
+    display: grid;
+    gap: 12px;
+  }
+
+  #root > main.v26App .connectionHeaderStatus,
+  #root > main.v26App .connectionStatusRail {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  #root > main.v26App .connectionFormGrid,
+  #root > main.v26App .connectionLiveGrid {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App .v26Footer {
+    display: grid;
+    gap: 7px;
+    margin-top: 14px;
+    padding: 10px 0;
+    font-size: 8px;
+  }
+}
+
+@media (max-width: 700px) {
+  #root > main.v26App .v26DashboardHero {
+    display: none;
+  }
+
+  #root > main.v26App .v26Header {
+    min-height: 52px;
+    padding: 7px 10px;
+    border-radius: 12px;
+  }
+
+  #root > main.v26App .v26Brand > span {
+    flex-basis: 30px;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    font-size: 14px;
+  }
+
+  #root > main.v26App .v26Brand b {
+    font-size: 11px;
+  }
+
+  #root > main.v26App .v26Brand small {
+    margin-top: 2px;
+    font-size: 6px;
+  }
+
+  #root > main.v26App .v26HeaderActions button {
+    flex-basis: 36px;
+    width: 36px;
+    min-height: 36px;
+    border-radius: 9px;
+  }
+
+  #root > main.v26App .v26Dashboard {
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  #root > main.v26App .v26DashboardHero {
+    padding: 13px 14px;
+    border-radius: 12px;
+  }
+
+  #root > main.v26App .v26DashboardHero h1 {
+    margin: 3px 0 5px;
+    font-size: clamp(23px, 7vw, 29px);
+  }
+
+  #root > main.v26App .v26DashboardHero p {
+    font-size: 11px;
+  }
+
+  #root > main.v26App .v26DashboardWorkspaces,
+  #root > main.v26App .v26DashboardPulse {
+    padding: 12px;
+    border-radius: 12px;
+    border-color: rgba(148, 163, 184, .12);
+  }
+
+  #root > main.v26App .v26DashboardWorkspaces {
+    gap: 10px;
+  }
+
+  #root > main.v26App .v26DashboardWorkspaces > div:first-child,
+  #root > main.v26App .v26DashboardPulse > header {
+    margin-bottom: 8px;
+  }
+
+  #root > main.v26App .v26DashboardWorkspaces h2,
+  #root > main.v26App .v26DashboardPulse h2 {
+    font-size: 13px;
+  }
+
+  #root > main.v26App .v26DashboardWorkspaces > div p,
+  #root > main.v26App .v26DashboardPulse header p {
+    font-size: 10px;
+  }
+
+  #root > main.v26App .v26DashboardChoices {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button {
+    min-height: 58px;
+    padding: 9px 10px;
+    gap: 8px;
+    border-radius: 9px;
+    border-color: rgba(148, 163, 184, .12);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
+  }
+
+  #root > main.v26App .v26DashboardChoices > button > svg {
+    width: 15px;
+    height: 15px;
+    color: var(--mobile-muted);
+  }
+
+  #root > main.v26App .v26DashboardChoices > button b {
+    font-size: 9px;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button small {
+    font-size: 8px;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button em {
+    font-size: 14px;
+    color: var(--mobile-muted);
+  }
+
+  #root > main.v26App .v26DashboardChoices > button:nth-child(2) {
+    border-color: rgba(217, 171, 85, .38);
+    background: rgba(217, 171, 85, .08);
+  }
+
+  #root > main.v26App .v26DashboardChoices > button:nth-child(2) > svg,
+  #root > main.v26App .v26DashboardChoices > button:nth-child(2) em {
+    color: var(--mobile-accent);
+  }
+
+  #root > main.v26App .demoHeroStatus {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App .v26DashboardPulseItems,
+  #root > main.v26App .masterTradeLiveChips {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  #root > main.v26App .v26DashboardPulseItems > button {
+    min-height: 44px;
+    padding: 8px;
+    border-radius: 8px;
+    border-color: rgba(148, 163, 184, .11);
+    background: rgba(255, 255, 255, .018);
+  }
+
+  #root > main.v26App :is(.v21Pulse, .v21AutoBotGrid, .v21AutoActivityGrid, .v21ScannerMetrics, .masterTradeLiveAccountMetrics) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #root > main.v26App .v21Pulse > strong {
+    grid-column: 1 / -1;
+  }
+
+  #root > main.v26App .v26NotificationPanel {
+    position: fixed;
+    top: calc(var(--mobile-top) + 62px);
+    right: var(--mobile-edge-right);
+    left: var(--mobile-edge);
+    width: auto;
+    max-width: none;
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradeShell,
+  #root > main.v26App.masterTradeRoute .masterTradeWorkspace,
+  #root > main.v26App.masterTradeRoute .masterTradeDataGrid {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradeTopbar,
+  #root > main.v26App.masterTradeRoute .masterTradeTerminalHeader,
+  #root > main.v26App.masterTradeRoute .masterTradeFocusPanel,
+  #root > main.v26App.masterTradeRoute .masterTradeOverview,
+  #root > main.v26App.masterTradeRoute .masterTradeWorkspace,
+  #root > main.v26App.masterTradeRoute .masterTradeDataGrid {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradeTopbar,
+  #root > main.v26App.masterTradeRoute .masterTradeTerminalHeader {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradeStatusRow,
+  #root > main.v26App.masterTradeRoute .terminalStatusStrip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    gap: 6px;
+  }
+
+  #root > main.v26App.masterTradeRoute .terminalStatusItem,
+  #root > main.v26App.masterTradeRoute .statusPill {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradeFocusPanel,
+  #root > main.v26App.masterTradeRoute .masterTradePanel,
+  #root > main.v26App.masterTradeRoute .masterTradeSafetyBanner {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradeSafetyBanner {
+    display: flex;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  #root > main.v26App.masterTradeRoute :is(.panelHeader, .chartPriceSummary, .chartToolbar, .tradeDecisionHeader) {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #root > main.v26App.masterTradeRoute :is(.marketStatsStrip, .indicatorGrid, .indicatorTerminalGrid, .decisionMetricGrid, .decisionSectionGrid) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #root > main.v26App.masterTradeRoute :is(.chartControls, .chartViewControls) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    max-width: 100%;
+  }
+
+  #root > main.v26App.masterTradeRoute .chartViewControls > span {
+    width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  #root > main.v26App.masterTradeRoute :is(.chartCanvas, .marketOhlcChart) {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  #root > main.v26App.masterTradeRoute :is(.positionsPanel, .historyPanel, .ordersPanel) {
+    overflow: hidden;
+  }
+
+  #root > main.v26App.masterTradeRoute :is(.positionsPanel > div, .historyPanel > div, .ordersPanel > div, .masterTradeTableWrap) {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  #root > main.v26App.masterTradeRoute :is(.positionActions, .orderActions) {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  #root > main.v26App.masterTradeRoute :is(.positionActions button, .orderActions button) {
+    width: 100%;
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 430px) {
+  #root > main.v26App {
+    padding-right: max(10px, env(safe-area-inset-right));
+    padding-left: max(10px, env(safe-area-inset-left));
+  }
+
+  #root > main.v26App .v26Header {
+    padding: 9px 10px;
+  }
+
+  #root > main.v26App .v26Brand b {
+    font-size: 11px;
+  }
+
+  #root > main.v26App .v26Brand small {
+    font-size: 6px;
+  }
+
+  #root > main.v26App .v26HeaderActions button {
+    flex-basis: 36px;
+    width: 36px;
+    min-height: 36px;
+  }
+
+  #root > main.v26App :is(.v26DashboardHero, .v26DashboardWorkspaces, .v26DashboardPulse, .v26ModeBar, .demoHero, .demoLiveChart, .demoTicket, .demoPositions, .demoOrderPanel, .demoEventPanel, .v21Workspace, .masterTradeLiveSection, .masterTradeLiveAccountHud, .subscriptionStatusCard, .subscriptionPanel, .subscriptionPlan) {
+    padding: 13px;
+  }
+
+  #root > main.v26App .v26DashboardPulseItems,
+  #root > main.v26App .masterTradeLiveChips,
+  #root > main.v26App :is(.v21Pulse, .v21AutoBotGrid, .v21AutoActivityGrid, .v21ScannerMetrics, .masterTradeLiveAccountMetrics) {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App .v21Pulse > strong {
+    grid-column: auto;
+  }
+
+  #root > main.v26App .v26MarketTitle {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  #root > main.v26App .v26MarketTitle strong {
+    grid-column: 2;
+    max-width: none;
+    text-align: left;
+  }
+
+  #root > main.v26App :is(.demoHeroCopy h2, .v26ModeBar h1) {
+    font-size: 24px;
+  }
+
+  #root > main.v26App .subscriptionPlanHeadingText h2 {
+    font-size: 21px;
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradeStatusRow,
+  #root > main.v26App.masterTradeRoute .terminalStatusStrip,
+  #root > main.v26App.masterTradeRoute :is(.marketStatsStrip, .indicatorGrid, .indicatorTerminalGrid, .decisionMetricGrid, .decisionSectionGrid) {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 360px) {
+  #root > main.v26App .v26Brand b {
+    font-size: 10px;
+  }
+
+  #root > main.v26App .v26Brand small {
+    display: none;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  #root > main.v26App .v26DashboardChoices > button em {
+    display: none;
+  }
+}

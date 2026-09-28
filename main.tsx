@@ -13,6 +13,7 @@ import './subscription.css'
 import './coin-analysis.css'
 import './scanner-modern.css'
 import './theme.css'
+import './mobile-premium.css'
 
 installAuthorizedFetch()
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><CopyProtection/><AppErrorBoundary><WebAccessGate><AuthGate><TestnetFirstApp/></AuthGate></WebAccessGate></AppErrorBoundary></React.StrictMode>)

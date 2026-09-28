@@ -1061,6 +1061,11 @@ html, body, #root, .app, .workspace, .page,
   font-style: normal !important;
 }
 
+.v26App.workspaceRoute:has(.demoHero) .demoHero,
+.v26App.workspaceRoute:has(.demoHero) .binanceDemoDeck {
+  border: 0 !important;
+}
+
 .v26App.workspaceRoute .v21NextAction button {
   min-width: 108px !important;
   border: 1px solid var(--orange) !important;
@@ -1133,6 +1138,11 @@ html, body, #root, .app, .workspace, .page,
 #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card, .v21RiskSummary) {
   background: #111214 !important;
   border-color: rgba(255, 255, 255, .12) !important;
+}
+
+#root main.v26App.workspaceRoute .binanceDemoDeck,
+#root main.v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+  border: 0 !important;
 }
 
 #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Card > header, .v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsUnavailable span, .v21RiskResult > span, .v21RiskSummary > span, .v21RiskSummary .v21MetricPrimary) {
@@ -4510,6 +4520,22 @@ html, body, #root, .app, .workspace, .page,
   align-self: stretch !important;
 }
 
+/* Risk Kasası polish: header actions share one height, and only a checked
+   switch gets the amber accent (default switches stay neutral). */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskStatus, .v21RiskReturn) {
+  min-height: 32px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsGrid .v21Switch:has(input:checked) {
+  border-color: rgba(245, 158, 11, .42) !important;
+  background: rgba(245, 158, 11, .07) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsGrid .v21Switch input[type='checkbox'] {
+  accent-color: #f59e0b !important;
+}
+
+
 .v26OfflineNotice {
   position: sticky;
   top: 10px;
@@ -4851,7 +4877,7 @@ html, body, #root, .app, .workspace, .page,
   display: grid !important;
   grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   align-items: center !important;
-  gap: 6px !important;
+  gap: 14px !important;
   min-height: 40px !important;
   height: 40px !important;
   padding: 5px 8px !important;
@@ -4866,7 +4892,7 @@ html, body, #root, .app, .workspace, .page,
   gap: 5px !important;
   min-width: 0 !important;
   padding: 0 6px !important;
-  border-right: 1px solid #25303b !important;
+  border-right: 0 !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse > span small {

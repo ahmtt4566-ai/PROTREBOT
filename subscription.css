@@ -1,2 +1,183 @@
+.subscriptionBilling{min-height:0;margin:18px 20px;padding:24px;border-color:rgba(71,85,105,.7);border-radius:16px;background:#0d141b;color:#e7ecf3;box-shadow:0 18px 42px rgba(0,0,0,.2)}
+.subscriptionBilling .subscriptionPageHeader{align-items:center;gap:18px;padding-bottom:22px;border-bottom:1px solid rgba(148,163,184,.16)}
+.subscriptionBilling .subscriptionPageHeader span,.subscriptionBilling small{color:#8fa2b3}
+.subscriptionBilling .subscriptionPageHeader h1{margin:7px 0 8px;font-size:clamp(28px,3.2vw,40px);line-height:1.1}
+.subscriptionBilling .subscriptionPageHeader p{color:#aebdca;font-size:13px;line-height:1.5}
+.subscriptionBilling .subscriptionPageHeader button,.subscriptionBilling .subscriptionActionList button,.subscriptionBilling .subscriptionSecondaryAction{border-color:rgba(245,158,11,.48);border-radius:9px;background:rgba(245,158,11,.12);color:#f8d783}
+.subscriptionBilling .subscriptionStatusCard,.subscriptionBilling .subscriptionPanel{margin-top:14px;border:1px solid rgba(71,85,105,.68);border-radius:14px;background:#101820;box-shadow:0 14px 34px rgba(0,0,0,.16)}
+.subscriptionBilling .subscriptionStatusCard{padding:20px}
+.subscriptionBilling .subscriptionCardHeading,.subscriptionBilling .subscriptionPanel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.subscriptionBilling .subscriptionCardHeading{padding-bottom:16px;border-bottom:1px solid rgba(148,163,184,.14)}
+.subscriptionBilling .subscriptionCardHeading h2,.subscriptionBilling .subscriptionPanel h2{margin:4px 0 5px;color:#f1f5f9;font-size:22px;line-height:1.2}
+.subscriptionBilling .subscriptionCardHeading p,.subscriptionBilling .subscriptionPlanDetails>p{margin:0;color:#aebdca;font-size:12px;line-height:1.5}
+.subscriptionBilling .subscriptionStatusBadge,.subscriptionBilling .subscriptionCurrentBadge{display:inline-flex;align-items:center;white-space:nowrap;padding:5px 9px;border:1px solid rgba(88,211,154,.3);border-radius:999px;background:rgba(88,211,154,.1);color:#8ce0b4;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.subscriptionBilling .subscriptionStatus-expired .subscriptionStatusBadge,.subscriptionBilling .subscriptionStatus-unpaid .subscriptionStatusBadge{border-color:rgba(245,158,11,.34);background:rgba(245,158,11,.1);color:#f5c86a}
+.subscriptionBilling .subscriptionStatusTop{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:16px}
+.subscriptionBilling .subscriptionStatusTop>div,.subscriptionBilling .subscriptionDetailList>div{display:grid;gap:6px;min-width:0;padding:12px;border:1px solid rgba(148,163,184,.14);border-radius:10px;background:#0c141c}
+.subscriptionBilling .subscriptionStatusTop strong,.subscriptionBilling .subscriptionDetailList strong{color:#edf3f5;font-size:14px;line-height:1.35}
+.subscriptionBilling .subscriptionStatusTop small,.subscriptionBilling .subscriptionDetailList small{font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.subscriptionBilling .subscriptionFeatureList{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+.subscriptionBilling .subscriptionFeatureList span{padding:8px 10px;border:1px solid rgba(148,163,184,.12);border-radius:8px;background:#0c141c;color:#c9d5dc;font-size:11px}
+.subscriptionBillingGrid,.subscriptionLowerGrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:14px}
+.subscriptionBilling .subscriptionPanel{padding:18px}
+.subscriptionBilling .subscriptionPanel>header{padding-bottom:12px;border-bottom:1px solid rgba(148,163,184,.14)}
+.subscriptionBilling .subscriptionPanel>header h2{font-size:17px}
+.subscriptionBilling .subscriptionPanel>header>svg{width:19px;color:#67d9e8}
+.subscriptionBilling .subscriptionCurrentBadge{border-color:rgba(245,158,11,.34);background:rgba(245,158,11,.1);color:#f5c86a}
+.subscriptionBilling .subscriptionPlanPrice{display:flex;align-items:baseline;gap:6px;margin:18px 0 10px}.subscriptionBilling .subscriptionPlanPrice strong{color:#f8fafc;font-size:30px}.subscriptionBilling .subscriptionPlanPrice span{color:#8fa2b3;font-size:11px}
+.subscriptionBilling .subscriptionDetailList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.subscriptionBilling .subscriptionPlanDetails ul{display:grid;gap:8px;margin:16px 0 0;padding:0;list-style:none}.subscriptionBilling .subscriptionPlanDetails li{display:flex;align-items:flex-start;gap:8px;color:#c9d5dc;font-size:12px}.subscriptionBilling .subscriptionPlanDetails li svg{flex:none;width:15px;color:#58d39a}
+.subscriptionPaymentPlaceholder{display:flex;align-items:center;gap:10px;margin:14px 0;padding:13px;border:1px dashed rgba(148,163,184,.25);border-radius:10px;background:#0c141c}.subscriptionPaymentPlaceholder>svg{width:20px;color:#8fa2b3}.subscriptionPaymentPlaceholder div{display:grid;gap:3px}.subscriptionPaymentPlaceholder strong{color:#e7eef1;font-size:12px}.subscriptionPaymentPlaceholder span{color:#8fa2b3;font-size:11px;line-height:1.4}
+.subscriptionBilling .subscriptionActionList{display:grid;gap:8px}.subscriptionBilling .subscriptionActionList button,.subscriptionBilling .subscriptionSecondaryAction{width:100%;min-height:40px}.subscriptionBilling .subscriptionActionList button:nth-child(3),.subscriptionBilling .subscriptionActionList button.subscriptionQuietAction{border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.08);color:#fca5a5}
+.subscriptionLowerGrid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:0}.subscriptionStatusRows{display:grid;gap:0;margin-top:12px}.subscriptionStatusRows>div{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid rgba(148,163,184,.12)}.subscriptionStatusRows span{color:#8fa2b3;font-size:11px}.subscriptionStatusRows strong{color:#dce7eb;font-size:12px}.subscriptionSecondaryAction{margin-top:14px}.subscriptionHistoryPanel>header>span{color:#8fa2b3;font-size:10px}.subscriptionEmptyState{display:grid;justify-items:start;gap:7px;margin-top:16px;padding:20px 0}.subscriptionEmptyState>svg{width:19px;color:#8fa2b3}.subscriptionEmptyState strong{color:#dce7eb;font-size:13px}.subscriptionEmptyState span{color:#8fa2b3;font-size:11px;line-height:1.5}.subscriptionBilling .subscriptionCallout{margin-top:14px;border-color:rgba(245,158,11,.34);background:rgba(245,158,11,.08)}
+@media (max-width:900px){.subscriptionBilling{padding:18px}.subscriptionBillingGrid,.subscriptionLowerGrid{grid-template-columns:1fr}.subscriptionBilling .subscriptionStatusTop{grid-template-columns:repeat(2,minmax(0,1fr))}.subscriptionBilling .subscriptionFeatureList{grid-template-columns:1fr}}
+@media (max-width:520px){.subscriptionBilling{margin:10px;padding:14px}.subscriptionBilling .subscriptionPageHeader{align-items:stretch;flex-direction:column}.subscriptionBilling .subscriptionPageHeader button{width:100%}.subscriptionBilling .subscriptionCardHeading{align-items:flex-start;flex-direction:column}.subscriptionBilling .subscriptionStatusTop,.subscriptionBilling .subscriptionDetailList{grid-template-columns:1fr}.subscriptionBilling .subscriptionStatusCard,.subscriptionBilling .subscriptionPanel{padding:15px}}
+
+/* Billing dashboard v2: premium surface cards, one shared grid rhythm, restrained amber. */
+#root .subscriptionBilling { margin: 14px 20px !important; padding: 20px 0 32px !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+#root .subscriptionBilling .subscriptionPageHeader { padding: 0 0 18px; border-bottom: 0; }
+#root .subscriptionBilling .subscriptionPageHeader > div > span { color: #8fa2b3; }
+#root .subscriptionBilling .subscriptionPageHeader h1 { font-size: 25px; text-shadow: 0 0 24px rgba(245,158,11,.08); }
+#root .subscriptionBilling .subscriptionPageHeader button { border-color: rgba(245,158,11,.46) !important; border-radius: 10px !important; background: rgba(245,158,11,.14) !important; color: #f8d783 !important; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+#root .subscriptionBilling .subscriptionPageHeader button:hover { border-color: rgba(245,158,11,.68) !important; background: rgba(245,158,11,.2) !important; box-shadow: 0 0 14px rgba(245,158,11,.1) !important; }
+
+/* Current plan: premium status hero */
+#root .subscriptionBilling .subscriptionStatusCard.subscriptionStatusCard.subscriptionStatusCard.subscriptionStatusCard.subscriptionStatusCard.subscriptionStatusCard.subscriptionStatusCard { position: relative; margin-top: 12px; padding: 28px 28px 26px; border: 1px solid rgba(148,163,184,.16) !important; border-radius: 12px !important; background: #131d27 !important; box-shadow: 0 16px 34px rgba(0,0,0,.16) !important; }
+#root .subscriptionBilling .subscriptionPlanHeading { align-items: flex-start; gap: 0; padding: 0; border-bottom: 0; }
+#root .subscriptionBilling .subscriptionPlanHeadingMain { display: flex; align-items: flex-start; gap: 16px; min-width: 0; padding-right: 92px; }
+#root .subscriptionBilling .subscriptionPlanIcon { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 38px; height: 38px; margin-top: 2px; border: 1px solid rgba(245,158,11,.18); border-radius: 10px; background: rgba(245,158,11,.08); color: #d7aa55; }
+#root .subscriptionBilling .subscriptionPlanIcon svg { width: 17px; height: 17px; }
+#root .subscriptionBilling .subscriptionPlanHeadingText small { display: block; margin-bottom: 9px; color: #d7aa55 !important; font-size: 9px; font-weight: 800; letter-spacing: .13em; line-height: 1.2; }
+#root .subscriptionBilling .subscriptionPlanHeadingText h2 { margin: 0 0 7px; color: #f8fafc; font-size: 24px; font-weight: 800; line-height: 1.2; letter-spacing: -.01em; }
+#root .subscriptionBilling .subscriptionPlanHeadingText p { margin: 0; max-width: 400px; color: #9fb0bd; font-size: 12px; line-height: 1.5; }
+#root .subscriptionBilling .subscriptionPlanHeading .subscriptionStatusBadge { position: absolute; top: 28px; right: 28px; flex: 0 0 auto; margin: 0; padding: 5px 10px; max-width: 140px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; }
+#root .subscriptionBilling .subscriptionStatus-expired .subscriptionStatusBadge,
+#root .subscriptionBilling .subscriptionStatus-unpaid .subscriptionStatusBadge { border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.12); color: #f5c86a; }
+
+/* Four equal mini-stats */
+#root .subscriptionBilling .subscriptionStatusTop { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 0; margin-top: 22px; padding-top: 0; border-top: 0; }
+#root .subscriptionBilling .subscriptionStatusTop > div { min-height: 0; padding: 4px 18px; border: 0 !important; border-radius: 0; background: transparent !important; }
+#root .subscriptionBilling .subscriptionStatusTop > div:first-child { padding-left: 0; }
+#root .subscriptionBilling .subscriptionStatusTop > div:last-child { padding-right: 0; }
+#root .subscriptionBilling .subscriptionStatusTop small { color: #8799a7; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+#root .subscriptionBilling .subscriptionStatusTop strong { margin-top: 5px; font-size: 14px; }
+#root .subscriptionBilling .subscriptionFeatureList { gap: 10px; margin-top: 18px; padding-top: 0; border-top: 0; }
+#root .subscriptionBilling .subscriptionFeatureList span { padding: 0; border: 0 !important; background: transparent !important; color: #9fb0bd; }
+
+/* One shared grid rhythm for both lower rows */
+#root .subscriptionBillingGrid,
+#root .subscriptionBilling .subscriptionLowerGrid { margin-top: 16px; gap: 16px; }
+#root .subscriptionBilling .subscriptionPanel.subscriptionPanel.subscriptionPanel.subscriptionPanel.subscriptionPanel.subscriptionPanel.subscriptionPanel { margin-top: 0; padding: 20px; border: 1px solid rgba(148,163,184,.14) !important; border-radius: 12px !important; background: rgba(16,24,32,.6) !important; box-shadow: none !important; }
+#root .subscriptionBilling .subscriptionPanel > header { padding-bottom: 12px; border-bottom: 0; }
+#root .subscriptionBilling .subscriptionPanel > header h2 { margin: 4px 0 0; font-size: 16px; }
+#root .subscriptionBilling .subscriptionPlanDetails > header > div > small,
+#root .subscriptionBilling .subscriptionBillingPanel > header > div > small,
+#root .subscriptionBilling .subscriptionStatusPanel > header > div > small,
+#root .subscriptionBilling .subscriptionHistoryPanel > header > div > small { color: #8fa2b3; }
+#root .subscriptionBilling .subscriptionBillingPanel > header > svg { width: 17px; color: #8fa2b3; }
+
+/* Plan details + subscription status rows share the same label/value list */
+#root .subscriptionBilling .subscriptionDetailList,
+#root .subscriptionBilling .subscriptionStatusRows { display: flex; flex-direction: column; gap: 0; margin-top: 14px; }
+#root .subscriptionBilling .subscriptionDetailList > div,
+#root .subscriptionBilling .subscriptionStatusRows > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 0; border: 0 !important; border-radius: 0; background: transparent !important; }
+#root .subscriptionBilling .subscriptionDetailList small { color: #8799a7; font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+#root .subscriptionBilling .subscriptionDetailList strong { color: #edf3f5; font-size: 13px; }
+#root .subscriptionBilling .subscriptionStatusRows span { color: #8799a7; font-size: 12px; }
+#root .subscriptionBilling .subscriptionStatusRows strong { color: #edf3f5; font-size: 12px; font-weight: 700; }
+#root .subscriptionBilling .subscriptionStatusPill { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+#root .subscriptionBilling .subscriptionStatusPill.isPositive { border: 1px solid rgba(88,211,154,.3); background: rgba(88,211,154,.1); color: #8ce0b4; }
+#root .subscriptionBilling .subscriptionStatusPill.isNegative { border: 1px solid rgba(245,158,11,.34); background: rgba(245,158,11,.1); color: #f5c86a; }
+#root .subscriptionBilling .subscriptionSecondaryAction { margin-top: 16px; border-radius: 9px; }
+
+/* Payment method row + primary CTA */
+#root .subscriptionBilling .subscriptionPaymentPlaceholder { margin: 14px 0; padding: 13px 14px; border: 0 !important; border-radius: 10px; background: rgba(12,20,28,.55) !important; }
+#root .subscriptionBilling .subscriptionPaymentPlaceholder > svg { color: #8fa2b3; }
+#root .subscriptionBilling .subscriptionActionList button { border-radius: 9px; }
+#root .subscriptionBilling .subscriptionActionList button:hover { border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.08); }
+#root .subscriptionBilling .subscriptionActionList button:last-child { border-color: rgba(245,158,11,.46) !important; border-radius: 10px !important; background: rgba(245,158,11,.14) !important; color: #f8d783 !important; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+#root .subscriptionBilling .subscriptionActionList button:last-child:hover { border-color: rgba(245,158,11,.68) !important; background: rgba(245,158,11,.2) !important; box-shadow: 0 0 14px rgba(245,158,11,.1) !important; }
+#root .subscriptionBilling .subscriptionActionList button:nth-child(3):hover,
+#root .subscriptionBilling .subscriptionActionList button.subscriptionQuietAction:hover { border-color: rgba(239,68,68,.55); background: rgba(239,68,68,.1); box-shadow: none; }
+
+/* Billing history: compact centered empty-state instead of a large void */
+#root .subscriptionBilling .subscriptionHistoryPanel { display: flex; flex-direction: column; }
+#root .subscriptionBilling .subscriptionHistoryPanel .subscriptionEmptyState { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; padding: 22px 12px; border: 0; border-radius: 10px; background: rgba(12,20,28,.35); text-align: center; }
+#root .subscriptionBilling .subscriptionEmptyIcon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid rgba(148,163,184,.16); border-radius: 8px; background: rgba(148,163,184,.06); color: #8fa2b3; }
+#root .subscriptionBilling .subscriptionEmptyIcon svg { width: 15px; height: 15px; }
+#root .subscriptionBilling .subscriptionEmptyState strong { color: #dce7eb; font-size: 13px; font-weight: 700; }
+#root .subscriptionBilling .subscriptionEmptyState span { max-width: 260px; color: #8799a7; font-size: 11px; line-height: 1.5; }
+
+@media (min-width:901px) {
+	#root .subscriptionBillingGrid,
+	#root .subscriptionBilling .subscriptionLowerGrid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width:900px) {
+	#root .subscriptionBilling .subscriptionStatusTop { grid-template-columns: repeat(2, minmax(0,1fr)); row-gap: 18px; }
+	#root .subscriptionBilling .subscriptionStatusTop > div { padding: 4px 14px; }
+	#root .subscriptionBilling .subscriptionStatusTop > div:nth-child(2n+1) { padding-left: 0; }
+	#root .subscriptionBilling .subscriptionStatusTop > div:nth-child(n+3) { padding-top: 0; border-top: 0; }
+}
+@media (max-width:720px) and (min-width:521px) {
+	#root .subscriptionBilling .subscriptionPlanHeadingMain { padding-right: 76px; }
+	#root .subscriptionBilling .subscriptionPlanHeading .subscriptionStatusBadge { top: 22px; right: 22px; max-width: 120px; }
+}
+@media (max-width:520px) {
+	#root .subscriptionBilling { margin: 8px 14px !important; padding: 16px 0 26px !important; }
+	#root .subscriptionBilling .subscriptionStatusCard { padding: 20px; }
+	#root .subscriptionBilling .subscriptionPlanHeadingMain { padding-right: 68px; }
+	#root .subscriptionBilling .subscriptionPlanHeading .subscriptionStatusBadge { top: 20px; right: 20px; max-width: 100px; }
+	#root .subscriptionBilling .subscriptionStatusTop { grid-template-columns: 1fr; }
+	#root .subscriptionBilling .subscriptionStatusTop > div { padding: 10px 0 !important; border-left: 0 !important; border-top: 0; }
+	#root .subscriptionBilling .subscriptionStatusTop > div:first-child { border-top: 0; }
+	#root .subscriptionBilling .subscriptionPanel { padding: 16px; }
+}
+
+/* Pricing page: align access selection with the Billing control-center language. */
+#root .subscriptionPricing { min-height: 0; width: auto; max-width: none; margin: 8px 20px !important; padding: 16px 0 24px !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+#root .subscriptionPricing .subscriptionPageHeader { align-items: center; gap: 16px; padding: 0 0 15px; }
+#root .subscriptionPricing .subscriptionPageHeader h1 { margin: 5px 0 6px; font-size: clamp(25px, 2.7vw, 34px); line-height: 1.1; }
+#root .subscriptionPricing .subscriptionPageHeader p { max-width: 680px; color: #bac6cf; font-size: 13px; line-height: 1.55; }
+#root .subscriptionPricing .subscriptionPageHeader button { border-color: rgba(245,158,11,.42); border-radius: 9px; background: rgba(245,158,11,.12); color: #f8d783; }
+#root .subscriptionPricing .subscriptionPlans { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; overflow: visible; border: 0; background: transparent; }
+#root .subscriptionPricing .subscriptionPlan { min-height: 412px; padding: 20px; border: 1px solid rgba(148,163,184,.18); border-radius: 12px; background: #101820; box-shadow: 0 12px 28px rgba(0,0,0,.14); }
+#root .subscriptionPricing .subscriptionPlan header { min-height: 72px; }
+#root .subscriptionPricing .subscriptionPlan header span { color: #8fa2b3; font-size: 10px; letter-spacing: .1em; }
+#root .subscriptionPricing .subscriptionPlan h2 { margin: 7px 0 6px; color: #f1f5f9; font-size: 23px; }
+#root .subscriptionPricing .subscriptionPlan p { min-height: 0; color: #aebdca; font-size: 12px; line-height: 1.5; }
+#root .subscriptionPricing .subscriptionPlanFeatured { border-color: rgba(245,158,11,.24); background: linear-gradient(145deg, #121d25, #101820 70%); box-shadow: 0 14px 30px rgba(0,0,0,.17); }
+#root .subscriptionPricing .subscriptionPlanFeatured::before { position: absolute; top: 14px; right: 16px; padding: 4px 8px; border: 1px solid rgba(245,158,11,.24); border-radius: 999px; background: rgba(245,158,11,.07); color: #e9bd63; content: 'PREMIUM'; font-size: 8px; font-weight: 800; letter-spacing: .08em; }
+#root .subscriptionPricing .subscriptionPrice { align-items: baseline; gap: 6px; margin: 17px 0 3px; padding-top: 13px; border-top: 1px solid rgba(148,163,184,.11); }
+#root .subscriptionPricing .subscriptionPrice strong { color: #f8fafc; font-size: 36px; line-height: 1; }
+#root .subscriptionPricing .subscriptionPrice strong small { margin-right: 2px; color: #aebdca; font-size: .52em; font-weight: 700; vertical-align: .2em; }
+#root .subscriptionPricing .subscriptionPrice span { color: #8799a7; font-size: 11px; }
+#root .subscriptionPricing .subscriptionTrialTerms { display: grid; gap: 3px; min-height: 35px; color: #aebdca; font-size: 11px; }
+#root .subscriptionPricing .subscriptionTrialTerms b { color: #dce7eb; font-size: 12px; }
+#root .subscriptionPricing .subscriptionPlan ul { flex: 1 1 auto; gap: 8px; margin: 15px 0 17px; padding: 13px 0 0; border-top: 1px solid rgba(148,163,184,.11); }
+#root .subscriptionPricing .subscriptionPlan li { align-items: center; gap: 8px; color: #c9d5dc; font-size: 12px; line-height: 1.4; }
+#root .subscriptionPricing .subscriptionPlan li svg { width: 14px; color: #58d39a; }
+#root .subscriptionPricing .subscriptionPlan>button { min-height: 42px; border-color: rgba(245,158,11,.4); border-radius: 8px; background: rgba(245,158,11,.11); color: #f8d783; }
+#root .subscriptionPricing .subscriptionPlanFeatured>button { border-color: rgba(245,158,11,.5); background: #d3a84e; color: #17120a; }
+#root .subscriptionPricing .subscriptionPlan>button { margin-top: auto; }
+#root .subscriptionPricing .subscriptionTerms { min-height: 32px; margin-top: 10px; color: #7f929f; font-size: 10px; line-height: 1.45; }
+#root .subscriptionPricing .subscriptionSecurityNote { display: flex; align-items: center; gap: 9px; max-width: 860px; margin: 12px auto 0; padding: 8px 10px; border: 0; border-radius: 8px; background: rgba(12,20,28,.62); }
+#root .subscriptionPricing .subscriptionSecurityNote>svg { flex: 0 0 auto; width: 16px; color: #58d39a; }
+#root .subscriptionPricing .subscriptionSecurityNote>span { display: grid; gap: 3px; min-width: 0; }
+#root .subscriptionPricing .subscriptionSecurityNote b { color: #dce7eb; font-size: 10px; letter-spacing: .08em; }
+#root .subscriptionPricing .subscriptionSecurityNote small { color: #8fa2b3; font-size: 10px; line-height: 1.4; }
+
+@media (max-width:900px) {
+	#root .subscriptionPricing { padding: 18px 0 24px !important; }
+	#root .subscriptionPricing .subscriptionPageHeader { align-items: stretch; flex-direction: column; }
+	#root .subscriptionPricing .subscriptionPageHeader button { align-self: flex-start; }
+	#root .subscriptionPricing .subscriptionPlans { grid-template-columns: 1fr; }
+}
+@media (max-width:520px) {
+	#root .subscriptionPricing { margin: 8px 14px !important; padding: 16px 0 24px !important; }
+	#root .subscriptionPricing .subscriptionPageHeader h1 { font-size: 31px; }
+	#root .subscriptionPricing .subscriptionPageHeader button { width: 100%; }
+	#root .subscriptionPricing .subscriptionPlan { min-height: 480px; padding: 18px; }
+	#root .subscriptionPricing .subscriptionPlanFeatured::before { top: 12px; right: 14px; }
+}
 .subscriptionPage{min-height:680px;margin:16px 20px;padding:34px;border:1px solid rgba(73,92,68,.8);border-radius:18px;background:linear-gradient(145deg,rgba(17,21,16,.98),rgba(24,29,21,.96));color:#f3f0e6;box-shadow:0 24px 70px rgba(0,0,0,.18)}
 .subscriptionPageHeader{display:flex;justify-content:space-between;gap:24px;align-items:end}.subscriptionPageHeader>div{min-width:0}.subscriptionPageHeader span{color:#9dbb5a;font-size:10px;font-weight:800;letter-spacing:.14em}.subscriptionPageHeader h1{max-width:780px;margin:8px 0 10px;font-size:clamp(30px,4vw,54px);line-height:1.02}.subscriptionPageHeader p{max-width:680px;margin:0;color:#b9c0ac;font-size:14px;line-height:1.55}.subscriptionPageHeader button,.subscriptionPlan>button,.subscriptionBillingActions button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 16px;border:1px solid rgba(157,187,90,.5);border-radius:9px;background:#829d45;color:#10150d;font-size:10px;font-weight:850;letter-spacing:.08em;cursor:pointer}.subscriptionPageHeader button svg,.subscriptionPlan button svg,.subscriptionBillingActions button svg{width:16px}.subscriptionModeSwitch{display:flex;gap:8px;margin:30px 0 18px}.subscriptionModeSwitch button{min-height:36px;padding:8px 14px;border:1px solid rgba(155,169,137,.35);border-radius:8px;background:rgba(13,17,12,.5);color:#aeb9a1;font-size:10px;font-weight:800;cursor:pointer}.subscriptionModeSwitch button.active{border-color:#a5c063;background:rgba(130,157,69,.18);color:#f3f0e6}.subscriptionModeSwitch small{margin-left:6px;color:#b7d878}.subscriptionPlans{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.subscriptionPlan{position:relative;display:flex;flex-direction:column;min-width:0;padding:22px;border:1px solid rgba(83,101,78,.8);border-radius:12px;background:rgba(12,16,12,.7)}.subscriptionPlanPopular{border-color:#a5c063;box-shadow:0 0 0 1px rgba(165,192,99,.18)}.subscriptionPopular{position:absolute;top:-12px;right:18px;padding:5px 9px;border-radius:999px;background:#a5c063;color:#11170d;font-size:9px;font-weight:900;letter-spacing:.08em}.subscriptionPlan header span{color:#a5c063;font-size:10px;font-weight:900;letter-spacing:.12em}.subscriptionPlan h2{margin:8px 0 7px;font-size:27px}.subscriptionPlan p{min-height:46px;margin:0;color:#aeb9a1;font-size:11px;line-height:1.5}.subscriptionPrice{display:flex;align-items:baseline;gap:6px;margin:20px 0 3px}.subscriptionPrice strong{font-size:36px}.subscriptionPrice span,.subscriptionSavings{color:#aeb9a1;font-size:11px}.subscriptionSavings{display:block;min-height:16px;color:#b7d878}.subscriptionPlan ul{display:grid;gap:10px;margin:20px 0 24px;padding:0;list-style:none}.subscriptionPlan li{display:flex;gap:8px;align-items:flex-start;color:#d6d9ca;font-size:11px;line-height:1.4}.subscriptionPlan li svg{flex:none;width:14px;color:#a5c063}.subscriptionPlan>button{width:100%;margin-top:auto}.subscriptionPlan .subscriptionTrialCta{margin-top:8px;background:transparent;color:#b7d878}.subscriptionDevelopment,.subscriptionStatusCard,.subscriptionBillingActions{margin-top:20px;padding:18px;border:1px solid rgba(83,101,78,.8);border-radius:12px;background:rgba(12,16,12,.56)}.subscriptionDevelopment{display:flex;align-items:center;gap:12px}.subscriptionDevelopment>svg{flex:none;width:21px;color:#a5c063}.subscriptionDevelopment span{display:grid;gap:5px;min-width:0}.subscriptionDevelopment b{font-size:10px;letter-spacing:.08em}.subscriptionDevelopment small{color:#aeb9a1;font-size:10px;line-height:1.5}.subscriptionFeedback{margin:14px 0 0;color:#b7d878;font-size:11px}.subscriptionFeedbackError{color:#ed8a7f}.subscriptionStatusTop{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.subscriptionStatusTop span{display:grid;gap:7px;min-width:0;padding:12px;border:1px solid rgba(83,101,78,.8);border-radius:9px;background:rgba(6,10,7,.45)}.subscriptionStatusTop small,.subscriptionTrialBar small{color:#91a184;font-size:9px;letter-spacing:.08em}.subscriptionStatusTop b{overflow:hidden;color:#f3f0e6;font-size:14px;text-overflow:ellipsis;white-space:nowrap}.subscriptionStatus{display:inline-flex;width:max-content;padding:5px 8px;border-radius:999px;background:rgba(165,192,99,.16);color:#b7d878;font-size:10px}.subscriptionStatus-expired,.subscriptionStatus-free{background:rgba(148,163,184,.14);color:#b9c0ac}.subscriptionTrialBar{display:flex;justify-content:space-between;gap:16px;align-items:end;margin-top:14px;padding:14px;border-left:2px solid #a5c063;background:rgba(130,157,69,.08)}.subscriptionTrialBar div{display:grid;gap:5px}.subscriptionTrialBar b{font-size:18px}.subscriptionTrialBar>span{color:#aeb9a1;font-size:10px}.subscriptionFeatureList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:14px}.subscriptionFeatureList span{display:flex;gap:8px;align-items:center;color:#d6d9ca;font-size:11px}.subscriptionFeatureList svg{width:14px;color:#a5c063}.subscriptionBillingActions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.subscriptionBillingActions button:nth-child(2){background:transparent;color:#d6d9ca}.subscriptionNotice{flex:1 1 260px;color:#aeb9a1;font-size:10px;line-height:1.5}.subscriptionNotice b{display:block;margin-top:4px;color:#ed8a7f}@media(max-width:900px){.subscriptionPage{padding:24px}.subscriptionPlans{grid-template-columns:1fr}.subscriptionPageHeader{align-items:start;flex-direction:column}.subscriptionStatusTop{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.subscriptionPage{margin:10px;padding:18px}.subscriptionPageHeader h1{font-size:31px}.subscriptionTrialBar{align-items:start;flex-direction:column}.subscriptionFeatureList{grid-template-columns:1fr}.subscriptionModeSwitch{margin-top:22px}.subscriptionBillingActions{align-items:stretch;flex-direction:column}.subscriptionBillingActions button{width:100%}}

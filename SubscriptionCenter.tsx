@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, CreditCard, ExternalLink, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
+import { Check, CreditCard, ExternalLink, Lock, Receipt, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import { SUBSCRIPTION_PLANS, type PlanCode } from './subscription'
 
@@ -77,36 +77,38 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
   const hasAccess = Boolean(subscription?.master_trade_access)
   const trialing = status === 'TRIALING'
   const pastDue = status === 'PAST_DUE'
+  const activePlan = subscription?.plan ? SUBSCRIPTION_PLANS.find(plan => plan.code === subscription.plan) : null
+  const nextPayment = subscription?.next_payment_amount != null ? `$${subscription.next_payment_amount.toFixed(2)}` : 'Not available'
+  const statusLabel = trialing ? 'Free trial' : status.replace('_', ' ')
 
   if (mode === 'billing') return <main className="subscriptionPage subscriptionBilling">
-    <header className="subscriptionPageHeader"><div><span>PROTREBOT / BILLING</span><h1>Subscription control center</h1><p>Manage your Master Trade access, renewal schedule, and payment method.</p></div><button onClick={() => onNavigate('pricing')}><Sparkles />VIEW PLANS</button></header>
+    <header className="subscriptionPageHeader"><div><span>PROTREBOT / BILLING</span><h1>Subscription control center</h1><p>Review your plan, Master Trade access, renewal timing, and Stripe-managed billing from one place.</p></div><button onClick={() => onNavigate('pricing')}><Sparkles />VIEW PLANS</button></header>
     <section className={`subscriptionStatusCard subscriptionStatus-${status.toLowerCase()}`}>
-      <div className="subscriptionStatusTop"><div><small>PRODUCT</small><strong>MASTER MODE</strong></div><div><small>STATUS</small><strong>{trialing ? 'FREE TRIAL' : status.replace('_', ' ')}</strong></div><div><small>MASTER TRADE</small><strong>{hasAccess ? 'ACCESS ENABLED' : 'ACCESS CLOSED'}</strong></div><div><small>NEXT BILLING</small><strong>{trialing ? `${daysRemaining(subscription?.trial_end)} days` : formatDate(subscription?.current_period_end)}</strong></div></div>
+      <div className="subscriptionPlanHeading"><div className="subscriptionPlanHeadingMain"><div className="subscriptionPlanIcon"><Lock /></div><div className="subscriptionPlanHeadingText"><small>CURRENT PLAN</small><h2>{activePlan?.name || 'No active plan'}</h2><p>{activePlan?.description || 'Choose a plan to unlock Master Trade access.'}</p></div></div><span className="subscriptionStatusBadge">{statusLabel}</span></div>
+      <div className="subscriptionStatusTop"><div><small>MASTER TRADE ACCESS</small><strong>{hasAccess ? 'Enabled' : 'Closed'}</strong></div><div><small>NEXT BILLING / RENEWAL</small><strong>{trialing ? `${daysRemaining(subscription?.trial_end)} days` : formatDate(subscription?.current_period_end)}</strong></div><div><small>BILLING INTERVAL</small><strong>{subscription?.plan ? 'Monthly' : 'Not available'}</strong></div><div><small>NEXT PAYMENT</small><strong>{nextPayment}</strong></div></div>
       {trialing && <div className="subscriptionCallout"><b>Your free trial ends in {daysRemaining(subscription?.trial_end)} days.</b><span>After the trial, Stripe will automatically charge $119.90/month unless you cancel.</span></div>}
       {pastDue && <div className="subscriptionCallout subscriptionCalloutWarning"><b>Payment method update required</b><span>Your Master Trade access remains temporarily available during the payment retry period.</span></div>}
       {status === 'UNPAID' && <div className="subscriptionCallout subscriptionCalloutDanger"><b>Master Trade access is closed</b><span>Your subscription payment could not be recovered. Update your payment method to reactivate it.</span></div>}
       {subscription?.cancel_at_period_end && <div className="subscriptionCallout"><b>Cancellation scheduled</b><span>Your subscription remains active until {formatDate(subscription.current_period_end || subscription.trial_end)}.</span></div>}
       <div className="subscriptionFeatureList">{(subscription?.features || ['Secure Stripe billing', 'Account access remains server-authorized', 'No card details are stored by ProTreBot']).map(feature => <span key={feature}><Check />{feature}</span>)}</div>
     </section>
-    <section className="subscriptionBillingActions">
-      {(pastDue || status === 'UNPAID') && <button onClick={openPortal} disabled={busy}><CreditCard />UPDATE PAYMENT METHOD</button>}
-      {hasAccess && !subscription?.cancel_at_period_end && <button onClick={() => void cancel(false)} disabled={busy}><XCircle />CANCEL AT PERIOD END</button>}
-      {hasAccess && trialing && <button className="subscriptionQuietAction" onClick={() => void cancel(true)} disabled={busy}>CANCEL NOW</button>}
-      {authenticated && subscription?.plan && <button onClick={openPortal} disabled={busy}><ExternalLink />MANAGE BILLING</button>}
-      {!hasAccess ? <button onClick={() => onNavigate('pricing')}><Sparkles />VIEW SUBSCRIPTION OPTIONS</button> : <button onClick={() => onNavigate('live')}><ShieldCheck />GO TO MASTER TRADE</button>}
-      {notice && <p className="subscriptionFeedback">{notice}</p>}{error && <p className="subscriptionFeedback subscriptionFeedbackError">{error}</p>}
-    </section>
+    <div className="subscriptionBillingGrid">
+      <section className="subscriptionPanel subscriptionPlanDetails"><header><div><small>PLAN DETAILS</small><h2>{activePlan?.name || 'Subscription options'}</h2></div>{activePlan && <span className="subscriptionCurrentBadge">CURRENT PLAN</span>}</header><p>{activePlan?.description || 'No subscription plan is currently active.'}</p>{activePlan?.monthlyPrice != null && subscription?.next_payment_amount != null && <div className="subscriptionPlanPrice"><strong>${subscription.next_payment_amount.toFixed(2)}</strong><span>/ month</span></div>}<div className="subscriptionDetailList"><div><small>MASTER TRADE</small><strong>{hasAccess ? 'Included' : 'Not enabled'}</strong></div><div><small>RENEWAL</small><strong>{formatDate(subscription?.current_period_end || subscription?.trial_end)}</strong></div></div><ul>{(subscription?.features || activePlan?.features || []).map(feature => <li key={feature}><Check />{feature}</li>)}</ul></section>
+      <section className="subscriptionPanel subscriptionBillingPanel"><header><div><small>BILLING & PAYMENT</small><h2>Manage billing</h2></div><CreditCard /></header><div className="subscriptionPaymentPlaceholder"><CreditCard /><div><strong>Payment method</strong><span>Payment details are managed securely by Stripe.</span></div></div><div className="subscriptionActionList">{(pastDue || status === 'UNPAID') && <button onClick={openPortal} disabled={busy}><CreditCard />UPDATE PAYMENT METHOD</button>}{authenticated && subscription?.plan && <button onClick={openPortal} disabled={busy}><ExternalLink />MANAGE BILLING PORTAL</button>}{hasAccess && !subscription?.cancel_at_period_end && <button onClick={() => void cancel(false)} disabled={busy}><XCircle />CANCEL AT PERIOD END</button>}{hasAccess && trialing && <button className="subscriptionQuietAction" onClick={() => void cancel(true)} disabled={busy}>CANCEL NOW</button>}<button onClick={() => onNavigate('pricing')}><Sparkles />VIEW PLANS</button></div></section>
+    </div>
+    <div className="subscriptionLowerGrid"><section className="subscriptionPanel subscriptionStatusPanel"><header><div><small>SUBSCRIPTION STATUS</small><h2>Access overview</h2></div><span className="subscriptionStatusBadge">{statusLabel}</span></header><div className="subscriptionStatusRows"><div><span>Subscription status</span><strong className={`subscriptionStatusPill ${hasAccess ? 'isPositive' : 'isNegative'}`}>{statusLabel}</strong></div><div><span>Renewal</span><strong>{formatDate(subscription?.current_period_end || subscription?.trial_end)}</strong></div><div><span>Master Trade access</span><strong className={`subscriptionStatusPill ${hasAccess ? 'isPositive' : 'isNegative'}`}>{hasAccess ? 'Enabled' : 'Closed'}</strong></div></div>{hasAccess && <button className="subscriptionSecondaryAction" onClick={() => onNavigate('live')}><ShieldCheck />GO TO MASTER TRADE</button>}</section><section className="subscriptionPanel subscriptionHistoryPanel"><header><div><small>BILLING HISTORY</small><h2>Recent activity</h2></div><span>Stripe-managed</span></header><div className="subscriptionEmptyState"><div className="subscriptionEmptyIcon"><Receipt /></div><strong>No billing activity yet</strong><span>Your invoices and payment events will appear here.</span></div></section></div>
+    {notice && <p className="subscriptionFeedback">{notice}</p>}{error && <p className="subscriptionFeedback subscriptionFeedbackError">{error}</p>}
   </main>
 
   return <main className="subscriptionPage subscriptionPricing">
     <header className="subscriptionPageHeader"><div><span>PROTREBOT / MASTER TRADE</span><h1>Choose your access level.</h1><p>Secure Stripe billing, immediate entitlement updates, and clear renewal terms for every subscription.</p></div><button onClick={() => onNavigate('billing')}><CreditCard />BILLING</button></header>
     <section className="subscriptionPlans">{SUBSCRIPTION_PLANS.map(plan => <article className={`subscriptionPlan ${plan.code === 'MASTER_MODE' ? 'subscriptionPlanFeatured' : ''}`} key={plan.code}>
       <header><span>{plan.code === 'TRIAL' ? 'LIMITED-TIME ACCESS' : 'FULL ACCESS'}</span><h2>{plan.name}</h2><p>{plan.description}</p></header>
-      <div className="subscriptionPrice"><strong>{plan.code === 'TRIAL' ? '$0' : '$119.90'}</strong><span>{plan.code === 'TRIAL' ? 'today' : '/month'}</span></div>
+      <div className="subscriptionPrice"><strong><small>$</small>{plan.code === 'TRIAL' ? '0' : '119.90'}</strong><span>{plan.code === 'TRIAL' ? 'today' : '/month'}</span></div>
       {plan.code === 'TRIAL' ? <div className="subscriptionTrialTerms"><b>7 days free</b><span>Then $119.90/month</span></div> : <div className="subscriptionTrialTerms"><b>Immediate access</b><span>Renews automatically every month</span></div>}
       <ul>{plan.features.map(feature => <li key={feature}><Check />{feature}</li>)}</ul>
-      <button onClick={() => void startCheckout(plan.code)} disabled={busy}>{plan.code === 'TRIAL' ? 'START FREE TRIAL' : 'START MASTER MODE'}<ExternalLink /></button>
       {plan.code === 'TRIAL' && <small className="subscriptionTerms">Payment method required. No charge today. If you do not cancel, Stripe automatically charges $119.90/month after the 7-day trial.</small>}
+      <button onClick={() => void startCheckout(plan.code)} disabled={busy}>{plan.code === 'TRIAL' ? 'START FREE TRIAL' : 'START MASTER MODE'}<ExternalLink /></button>
     </article>)}</section>
     <div className="subscriptionSecurityNote"><ShieldCheck /><span><b>SECURE STRIPE BILLING</b><small>Stripe collects and stores payment details. ProTreBot never stores card numbers or security codes.</small></span></div>
     {notice && <p className="subscriptionFeedback">{notice}</p>}{error && <p className="subscriptionFeedback subscriptionFeedbackError">{error}</p>}
