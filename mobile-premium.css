@@ -950,6 +950,58 @@
   }
 }
 
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceHeader,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup > header,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector > header,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystResultWorkspace > header {
+  border-bottom: 0 !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceHeader {
+  padding-bottom: 4px !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWhyResult {
+  padding-left: 0 !important;
+  border-left: 0 !important;
+  background: #12100d !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinAnalysisCenter :is(
+  .coinAnalysisHeader,
+  .marketPulse,
+  .topOpportunityGrid > article,
+  .marketSignalsRow > article,
+  .featuredOpportunities,
+  .coinTablePanel,
+  .coinDetailPanel,
+  .coinHistoryPanel,
+  .coinAnalystPanel,
+  .coinPaperPanel
+) > header {
+  border-bottom: 0 !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinAnalysisCenter {
+  align-content: start !important;
+  align-items: start !important;
+  grid-auto-rows: max-content !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: #080808 !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinAnalysisLayout {
+  grid-template-rows: max-content !important;
+  grid-auto-rows: max-content !important;
+  align-items: start !important;
+  align-content: start !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinAnalysisLayout > .coinTablePanel,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinAnalysisLayout > .coinDetailPanel {
+  align-self: start !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
 @media (max-width: 430px) {
   #root > main.v26App {
     padding-right: max(10px, env(safe-area-inset-right));
@@ -1233,9 +1285,9 @@
   #root > main.v26App.workspaceRoute .coinAnalysisCenter .analystWorkspace {
     gap: 10px;
     padding: 12px !important;
-    border: 1px solid var(--mobile-line) !important;
+    border: 0 !important;
     border-radius: 12px;
-    background: var(--mobile-card) !important;
+    background: transparent !important;
     box-shadow: none !important;
   }
 
@@ -2029,6 +2081,62 @@
   }
 }
 
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > .v26ModeBar {
+  min-height: 0 !important;
+  margin-top: 8px !important;
+  padding: 13px 14px 14px !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > .v26ModeBar h1 { font-size: 24px !important; }
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace {
+  padding: 13px !important;
+  background: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) :is(.analystCommandGroup, .analystCoinSelector, .analystResultWorkspace, .analystAskBar) {
+  background: #101010 !important;
+  background-image: none !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  box-shadow: none !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList > button,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystPromptChips button {
+  background: #151515 !important;
+  background-image: none !important;
+  border-color: rgba(255,255,255,.07) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) :is(.analystCommandItems button.active, .analystSelectorList > button.selected, .analystPromptChips button.active) {
+  background: #191713 !important;
+  border-color: #ae8148 !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > section.v26ModeBar.v26ModeBar {
+  border-radius: 7px !important;
+}
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace.analystWorkspace,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup.analystCommandGroup,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector.analystCoinSelector,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystResultWorkspace.analystResultWorkspace,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAskBar.analystAskBar {
+  border-radius: 7px !important;
+}
+#root#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > section.v26ModeBar.v26ModeBar {
+  border-radius: 7px !important;
+}
+#root#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace.analystWorkspace {
+  border-radius: 7px !important;
+}
+
 @media (max-width: 700px) {
   #root > main.v26App .v26DashboardWorkspaces,
   #root > main.v26App .v26DashboardPulse {
@@ -2074,5 +2182,126 @@
     border-bottom: 1px solid rgba(148, 163, 184, .12);
     border-radius: 0;
     background: transparent;
+  }
+}
+
+/* Analyst-only responsive density and natural-height layout. */
+@media (min-width: 1101px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > .coinAnalysisCenter {
+    grid-template-columns: minmax(0, 1.5fr) minmax(360px, .9fr) !important;
+    align-items: start !important;
+    align-content: start !important;
+    grid-auto-rows: max-content !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > .coinAnalysisCenter > :not(.coinAnalysisLayout) {
+    grid-column: 1 / -1 !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinAnalysisLayout {
+    display: contents !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinAnalysisLayout > .coinTablePanel {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    align-self: start !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinAnalysisLayout > .coinDetailPanel {
+    grid-column: 2 !important;
+    grid-row: span 2 !important;
+    align-self: start !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > .coinAnalysisCenter > .coinToolsGrid {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    align-self: start !important;
+    grid-template-columns: minmax(0, 1.25fr) minmax(220px, .75fr) !important;
+  }
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem {
+  grid-template-columns: auto minmax(0, 1fr) auto auto !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem b,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem span,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinTableScroll td:first-child b {
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem span {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+@media (max-width: 700px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace,
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup,
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector,
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystResultWorkspace,
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAskBar {
+    min-height: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems {
+    grid-template-columns: 1fr !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button {
+    min-height: 44px !important;
+    padding: 9px 10px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinMobileCards {
+    max-height: min(520px, calc(100vh - 280px)) !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    align-content: start !important;
+    padding-right: 4px !important;
+    scrollbar-width: thin;
+    scrollbar-color: #4a4a4a #0b0b0b;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinMobileCards::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinMobileCards::-webkit-scrollbar-track {
+    background: #0b0b0b;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinMobileCards::-webkit-scrollbar-thumb {
+    background: #4a4a4a;
+    border-radius: 5px;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinHistoryPanel {
+    max-height: 300px !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    scrollbar-width: thin;
+    scrollbar-color: #4a4a4a #0b0b0b;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    gap: 5px 8px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem strong,
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem em {
+    grid-column: 2;
+    justify-self: start;
   }
 }
