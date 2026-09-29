@@ -8718,6 +8718,88 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   to { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
+.v26App.homeRoute .v26HomeHeader .v26Refresh,
+.v26App.homeRoute .v26HomeHeader .v26NotificationButton {
+  display: grid;
+  flex: 0 0 36px;
+  place-items: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50% !important;
+  background: transparent !important;
+  color: #aeb8c4 !important;
+  box-shadow: none !important;
+  transition: background-color .16s ease, box-shadow .16s ease, color .16s ease;
+}
+.v26App.homeRoute .v26HomeHeader .v26Refresh:hover:not(:disabled),
+.v26App.homeRoute .v26HomeHeader .v26NotificationButton:hover {
+  background: rgba(212, 168, 79, .07) !important;
+  color: #e5d4ad !important;
+  box-shadow: 0 0 12px rgba(212, 168, 79, .09) !important;
+}
+.v26App.homeRoute .v26HomeHeader .v26Refresh:focus-visible,
+.v26App.homeRoute .v26HomeHeader .v26NotificationButton:focus-visible {
+  outline: 2px solid rgba(212, 168, 79, .48);
+  outline-offset: 2px;
+}
+.v26App.homeRoute .v26HomeHeader .v26Refresh svg,
+.v26App.homeRoute .v26HomeHeader .v26NotificationButton svg {
+  width: 17px;
+  height: 17px;
+}
+.v26App.homeRoute .v26HomeHeader .v26NotificationBadge {
+  top: 0;
+  right: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid #05070c;
+  background: #d6b36a;
+  color: #17140d;
+  font-size: 8px;
+}
+.v26App.homeRoute .v26Notifications::after { display: none; }
+.v26App.homeRoute .v26Notifications:has(.v26NotificationPanel)::after { display: block; }
+.v26App.homeRoute .v26HomeHeaderStatus {
+  min-height: 24px;
+  box-sizing: border-box;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid rgba(148, 163, 184, .13);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .025);
+  color: #aeb8c4;
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+.v26App.homeRoute .v26HomeHeaderStatus i { width: 8px; height: 8px; }
+.v26App.homeRoute .v26HomeHeaderStatus i.ok {
+  animation: v26HomeOnlinePulse 2.8s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, .07);
+}
+.v26App.homeRoute .v26HomeHeader .v26Brand > span { border-radius: 12px; }
+.v26App.homeRoute .v26HomeHeader .v26Brand small {
+  margin-top: 2px;
+  color: #b3c0c8;
+  font-size: 10px;
+}
+@keyframes v26HomeOnlinePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .82; }
+}
+@media (max-width: 600px) {
+  #root > main.v26App.homeRoute .v26HomeHeader .v26Brand > span { border-radius: 12px; }
+  #root > main.v26App.homeRoute .v26HomeHeader .v26Brand small { font-size: 8px; }
+  .v26App.homeRoute .v26Notifications:has(.v26NotificationPanel)::after { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v26App.homeRoute .v26HomeHeaderStatus i.ok { animation: none; }
+}
+
 .masterTradeRoute > .workspaceBack {
   display: inline-flex;
   align-items: center;
