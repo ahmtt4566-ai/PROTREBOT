@@ -2391,10 +2391,14 @@
     align-items: center;
     width: max-content;
     transform: translate3d(0,0,0);
-    animation: marketPulseMarquee var(--pulse-marquee-duration,60s) linear infinite;
+    animation: none;
     will-change: transform;
     backface-visibility: hidden;
     contain: layout paint;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseTrack[data-marquee-ready="true"] {
+    animation: marketPulseMarquee var(--pulse-marquee-duration,60s) linear infinite;
   }
 
   #root > main.v26App.homeRoute .marketPulseGroup {
@@ -2503,7 +2507,7 @@
   @keyframes marketPulseDot { 0% { transform: scale(.55); opacity: .8; } 100% { transform: scale(1.5); opacity: 0; } }
 
   @media (prefers-reduced-motion: reduce) {
-    #root > main.v26App.homeRoute .marketPulseTrack,
+    #root > main.v26App.homeRoute .marketPulseTrack { animation-duration: 200s !important; }
     #root > main.v26App.homeRoute .marketPulseLiveDot::after,
     #root > main.v26App.homeRoute .marketPulseChip > span { animation: none !important; transition: none !important; }
   }
@@ -3154,8 +3158,12 @@
     width: max-content;
     height: 42px;
     transform: translate3d(0, 0, 0);
-    animation: desktopMarketPulseMarquee 80s linear infinite;
+    animation: none;
     will-change: transform;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseTrack[data-marquee-ready="true"] {
+    animation: desktopMarketPulseMarquee 80s linear infinite;
   }
 
   #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseScroller:hover .marketPulseTrack {
@@ -3319,7 +3327,10 @@
 }
 
 @media (min-width: 1024px) and (prefers-reduced-motion: reduce) {
-  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseTrack,
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseTrack {
+    animation-duration: 200s !important;
+  }
+
   #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > span {
     animation: none !important;
     transition: none !important;

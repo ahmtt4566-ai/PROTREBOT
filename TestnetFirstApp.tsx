@@ -74,6 +74,7 @@ const MOBILE_PULSE_COINS:PulseCoin[] = [
 ]
 const TABLET_PULSE_SYMBOLS = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT']
 const QUIET_PULSE_SYMBOLS = ['TONUSDT','MATICUSDT']
+const PULSE_REST_RETRY_DELAYS_MS = [1000,2000,4000,8000]
 const PULSE_STREAM_URL = `wss://stream.binance.com:9443/stream?streams=${MOBILE_PULSE_COINS.map(coin => `${coin.stream}@ticker`).join('/')}`
 
 const paintPulseQuote = (node:PulseQuoteNode,quote:PulseQuote,flashDirection?:'up'|'down') => {
@@ -133,12 +134,14 @@ const MarketPulseChip = memo(function MarketPulseChip({coin,onSelect,quoteNodesR
 
 const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{markets:Market[];onSelect:(symbol:string)=>void}) {
   const [isMobile,setIsMobile] = useState(() => window.matchMedia('(max-width: 700px)').matches)
+  const [coinRepeatCount,setCoinRepeatCount] = useState(1)
   const quoteCacheRef = useRef<Record<string,PulseQuote>>({})
   const quoteNodesRef = useRef(new Map<string,Set<PulseQuoteNode>>())
   const liveQuotesRef = useRef(new Set<string>())
   const trackRef = useRef<HTMLDivElement>(null)
   const pendingQuotesRef = useRef<Record<string,PulseQuote>>({})
   const quoteFlushTimerRef = useRef<number|undefined>(undefined)
+  const repeatedPulseCoins = useMemo(() => Array.from({length:coinRepeatCount},() => MOBILE_PULSE_COINS).flat(),[coinRepeatCount])
 
   useEffect(() => {
     const mobileQuery = window.matchMedia('(max-width: 700px)')
@@ -151,18 +154,29 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
     const track = trackRef.current
     const group = track?.querySelector<HTMLElement>('.marketPulseGroup')
     if (!track || !group) return
+    track.dataset.marqueeReady = 'false'
     const setDurationFromWidth = () => {
       const width = group.getBoundingClientRect().width
-      if (width > 0) {
-        const duration = `${Math.round(width / 24 * 100) / 100}s`
-        if (track.style.getPropertyValue('--pulse-marquee-duration') !== duration) track.style.setProperty('--pulse-marquee-duration',duration)
+      if (width <= 0 || !group.childElementCount) return
+      const viewportWidth = Math.max(window.innerWidth,track.parentElement?.clientWidth ?? 0)
+      const requiredRepeatCount = Math.max(coinRepeatCount,Math.ceil(coinRepeatCount * viewportWidth / width))
+      if (requiredRepeatCount > coinRepeatCount) {
+        setCoinRepeatCount(requiredRepeatCount)
+        return
       }
+      const duration = `${Math.round(width / 24 * 100) / 100}s`
+      if (track.style.getPropertyValue('--pulse-marquee-duration') !== duration) track.style.setProperty('--pulse-marquee-duration',duration)
+      track.dataset.marqueeReady = 'true'
     }
     const observer = new ResizeObserver(setDurationFromWidth)
     observer.observe(group)
+    window.addEventListener('resize',setDurationFromWidth)
     setDurationFromWidth()
-    return () => observer.disconnect()
-  },[isMobile])
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize',setDurationFromWidth)
+    }
+  },[coinRepeatCount,isMobile])
 
   const fallbackQuotes = useMemo(() => Object.fromEntries(MOBILE_PULSE_COINS.map(coin => {
     const market = markets.find(item => item.symbol.replace('/','').toUpperCase() === coin.symbol)
@@ -183,6 +197,10 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
     let active = true
     let reconnectTimer = 0
     let snapshotTimer = 0
+    let fallbackRetryTimer = 0
+    let fallbackRetryAttempts = 0
+    let fallbackSequence = 0
+    let fallbackSequenceStarted = false
     let snapshotInFlight = false
     let socket:WebSocket|null = null
 
@@ -206,21 +224,42 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
       },1000)
     }
 
-    const refreshQuietSymbols = async () => {
-      if (snapshotInFlight) return
+    const refreshSnapshot = async (symbolsToRefresh:string[]) => {
+      if (snapshotInFlight) return false
       snapshotInFlight = true
       try {
-        const symbols = encodeURIComponent(JSON.stringify(QUIET_PULSE_SYMBOLS))
+        const symbols = encodeURIComponent(JSON.stringify(symbolsToRefresh))
         const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbols=${symbols}`,{cache:'no-store'})
-        if (!response.ok) return
+        if (!response.ok) return false
         const snapshots = await response.json() as TickerSnapshot[]
-        if (!active || !Array.isArray(snapshots)) return
+        if (!active || !Array.isArray(snapshots)) return false
         snapshots.forEach(item => updateQuote(item.symbol,Number(item.lastPrice),Number(item.priceChangePercent)))
+        return true
       } catch {
-        // Keep the last available quote when the fallback request is unavailable.
+        return false
       } finally {
         snapshotInFlight = false
       }
+    }
+
+    const refreshQuietSymbols = () => refreshSnapshot(QUIET_PULSE_SYMBOLS)
+    const attemptPulseFallback = async (sequence:number) => {
+      const refreshed = await refreshSnapshot(MOBILE_PULSE_COINS.map(coin => coin.symbol))
+      if (!active || sequence !== fallbackSequence || refreshed) return
+      if (!active || fallbackRetryTimer || fallbackRetryAttempts >= PULSE_REST_RETRY_DELAYS_MS.length) return
+      const delay = PULSE_REST_RETRY_DELAYS_MS[fallbackRetryAttempts]
+      fallbackRetryAttempts += 1
+      fallbackRetryTimer = window.setTimeout(() => {
+        fallbackRetryTimer = 0
+        void attemptPulseFallback(sequence)
+      },delay)
+    }
+
+    const refreshPulseFallback = () => {
+      if (!active || fallbackSequenceStarted) return
+      fallbackSequenceStarted = true
+      fallbackRetryAttempts = 0
+      void attemptPulseFallback(++fallbackSequence)
     }
 
     const connect = () => {
@@ -228,8 +267,16 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
       try {
         socket = new WebSocket(PULSE_STREAM_URL)
       } catch {
+        void refreshPulseFallback()
         reconnectTimer = window.setTimeout(connect,3000)
         return
+      }
+      socket.onopen = () => {
+        fallbackSequence += 1
+        fallbackSequenceStarted = false
+        window.clearTimeout(fallbackRetryTimer)
+        fallbackRetryTimer = 0
+        fallbackRetryAttempts = 0
       }
       socket.onmessage = event => {
         try {
@@ -240,7 +287,11 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
         }
       }
       socket.onerror = () => socket?.close()
-      socket.onclose = () => {if (active) reconnectTimer = window.setTimeout(connect,3000)}
+      socket.onclose = () => {
+        if (!active) return
+        void refreshPulseFallback()
+        reconnectTimer = window.setTimeout(connect,3000)
+      }
     }
 
     connect()
@@ -249,6 +300,7 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
     return () => {
       active = false
       window.clearTimeout(reconnectTimer)
+      window.clearTimeout(fallbackRetryTimer)
       window.clearInterval(snapshotTimer)
       if (quoteFlushTimerRef.current !== undefined) window.clearTimeout(quoteFlushTimerRef.current)
       quoteFlushTimerRef.current = undefined
@@ -269,9 +321,9 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
     {!isMobile && <div className="marketPulseLine desktopMarketPulseLine">
       <i className="marketPulseLiveDot" role="img" aria-label="Canlı veri" />
       <div className="v26DashboardPulseItems marketPulseScroller">
-        <div className="marketPulseTrack">
+        <div className="marketPulseTrack" data-marquee-ready="false" ref={trackRef}>
           {[false,true].map(clone => <div className="marketPulseGroup" key={clone ? 'desktop-clone' : 'desktop-primary'} aria-hidden={clone || undefined}>
-            {MOBILE_PULSE_COINS.map(coin => <MarketPulseChip key={coin.symbol} coin={coin} onSelect={onSelect} quoteNodesRef={quoteNodesRef} quoteCacheRef={quoteCacheRef} clone={clone}/>) }
+            {repeatedPulseCoins.map((coin,index) => <MarketPulseChip key={`${coin.symbol}-${index}`} coin={coin} onSelect={onSelect} quoteNodesRef={quoteNodesRef} quoteCacheRef={quoteCacheRef} clone={clone}/>) }
           </div>)}
         </div>
       </div>
@@ -280,9 +332,9 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
     {isMobile && <div className="marketPulseLine mobileMarketPulseLine" key="mobile-market-pulse">
       <i className="marketPulseLiveDot" role="img" aria-label="Canlı veri" />
       <div className="v26DashboardPulseItems marketPulseScroller">
-        <div className="marketPulseTrack" key="mobile-market-pulse-track" ref={trackRef}>
+        <div className="marketPulseTrack" key="mobile-market-pulse-track" data-marquee-ready="false" ref={trackRef}>
           {[false,true].map(clone => <div className="marketPulseGroup" key={clone ? 'clone' : 'primary'} aria-hidden={clone || undefined}>
-            {MOBILE_PULSE_COINS.map(coin => <MarketPulseChip key={coin.symbol} coin={coin} onSelect={onSelect} quoteNodesRef={quoteNodesRef} quoteCacheRef={quoteCacheRef} clone={clone}/>) }
+            {repeatedPulseCoins.map((coin,index) => <MarketPulseChip key={`${coin.symbol}-${index}`} coin={coin} onSelect={onSelect} quoteNodesRef={quoteNodesRef} quoteCacheRef={quoteCacheRef} clone={clone}/>) }
           </div>)}
         </div>
       </div>
