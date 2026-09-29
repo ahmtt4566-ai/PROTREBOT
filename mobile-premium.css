@@ -1907,3 +1907,172 @@
     display: none;
   }
 }
+
+@media (max-width: 650px) {
+  #root > main.v26App.workspaceRoute .binanceDemoDeck {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck :is(h2, h3, h4, small, .demoHeroStatus b, .demoConnectionState b, .v21AlertBody strong, .v21AlertBody span, .v21SmartAlertList p) {
+    min-width: 0;
+    word-break: normal;
+    overflow-wrap: normal;
+    hyphens: none;
+  }
+
+  #root > main.v26App.workspaceRoute .binanceDemoDeck :is(.demoHeroStatus > span, .demoAccountStrip article, .demoTicket, .demoPositions, .v21InsightPanel, .v21SmartAlertCenter, .v21Alert) {
+    min-width: 0;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroStatus > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroStatus b,
+  #root > main.v26App.workspaceRoute .demoConnectionState b {
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  #root > main.v26App.workspaceRoute .v21SmartAlertCenter .v21SmartAlertList article {
+    grid-template-columns: auto minmax(0, 1fr);
+    min-width: 0;
+  }
+
+  #root > main.v26App.workspaceRoute .v21SmartAlertCenter .v21SmartAlertList article > div {
+    min-width: 0;
+  }
+
+  #root > main.v26App.workspaceRoute .v21SmartAlertCenter .v21SmartAlertList p {
+    overflow-wrap: break-word;
+  }
+}
+
+@media (max-width: 360px) {
+  #root > main.v26App.workspaceRoute .demoHeroStatus,
+  #root > main.v26App.workspaceRoute .demoAccountStrip,
+  #root > main.v26App.workspaceRoute :is(.v21InsightMetrics, .v21PortfolioMetrics, .v21DecisionChecks, .v21ProtectionMetrics, .v21AdvancedMetrics) {
+    grid-template-columns: 1fr;
+  }
+
+  #root > main.v26App.workspaceRoute .demoHeroStatus > span:first-child {
+    grid-column: auto;
+  }
+}
+
+#root > main.v26App.homeRoute .v26Footer {
+  min-height: 0;
+  margin-top: 10px;
+  padding: 6px 0 2px;
+  justify-content: center;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root > main.v26App.homeRoute .v26Footer > span {
+  min-height: 0;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  color: var(--mobile-muted);
+}
+
+@media (max-width: 700px) {
+  #root > main.v26App.homeRoute .v26Footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px 14px;
+    padding: 6px 0 2px;
+  }
+
+  #root > main.v26App.homeRoute .v26Footer > span {
+    justify-content: flex-start;
+    overflow: visible;
+    font-size: 8px;
+    white-space: nowrap;
+    text-overflow: clip;
+  }
+}
+
+@media (max-width: 900px) {
+  #root > main.v26App {
+    padding-top: calc(var(--mobile-top) + 54px);
+  }
+
+  .authSessionBar {
+    top: max(10px, env(safe-area-inset-top)) !important;
+    right: var(--mobile-edge-right) !important;
+    z-index: 40 !important;
+  }
+
+  #root > main.v26App .v26Header {
+    top: calc(var(--mobile-top) + 54px);
+    z-index: 1100;
+  }
+
+  #root > main.v26App .v26Header.v26HeaderHidden {
+    transform: none;
+    opacity: 1;
+  }
+
+  #root > main.v26App .v26NotificationPanel {
+    top: calc(env(safe-area-inset-top) + var(--mobile-top) + 58px) !important;
+    right: max(10px, env(safe-area-inset-right)) !important;
+    left: max(10px, env(safe-area-inset-left)) !important;
+    max-height: min(76vh, 560px) !important;
+    z-index: 1101 !important;
+  }
+}
+
+@media (max-width: 700px) {
+  #root > main.v26App .v26DashboardWorkspaces,
+  #root > main.v26App .v26DashboardPulse {
+    padding-right: 0;
+    padding-left: 0;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App .v26DashboardPulse > header {
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, .14);
+  }
+
+  #root > main.v26App .v26DashboardChoices > button {
+    border-color: rgba(148, 163, 184, .16);
+    background: rgba(16, 24, 32, .72);
+    box-shadow: none;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button span,
+  #root > main.v26App .v26DashboardChoices > button b,
+  #root > main.v26App .v26DashboardChoices > button small {
+    min-width: 0;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button b,
+  #root > main.v26App .v26DashboardChoices > button small {
+    white-space: nowrap;
+  }
+
+  #root > main.v26App .v26DashboardChoices > button:nth-child(2) {
+    border-color: rgba(217, 171, 85, .3);
+    background: rgba(217, 171, 85, .055);
+  }
+
+  #root > main.v26App .v26DashboardPulseItems > button {
+    border: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, .12);
+    border-radius: 0;
+    background: transparent;
+  }
+}

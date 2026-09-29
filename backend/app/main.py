@@ -87,6 +87,8 @@ WEB_CORS_ORIGINS = list(dict.fromkeys([
     "http://localhost:5173",
     "http://127.0.0.1:4173",
     "http://localhost:4173",
+    "http://127.0.0.1:4175",
+    "http://localhost:4175",
 ]))
 WEB_CORS_ORIGIN_REGEX = r"https://(?:frontend-nu-two-18|frontend-gh7asjvqj-ahmet-f11)(?:-[a-z0-9-]+)*\.vercel\.app"
 PAPER_ENABLED = env_flag("PROTREBOT_PAPER_ENABLED", default=True)

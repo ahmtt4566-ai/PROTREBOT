@@ -23,30 +23,9 @@ type Analysis = {
 }
 type Health = {status:string;version:string;mode:string;testnet:string;live_guard:string;paper:string;database:string;cloud_evidence:string;web_access:string}
 type ConnectionStatus = {connections?:Record<'TESTNET'|'LIVE',{configured:boolean;active:boolean;last_test_ok:boolean;api_key_masked?:string;last_error?:string|null;storage?:string;account?:{active_positions?:number}|null}>;vault?:{ready:boolean;reason?:string|null}}
-type NotificationItem = {id:string;title:string;description:string;kind:'success'|'warning'|'error'|'info'}
+type NotificationItem = {id:string;type:string;severity:'success'|'warning'|'error'|'info';title:string;message:string;timestamp:string|null;read:boolean;target:string}
+type NotificationResponse = {items:NotificationItem[];unread:number}
 const ANALYSIS_TIMEOUT_MS = 30000
-
-const notificationKind = (value:string):NotificationItem['kind'] => {
-  if (/error|hata|failed|down|unavailable/i.test(value)) return 'error'
-  if (/bek|kontrol|connecting|waiting|locked|kilit/i.test(value)) return 'warning'
-  if (/ok|bağlı|active|canlı|kalıcı|hazır/i.test(value)) return 'success'
-  return 'info'
-}
-
-const healthNotifications = (health:Health|null):NotificationItem[] => {
-  if (!health) return []
-  return [
-    ['api', 'API status', health.status],
-    ['database', 'Database status', health.database],
-    ['mode', 'Execution mode', health.mode],
-    ['testnet', 'Testnet status', health.testnet],
-    ['live-guard', 'Live Guard status', health.live_guard],
-    ['paper', 'Paper status', health.paper],
-    ['evidence', 'Evidence status', health.cloud_evidence],
-  ].filter(([, , value]) => Boolean(value)).map(([id,title,description]) => ({
-    id,title,description,kind:notificationKind(description),
-  }))
-}
 
 const format = (value:number) => value.toLocaleString('tr-TR',{maximumFractionDigits:value < 10 ? 5 : 2})
 
@@ -170,13 +149,14 @@ export default function TestnetFirstApp() {
   const [demoVerifyState,setDemoVerifyState] = useState<'idle'|'verifying'|'verified'|'error'>('idle')
   const [demoVerification,setDemoVerification] = useState({kind:'info',message:''})
   const [connectionStatus,setConnectionStatus] = useState<ConnectionStatus|null>(null)
+  const [notifications,setNotifications] = useState<NotificationItem[]>([])
   const [notificationsOpen,setNotificationsOpen] = useState(false)
   const [headerHidden,setHeaderHidden] = useState(false)
   const [complianceOpen,setComplianceOpen] = useState(false)
   const [complianceTab,setComplianceTab] = useState<'risk'|'privacy'|'terms'|'support'>('risk')
   const notificationRef = useRef<HTMLDivElement>(null)
   const marketPickerRef = useRef<HTMLDivElement>(null)
-  const notifications = healthNotifications(health)
+  const unreadNotifications = notifications.filter(item => !item.read).length
   const selectedMarket = markets.find(market => market.symbol === symbol)
   const pulseSymbols = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT']
   const pulseMarkets = pulseSymbols.map(pulseSymbol => markets.find(market => market.symbol.replace('/','').toUpperCase() === pulseSymbol))
@@ -258,6 +238,16 @@ export default function TestnetFirstApp() {
     } catch {}
   }
 
+  const refreshNotifications = async () => {
+    try {
+      const headers = new Headers(); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`)
+      const response = await fetch(`${API_BASE}/v21/notifications?limit=100`,{headers})
+      if (!response.ok) return
+      const payload = await response.json() as NotificationResponse
+      if (Array.isArray(payload.items)) setNotifications(payload.items)
+    } catch {}
+  }
+
   const saveDemoCredentials = async () => {
     const apiKey = credentials.demoApiKey.trim()
     const secretKey = credentials.demoSecretKey.trim()
@@ -311,11 +301,43 @@ export default function TestnetFirstApp() {
   useEffect(() => {
     void refresh()
     void refreshConnectionStatus()
+    void refreshNotifications()
     const timer = window.setInterval(() => void refresh(),60000)
+    const notificationTimer = window.setInterval(() => void refreshNotifications(),10000)
     const openExchangeSettings = () => setView('setup')
     window.addEventListener('protrebot-open-exchange-settings', openExchangeSettings)
-    return () => {window.clearInterval(timer);window.removeEventListener('protrebot-open-exchange-settings', openExchangeSettings)}
+    return () => {window.clearInterval(timer);window.clearInterval(notificationTimer);window.removeEventListener('protrebot-open-exchange-settings',openExchangeSettings)}
   },[])
+
+  const notificationTarget = (target:string):{view:View;selector:string} => ({
+    'system-health': {view:'dashboard',selector:'#dashboard-title'},
+    'execution-status': {view:'trading',selector:'.v26MarketBar'},
+    'demo-trading': {view:'trading',selector:'.binanceDemoDeck'},
+    'risk-management': {view:'risk',selector:'.binanceDemoDeck'},
+    'trade-history': {view:'performance',selector:'.v21PerformanceCenter'},
+    subscription: {view:'billing',selector:'.subscriptionCenter'},
+    settings: {view:'setup',selector:'.connectionCenter'},
+  }[target] || {view:'trading',selector:'.v26MarketBar'})
+
+  const openNotification = async (item:NotificationItem) => {
+    setNotifications(current => current.map(entry => entry.id === item.id ? {...entry,read:true} : entry))
+    setNotificationsOpen(false)
+    try { const headers = new Headers(); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`); await fetch(`${API_BASE}/v21/notifications/${encodeURIComponent(item.id)}/read`,{method:'POST',headers}) } catch {}
+    const destination = notificationTarget(item.target)
+    navigate(destination.view)
+    window.setTimeout(() => {
+      const target = document.querySelector(destination.selector)
+      if (!target) return
+      target.scrollIntoView({behavior:'smooth',block:'start'})
+      target.classList.add('notificationTargetHighlight')
+      window.setTimeout(() => target.classList.remove('notificationTargetHighlight'),1600)
+    },120)
+  }
+
+  const markAllNotificationsRead = async () => {
+    setNotifications(current => current.map(item => ({...item,read:true})))
+    try { const headers = new Headers(); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`); await fetch(`${API_BASE}/v21/notifications/read-all`,{method:'POST',headers}) } catch {}
+  }
 
   useEffect(() => {
     if (!notificationsOpen) return
@@ -370,10 +392,10 @@ export default function TestnetFirstApp() {
       <div className="v26HeaderActions">
         <button className="v26Refresh" aria-label="Piyasa verisini yenile" title="Piyasa verisini yenile" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/></button>
         <div className="v26Notifications" ref={notificationRef}>
-          <button className="v26NotificationButton" type="button" aria-label="Bildirimler" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}><Bell/></button>
+          <button className={`v26NotificationButton${unreadNotifications ? ' hasUnread' : ''}`} type="button" aria-label={`Bildirimler${unreadNotifications ? `, ${unreadNotifications} okunmamış` : ''}`} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}><Bell/>{unreadNotifications > 0 && <span className="v26NotificationBadge">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</button>
           {notificationsOpen && <section className="v26NotificationPanel" role="dialog" aria-label="Bildirimler">
-            <header><div><small>DURUM MERKEZİ</small><h2>Bildirimler</h2></div><span>{notifications.length}</span></header>
-            {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <article key={item.id} className={item.kind}><i><Bell/></i><div><b>{item.title}</b><p>{item.description}</p><small>Güncel durum</small></div></article>)}</div> : <div className="v26NotificationEmpty"><Bell/><b>Bildirim yok</b><p>Şu anda yeni bir bildiriminiz yok.</p></div>}
+            <header><div><small>DURUM MERKEZİ</small><h2>Bildirimler</h2></div><div><span>{unreadNotifications}</span>{unreadNotifications > 0 && <button type="button" onClick={() => void markAllNotificationsRead()}>TÜMÜ OKUNDU</button>}</div></header>
+            {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <button type="button" key={item.id} className={`v26NotificationItem ${item.severity}${item.read ? ' isRead' : ''}`} onClick={() => void openNotification(item)}><i><Bell/></i><span><b>{item.title}</b><p>{item.message}</p><small>{item.timestamp ? new Date(item.timestamp).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</small></span></button>)}</div> : <div className="v26NotificationEmpty"><Bell/><b>Bildirim yok</b><p>Gerçek bir sistem olayı oluştuğunda burada görünecek.</p></div>}
           </section>}
         </div>
       </div>

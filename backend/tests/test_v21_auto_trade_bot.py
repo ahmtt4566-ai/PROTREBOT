@@ -163,6 +163,36 @@ class AutoTradeBotTests(unittest.TestCase):
         self.assertEqual(state["auto"]["pause_reason"], "DAILY_LOSS_20")
         self.assertEqual(len(state["notifications"]["seen"]), 4)
 
+    def test_notifications_are_deduplicated_and_read_state_is_persisted(self):
+        state = v21_demo.initial_state()
+        first = v21_demo.emit_notification(state, "AUTO_STARTED", "Auto Trade başladı.", event_id="notification-test")
+        duplicate = v21_demo.emit_notification(state, "AUTO_STARTED", "Auto Trade başladı.", event_id="notification-test")
+
+        self.assertIsNotNone(first)
+        self.assertIsNone(duplicate)
+        item = v21_demo.notification_payload(state)[0]
+        self.assertFalse(item["read"])
+
+        request = SimpleNamespace()
+        with patch.object(v21_demo, "state_for", return_value=state), patch.object(v21_demo, "persist_state"):
+            result = asyncio.run(v21_demo.v21_notification_read(request, item["id"]))
+
+        self.assertEqual(result["unread"], 0)
+        self.assertTrue(result["items"][0]["read"])
+        self.assertIn(item["id"], state["notifications"]["read_ids"])
+
+    def test_notifications_read_all_marks_current_items_read(self):
+        state = v21_demo.initial_state()
+        v21_demo.emit_notification(state, "SCAN_STARTED", "Tarama başladı.", event_id="notification-one")
+        v21_demo.emit_notification(state, "ROTATION", "Güvenli rotasyon uygulandı.", event_id="notification-two")
+
+        with patch.object(v21_demo, "state_for", return_value=state), patch.object(v21_demo, "persist_state"):
+            result = asyncio.run(v21_demo.v21_notifications_read_all(SimpleNamespace()))
+
+        self.assertEqual(result["unread"], 0)
+        self.assertTrue(all(item["read"] for item in result["items"]))
+        self.assertEqual(len(state["notifications"]["read_ids"]), 2)
+
     def test_rotation_keeps_losing_position_and_only_returns_auto_safe_symbols(self):
         snapshot = {"positions": [
             {"symbol": "BTCUSDT", "unrealized_pnl": -2.0},

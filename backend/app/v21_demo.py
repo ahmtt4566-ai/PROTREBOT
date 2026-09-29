@@ -200,7 +200,7 @@ def initial_state() -> dict[str, Any]:
             "status": "OFF", "pause_reason": None, "started_at": None,
         },
         "risk": {"consecutive_losses": 0, "consecutive_loss_limit": 3, "kill_switch": False},
-        "notifications": {"seen": [], "unread": 0},
+        "notifications": {"seen": [], "unread": 0, "read_ids": []},
         "scanner": {
             "active": False, "running": False, "scan_status": "BEKLEMEDE", "coins_scanned": 0,
             "scan_duration_ms": 0, "last_scan_at": None, "next_scan_at": None,
@@ -287,6 +287,7 @@ def load_state() -> dict[str, Any]:
     base["risk"].setdefault("kill_switch", False)
     base["notifications"].setdefault("seen", [])
     base["notifications"].setdefault("unread", 0)
+    base["notifications"].setdefault("read_ids", [])
     if migrated_allowlist:
         persist = globals().get("persist_state")
         if callable(persist):
@@ -559,7 +560,36 @@ def emit_notification(state: dict[str, Any], kind: str, message: str, *, event_i
     seen.append(event_id)
     del seen[:-400]
     notifications["unread"] = int(notifications.get("unread", 0)) + 1
+    notifications.setdefault("read_ids", [])
     return record_event(state, "NOTIFICATION", message, reason=f"{kind}:{event_id}", event_id=f"notification-{event_id}", source="NOTIFICATION")
+
+
+NOTIFICATION_TARGETS = {
+    "API": "system-health", "DATABASE": "system-health", "STREAM": "system-health",
+    "SCAN": "execution-status", "AUTO": "execution-status", "KILL_SWITCH": "risk-management",
+    "CONSECUTIVE_LOSSES": "risk-management", "DAILY_LOSS": "risk-management",
+    "ROTATION": "trade-history", "TRADE": "trade-history", "FILL": "trade-history",
+}
+
+
+def notification_payload(state: dict[str, Any], limit: int = 100) -> list[dict[str, Any]]:
+    read_ids = {str(item) for item in state.get("notifications", {}).get("read_ids", [])}
+    items = []
+    for event in state.get("journal", []):
+        if event.get("kind") != "NOTIFICATION":
+            continue
+        notification_type = str(event.get("reason") or "INFO").split(":", 1)[0]
+        normalized_type = notification_type.upper()
+        severity = "error" if any(token in normalized_type for token in ("ERROR", "FAIL", "KILL", "LOSS", "RISK")) else "warning" if any(token in normalized_type for token in ("STOP", "WARNING", "ROTATION")) else "info"
+        items.append({
+            "id": str(event.get("id")), "type": notification_type, "severity": severity,
+            "title": notification_type.replace("_", " "), "message": event.get("message", ""),
+            "timestamp": event.get("created_at"), "read": str(event.get("id")) in read_ids,
+            "target": next((target for prefix, target in NOTIFICATION_TARGETS.items() if normalized_type.startswith(prefix)), "execution-status"),
+        })
+        if len(items) >= limit:
+            break
+    return items
 
 
 def daily_loss_percent(state: dict[str, Any], balance_reference: float) -> float:
@@ -2343,9 +2373,13 @@ def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
     observations = state.get("evidence_observations", [])
     observations = observations if isinstance(observations, list) else []
     exposed_observations = observations[-EVIDENCE_RESPONSE_LIMIT:]
+    notifications = state.setdefault("notifications", {"seen": [], "unread": 0, "read_ids": []})
+    notifications.setdefault("read_ids", [])
+    notification_items = notification_payload(state)
+    notifications["unread"] = sum(1 for item in notification_items if not item["read"])
     return {
         "version": "21.0.0", "mode": "BINANCE_FUTURES_DEMO_ONLY", "settings": state["settings"],
-        "auto": state["auto"], "risk": state.get("risk", {}), "notifications": state.get("notifications", {}),
+        "auto": state["auto"], "risk": state.get("risk", {}), "notifications": {**notifications, "items": notification_items},
         "scanner": scanner_payload, "stream": state["stream"], "daily": daily_metrics(state),
         "account": {
             "wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"),
@@ -2403,6 +2437,42 @@ async def shutdown_v21_demo(application: Any) -> None:
 @router.get("/summary")
 async def v21_summary(request: Request) -> dict[str, Any]:
     return summary_payload(state_for(request))
+
+
+@router.get("/notifications")
+async def v21_notifications(request: Request, limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+    state = state_for(request)
+    items = notification_payload(state, limit)
+    return {"items": items, "unread": sum(1 for item in items if not item["read"]), "demo_only": True}
+
+
+@router.post("/notifications/read-all")
+async def v21_notifications_read_all(request: Request) -> dict[str, Any]:
+    state = state_for(request)
+    notifications = state.setdefault("notifications", {"seen": [], "unread": 0, "read_ids": []})
+    read_ids = notifications.setdefault("read_ids", [])
+    for item in notification_payload(state, 500):
+        if item["id"] not in read_ids:
+            read_ids.append(item["id"])
+    del read_ids[:-1200]
+    notifications["unread"] = 0
+    persist_state(state)
+    return {"items": notification_payload(state), "unread": 0, "demo_only": True}
+
+
+@router.post("/notifications/{notification_id}/read")
+async def v21_notification_read(request: Request, notification_id: str) -> dict[str, Any]:
+    state = state_for(request)
+    items = notification_payload(state, 500)
+    if not any(item["id"] == notification_id for item in items):
+        raise HTTPException(status_code=404, detail="Bildirim bulunamadı.")
+    notifications = state.setdefault("notifications", {"seen": [], "unread": 0, "read_ids": []})
+    read_ids = notifications.setdefault("read_ids", [])
+    if notification_id not in read_ids:
+        read_ids.append(notification_id)
+    notifications["unread"] = sum(1 for item in notification_payload(state, 500) if not item["read"])
+    persist_state(state)
+    return {"items": notification_payload(state), "unread": notifications["unread"], "demo_only": True}
 
 
 @router.get("/markets")

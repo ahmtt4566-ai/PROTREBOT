@@ -5430,9 +5430,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   /* Home terminal surface */
   .v26App:has(.v26Dashboard) { display: flex; flex-direction: column; background-color: #05070c; background-image: none; }
   body:has(.v26Dashboard) { background-color: #05070c; background-image: none; }
-  .v26App:has(.v26Dashboard) > .v26Header { grid-template-columns: minmax(0, 1fr) auto; border: 0; border-bottom: 1px solid rgba(255,255,255,.06); border-radius: 0; background: #05070c; box-shadow: none; }
-  .v26HomeHeader { grid-template-columns: minmax(0, 1fr) auto; }
-  .v26HomeHeader .v26HeaderSignals, .v26HomeHeader .v26HeaderActions { display: none; }
+  .v26App:has(.v26Dashboard) > .v26Header { grid-template-columns: minmax(0, 1fr) auto auto; border: 0; border-bottom: 1px solid rgba(255,255,255,.06); border-radius: 0; background: #05070c; box-shadow: none; }
+  .v26HomeHeader { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .v26HomeHeader .v26HeaderSignals { display: none; }
   .v26HomeHeaderStatus { display: inline-flex; align-items: center; justify-self: end; gap: 6px; color: #aeb8c4; font-size: 10px; font-weight: 800; letter-spacing: .1em; }
   .v26HomeHeaderStatus i { width: 6px; height: 6px; border-radius: 50%; background: #e5b95d; }
   .v26HomeHeaderStatus i.ok { background: #37c98a; }
@@ -8480,6 +8480,65 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+.v26App .v26Header { z-index: 1100; }
+.v26App .v26NotificationPanel {
+  position: absolute !important;
+  top: calc(100% + 10px) !important;
+  right: 0 !important;
+  width: min(400px, calc(100vw - 24px)) !important;
+  max-height: min(560px, calc(100vh - 96px));
+  display: flex;
+  flex-direction: column;
+}
+.v26App .v26NotificationPanel > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.v26App .v26NotificationPanel > header > div:last-child { display: flex; align-items: center; gap: 8px; }
+.v26App .v26NotificationPanel > header > div:last-child > button {
+  border: 0; background: transparent; color: var(--terminal-info, #7ed3f7); font-size: 9px; font-weight: 700; cursor: pointer;
+}
+.v26App .v26NotificationList {
+  min-height: 0;
+  max-height: none !important;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.v26App .v26NotificationItem {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  width: 100%;
+  gap: 10px;
+  padding: 11px 9px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, .12);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.v26App .v26NotificationItem:hover { background: rgba(100, 227, 161, .06); }
+.v26App .v26NotificationItem > span { min-width: 0; }
+.v26App .v26NotificationItem > i { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; }
+.v26App .v26NotificationItem b { color: var(--text, #dce7e9); font-size: 12px; }
+.v26App .v26NotificationItem p { margin: 4px 0 0; color: var(--text-muted, #9aabb2); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.v26App .v26NotificationItem small { display: block; margin-top: 5px; color: var(--text-muted, #8297a0); font-size: 9px; }
+.v26App .v26NotificationItem.isRead { opacity: .68; }
+.v26App .v26NotificationItem.warning > i { background: rgba(245, 190, 85, .12); color: var(--terminal-warning, #f5be55); }
+.v26App .v26NotificationItem.error > i { background: rgba(239, 143, 134, .12); color: var(--terminal-negative, #ef8f86); }
+.v26App .v26NotificationItem.info > i { background: rgba(126, 211, 247, .12); color: var(--terminal-info, #7ed3f7); }
+.v26App .v26NotificationBadge { position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--terminal-negative, #ef8f86); color: #071116; font-size: 9px; font-weight: 800; display: grid; place-items: center; }
+.v26App .v26NotificationButton { position: relative; }
+.v26App .v26NotificationButton.hasUnread svg { animation: v26NotificationPulse 1.8s ease-in-out 1; }
+.v26App .notificationTargetHighlight { animation: notificationTargetHighlight 1.6s ease-out; }
+@keyframes v26NotificationPulse { 0%, 100% { transform: rotate(0); } 18% { transform: rotate(9deg); } 36% { transform: rotate(-7deg); } 54% { transform: rotate(3deg); } }
+@keyframes notificationTargetHighlight { 0%, 100% { box-shadow: 0 0 0 0 rgba(212, 168, 79, 0); } 30% { box-shadow: 0 0 0 3px rgba(212, 168, 79, .28); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .v26App .v26NotificationPanel,
+  .v26App .v26NotificationButton.hasUnread svg,
+  .v26App .notificationTargetHighlight { animation: none; }
+}
+
 @media (max-width: 700px) {
   .v26App .v26ModeBar aside {
     min-width: 0;
@@ -8489,12 +8548,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   .v26App .v26Notifications::after { display: none; }
   .v26App .v26NotificationPanel {
     position: fixed !important;
-    top: 66px !important;
-    right: 10px !important;
-    left: 10px !important;
+    top: calc(env(safe-area-inset-top) + 58px) !important;
+    right: max(10px, env(safe-area-inset-right)) !important;
+    left: max(10px, env(safe-area-inset-left)) !important;
     width: auto !important;
-    max-height: min(70vh, 520px);
+    max-height: min(76vh, 560px) !important;
   }
+  .v26App .v26Notifications:has(.v26NotificationPanel)::before { content: ''; position: fixed; inset: 0; z-index: 1000; background: rgba(2, 7, 10, .42); pointer-events: none; }
 }
 
 /* Final palette and readability guard for the active terminal surfaces. */
@@ -9398,6 +9458,266 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .masterTradeRoute .marketCount { font-size: 10px; }
 .masterTradeRoute .liveUxSummary .liveUxMetrics small { font-size: 9px; }
 .masterTradeRoute .liveUxSummary .liveUxMetrics b { font-size: 11px; }
+
+/* Master Trade terminal composition: one page flow, restrained surfaces, and a clear reading order. */
+.masterTradeRoute .masterTradeShell {
+  width: min(100%, 1540px);
+  gap: 12px;
+  padding: 12px clamp(14px, 2vw, 30px) 36px;
+  background: transparent;
+}
+
+.masterTradeRoute .masterTradeTerminalHeader {
+  min-height: 52px;
+  padding: 4px 0 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, .18);
+  border-radius: 0;
+  background: transparent;
+}
+
+.masterTradeRoute .terminalStatusStrip {
+  min-height: 30px;
+  padding: 2px 0 0;
+  border: 0;
+  background: transparent;
+}
+
+.masterTradeRoute .masterTradeFocusPanel {
+  grid-template-columns: minmax(220px, 1.35fr) repeat(4, minmax(110px, .7fr));
+  gap: 16px;
+  margin: 4px 0 8px;
+  padding: 16px 18px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  border-radius: 10px;
+  background: linear-gradient(105deg, rgba(18, 28, 35, .98), rgba(12, 19, 25, .96));
+  box-shadow: inset 3px 0 0 var(--terminal-accent);
+}
+
+.masterTradeRoute .masterTradeWorkspace {
+  height: auto;
+  min-height: 0;
+  grid-template-columns: minmax(205px, .72fr) minmax(0, 2.2fr) minmax(280px, .95fr);
+  align-items: start;
+}
+
+.masterTradeRoute .masterTradeWorkspace > .masterTradePanel {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+/* Show exactly 4 watchlist rows; the rest stay reachable via a modern scroll list. */
+.masterTradeRoute .watchlistList {
+  max-height: 224px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(212, 168, 79, .55) rgba(255, 255, 255, .04);
+  scrollbar-width: thin;
+}
+
+.masterTradeRoute .watchlistList::-webkit-scrollbar {
+  width: 6px;
+}
+
+.masterTradeRoute .watchlistList::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, .04);
+  border-radius: 999px;
+}
+
+.masterTradeRoute .watchlistList::-webkit-scrollbar-thumb {
+  background: rgba(212, 168, 79, .5);
+  border-radius: 999px;
+}
+
+.masterTradeRoute .watchlistList::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 168, 79, .78);
+}
+
+.masterTradeRoute .watchlistItem {
+  padding: 10px 4px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, .11);
+  border-radius: 0;
+  background: transparent;
+}
+
+.masterTradeRoute .watchlistItem:hover,
+.masterTradeRoute .watchlistItem.active {
+  border-bottom-color: rgba(90, 169, 214, .55);
+  background: rgba(90, 169, 214, .08);
+}
+
+.masterTradeRoute .chartPanel {
+  overflow: visible;
+}
+
+.masterTradeRoute .chartCanvas,
+.masterTradeRoute .marketOhlcChart {
+  min-height: clamp(330px, 38vh, 480px);
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, .14);
+  border-bottom: 1px solid rgba(148, 163, 184, .14);
+  border-radius: 0;
+}
+
+.masterTradeRoute .chartCanvas svg,
+.masterTradeRoute .marketOhlcChart svg {
+  min-height: clamp(330px, 38vh, 480px);
+}
+
+.masterTradeRoute .marketAnalysisPanel {
+  overflow: visible;
+}
+
+.masterTradeRoute .marketAnalysisMetrics {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.masterTradeRoute .marketAnalysisMetrics > div {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 2px;
+  border-bottom: 1px solid rgba(148, 163, 184, .11);
+  border-radius: 0;
+  background: transparent;
+}
+
+.masterTradeRoute .marketAnalysisMetrics > div:last-child { border-bottom: 0; }
+.masterTradeRoute .marketAnalysisMetrics strong { text-align: right; }
+
+.masterTradeRoute .tradeDecisionPanel {
+  margin-top: 18px;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, .18);
+  border-radius: 0;
+  background: transparent;
+}
+
+.masterTradeRoute .masterTradeLiveUx {
+  gap: 10px;
+  margin: 4px 0 0;
+  border-top: 1px solid rgba(148, 163, 184, .18);
+  background: transparent;
+}
+
+.masterTradeRoute .masterTradeLiveHeader,
+.masterTradeRoute .masterTradeLiveAssistant,
+.masterTradeRoute .masterTradeLiveSection,
+.masterTradeRoute .masterTradeLiveApiDrawer,
+.masterTradeRoute .masterTradeLiveAccountHud,
+.masterTradeRoute .masterTradeLiveActivityRail {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.masterTradeRoute .masterTradeLiveHeader {
+  padding: 14px 0 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, .14);
+  background: transparent;
+}
+
+.masterTradeRoute .masterTradeLiveAssistant {
+  padding: 12px 14px;
+  border-left-width: 2px;
+  background: rgba(237, 189, 103, .06);
+}
+
+.masterTradeRoute .masterTradeLiveSection,
+.masterTradeRoute .masterTradeLiveApiDrawer,
+.masterTradeRoute .masterTradeLiveAccountHud {
+  border: 1px solid rgba(148, 163, 184, .14);
+  background: rgba(13, 20, 27, .72) !important;
+}
+
+.masterTradeRoute .masterTradeLiveAccountMetrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+}
+
+.masterTradeRoute .masterTradeLiveAccountMetrics > span {
+  min-height: 62px;
+  padding: 10px 12px;
+  border-right: 1px solid rgba(148, 163, 184, .12);
+  background: transparent;
+}
+
+.masterTradeRoute .masterTradeLiveAccountMetrics > span:last-child { border-right: 0; }
+
+.masterTradeRoute .masterTradeDataGrid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.masterTradeRoute .riskMonitorPanel {
+  grid-column: 1 / -1;
+}
+
+.masterTradeRoute .riskMonitorGrid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+}
+
+.masterTradeRoute .riskMonitorGrid > div,
+.masterTradeRoute .performanceMetrics > div {
+  border-right: 1px solid rgba(148, 163, 184, .12);
+  border-radius: 0;
+  background: transparent;
+}
+
+.masterTradeRoute .riskMonitorGrid > div:last-child,
+.masterTradeRoute .performanceMetrics > div:last-child { border-right: 0; }
+
+.masterTradeRoute .positionsPanel,
+.masterTradeRoute .historyPanel { grid-column: 1 / -1; }
+.masterTradeRoute .ordersPanel { grid-column: span 6; }
+.masterTradeRoute .performancePanel,
+.masterTradeRoute .scannerPanel { grid-column: span 6; }
+
+@media (max-width: 1180px) and (min-width: 701px) {
+  .masterTradeRoute .masterTradeWorkspace {
+    grid-template-columns: minmax(190px, .7fr) minmax(0, 1.8fr);
+  }
+
+  .masterTradeRoute .marketAnalysisPanel {
+    grid-column: 1 / -1;
+  }
+
+  .masterTradeRoute .masterTradeFocusPanel {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .masterTradeRoute .masterTradeLiveAccountMetrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .masterTradeRoute .masterTradeLiveAccountMetrics > span:nth-child(3n) { border-right: 0; }
+  .masterTradeRoute .riskMonitorGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .masterTradeRoute .masterTradeShell { padding: 10px 12px 28px; }
+  .masterTradeRoute .masterTradeTerminalHeader { min-height: 48px; padding-bottom: 8px; }
+  .masterTradeRoute .masterTradeFocusPanel { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 13px; }
+  .masterTradeRoute .masterTradeFocusIdentity { grid-column: 1 / -1; }
+  .masterTradeRoute .masterTradeFocusPrice { grid-column: 1 / -1; }
+  .masterTradeRoute .masterTradeWorkspace { grid-template-columns: 1fr; }
+  .masterTradeRoute .chartPanel { order: 1; }
+  .masterTradeRoute .watchlistPanel { order: 2; }
+  .masterTradeRoute .marketAnalysisPanel { order: 3; grid-column: auto; }
+  .masterTradeRoute .masterTradeLiveAccountMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .masterTradeRoute .masterTradeLiveAccountMetrics > span:nth-child(2n) { border-right: 0; }
+  .masterTradeRoute .riskMonitorGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .masterTradeRoute .riskMonitorGrid > div:nth-child(2n) { border-right: 0; }
+  .masterTradeRoute .ordersPanel,
+  .masterTradeRoute .performancePanel,
+  .masterTradeRoute .scannerPanel { grid-column: 1 / -1; }
+  .masterTradeRoute .chartCanvas,
+  .masterTradeRoute .marketOhlcChart,
+  .masterTradeRoute .chartCanvas svg,
+  .masterTradeRoute .marketOhlcChart svg { min-height: 280px; }
+}
 .masterTradeRoute .liveUxManual .liveChoice > span { font-size: 10px; }
 .masterTradeRoute .liveUxManual .liveChoice button { font-size: 11px; }
 .masterTradeRoute .liveUxManual .liveUxFormActions button { font-size: 10px; }
@@ -10036,4 +10356,182 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 @media (max-width: 520px) {
   #root .v26App.workspaceRoute .v27SleepNotice { flex-wrap: wrap; }
   #root .v26App.workspaceRoute .v27SleepNotice em { grid-column: 1 / -1; margin-top: 2px; }
+}
+
+/* Show exactly 4 approved markets; the rest stay reachable via a modern scroll list. */
+.masterTradeRoute .masterTradeLiveMarkets {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.masterTradeRoute .masterTradeLiveMarkets > span {
+  margin: 0;
+}
+
+.masterTradeRoute .masterTradeLiveMarketsScroll {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 138px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(85, 215, 155, .55) rgba(255, 255, 255, .04);
+  scrollbar-width: thin;
+}
+
+.masterTradeRoute .masterTradeLiveMarketsScroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.masterTradeRoute .masterTradeLiveMarketsScroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, .04);
+  border-radius: 999px;
+}
+
+.masterTradeRoute .masterTradeLiveMarketsScroll::-webkit-scrollbar-thumb {
+  background: rgba(85, 215, 155, .5);
+  border-radius: 999px;
+}
+
+.masterTradeRoute .masterTradeLiveMarketsScroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(85, 215, 155, .78);
+}
+
+.masterTradeRoute .masterTradeLiveMarketsScroll button {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 30px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+/* Master Trade low-line mode: keep controls distinct, remove decorative separators. */
+.masterTradeRoute .masterTradeTerminalHeader,
+.masterTradeRoute .masterTradeFocusPanel,
+.masterTradeRoute .masterTradePanel,
+.masterTradeRoute .masterTradeLiveHeader,
+.masterTradeRoute .masterTradeLiveSection,
+.masterTradeRoute .masterTradeLiveApiDrawer,
+.masterTradeRoute .masterTradeLiveAccountHud,
+.masterTradeRoute .masterTradeLiveActivityRail,
+.masterTradeRoute .masterTradeLiveConnection,
+.masterTradeRoute .masterTradeLiveEmergency,
+.masterTradeRoute .masterTradeDataGrid .tableWrap,
+.masterTradeRoute .masterTradeDataGrid .masterTradeLiveTableWrap {
+  border-color: transparent !important;
+}
+
+.masterTradeRoute .masterTradeFocusPanel {
+  box-shadow: inset 3px 0 0 var(--terminal-accent);
+}
+
+.masterTradeRoute .chartCanvas,
+.masterTradeRoute .marketOhlcChart,
+.masterTradeRoute .watchlistItem,
+.masterTradeRoute .marketAnalysisMetrics > div,
+.masterTradeRoute .masterTradeLiveHeader,
+.masterTradeRoute .masterTradeLiveAccountMetrics > span,
+.masterTradeRoute .riskMonitorGrid > div,
+.masterTradeRoute .performanceMetrics > div,
+.masterTradeRoute .masterTradeLiveControlMeta,
+.masterTradeRoute .masterTradeLiveAdvanced,
+.masterTradeRoute .masterTradeLiveTableWrap td,
+.masterTradeRoute .masterTradeLiveActivity li,
+.masterTradeRoute .masterTradeLiveSafetyList details,
+.masterTradeRoute .masterTradeLiveConnectionHeader,
+.masterTradeRoute .masterTradeLiveConnectionActionBar,
+.masterTradeRoute .masterTradeLiveSecurityStrip {
+  border-top-color: transparent !important;
+  border-right-color: transparent !important;
+  border-bottom-color: transparent !important;
+  border-left-color: transparent !important;
+}
+
+.masterTradeRoute .masterTradeLiveSection > header,
+.masterTradeRoute .panelHeader,
+.masterTradeRoute .tradeDecisionHeader {
+  border-bottom-color: transparent !important;
+}
+
+.masterTradeRoute .masterTradeTerminalHeader,
+.masterTradeRoute .masterTradeFocusPanel,
+.masterTradeRoute .masterTradePanel,
+.masterTradeRoute .masterTradeLiveHeader,
+.masterTradeRoute .masterTradeLiveSection,
+.masterTradeRoute .masterTradeLiveApiDrawer,
+.masterTradeRoute .masterTradeLiveAccountHud,
+.masterTradeRoute .masterTradeLiveActivityRail,
+.masterTradeRoute .masterTradeLiveConnection,
+.masterTradeRoute .masterTradeLiveEmergency {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+#root > main.v26App.masterTradeRoute .masterTradePanel,
+#root > main.v26App.masterTradeRoute .masterTradeLiveSection,
+#root > main.v26App.masterTradeRoute .masterTradeLiveApiDrawer,
+#root > main.v26App.masterTradeRoute .masterTradeLiveAccountHud {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.masterTradeRoute .watchlistItem,
+.masterTradeRoute .chartCanvas,
+.masterTradeRoute .marketOhlcChart,
+.masterTradeRoute .marketAnalysisMetrics > div,
+.masterTradeRoute .masterTradeLiveAccountMetrics > span,
+.masterTradeRoute .riskMonitorGrid > div,
+.masterTradeRoute .performanceMetrics > div,
+.masterTradeRoute .masterTradeLiveControlMeta,
+.masterTradeRoute .masterTradeLiveAdvanced,
+.masterTradeRoute .masterTradeLiveTableWrap td,
+.masterTradeRoute .masterTradeLiveActivity li,
+.masterTradeRoute .masterTradeLiveSafetyList details,
+.masterTradeRoute .masterTradeLiveConnectionHeader,
+.masterTradeRoute .masterTradeLiveConnectionActionBar,
+.masterTradeRoute .masterTradeLiveSecurityStrip {
+  border: 0 !important;
+}
+
+/* Live Markets panel: compact header, deterministic 5-row viewport, gold active indicator. */
+.masterTradeRoute .watchlistPanel .panelHeader {
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+}
+
+.masterTradeRoute .watchlistPanel .panelHeader h3 {
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.masterTradeRoute .watchlistPanel .marketSearch {
+  margin-bottom: 7px;
+}
+
+.masterTradeRoute .watchlistPanel .marketSearch input {
+  min-height: 30px;
+}
+
+.masterTradeRoute .watchlistList {
+  gap: 6px;
+  max-height: 274px;
+  padding-right: 4px;
+}
+
+.masterTradeRoute .watchlistItem {
+  min-height: 50px;
+  padding: 7px 8px;
+  border-radius: 6px;
+}
+
+.masterTradeRoute .watchlistItem:hover {
+  background: rgba(148, 163, 184, .08);
+}
+
+.masterTradeRoute .watchlistItem.active {
+  background: rgba(212, 168, 79, .1);
+  box-shadow: inset 3px 0 0 var(--terminal-warning);
 }
