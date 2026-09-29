@@ -194,7 +194,6 @@
     line-height: 1.45;
   }
 
-  #root > main.v26App .v26DashboardWorkspaces > div:first-child,
   #root > main.v26App .v26DashboardPulse > header {
     display: flex;
     align-items: flex-start;
@@ -3367,4 +3366,51 @@
 #root:has(> main.v26App.homeRoute) > .authSessionBar .authMemberTrigger::after {
   display: none !important;
   content: none !important;
+}
+
+#root > main.v26App.homeRoute {
+  width: 100%;
+  min-width: 320px;
+  max-width: 100vw;
+  box-sizing: border-box;
+}
+
+#root > main.v26App.homeRoute .v26DashboardWorkspaces {
+  width: 100%;
+  max-width: 1180px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  width: 100%;
+  max-width: 1180px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button {
+  width: 100%;
+  min-width: 160px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button > span,
+#root > main.v26App.homeRoute .v26DashboardChoices > button b,
+#root > main.v26App.homeRoute .v26DashboardChoices > button small {
+  min-width: 0;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  writing-mode: horizontal-tb !important;
+  letter-spacing: normal !important;
+  white-space: normal !important;
+}
+
+@media (max-width: 359px) {
+  #root > main.v26App.homeRoute .v26DashboardChoices {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }
