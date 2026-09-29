@@ -643,6 +643,15 @@
   }
 }
 
+.v26MobileBottomNav,
+.v26MobileMenuBackdrop {
+  display: none;
+}
+
+.marketPulseLine {
+  display: none;
+}
+
 @media (max-width: 700px) {
   #root > main.v26App .v26DashboardHero {
     display: none;
@@ -2138,6 +2147,695 @@
 }
 
 @media (max-width: 700px) {
+  html:has(#root > main.v26App.homeRoute),
+  body:has(#root > main.v26App.homeRoute),
+  #root:has(> main.v26App.homeRoute) {
+    overflow-x: clip !important;
+  }
+
+  #root > main.v26App.homeRoute {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+    overflow-x: clip !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader {
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 50 !important;
+    display: flex !important;
+    flex-wrap: nowrap;
+    align-items: center;
+    box-sizing: border-box;
+    width: calc(100% + 28px) !important;
+    max-width: none !important;
+    margin-top: 0 !important;
+    margin-right: -14px !important;
+    margin-bottom: 0 !important;
+    margin-left: -14px !important;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px 8px !important;
+    border-radius: 0 !important;
+    gap: 8px !important;
+    background: rgba(10, 20, 32, .94) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader > .v26Brand {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    overflow: hidden;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader > .v26Brand > div {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader > .v26Brand b,
+  #root > main.v26App.homeRoute > .v26HomeHeader > .v26Brand small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader > .v26HomeHeaderStatus {
+    display: none !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26HeaderActions {
+    display: flex !important;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px !important;
+    min-width: 80px;
+    padding-right: 0;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26Notifications {
+    display: flex;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26Refresh,
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26NotificationButton {
+    display: inline-flex !important;
+    flex: 0 0 36px !important;
+    flex-shrink: 0 !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26HeaderProfileSlot {
+    display: flex !important;
+    flex: 0 0 36px !important;
+    flex-shrink: 0 !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26HeaderProfileSlot > .authSessionBar {
+    position: static !important;
+    display: flex !important;
+    flex: 0 0 36px !important;
+    flex-shrink: 0 !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    box-sizing: border-box;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .authMemberTrigger {
+    display: inline-flex !important;
+    flex: 0 0 36px !important;
+    flex-shrink: 0 !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .authProfileGlyph {
+    width: 18px !important;
+    height: 18px !important;
+    flex: 0 0 18px !important;
+  }
+
+  #root > main.v26App {
+    --mobile-bottom-nav-height: 59px;
+    --mobile-status-rail-height: 34px;
+    padding-bottom: calc(var(--mobile-bottom-nav-height) + var(--mobile-status-rail-height) + 35px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  #root > main.v26App.homeRoute .v26Dashboard {
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardPulse {
+    order: -1;
+    min-width: 0;
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    width: calc(100% + 28px);
+    margin-left: -14px;
+    margin-right: -14px;
+    background: rgba(10,20,32,.72) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardPulse > header {
+    display: none;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseLine {
+    position: relative;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 36px;
+    min-width: 0;
+    margin-inline: 0;
+    padding-inline: 0 !important;
+    border-radius: 0 !important;
+    background: rgba(10,20,32,.94) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  @media (max-width: 400px) {
+    #root > main.v26App.homeRoute .v26DashboardPulse {
+      width: calc(100% + 20px);
+      margin-left: -10px;
+      margin-right: -10px;
+    }
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseItems {
+    display: none !important;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseLiveDot {
+    position: relative;
+    display: block;
+    flex: 0 0 7px;
+    width: 7px;
+    height: 7px;
+    margin-left: 4px;
+    border-radius: 50%;
+    background: #22c55e;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseLiveDot::after {
+    position: absolute;
+    inset: -4px;
+    border: 1px solid rgba(34,197,94,.55);
+    border-radius: 50%;
+    content: '';
+    animation: marketPulseDot 1.8s ease-out infinite;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseScroller {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 36px;
+    padding: 0 !important;
+    overflow: hidden;
+    background: transparent;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    scrollbar-width: none;
+    scroll-snap-type: none;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+  }
+
+  #root > main.v26App.homeRoute .marketPulseScroller::-webkit-scrollbar {
+    display: none;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseTrack {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: max-content;
+    transform: translate3d(0,0,0);
+    animation: marketPulseMarquee var(--pulse-marquee-duration,60s) linear infinite;
+    will-change: transform;
+    backface-visibility: hidden;
+    contain: layout paint;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseGroup {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 24px;
+    width: max-content;
+    padding-right: 24px;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseScroller:hover .marketPulseTrack,
+  #root > main.v26App.homeRoute .marketPulseScroller:has(.marketPulseChip:active) .marketPulseTrack {
+    animation-play-state: paused;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseChip {
+    position: relative;
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    align-items: center;
+    gap: 4px !important;
+    width: auto !important;
+    min-width: 0 !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #fff;
+    font-size: 13px !important;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    backdrop-filter: none !important;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseChip::after {
+    position: absolute;
+    top: 11px;
+    right: -13px;
+    width: 1px;
+    height: 14px;
+    background: rgba(255,255,255,.2);
+    content: '';
+    pointer-events: none;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseChip > b {
+    color: rgba(255,255,255,.6) !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseChip > span {
+    display: inline-block !important;
+    color: #fff !important;
+    font-size: 13px !important;
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 88px;
+    width: 88px;
+    min-width: 88px;
+    box-sizing: border-box;
+    text-align: right;
+    background-color: transparent;
+    opacity: 1;
+    transition: opacity 300ms ease, background-color 300ms ease;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseChip > span.flash-up {
+    background-color: rgba(34,197,94,.2);
+    opacity: .72;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseChip > span.flash-down {
+    background-color: rgba(239,68,68,.2);
+    opacity: .72;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseChip > em {
+    flex: 0 0 auto;
+    color: #ef4444 !important;
+    font-size: 13px !important;
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 80px;
+    width: 80px;
+    min-width: 80px;
+    box-sizing: border-box;
+    text-align: right;
+  }
+
+  #root > main.v26App.homeRoute .marketPulseChip > em.up {
+    color: #22c55e !important;
+  }
+
+  @keyframes marketPulseMarquee { from { transform: translate3d(0,0,0); } to { transform: translate3d(-50%,0,0); } }
+  @keyframes marketPulseDot { 0% { transform: scale(.55); opacity: .8; } 100% { transform: scale(1.5); opacity: 0; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    #root > main.v26App.homeRoute .marketPulseTrack,
+    #root > main.v26App.homeRoute .marketPulseLiveDot::after,
+    #root > main.v26App.homeRoute .marketPulseChip > span { animation: none !important; transition: none !important; }
+  }
+
+  html:has(#root > main.v26App),
+  body:has(#root > main.v26App),
+  #root > main.v26App {
+    scrollbar-width: none !important;
+  }
+
+  html:has(#root > main.v26App)::-webkit-scrollbar,
+  body:has(#root > main.v26App)::-webkit-scrollbar,
+  #root > main.v26App::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  #root > main.v26App.homeRoute .v26Footer {
+    position: fixed !important;
+    z-index: 79 !important;
+    right: 0 !important;
+    bottom: calc(var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom, 0px)) !important;
+    left: 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(3,minmax(0,1fr));
+    align-items: center;
+    gap: 4px;
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--mobile-status-rail-height);
+    min-height: var(--mobile-status-rail-height);
+    margin: 0 !important;
+    padding: 4px 8px !important;
+    overflow: hidden;
+    border: 0 !important;
+    border-top: 1px solid rgba(255,255,255,.08) !important;
+    border-radius: 0 !important;
+    background: rgba(7,17,28,.96) !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  #root > main.v26App.homeRoute .v26Footer > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 24px;
+    padding: 0 2px;
+    overflow: hidden;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    color: var(--mobile-muted);
+    font-size: 8px;
+    line-height: 1;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardHero {
+    display: flex !important;
+    gap: 8px;
+    padding: 7px 0 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardHero h1 {
+    margin: 0 0 4px;
+    color: #edf3f8;
+    font-size: 23px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    line-height: 1.15;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardHero small {
+    display: none;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardHero p,
+  #root > main.v26App.homeRoute .v26DashboardWorkspaces p {
+    color: rgba(211,224,237,.6);
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardWorkspaces {
+    gap: 10px;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices > button {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: 22px auto;
+    align-content: start;
+    justify-items: start;
+    gap: 5px;
+    width: 100%;
+    height: 110px;
+    min-height: 110px;
+    box-sizing: border-box;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,.1) !important;
+    border-radius: 9px;
+    background: rgba(255,255,255,.05) !important;
+    color: #e0eaf3;
+    box-shadow: none;
+    backdrop-filter: blur(12px);
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices > button > svg {
+    width: 19px;
+    height: 19px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #89bce8;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices > button > span {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices > button b {
+    overflow: hidden;
+    color: #e6eef5;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    letter-spacing: .02em !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices > button small {
+    display: -webkit-box;
+    overflow: hidden;
+    color: rgba(211,224,237,.6) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1.2 !important;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices > button em {
+    display: none;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices > button:nth-child(2) {
+    border-color: rgba(242,151,78,.42) !important;
+    background: rgba(8,15,23,.78) !important;
+    box-shadow: 0 0 0 1px rgba(242,151,78,.08), 0 0 14px rgba(242,151,78,.12) !important;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardChoices > button:nth-child(2) > svg {
+    color: #f2a064;
+  }
+
+  .v26MobileBottomNav {
+    position: fixed;
+    z-index: 80;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    padding: 7px 7px calc(7px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid rgba(255,255,255,.08);
+    background: rgba(7,17,28,.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .v26MobileBottomNav > button {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 42px;
+    padding: 2px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #91a3b5;
+  }
+
+  .v26MobileBottomNav > button > svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .v26MobileBottomNav > button > span {
+    overflow: hidden;
+    max-width: 100%;
+    color: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .v26MobileBottomNav > button.active {
+    background: transparent;
+    color: #9ec9ee;
+  }
+
+  .v26MobileBottomNav > button.active::before {
+    position: absolute;
+    top: -7px;
+    left: 50%;
+    width: 24px;
+    height: 2px;
+    background: #89bce8;
+    content: '';
+    transform: translateX(-50%);
+  }
+
+  .v26MobileMenuBackdrop {
+    position: fixed;
+    z-index: 90;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+    background: rgba(3,9,16,.58);
+    backdrop-filter: blur(3px);
+  }
+
+  .v26MobileMenuSheet {
+    width: 100%;
+    padding: 16px 14px 14px;
+    border: 1px solid rgba(255,255,255,.1);
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+    background: rgba(10,23,36,.98);
+    box-shadow: 0 -18px 50px rgba(0,0,0,.34);
+  }
+
+  .v26MobileMenuSheet > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .v26MobileMenuSheet > header small {
+    color: #8fa9c0;
+    font-size: 9px;
+    font-weight: 500;
+  }
+
+  .v26MobileMenuSheet > header h2 {
+    margin: 3px 0 0;
+    color: #e5edf4;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .v26MobileMenuSheet > header > button {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px;
+    background: rgba(255,255,255,.04);
+    color: #c8d8e6;
+  }
+
+  .v26MobileMenuSheet > header > button svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .v26MobileMenuChoices {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .v26MobileMenuChoices > button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    min-height: 50px;
+    padding: 8px;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px;
+    background: rgba(15,30,45,.68);
+    color: #90b8dc;
+    text-align: left;
+  }
+
+  .v26MobileMenuChoices > button > svg {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+  }
+
+  .v26MobileMenuChoices > button > span {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .v26MobileMenuChoices b {
+    overflow: hidden;
+    color: #e3edf6;
+    font-size: 10px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .v26MobileMenuChoices small {
+    overflow: hidden;
+    color: rgba(211,224,237,.6);
+    font-size: 9px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   #root > main.v26App .v26DashboardWorkspaces {
     padding-right: 0;
     padding-left: 0;

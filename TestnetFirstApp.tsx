@@ -1,11 +1,36 @@
-import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries, type IPriceLine } from 'lightweight-charts'
-import { Activity, ArrowLeft, BarChart3, Bell, CheckCircle2, CircleDollarSign, Cloud, CloudCog, KeyRound, LockKeyhole, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2 } from 'lucide-react'
+import { Activity, ArrowLeft, BarChart3, Bell, BrainCircuit, CheckCircle2, CircleDollarSign, Cloud, CloudCog, Home, KeyRound, LockKeyhole, Menu, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2, X } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 import ScannerCenter from './ScannerCenter'
 
-const BinanceDemo = lazy(() => import('./BinanceDemo'))
+function BinanceDemoLoadRecovery() {
+  useEffect(() => {
+    const timer = window.setTimeout(() => window.dispatchEvent(new CustomEvent('protrebot-navigate',{detail:'dashboard'})),0)
+    return () => window.clearTimeout(timer)
+  },[])
+  return null
+}
+
+const retryImport = async <T,>(load:() => Promise<T>,retry:() => Promise<T>,fallback:() => T):Promise<T> => {
+  try {
+    return await load()
+  } catch {
+    await new Promise<void>(resolve => window.setTimeout(resolve,250))
+    try {
+      return await retry()
+    } catch {
+      return fallback()
+    }
+  }
+}
+
+const BinanceDemo = lazy(() => retryImport(
+  () => import('./BinanceDemo'),
+  () => import.meta.env.DEV ? import(/* @vite-ignore */ `/BinanceDemo.tsx?retry=${Date.now()}`) : import('./BinanceDemo'),
+  () => ({default:BinanceDemoLoadRecovery}) as typeof import('./BinanceDemo'),
+))
 const LiveTradingPanel = lazy(() => import('./frontend/src/LiveTradingPanel'))
 const CommercialHub = lazy(() => import('./CommercialHub'))
 const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
@@ -28,6 +53,228 @@ type NotificationResponse = {items:NotificationItem[];unread:number}
 const ANALYSIS_TIMEOUT_MS = 30000
 
 const format = (value:number) => value.toLocaleString('tr-TR',{maximumFractionDigits:value < 10 ? 5 : 2})
+
+type PulseCoin = {symbol:string;stream:string;label:string}
+type PulseQuote = {price:number;change:number}
+type PulseQuoteNode = {button:HTMLButtonElement;price:HTMLSpanElement;change:HTMLElement;label:string;flashTimer:number|undefined}
+type PulseQuoteNodesRef = {current:Map<string,Set<PulseQuoteNode>>}
+type PulseQuoteCacheRef = {current:Record<string,PulseQuote>}
+type TickerMessage = {data?:{s?:string;c?:string;P?:string}}
+type TickerSnapshot = {symbol:string;lastPrice:string;priceChangePercent:string}
+
+const MOBILE_PULSE_COINS:PulseCoin[] = [
+  {symbol:'BTCUSDT',stream:'btcusdt',label:'BTC'}, {symbol:'ETHUSDT',stream:'ethusdt',label:'ETH'},
+  {symbol:'BNBUSDT',stream:'bnbusdt',label:'BNB'}, {symbol:'SOLUSDT',stream:'solusdt',label:'SOL'},
+  {symbol:'XRPUSDT',stream:'xrpusdt',label:'XRP'}, {symbol:'DOGEUSDT',stream:'dogeusdt',label:'DOGE'},
+  {symbol:'ADAUSDT',stream:'adausdt',label:'ADA'}, {symbol:'AVAXUSDT',stream:'avaxusdt',label:'AVAX'},
+  {symbol:'LINKUSDT',stream:'linkusdt',label:'LINK'}, {symbol:'TONUSDT',stream:'tonusdt',label:'TON'},
+  {symbol:'DOTUSDT',stream:'dotusdt',label:'DOT'}, {symbol:'TRXUSDT',stream:'trxusdt',label:'TRX'},
+  {symbol:'LTCUSDT',stream:'ltcusdt',label:'LTC'}, {symbol:'SHIBUSDT',stream:'shibusdt',label:'SHIB'},
+  {symbol:'MATICUSDT',stream:'maticusdt',label:'MATIC'},
+]
+const DESKTOP_PULSE_SYMBOLS = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT']
+const QUIET_PULSE_SYMBOLS = ['TONUSDT','MATICUSDT']
+const PULSE_STREAM_URL = `wss://stream.binance.com:9443/stream?streams=${MOBILE_PULSE_COINS.map(coin => `${coin.stream}@ticker`).join('/')}`
+
+const paintPulseQuote = (node:PulseQuoteNode,quote:PulseQuote,flashDirection?:'up'|'down') => {
+  node.price.textContent = format(quote.price)
+  node.change.textContent = `${quote.change >= 0 ? '▲ +' : '▼ '}${format(quote.change)}%`
+  node.change.classList.toggle('up',quote.change >= 0)
+  node.change.classList.toggle('down',quote.change < 0)
+  node.button.setAttribute('aria-label',`${node.label}/USDT, ${format(quote.price)}, ${quote.change >= 0 ? 'yükseliş' : 'düşüş'} ${format(quote.change)}%`)
+  if (!flashDirection) return
+  if (node.flashTimer !== undefined) window.clearTimeout(node.flashTimer)
+  const flashClass = `flash-${flashDirection}`
+  node.price.classList.remove('flash-up','flash-down')
+  node.price.classList.add(flashClass)
+  node.flashTimer = window.setTimeout(() => {
+    node.price.classList.remove(flashClass)
+    node.flashTimer = undefined
+  },300)
+}
+
+const paintPulseQuoteNodes = (registry:Map<string,Set<PulseQuoteNode>>,symbol:string,quote:PulseQuote,previous?:PulseQuote) => {
+  const flashDirection = previous && previous.price !== quote.price ? quote.price > previous.price ? 'up' : 'down' : undefined
+  registry.get(symbol)?.forEach(node => paintPulseQuote(node,quote,flashDirection))
+}
+
+const MarketPulseChip = memo(function MarketPulseChip({coin,onSelect,quoteNodesRef,quoteCacheRef,clone=false}:{coin:PulseCoin;onSelect:(symbol:string)=>void;quoteNodesRef:PulseQuoteNodesRef;quoteCacheRef:PulseQuoteCacheRef;clone?:boolean}) {
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const priceRef = useRef<HTMLSpanElement>(null)
+  const changeRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const button = buttonRef.current
+    const price = priceRef.current
+    const change = changeRef.current
+    if (!button || !price || !change) return
+    const node:PulseQuoteNode = {button,price,change,label:coin.label,flashTimer:undefined}
+    const nodes = quoteNodesRef.current.get(coin.symbol) || new Set<PulseQuoteNode>()
+    nodes.add(node)
+    quoteNodesRef.current.set(coin.symbol,nodes)
+    const quote = quoteCacheRef.current[coin.symbol]
+    if (quote) paintPulseQuote(node,quote)
+    return () => {
+      if (node.flashTimer !== undefined) window.clearTimeout(node.flashTimer)
+      nodes.delete(node)
+      if (!nodes.size) quoteNodesRef.current.delete(coin.symbol)
+    }
+  },[coin.label,coin.symbol,quoteCacheRef,quoteNodesRef])
+
+  return <button ref={buttonRef} type="button" className="marketPulseChip" title={`${coin.label}/USDT`} aria-label={`${coin.label}/USDT, fiyat bekleniyor`} aria-hidden={clone} tabIndex={clone ? -1 : 0} onClick={event => {event.preventDefault();onSelect(coin.symbol)}}>
+    <b>{coin.label}</b><span className="marketPulsePrice" ref={priceRef}>—</span><em className="marketPulseChange" ref={changeRef}>—</em>
+  </button>
+})
+
+const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{markets:Market[];onSelect:(symbol:string)=>void}) {
+  const [isMobile,setIsMobile] = useState(() => window.matchMedia('(max-width: 700px)').matches)
+  const quoteCacheRef = useRef<Record<string,PulseQuote>>({})
+  const quoteNodesRef = useRef(new Map<string,Set<PulseQuoteNode>>())
+  const liveQuotesRef = useRef(new Set<string>())
+  const trackRef = useRef<HTMLDivElement>(null)
+  const pendingQuotesRef = useRef<Record<string,PulseQuote>>({})
+  const quoteFlushTimerRef = useRef<number|undefined>(undefined)
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia('(max-width: 700px)')
+    const updateMedia = () => setIsMobile(mobileQuery.matches)
+    mobileQuery.addEventListener('change',updateMedia)
+    return () => mobileQuery.removeEventListener('change',updateMedia)
+  },[])
+
+  useEffect(() => {
+    const track = trackRef.current
+    const group = track?.querySelector<HTMLElement>('.marketPulseGroup')
+    if (!track || !group) return
+    const setDurationFromWidth = () => {
+      const width = group.getBoundingClientRect().width
+      if (width > 0) {
+        const duration = `${Math.round(width / 24 * 100) / 100}s`
+        if (track.style.getPropertyValue('--pulse-marquee-duration') !== duration) track.style.setProperty('--pulse-marquee-duration',duration)
+      }
+    }
+    const observer = new ResizeObserver(setDurationFromWidth)
+    observer.observe(group)
+    setDurationFromWidth()
+    return () => observer.disconnect()
+  },[])
+
+  const fallbackQuotes = useMemo(() => Object.fromEntries(MOBILE_PULSE_COINS.map(coin => {
+    const market = markets.find(item => item.symbol.replace('/','').toUpperCase() === coin.symbol)
+    return [coin.symbol,market ? {price:market.price,change:market.change} : null]
+  })) as Record<string,PulseQuote|null>,[markets])
+
+  useEffect(() => {
+    Object.entries(fallbackQuotes).forEach(([symbol,quote]) => {
+      if (!quote || liveQuotesRef.current.has(symbol)) return
+      const previous = quoteCacheRef.current[symbol]
+      if (previous?.price === quote.price && previous.change === quote.change) return
+      quoteCacheRef.current[symbol] = quote
+      paintPulseQuoteNodes(quoteNodesRef.current,symbol,quote,previous)
+    })
+  },[fallbackQuotes])
+
+  useEffect(() => {
+    if (!isMobile) return
+    let active = true
+    let reconnectTimer = 0
+    let snapshotTimer = 0
+    let snapshotInFlight = false
+    let socket:WebSocket|null = null
+
+    const updateQuote = (symbol:string,price:number,change:number) => {
+      if (!active || !Number.isFinite(price) || !Number.isFinite(change)) return
+      const pending = pendingQuotesRef.current[symbol]
+      if (pending?.price === price && pending.change === change) return
+      pendingQuotesRef.current = {...pendingQuotesRef.current,[symbol]:{price,change}}
+      if (quoteFlushTimerRef.current !== undefined) return
+      quoteFlushTimerRef.current = window.setTimeout(() => {
+        quoteFlushTimerRef.current = undefined
+        const updates = pendingQuotesRef.current
+        pendingQuotesRef.current = {}
+        Object.entries(updates).forEach(([updatedSymbol,quote]) => {
+          const previous = quoteCacheRef.current[updatedSymbol]
+          if (previous?.price === quote.price && previous.change === quote.change) return
+          quoteCacheRef.current[updatedSymbol] = quote
+          liveQuotesRef.current.add(updatedSymbol)
+          paintPulseQuoteNodes(quoteNodesRef.current,updatedSymbol,quote,previous)
+        })
+      },1000)
+    }
+
+    const refreshQuietSymbols = async () => {
+      if (snapshotInFlight) return
+      snapshotInFlight = true
+      try {
+        const symbols = encodeURIComponent(JSON.stringify(QUIET_PULSE_SYMBOLS))
+        const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbols=${symbols}`,{cache:'no-store'})
+        if (!response.ok) return
+        const snapshots = await response.json() as TickerSnapshot[]
+        if (!active || !Array.isArray(snapshots)) return
+        snapshots.forEach(item => updateQuote(item.symbol,Number(item.lastPrice),Number(item.priceChangePercent)))
+      } catch {
+        // Keep the last available quote when the fallback request is unavailable.
+      } finally {
+        snapshotInFlight = false
+      }
+    }
+
+    const connect = () => {
+      if (!active) return
+      try {
+        socket = new WebSocket(PULSE_STREAM_URL)
+      } catch {
+        reconnectTimer = window.setTimeout(connect,3000)
+        return
+      }
+      socket.onmessage = event => {
+        try {
+          const ticker = (JSON.parse(event.data) as TickerMessage).data
+          if (ticker?.s && ticker.c && ticker.P) updateQuote(ticker.s,Number(ticker.c),Number(ticker.P))
+        } catch {
+          // Ignore malformed stream messages and keep the current ticker state.
+        }
+      }
+      socket.onerror = () => socket?.close()
+      socket.onclose = () => {if (active) reconnectTimer = window.setTimeout(connect,3000)}
+    }
+
+    connect()
+    void refreshQuietSymbols()
+    snapshotTimer = window.setInterval(() => void refreshQuietSymbols(),30000)
+    return () => {
+      active = false
+      window.clearTimeout(reconnectTimer)
+      window.clearInterval(snapshotTimer)
+      if (quoteFlushTimerRef.current !== undefined) window.clearTimeout(quoteFlushTimerRef.current)
+      quoteFlushTimerRef.current = undefined
+      pendingQuotesRef.current = {}
+      socket?.close()
+    }
+  },[isMobile])
+
+  return <>
+    <div className="v26DashboardPulseItems desktopMarketPulseItems">
+    {DESKTOP_PULSE_SYMBOLS.map(symbol => {
+      const market = markets.find(item => item.symbol.replace('/','').toUpperCase() === symbol)
+      const hasPrice = typeof market?.price === 'number' && Number.isFinite(market.price)
+      const hasChange = typeof market?.change === 'number' && Number.isFinite(market.change)
+      return <button type="button" key={symbol} onClick={() => onSelect(symbol)}><span><b>{symbol.replace('USDT','/USDT')}</b><small>{hasPrice ? `$${format(market.price)}` : '$—'}</small></span><em className={hasChange ? market.change >= 0 ? 'up' : 'down' : ''}>{hasChange ? `${market.change >= 0 ? '+' : ''}${format(market.change)}%` : '—%'}</em></button>
+    })}
+    </div>
+
+    <div className="marketPulseLine" key="mobile-market-pulse">
+      <i className="marketPulseLiveDot" role="img" aria-label="Canlı veri" />
+      <div className="v26DashboardPulseItems marketPulseScroller">
+        <div className="marketPulseTrack" key="mobile-market-pulse-track" ref={trackRef}>
+          {[false,true].map(clone => <div className="marketPulseGroup" key={clone ? 'clone' : 'primary'} aria-hidden={clone || undefined}>
+            {MOBILE_PULSE_COINS.map(coin => <MarketPulseChip key={coin.symbol} coin={coin} onSelect={onSelect} quoteNodesRef={quoteNodesRef} quoteCacheRef={quoteCacheRef} clone={clone}/>) }
+          </div>)}
+        </div>
+      </div>
+    </div>
+  </>
+})
 
 const gateInteraction = (target:View,eventName?:string) => ({
   role:'button' as const,
@@ -151,6 +398,7 @@ export default function TestnetFirstApp() {
   const [connectionStatus,setConnectionStatus] = useState<ConnectionStatus|null>(null)
   const [notifications,setNotifications] = useState<NotificationItem[]>([])
   const [notificationsOpen,setNotificationsOpen] = useState(false)
+  const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
   const [headerHidden,setHeaderHidden] = useState(false)
   const [complianceOpen,setComplianceOpen] = useState(false)
   const [complianceTab,setComplianceTab] = useState<'risk'|'privacy'|'terms'|'support'>('risk')
@@ -158,10 +406,9 @@ export default function TestnetFirstApp() {
   const marketPickerRef = useRef<HTMLDivElement>(null)
   const unreadNotifications = notifications.filter(item => !item.read).length
   const selectedMarket = markets.find(market => market.symbol === symbol)
-  const pulseSymbols = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT']
-  const pulseMarkets = pulseSymbols.map(pulseSymbol => markets.find(market => market.symbol.replace('/','').toUpperCase() === pulseSymbol))
 
-  const navigate = (target:View) => {
+  const navigate = useCallback((target:View) => {
+    setMobileMenuOpen(false)
     if (target === 'testnet' as View) target = 'dashboard'
     setView(target)
     if (target === 'pricing' || target === 'billing' || target === 'master-trade') {
@@ -169,7 +416,13 @@ export default function TestnetFirstApp() {
     } else if (window.location.pathname === '/pricing' || window.location.pathname === '/billing' || window.location.pathname === '/master-trade') {
       window.history.pushState({},'', '/')
     }
-  }
+  },[])
+
+  const selectPulseSymbol = useCallback((nextSymbol:string) => {
+    setSymbol(nextSymbol)
+    navigate('trading')
+    window.scrollTo(0,0)
+  },[navigate])
 
   useEffect(() => {
     const onNavigate = (event:Event) => navigate((event as CustomEvent<View>).detail)
@@ -367,6 +620,13 @@ export default function TestnetFirstApp() {
   },[view])
 
   useEffect(() => {
+    if (!mobileMenuOpen) return
+    const closeOnEscape = (event:KeyboardEvent) => {if (event.key === 'Escape') setMobileMenuOpen(false)}
+    document.addEventListener('keydown',closeOnEscape)
+    return () => document.removeEventListener('keydown',closeOnEscape)
+  },[mobileMenuOpen])
+
+  useEffect(() => {
     let previousY = window.scrollY
     let ticking = false
     const updateScrollState = () => {
@@ -399,6 +659,7 @@ export default function TestnetFirstApp() {
           </section>}
         </div>
       </div>
+      <div className="v26HeaderProfileSlot" />
     </header> : <button type="button" className="workspaceBack" onClick={() => setView('dashboard')}><ArrowLeft/> <span>Home</span></button>}
 
     {view !== 'dashboard' && <section className="v26ModeBar">
@@ -406,9 +667,8 @@ export default function TestnetFirstApp() {
     </section>}
 
     {view === 'dashboard' && <section className="v26Dashboard" aria-labelledby="dashboard-title">
-      <header className="v26DashboardHero"><div><small>PROTREBOT ELITE X</small><h1 id="dashboard-title">İşlem Terminali</h1><p>Devam etmek için bir çalışma alanı seçin.</p></div></header>
-      <section className="v26DashboardWorkspaces" aria-labelledby="workspace-title">
-        <div><h2 id="workspace-title">NE YAPMAK İSTİYORSUNUZ?</h2><p>Bir çalışma alanı seçin</p></div>
+      <header className="v26DashboardHero"><div><small>PROTREBOT ELITE X</small><h1 id="dashboard-title">İşlem Terminali</h1><p>Bir çalışma alanı seçin.</p></div></header>
+      <section className="v26DashboardWorkspaces" aria-label="Çalışma alanları">
         <div className="v26DashboardChoices">
           <button type="button" onClick={() => setView('trading')}><Activity/><span><b>İŞLEM</b><small>İşlem açın ve yönetin</small></span><em>→</em></button>
           <button type="button" onClick={() => navigate('master-trade')}><ShieldCheck/><span><b>MASTER TRADE</b><small>Profesyonel işlem alanı</small></span><em>→</em></button>
@@ -424,14 +684,7 @@ export default function TestnetFirstApp() {
       </section>
       <section className="v26DashboardPulse" aria-labelledby="market-pulse-title">
           <header><div><h2 id="market-pulse-title">Piyasa Nabzı</h2><p>{markets.length ? 'Canlı piyasa özeti' : 'Piyasa verisi bekleniyor'}</p></div><small>{markets.length ? 'CANLI VERİ' : 'VERİ BEKLENİYOR'}</small></header>
-        <div className="v26DashboardPulseItems">
-          {pulseSymbols.map((pulseSymbol,index) => {
-            const market = pulseMarkets[index]
-            const hasPrice = typeof market?.price === 'number' && Number.isFinite(market.price)
-            const hasChange = typeof market?.change === 'number' && Number.isFinite(market.change)
-            return <button type="button" key={pulseSymbol} onClick={() => {setSymbol(pulseSymbol);setView('trading')}}><span><b>{pulseSymbol.replace('USDT','/USDT')}</b><small>{hasPrice ? `$${format(market.price)}` : '$—'}</small></span><em className={hasChange ? market.change >= 0 ? 'up' : 'down' : ''}>{hasChange ? `${market.change >= 0 ? '+' : ''}${format(market.change)}%` : '—%'}</em></button>
-          })}
-        </div>
+        <MobileMarketPulse markets={markets} onSelect={selectPulseSymbol}/>
       </section>
     </section>}
 
@@ -495,7 +748,26 @@ export default function TestnetFirstApp() {
       <section className="connectionSecurityPanel"><header><div><span>SECURITY &amp; SAFETY</span><h3>Fail-closed by design</h3></div><ShieldCheck/></header><div>{['Secrets are stored server-side','Secrets are never displayed in the UI','Live trading remains locked by default','Demo and Live credentials are separated','Orders require existing safety gates','No automatic live orders on startup'].map(item => <span key={item}><CheckCircle2/>{item}</span>)}</div></section>
     </section>}
 
-    {view === 'dashboard' && <nav className={`terminalMobileNav ${headerHidden ? 'terminalMobileNavHidden' : ''}`} aria-label="Mobil ana navigasyon"><button className="active" onClick={() => setView('dashboard')}><TestTube2/><span>Home</span></button></nav>}
+    <nav className="v26MobileBottomNav" aria-label="Mobil ana navigasyon">
+      <button className={view === 'dashboard' ? 'active' : ''} type="button" onClick={() => navigate('dashboard')}><Home/><span>Ana sayfa</span></button>
+      <button className={view === 'trading' ? 'active' : ''} type="button" onClick={() => navigate('trading')}><Activity/><span>İşlem</span></button>
+      <button className={view === 'analyst' ? 'active' : ''} type="button" onClick={() => navigate('analyst')}><BrainCircuit/><span>Analist</span></button>
+      <button className={view === 'performance' ? 'active' : ''} type="button" onClick={() => navigate('performance')}><BarChart3/><span>Performans</span></button>
+      <button className={mobileMenuOpen ? 'active' : ''} type="button" aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(open => !open)}><Menu/><span>Menü</span></button>
+    </nav>
+    {mobileMenuOpen && <div className="v26MobileMenuBackdrop" role="presentation" onClick={event => {if (event.target === event.currentTarget) setMobileMenuOpen(false)}}>
+      <section className="v26MobileMenuSheet" role="dialog" aria-modal="true" aria-label="Çalışma alanları">
+        <header><div><small>PROTREBOT</small><h2>Çalışma alanları</h2></div><button type="button" aria-label="Menüyü kapat" onClick={() => setMobileMenuOpen(false)}><X/></button></header>
+        <div className="v26MobileMenuChoices">
+          <button type="button" onClick={() => navigate('scanner')}><Radar/><span><b>Tarama</b><small>Piyasa fırsatları</small></span></button>
+          <button type="button" onClick={() => navigate('live')}><RadioTower/><span><b>Canlı hazırlık</b><small>Güvenlik ve durum</small></span></button>
+          <button type="button" onClick={() => navigate('ops')}><Cloud/><span><b>Operasyon</b><small>Sistem merkezi</small></span></button>
+          <button type="button" onClick={() => navigate('setup')}><CloudCog/><span><b>Bağlantılar</b><small>API ve kasa</small></span></button>
+          <button type="button" onClick={() => navigate('billing')}><Sparkles/><span><b>Abonelik</b><small>Plan ve faturalama</small></span></button>
+          <button type="button" onClick={() => navigate('risk')}><ShieldCheck/><span><b>Risk</b><small>Pozisyon kontrolleri</small></span></button>
+        </div>
+      </section>
+    </div>}
     {view === 'setup' && <section className="v26TrustStrip" style={{margin:'0 1rem 1rem',padding:'1rem 1.25rem',border:'1px solid rgba(148,163,184,0.18)',borderRadius:'16px',background:'rgba(15,23,42,0.82)',display:'grid',gap:'0.7rem'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'0.75rem',flexWrap:'wrap'}}>
         <div>
