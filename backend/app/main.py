@@ -1349,10 +1349,21 @@ async def web_access_check():
 
 @app.get("/api/markets")
 async def markets(limit: int = Query(500, ge=1, le=500)):
+    return await _markets(limit=limit)
+
+
+async def _markets(limit: int, timing: dict[str, float] | None = None):
     try:
+        async def request_market_data(path: str, timing_key: str) -> httpx.Response:
+            started = time.monotonic()
+            response = await market_data_request(app, path)
+            if timing is not None:
+                timing[timing_key] = time.monotonic() - started
+            return response
+
         exchange_response, ticker_response = await asyncio.gather(
-            market_data_request(app, "/fapi/v1/exchangeInfo"),
-            market_data_request(app, "/fapi/v1/ticker/24hr"),
+            request_market_data("/fapi/v1/exchangeInfo", "market_info"),
+            request_market_data("/fapi/v1/ticker/24hr", "ticker"),
         )
         exchange_response.raise_for_status()
         ticker_response.raise_for_status()
@@ -4171,13 +4182,22 @@ async def smart_scan(limit: int = Query(18, ge=6, le=30), interval: str = "15m")
 @app.get("/api/analysis-universe")
 async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1, le=100)):
     """Return cached, read-only technical snapshots for eligible USDT pairs."""
+    analysis_started = time.monotonic()
+    timing = {
+        "market_info": 0.0,
+        "ticker": 0.0,
+        "candle_fetch_total": 0.0,
+        "indicator_total": 0.0,
+        "scoring_total": 0.0,
+        "serialization_total": 0.0,
+    }
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(400, "Desteklenmeyen zaman dilimi")
     cached = ANALYSIS_UNIVERSE_CACHE.get(interval)
     if cached and time.monotonic() - cached[0] < 60:
         return {"cached": True, "interval": interval, "results": cached[1][:limit]}
 
-    market_list = await markets(limit=limit)
+    market_list = await _markets(limit=limit, timing=timing)
     if not market_list:
         raise HTTPException(502, "Binance Futures market data unavailable: no tradable markets returned.")
     semaphore = asyncio.Semaphore(8)
@@ -4185,23 +4205,29 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
     async def inspect(market: dict) -> dict | None:
         try:
             async with semaphore:
+                candle_started = time.monotonic()
                 candles = await fetch_candles(market["symbol"], interval, 500)
                 if interval == "15m":
                     mtf_intervals = ("1h", "4h", "1d")
                     higher_timeframes = await asyncio.gather(
                         *(fetch_candles(market["symbol"], timeframe, 260) for timeframe in mtf_intervals)
                     )
+                    timing["candle_fetch_total"] += time.monotonic() - candle_started
                     mtf_candles = {"15m": candles[-260:]}
                     mtf_candles.update(dict(zip(mtf_intervals, higher_timeframes)))
+                    indicator_started = time.monotonic()
                     result, mtf = await asyncio.gather(
                         asyncio.to_thread(analyze, candles),
                         consensus_from_candles(market["symbol"], mtf_candles),
                     )
                 else:
+                    timing["candle_fetch_total"] += time.monotonic() - candle_started
+                    indicator_started = time.monotonic()
                     result, mtf = await asyncio.gather(
                         asyncio.to_thread(analyze, candles),
                         multi_timeframe_consensus(market["symbol"]),
                     )
+                timing["indicator_total"] += time.monotonic() - indicator_started
             direction = result["direction"]
             aligned = (
                 result["ema"]["ema20"] > result["ema"]["ema50"] > result["ema"]["ema200"]
@@ -4213,6 +4239,7 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
             mtf_fit = min(100.0, float(mtf["alignment"]))
             volatility_pct = abs(candles[-1]["high"] - candles[-1]["low"]) / max(candles[-1]["close"], 1e-9) * 100
             volatility_fit = 1.0 if volatility_pct < 3 else .55
+            scoring_started = time.monotonic()
             smart_score = round(min(100.0, max(0.0, result["confidence"] * .30 + mtf_fit * .20 + (18 if aligned else 7) + rsi_fit * 14 + min(12, result["volume_ratio"] * 6) + min(10, result["risk_reward"] / 3 * 10) * volatility_fit)), 1)
             confidence_score = max(0.0, min(100.0, float(result["confidence"])))
             liquidity_score = max(0.0, min(100.0, float(result["volume_ratio"]) / 1.5 * 100.0))
@@ -4226,6 +4253,7 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
                 + mtf_score * .15 + freshness_score * .10 + risk_reward_score * .05,
                 1,
             )
+            timing["scoring_total"] += time.monotonic() - scoring_started
             risk_pct = abs(result["entry"] - result["stop_loss"]) / result["entry"] * 100
             potential_tp3_pct = abs(result["tp3"] - result["entry"]) / result["entry"] * 100
             previous_volume = sum(candle["volume"] for candle in candles[-21:-1]) / max(1, len(candles[-21:-1]))
@@ -4316,7 +4344,23 @@ async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1,
     if alert_changed:
         asyncio.create_task(persist_paper_snapshot(app))
     ANALYSIS_UNIVERSE_CACHE[interval] = (time.monotonic(), results)
-    return {"cached": False, "interval": interval, "results": results[:limit]}
+    payload = {"cached": False, "interval": interval, "results": results[:limit]}
+    serialization_started = time.monotonic()
+    response = JSONResponse(content=payload)
+    timing["serialization_total"] = time.monotonic() - serialization_started
+    logger.info(
+        "Analyst analysis_universe timing interval=%s limit=%s analysis_universe_total=%.3f market_info=%.3f ticker=%.3f candle_fetch_total=%.3f indicator_total=%.3f scoring_total=%.3f serialization_total=%.3f",
+        interval,
+        limit,
+        time.monotonic() - analysis_started,
+        timing["market_info"],
+        timing["ticker"],
+        timing["candle_fetch_total"],
+        timing["indicator_total"],
+        timing["scoring_total"],
+        timing["serialization_total"],
+    )
+    return response
 
 
 @app.get("/api/signal-history/{symbol}")

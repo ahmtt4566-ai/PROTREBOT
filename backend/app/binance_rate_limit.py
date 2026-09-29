@@ -22,6 +22,9 @@ RATE_LIMIT_FALLBACK_SECONDS = min(
     max(1, int(os.getenv("BINANCE_RATE_LIMIT_FALLBACK_SECONDS", "10"))),
     RATE_LIMIT_MAX_WAIT_SECONDS,
 )
+BINANCE_MAX_CONCURRENT_REQUESTS_PER_HOST = max(
+    1, int(os.getenv("BINANCE_MAX_CONCURRENT_REQUESTS_PER_HOST", "8"))
+)
 
 
 def retry_after_seconds(response: Any) -> int | None:
@@ -34,6 +37,9 @@ def retry_after_seconds(response: Any) -> int | None:
 @dataclass
 class _HostState:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    semaphore: asyncio.Semaphore = field(
+        default_factory=lambda: asyncio.Semaphore(BINANCE_MAX_CONCURRENT_REQUESTS_PER_HOST)
+    )
     cooldown_until: float = 0.0
     used_weight_1m: int | None = None
 
@@ -49,7 +55,7 @@ class RateLimitPermit:
 
 
 class BinanceRateLimiter:
-    """Serialize Binance calls per host and coordinate process-local cooldowns."""
+    """Bound Binance calls per host and coordinate process-local cooldowns."""
 
     def __init__(self) -> None:
         self._states: dict[str, _HostState] = {}
@@ -68,8 +74,9 @@ class BinanceRateLimiter:
     @asynccontextmanager
     async def slot(self, host: str) -> AsyncIterator[RateLimitPermit]:
         state = self._state_for(host)
-        async with state.lock:
-            await self._wait(state)
+        async with state.semaphore:
+            async with state.lock:
+                await self._wait(state)
             yield RateLimitPermit(self, host, state)
 
     def observe(self, host: str, response: Any, *, exchange_code: int | str | None = None) -> None:
