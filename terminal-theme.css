@@ -10535,3 +10535,36 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   background: rgba(212, 168, 79, .1);
   box-shadow: inset 3px 0 0 var(--terminal-warning);
 }
+/* Demo Trade Activity Panel - Temporary styles file for safe addition */
+.v26App.workspaceRoute .v21TradeActivityPanel { min-width: 0 !important; padding: 16px !important; background: #0d1117 !important; border-radius: 10px !important; box-shadow: none !important; }
+.v26App.workspaceRoute .v21TradeActivityPanel > header { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.v26App.workspaceRoute .v21TradeActivityPanel > header > div { display: flex; flex-direction: column; gap: 3px; }
+.v26App.workspaceRoute .v21TradeActivityPanel > header span { color: var(--text-faint); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
+.v26App.workspaceRoute .v21TradeActivityPanel > header h2 { color: var(--text); font-size: 16px; letter-spacing: .02em; font-weight: 600; margin: 0; }
+.v26App.workspaceRoute .v21ActivityMetrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.v26App.workspaceRoute .v21ActivityMetrics > span { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: rgba(148, 163, 184, .06); border-radius: 8px; border: 1px solid rgba(255,255,255,.04); }
+.v26App.workspaceRoute .v21ActivityMetrics > span:hover { background: rgba(148, 163, 184, .12); }
+.v26App.workspaceRoute .v21ActivityMetrics small { color: var(--text-faint); font-size: 8px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+.v26App.workspaceRoute .v21ActivityMetrics b { color: var(--text); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v26App.workspaceRoute .v21ActivityMetrics .demoProfit { color: #4ade80 !important; }
+.v26App.workspaceRoute .v21ActivityMetrics .demoLoss { color: #f87171 !important; }
+.v26App.workspaceRoute .v21ActivityTable { border: 1px solid rgba(255,255,255,.08); border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.02); }
+.v26App.workspaceRoute .v21ActivityHead { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; padding: 10px 12px; background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.08); font-size: 8px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); }
+.v26App.workspaceRoute .v21ActivityRow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.04); align-items: center; font-size: 11px; color: var(--text-dim); }
+.v26App.workspaceRoute .v21ActivityRow:last-child { border-bottom: none; }
+.v26App.workspaceRoute .v21ActivityRow:hover { background: rgba(255,255,255,.02); }
+.v26App.workspaceRoute .v21ActivitySymbol { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v26App.workspaceRoute .v21ActivitySide { font-weight: 600; text-transform: uppercase; font-size: 10px; }
+.v26App.workspaceRoute .v21ActivitySide.long { color: #4ade80 !important; }
+.v26App.workspaceRoute .v21ActivitySide.short { color: #f87171 !important; }
+.v26App.workspaceRoute .v21ActivityPrice,
+.v26App.workspaceRoute .v21ActivityStatus { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v26App.workspaceRoute .v21ActivityPnl { text-align: right; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v26App.workspaceRoute .v21ActivityPnl.positive { color: #4ade80 !important; }
+.v26App.workspaceRoute .v21ActivityPnl.negative { color: #f87171 !important; }
+.v26App.workspaceRoute .v21ActivityEmpty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 32px 16px; color: var(--text-dim); text-align: center; }
+.v26App.workspaceRoute .v21ActivityEmpty > svg { width: 32px; height: 32px; color: var(--text-faint); }
+.v26App.workspaceRoute .v21ActivityEmpty b { color: var(--text-dim); font-size: 12px; font-weight: 600; }
+.v26App.workspaceRoute .v21ActivityEmpty span { color: var(--text-faint); font-size: 11px; line-height: 1.4; }
+@media (max-width: 1100px) { .v26App.workspaceRoute .v21ActivityMetrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } .v26App.workspaceRoute .v21ActivityHead, .v26App.workspaceRoute .v21ActivityRow { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .v26App.workspaceRoute .v21ActivityMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .v26App.workspaceRoute .v21ActivityMetrics > span { padding: 8px 10px; } .v26App.workspaceRoute .v21ActivityMetrics small { font-size: 7px; } .v26App.workspaceRoute .v21ActivityMetrics b { font-size: 12px; } .v26App.workspaceRoute .v21ActivityHead, .v26App.workspaceRoute .v21ActivityRow { grid-template-columns: repeat(3, minmax(0, 1fr)); font-size: 9px; padding: 8px 10px; } .v26App.workspaceRoute .v21ActivityRow { font-size: 10px; } }

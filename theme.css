@@ -2486,55 +2486,81 @@ html, body, #root, .app, .workspace, .page,
    visual order and available space change inside this route. */
 .v26App.workspaceRoute .binanceDemoDeck {
   display: grid !important;
-  grid-template-columns: minmax(360px, 1.5fr) minmax(280px, .95fr) minmax(320px, 1fr) !important;
+  grid-template-columns: minmax(0, 1fr) 360px !important;
   grid-template-areas:
-    "topnav topnav topnav"
-    "hero hero hero"
-    "pulse pulse pulse"
-    "market market market"
-    "chart position order"
-    "chart . order"
-    "orders orders orders"
-    "setup setup setup"
-    "command command command"
-    "message message message"
-    "confirmation confirmation confirmation"
-    "workflow workflow workflow"
-    "summary summary summary"
-    "insights insights insights"
-    "history history history"
-    "alerts alerts alerts"
-    "advanced advanced advanced"
-    "journal journal journal"
-    "strategy strategy strategy"
-    "regime regime regime"
-    "health health health"
-    "intelligence intelligence intelligence" !important;
+    "topnav topnav"
+    "demoTopBar demoTopBar"
+    "demoSummaryBar demoSummaryBar"
+    "demoMainArea demoRightPanel"
+    "demoTabsNav demoRightPanel"
+    "demoTabs demoRightPanel"
+    "demoTabsExtra demoRightPanel"
+    "activity activity"
+    "message message"
+    "confirmation confirmation"
+    "workflow workflow"
+    "insights insights"
+    "history history"
+    "alerts alerts"
+    "journal journal"
+    "strategy strategy"
+    "regime regime"
+    "health health"
+    "intelligence intelligence" !important;
   gap: 14px !important;
   align-items: start !important;
   min-width: 0 !important;
 }
 
+@media (max-width: 1024px) {
+  .v26App.workspaceRoute .binanceDemoDeck {
+    grid-template-columns: 1fr !important;
+    grid-template-areas:
+      "topnav"
+      "demoTopBar"
+      "demoSummaryBar"
+      "demoMainArea"
+      "demoTabsNav"
+      "demoTabs"
+      "demoTabsExtra"
+      "demoRightPanel"
+      "activity"
+      "message"
+      "confirmation"
+      "workflow"
+      "insights"
+      "history"
+      "alerts"
+      "journal"
+      "strategy"
+      "regime"
+      "health"
+      "intelligence" !important;
+  }
+}
+
 .v26App.workspaceRoute .binanceDemoDeck > .v21Tabs { grid-area: topnav; }
-.v26App.workspaceRoute .binanceDemoDeck > .demoHero { grid-area: hero; }
-.v26App.workspaceRoute .binanceDemoDeck > .v21Pulse { grid-area: pulse; }
-.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard { grid-area: setup; }
-.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip { grid-area: market; }
-.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart { grid-area: chart; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero { grid-area: demoTopBar; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21Pulse { grid-area: demoSummaryBar; order: -1; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard { grid-area: demoTabs; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip { grid-area: demoSummaryBar; display: grid !important; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; padding: 0; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoLiveChart { grid-area: demoMainArea; }
 .v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid { display: contents !important; }
 .v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid.demoTabHidden { display: none !important; }
-.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoTicket { grid-area: order; }
-.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoPositions { grid-area: position; }
-.v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid { grid-area: orders; }
-.v26App.workspaceRoute .binanceDemoDeck > .demoCommandBar { grid-area: command; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoTicket { grid-area: demoRightPanel; align-self: start; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoBottomTabsNav { grid-area: demoTabsNav; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoPositions { grid-area: demoTabs; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoOrdersGrid { grid-area: demoTabs; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21TradeActivityPanel { grid-area: activity; }
+.v26App.workspaceRoute .binanceDemoDeck > .demoCommandBar { grid-area: demoTabsExtra; }
 .v26App.workspaceRoute .binanceDemoDeck > .demoMessage { grid-area: message; }
 .v26App.workspaceRoute .binanceDemoDeck > .demoOrderConfirmation { grid-area: confirmation; }
 .v26App.workspaceRoute .binanceDemoDeck > .v21Workflow { grid-area: workflow; }
-.v26App.workspaceRoute .binanceDemoDeck > .v21ExecutiveSummary { grid-area: summary; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21ExecutiveSummary { grid-area: demoTabs; }
 .v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights { grid-area: insights; }
 .v26App.workspaceRoute .binanceDemoDeck > .v21DecisionHistoryPanel { grid-area: history; }
 .v26App.workspaceRoute .binanceDemoDeck > .v21SmartAlertCenter { grid-area: alerts; }
-.v26App.workspaceRoute .binanceDemoDeck > .v21AdvancedAnalytics { grid-area: advanced; }
+.v26App.workspaceRoute .binanceDemoDeck > .v21AdvancedAnalytics { grid-area: demoTabs; }
 .v26App.workspaceRoute .binanceDemoDeck > .v21AiTradeJournal { grid-area: journal; }
 .v26App.workspaceRoute .binanceDemoDeck > .v21StrategyPerformance { grid-area: strategy; }
 .v26App.workspaceRoute .binanceDemoDeck > .v21MarketRegime { grid-area: regime; }
@@ -2572,10 +2598,55 @@ html, body, #root, .app, .workspace, .page,
   display: none !important;
 }
 
-.v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+.v26App.workspaceRoute .binanceDemoDeck .demoBottomTabsNav {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  margin-bottom: 10px !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoBottomTabsNav button {
   min-height: 0 !important;
-  padding: 20px 22px !important;
-  border-radius: 12px !important;
+  padding: 8px 14px !important;
+  border: 1px solid rgba(255,255,255,.08) !important;
+  border-radius: 8px !important;
+  background: rgba(255,255,255,.03) !important;
+  color: var(--text-dim) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .05em !important;
+  cursor: pointer !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck .demoBottomTabsNav button.active {
+  border-color: rgba(217,102,42,.5) !important;
+  background: rgba(217,102,42,.12) !important;
+  color: var(--text) !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid.demoTabHidden,
+.v26App.workspaceRoute .binanceDemoDeck:not(.demoFocusMode) > .v21AdvancedAnalytics.demoTabHidden,
+.v26App.workspaceRoute .binanceDemoDeck > .v21ExecutiveSummary.demoTabHidden,
+.v26App.workspaceRoute .binanceDemoDeck > .demoSetupCard.demoTabHidden,
+.v26App.workspaceRoute .binanceDemoDeck > .demoCommandBar.demoTabHidden,
+.v26App.workspaceRoute .binanceDemoDeck > .demoMainGrid > .demoPositions.demoTabHidden {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .v21DashboardInsights.secondaryAnalyticsClosed ~ .v21AdvancedAnalytics:not(.demoTabHidden) {
+  display: grid !important;
+}
+
+.v26App.workspaceRoute .binanceDemoDeck > .demoHero {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: 10px 16px !important;
+  border-radius: 10px !important;
   background: linear-gradient(120deg, #0d1722, #0a1018 72%) !important;
   box-shadow: none !important;
 }
@@ -2584,38 +2655,125 @@ html, body, #root, .app, .workspace, .page,
   display: none !important;
 }
 
-.v26App.workspaceRoute .demoHeroCopy h2 {
-  margin: 4px 0 !important;
-  color: var(--text) !important;
-  font-size: clamp(22px, 2.2vw, 30px) !important;
-  letter-spacing: 0 !important;
+.v26App.workspaceRoute .demoHeroCopy {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
 }
 
-.v26App.workspaceRoute .demoHeroCopy p {
-  color: var(--text-dim) !important;
-  font-size: 12px !important;
+.v26App.workspaceRoute .demoHeroCopy > span,
+.v26App.workspaceRoute .demoHeroCopy > h2,
+.v26App.workspaceRoute .demoHeroCopy > small.demoHeroSymbol,
+.v26App.workspaceRoute .demoHeroCopy > p {
+  display: none !important;
+}
+
+.v26App.workspaceRoute .demoHeroCopy > div {
+  margin: 0 !important;
+}
+
+.v26App.workspaceRoute .demoHeroCopy > div span {
+  display: none !important;
 }
 
 .v26App.workspaceRoute .demoHeroCopy > div b {
+  min-height: 0 !important;
+  padding: 5px 9px !important;
   background: rgba(217,102,42,.12) !important;
   color: var(--orange) !important;
 }
 
+.v26App.workspaceRoute .demoHeroConnect {
+  min-height: 0 !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+}
+
+.v26App.workspaceRoute .demoHeroStop {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-height: 0 !important;
+  padding: 6px 12px !important;
+  border: 1px solid rgba(239,68,68,.4) !important;
+  border-radius: 8px !important;
+  background: rgba(239,68,68,.1) !important;
+  color: #f87171 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .04em !important;
+  cursor: pointer !important;
+}
+
+.v26App.workspaceRoute .demoHeroStop:disabled {
+  opacity: .45 !important;
+  cursor: not-allowed !important;
+}
+
+.v26App.workspaceRoute .demoHeroStop svg {
+  width: 13px !important;
+  height: 13px !important;
+}
+
 .v26App.workspaceRoute .demoHeroStatus {
+  display: flex !important;
+  align-items: center !important;
   gap: 8px !important;
 }
 
+.v26App.workspaceRoute .demoHeroStatus > .demoSymbolStatus {
+  display: none !important;
+}
+
 .v26App.workspaceRoute .demoHeroStatus > span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
   min-height: 0 !important;
-  padding: 10px !important;
+  padding: 6px 10px !important;
   border-radius: 8px !important;
   background: rgba(255,255,255,.035) !important;
   box-shadow: none !important;
 }
 
+.v26App.workspaceRoute .demoHeroStatus > span > svg {
+  width: 13px !important;
+  height: 13px !important;
+}
+
 .v26App.workspaceRoute .demoHeroStatus small {
-  color: var(--text-faint) !important;
+  display: none !important;
+}
+
+.v26App.workspaceRoute .demoHeroStatus b {
   font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .02em !important;
+  white-space: nowrap !important;
+}
+
+#root .v26App.workspaceRoute:has(.demoHero) .v26ModeBar {
+  min-height: 0 !important;
+  padding: 8px 16px !important;
+}
+
+#root .v26App.workspaceRoute:has(.demoHero) .v26ModeBar p {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute:has(.demoHero) .v26ModeBar h1 {
+  margin: 0 !important;
+  font-size: 15px !important;
+}
+
+#root .v26App.workspaceRoute:has(.demoHero) .v26ModeBar small {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute:has(.demoHero) .v26MarketBar {
+  min-height: 0 !important;
+  margin-top: 6px !important;
+  padding: 8px 16px !important;
 }
 
 .v26App.workspaceRoute .demoHeroStatus b {
@@ -2708,6 +2866,9 @@ html, body, #root, .app, .workspace, .page,
 }
 
 .v26App.workspaceRoute .demoLiveChart {
+  position: relative !important;
+  width: 100% !important;
+  min-height: 520px !important;
   padding: 14px !important;
   border-radius: 10px !important;
   box-shadow: none !important;
@@ -3079,31 +3240,28 @@ html, body, #root, .app, .workspace, .page,
 
 @media (max-width: 1100px) {
   .v26App.workspaceRoute .binanceDemoDeck {
-    grid-template-columns: minmax(190px, 1fr) minmax(280px, 1.35fr) !important;
+    grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas:
-      "topnav topnav"
-      "hero hero"
-      "pulse pulse"
-      "market market"
-      "chart chart"
-      "order order"
-      "position position"
-      "orders orders"
-      "setup setup"
-      "command command"
-      "message message"
-      "confirmation confirmation"
-      "workflow workflow"
-      "summary summary"
-      "insights insights"
-      "history history"
-      "alerts alerts"
-      "advanced advanced"
-      "journal journal"
-      "strategy strategy"
-      "regime regime"
-      "health health"
-      "intelligence intelligence" !important;
+      "topnav"
+      "demoTopBar"
+      "demoSummaryBar"
+      "demoMainArea"
+      "demoTabsNav"
+      "demoTabs"
+      "demoTabsExtra"
+      "demoRightPanel"
+      "activity"
+      "message"
+      "confirmation"
+      "workflow"
+      "insights"
+      "history"
+      "alerts"
+      "journal"
+      "strategy"
+      "regime"
+      "health"
+      "intelligence" !important;
   }
 
   .v26App.workspaceRoute .binanceDemoDeck > .v21Tabs {
@@ -3124,23 +3282,20 @@ html, body, #root, .app, .workspace, .page,
     grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas:
       "topnav"
-      "hero"
-      "pulse"
-      "chart"
-      "market"
-      "order"
-      "position"
-      "command"
-      "orders"
-      "setup"
+      "demoTopBar"
+      "demoSummaryBar"
+      "demoMainArea"
+      "demoTabsNav"
+      "demoTabs"
+      "demoTabsExtra"
+      "demoRightPanel"
+      "activity"
       "message"
       "confirmation"
       "workflow"
-      "summary"
       "insights"
       "history"
       "alerts"
-      "advanced"
       "journal"
       "strategy"
       "regime"
@@ -3887,10 +4042,11 @@ html, body, #root, .app, .workspace, .page,
   grid-template-columns: minmax(0, 1fr) !important;
   grid-template-areas:
     "topnav"
-    "chart"
-    "position"
-    "order"
-    "command"
+    "demoMainArea"
+    "demoTabsNav"
+    "demoTabs"
+    "demoTabsExtra"
+    "demoRightPanel"
     "message"
     "confirmation" !important;
 }
@@ -4171,8 +4327,10 @@ html, body, #root, .app, .workspace, .page,
 }
 
 .v26App.workspaceRoute .binanceDemoDeck .demoChartCanvas {
-  height: clamp(240px, 23vw, 300px) !important;
-  min-height: 240px !important;
+  position: relative !important;
+  width: 100% !important;
+  height: 520px !important;
+  min-height: 520px !important;
 }
 
 .v26App.workspaceRoute .binanceDemoDeck .demoChartEmpty {
@@ -4621,40 +4779,51 @@ html, body, #root, .app, .workspace, .page,
 
 #root .v26App.workspaceRoute .binanceDemoDeck:has(> .v21DashboardInsights.secondaryAnalyticsClosed) {
   grid-template-areas:
-    "topnav topnav topnav"
-    "hero hero hero"
-    "pulse pulse pulse"
-    "market market market"
-    "chart position order"
-    "chart . order"
-    "orders orders orders"
-    "setup setup setup"
-    "command command command"
-    "message message message"
-    "confirmation confirmation confirmation"
-    "workflow workflow workflow"
-    "summary summary summary"
-    "insights insights insights" !important;
+    "topnav topnav"
+    "demoTopBar demoTopBar"
+    "demoSummaryBar demoSummaryBar"
+    "demoMainArea demoRightPanel"
+    "demoTabsNav demoRightPanel"
+    "demoTabs demoRightPanel"
+    "demoTabsExtra demoRightPanel"
+    "activity activity"
+    "message message"
+    "confirmation confirmation"
+    "workflow workflow"
+    "insights insights"
+    "history history"
+    "alerts alerts"
+    "journal journal"
+    "strategy strategy"
+    "regime regime"
+    "health health"
+    "intelligence intelligence" !important;
 }
 
 @media (max-width: 1100px) and (min-width: 701px) {
   #root .v26App.workspaceRoute .binanceDemoDeck:has(> .v21DashboardInsights.secondaryAnalyticsClosed) {
+    grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas:
-      "topnav topnav"
-      "hero hero"
-      "pulse pulse"
-      "market market"
-      "chart chart"
-      "order order"
-      "position position"
-      "orders orders"
-      "setup setup"
-      "command command"
-      "message message"
-      "confirmation confirmation"
-      "workflow workflow"
-      "summary summary"
-      "insights insights" !important;
+      "topnav"
+      "demoTopBar"
+      "demoSummaryBar"
+      "demoMainArea"
+      "demoTabsNav"
+      "demoTabs"
+      "demoTabsExtra"
+      "demoRightPanel"
+      "activity"
+      "message"
+      "confirmation"
+      "workflow"
+      "insights"
+      "history"
+      "alerts"
+      "journal"
+      "strategy"
+      "regime"
+      "health"
+      "intelligence" !important;
   }
 }
 
@@ -4668,22 +4837,28 @@ html, body, #root, .app, .workspace, .page,
   }
 
   #root .v26App.workspaceRoute .binanceDemoDeck:has(> .v21DashboardInsights.secondaryAnalyticsClosed) {
+    grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas:
       "topnav"
-      "hero"
-      "pulse"
-      "market"
-      "chart"
-      "order"
-      "position"
-      "command"
-      "orders"
-      "setup"
+      "demoTopBar"
+      "demoSummaryBar"
+      "demoMainArea"
+      "demoTabsNav"
+      "demoTabs"
+      "demoTabsExtra"
+      "demoRightPanel"
+      "activity"
       "message"
       "confirmation"
       "workflow"
-      "summary"
-      "insights" !important;
+      "insights"
+      "history"
+      "alerts"
+      "journal"
+      "strategy"
+      "regime"
+      "health"
+      "intelligence" !important;
   }
 }
 
@@ -4701,21 +4876,28 @@ html, body, #root, .app, .workspace, .page,
   display: grid !important;
 }
 
+#root .v26App.workspaceRoute .binanceDemoDeck.binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid.demoTabHidden:has(.demoOrderPanel .demoPanelEmpty):has(.demoEventPanel .demoPanelEmpty) {
+  display: none !important;
+}
+
 #root .v26App.workspaceRoute .binanceDemoDeck.binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid > .demoOrderPanel:has(.demoPanelEmpty),
 #root .v26App.workspaceRoute .binanceDemoDeck.binanceDemoDeck:not(.demoFocusMode) > .demoOrdersGrid > .demoEventPanel:has(.demoPanelEmpty) {
   display: block !important;
 }
 
-/* Modern instrument header for the active Demo surface. */
+/* Modern instrument header for the active Demo surface -- compact single-row bar. */
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero {
   position: relative !important;
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) auto !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
   align-items: center !important;
-  gap: 24px !important;
-  min-height: 132px !important;
-  padding: 22px 24px 20px !important;
-  overflow: hidden !important;
+  justify-content: flex-end !important;
+  gap: 16px !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  padding: 10px 16px !important;
+  overflow: visible !important;
   border: 1px solid #2d4050 !important;
   border-radius: 10px !important;
   background: #101a24 !important;
@@ -4732,41 +4914,29 @@ html, body, #root, .app, .workspace, .page,
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy {
   position: relative !important;
   z-index: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
   min-width: 0 !important;
 }
 
-#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > span:first-child {
-  color: #e4b85b !important;
-  font-size: 9px !important;
-  font-weight: 800 !important;
-  letter-spacing: .16em !important;
-}
-
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > span:first-child,
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy h2 {
-  margin: 5px 0 2px !important;
-  color: #f2f6f7 !important;
-  font-size: clamp(21px, 2vw, 28px) !important;
-  font-weight: 700 !important;
-  line-height: 1.05 !important;
+  display: none !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroSymbol {
-  display: block !important;
-  color: #9db1c2 !important;
-  font-size: 12px !important;
-  font-weight: 600 !important;
-  letter-spacing: .03em !important;
+  display: none !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy p,
-#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div,
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div > span {
   display: none !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div {
   display: flex !important;
-  margin-top: 12px !important;
+  margin-top: 0 !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div b {
@@ -4782,47 +4952,73 @@ html, body, #root, .app, .workspace, .page,
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
   position: relative !important;
   z-index: 1 !important;
-  display: grid !important;
-  grid-template-columns: repeat(3, minmax(98px, 1fr)) !important;
-  align-items: start !important;
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
   gap: 6px !important;
-  min-width: 306px !important;
+  min-width: 0 !important;
+  height: auto !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span {
-  align-self: start !important;
-  min-height: 58px !important;
-  height: 58px !important;
-  padding: 10px 11px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  align-self: auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  padding: 6px 10px !important;
   border: 1px solid #273847 !important;
   border-radius: 7px !important;
   background: #0b131c !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span > svg {
-  width: 14px !important;
-  height: 14px !important;
+  width: 13px !important;
+  height: 13px !important;
   color: #e4b85b !important;
 }
 
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > .demoSymbolStatus {
+  display: none !important;
+}
+
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus small {
-  color: #71879a !important;
-  font-size: 8px !important;
-  letter-spacing: .08em !important;
+  display: none !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus b {
   color: #dbe7f2 !important;
-  font-size: 11px !important;
+  font-size: 10px !important;
+  white-space: nowrap !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroConnect {
   display: none !important;
 }
 
-#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
-  align-self: start !important;
-  height: 58px !important;
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStop {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-height: 0 !important;
+  padding: 6px 12px !important;
+  border: 1px solid rgba(239,68,68,.4) !important;
+  border-radius: 7px !important;
+  background: rgba(239,68,68,.1) !important;
+  color: #f87171 !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: .06em !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStop:disabled {
+  opacity: .4 !important;
+}
+
+#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStop svg {
+  width: 12px !important;
+  height: 12px !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .demoAccountStrip {
@@ -4838,14 +5034,13 @@ html, body, #root, .app, .workspace, .page,
 
 @media (max-width: 700px) {
   #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero {
-    grid-template-columns: 1fr !important;
-    gap: 12px !important;
-    padding: 18px 18px 16px !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    padding: 10px 14px !important;
   }
 
   #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    min-width: 0 !important;
     width: 100% !important;
   }
 
@@ -4857,20 +5052,6 @@ html, body, #root, .app, .workspace, .page,
     height: auto !important;
     min-height: 0 !important;
   }
-}
-
-@media (max-width: 430px) {
-  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus {
-    grid-template-columns: 1fr !important;
-  }
-
-  #root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroStatus > span:not(:first-child) {
-    display: none !important;
-  }
-}
-
-#root .v26App.workspaceRoute .binanceDemoDeck > .demoHero .demoHeroCopy > div {
-  display: none !important;
 }
 
 #root .v26App.workspaceRoute .binanceDemoDeck > .v21Pulse {
@@ -5007,30 +5188,28 @@ html, body, #root, .app, .workspace, .page,
 
 @media (min-width: 701px) and (max-width: 1100px) {
   #root .v26App.workspaceRoute .binanceDemoDeck {
-    grid-template-columns: minmax(0, .9fr) minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas:
-      "topnav topnav"
-      "hero hero"
-      "pulse pulse"
-      "market market"
-      "chart chart"
-      "position order"
-      "orders orders"
-      "setup setup"
-      "command command"
-      "message message"
-      "confirmation confirmation"
-      "workflow workflow"
-      "summary summary"
-      "insights insights"
-      "history history"
-      "alerts alerts"
-      "advanced advanced"
-      "journal journal"
-      "strategy strategy"
-      "regime regime"
-      "health health"
-      "intelligence intelligence" !important;
+      "topnav"
+      "demoTopBar"
+      "demoSummaryBar"
+      "demoMainArea"
+      "demoTabsNav"
+      "demoTabs"
+      "demoTabsExtra"
+      "demoRightPanel"
+      "activity"
+      "message"
+      "confirmation"
+      "workflow"
+      "insights"
+      "history"
+      "alerts"
+      "journal"
+      "strategy"
+      "regime"
+      "health"
+      "intelligence" !important;
   }
 }
 
