@@ -2138,10 +2138,16 @@
 }
 
 @media (max-width: 700px) {
-  #root > main.v26App .v26DashboardWorkspaces,
-  #root > main.v26App .v26DashboardPulse {
+  #root > main.v26App .v26DashboardWorkspaces {
     padding-right: 0;
     padding-left: 0;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App .v26DashboardPulse {
     border: 0 !important;
     border-radius: 0;
     background: transparent !important;
