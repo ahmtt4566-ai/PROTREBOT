@@ -2310,6 +2310,10 @@
     display: none;
   }
 
+  #root > main.v26App.homeRoute .desktopMarketPulseLine {
+    display: none !important;
+  }
+
   #root > main.v26App.homeRoute .marketPulseLine {
     position: relative;
     left: 0;
@@ -2403,9 +2407,14 @@
     padding-right: 24px;
   }
 
-  #root > main.v26App.homeRoute .marketPulseScroller:hover .marketPulseTrack,
   #root > main.v26App.homeRoute .marketPulseScroller:has(.marketPulseChip:active) .marketPulseTrack {
     animation-play-state: paused;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    #root > main.v26App.homeRoute .marketPulseScroller:hover .marketPulseTrack {
+      animation-play-state: paused;
+    }
   }
 
   #root > main.v26App.homeRoute .marketPulseChip {
@@ -3008,4 +3017,343 @@
     grid-column: 2;
     justify-self: start;
   }
+}
+
+@media (min-width: 1024px) {
+  #root > main.v26App.homeRoute {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    box-sizing: border-box;
+    padding-bottom: 16px;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26HeaderActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26Refresh,
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26NotificationButton,
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26Notifications {
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26HeaderProfileSlot {
+    display: flex;
+    flex: 0 0 36px;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .v26HeaderProfileSlot > .authSessionBar {
+    position: static !important;
+    inset: auto !important;
+    display: flex !important;
+    flex: 0 0 36px;
+    align-items: center;
+    justify-content: center;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 9px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .authMemberTrigger {
+    display: inline-flex !important;
+    flex: 0 0 36px !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    padding: 0 !important;
+    border-radius: 9px !important;
+  }
+
+  #root > main.v26App.homeRoute > .v26HomeHeader .authProfileGlyph {
+    width: 18px !important;
+    height: 18px !important;
+    flex: 0 0 18px !important;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardPulse {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0;
+    padding: 0;
+    gap: 6px;
+  }
+
+  #root > main.v26App.homeRoute .v26DashboardPulse > header,
+  #root > main.v26App.homeRoute .mobileMarketPulseLine,
+  #root > main.v26App.homeRoute .desktopMarketPulseItems {
+    display: none !important;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 44px;
+    min-width: 0;
+    margin: 0;
+    padding: 0 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .03);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseLiveDot {
+    position: relative;
+    display: block;
+    flex: 0 0 7px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseScroller {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 42px;
+    overflow: hidden;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 48px, #000 calc(100% - 48px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 48px, #000 calc(100% - 48px), transparent 100%);
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseTrack {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: max-content;
+    height: 42px;
+    transform: translate3d(0, 0, 0);
+    animation: desktopMarketPulseMarquee 80s linear infinite;
+    will-change: transform;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseScroller:hover .marketPulseTrack {
+    animation-play-state: paused;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseGroup {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 32px;
+    width: max-content;
+    padding-right: 32px;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    min-width: 0;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #fff;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    transition: background-color 200ms ease, box-shadow 200ms ease;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip:hover {
+    background: rgba(255, 255, 255, .035);
+    box-shadow: 0 0 12px rgba(255, 255, 255, .12);
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip::after {
+    position: absolute;
+    top: 14px;
+    right: -17px;
+    width: 1px;
+    height: 14px;
+    background: rgba(255, 255, 255, .16);
+    content: '';
+    pointer-events: none;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > b {
+    color: rgba(255, 255, 255, .65);
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > span {
+    display: inline-block;
+    flex: 0 0 88px;
+    width: 88px;
+    min-width: 88px;
+    box-sizing: border-box;
+    color: #fff;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    background-color: transparent;
+    opacity: 1;
+    transition: none;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > span.flash-up {
+    animation: desktopMarketPulseFlashUp 300ms ease-out both;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > span.flash-down {
+    animation: desktopMarketPulseFlashDown 300ms ease-out both;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > em {
+    flex: 0 0 80px;
+    width: 80px;
+    min-width: 80px;
+    box-sizing: border-box;
+    color: #ef4444;
+    font-size: 14px;
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > em.up {
+    color: #22c55e;
+  }
+
+  #root > main.v26App.homeRoute > .v26Footer {
+    display: flex;
+    align-self: stretch;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    min-height: 0;
+    margin-top: auto;
+    margin-right: 0;
+    margin-bottom: 0;
+    margin-left: 0;
+    padding: 0;
+    opacity: .5;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    font-size: 11px;
+    text-align: center;
+  }
+
+  #root > main.v26App.homeRoute > .v26Footer > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 11px;
+    text-align: center;
+  }
+
+  @keyframes desktopMarketPulseFlashUp {
+    0%, 100% { background-color: transparent; }
+    40% { background-color: rgba(34, 197, 94, .15); }
+  }
+
+  @keyframes desktopMarketPulseFlashDown {
+    0%, 100% { background-color: transparent; }
+    40% { background-color: rgba(239, 68, 68, .15); }
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1024px) {
+  #root > main.v26App.homeRoute .v26DashboardPulse {
+    padding: 16px;
+  }
+
+  #root > main.v26App.homeRoute .desktopMarketPulseLine {
+    border-radius: 9px;
+  }
+}
+
+@keyframes desktopMarketPulseMarquee {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+
+@media (min-width: 1024px) and (prefers-reduced-motion: reduce) {
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseTrack,
+  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > span {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+#root > main.v26App.homeRoute .v26HeaderProfileSlot .authMemberTrigger,
+#root:has(> main.v26App.homeRoute) > .authSessionBar .authMemberTrigger {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  transform: none !important;
+  transition: background-color .16s ease !important;
+}
+
+#root > main.v26App.homeRoute .v26HeaderProfileSlot .authMemberTrigger:hover,
+#root > main.v26App.homeRoute .v26HeaderProfileSlot .authMemberTrigger:active,
+#root > main.v26App.homeRoute .v26HeaderProfileSlot .authMemberTrigger[aria-expanded="true"],
+#root > main.v26App.homeRoute .v26HeaderProfileSlot .authMemberTrigger:focus-visible,
+#root:has(> main.v26App.homeRoute) > .authSessionBar .authMemberTrigger:hover,
+#root:has(> main.v26App.homeRoute) > .authSessionBar .authMemberTrigger:active,
+#root:has(> main.v26App.homeRoute) > .authSessionBar .authMemberTrigger[aria-expanded="true"],
+#root:has(> main.v26App.homeRoute) > .authSessionBar .authMemberTrigger:focus-visible {
+  border: 0 !important;
+  background: rgba(255, 255, 255, .08) !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  outline: none !important;
+  transform: none !important;
+}
+
+#root > main.v26App.homeRoute .v26HeaderProfileSlot .authMemberTrigger::after,
+#root:has(> main.v26App.homeRoute) > .authSessionBar .authMemberTrigger::after {
+  display: none !important;
+  content: none !important;
 }

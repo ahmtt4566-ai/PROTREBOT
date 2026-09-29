@@ -56,7 +56,7 @@ const format = (value:number) => value.toLocaleString('tr-TR',{maximumFractionDi
 
 type PulseCoin = {symbol:string;stream:string;label:string}
 type PulseQuote = {price:number;change:number}
-type PulseQuoteNode = {button:HTMLButtonElement;price:HTMLSpanElement;change:HTMLElement;label:string;flashTimer:number|undefined}
+type PulseQuoteNode = {button:HTMLButtonElement;price:HTMLSpanElement;change:HTMLElement;label:string;flashTimer:number|undefined;flashFrame:number|undefined}
 type PulseQuoteNodesRef = {current:Map<string,Set<PulseQuoteNode>>}
 type PulseQuoteCacheRef = {current:Record<string,PulseQuote>}
 type TickerMessage = {data?:{s?:string;c?:string;P?:string}}
@@ -72,7 +72,7 @@ const MOBILE_PULSE_COINS:PulseCoin[] = [
   {symbol:'LTCUSDT',stream:'ltcusdt',label:'LTC'}, {symbol:'SHIBUSDT',stream:'shibusdt',label:'SHIB'},
   {symbol:'MATICUSDT',stream:'maticusdt',label:'MATIC'},
 ]
-const DESKTOP_PULSE_SYMBOLS = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT']
+const TABLET_PULSE_SYMBOLS = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT']
 const QUIET_PULSE_SYMBOLS = ['TONUSDT','MATICUSDT']
 const PULSE_STREAM_URL = `wss://stream.binance.com:9443/stream?streams=${MOBILE_PULSE_COINS.map(coin => `${coin.stream}@ticker`).join('/')}`
 
@@ -83,14 +83,18 @@ const paintPulseQuote = (node:PulseQuoteNode,quote:PulseQuote,flashDirection?:'u
   node.change.classList.toggle('down',quote.change < 0)
   node.button.setAttribute('aria-label',`${node.label}/USDT, ${format(quote.price)}, ${quote.change >= 0 ? 'yükseliş' : 'düşüş'} ${format(quote.change)}%`)
   if (!flashDirection) return
+  if (node.flashFrame !== undefined) window.cancelAnimationFrame(node.flashFrame)
   if (node.flashTimer !== undefined) window.clearTimeout(node.flashTimer)
   const flashClass = `flash-${flashDirection}`
   node.price.classList.remove('flash-up','flash-down')
-  node.price.classList.add(flashClass)
-  node.flashTimer = window.setTimeout(() => {
-    node.price.classList.remove(flashClass)
-    node.flashTimer = undefined
-  },300)
+  node.flashFrame = window.requestAnimationFrame(() => {
+    node.flashFrame = undefined
+    node.price.classList.add(flashClass)
+    node.flashTimer = window.setTimeout(() => {
+      node.price.classList.remove('flash-up','flash-down')
+      node.flashTimer = undefined
+    },300)
+  })
 }
 
 const paintPulseQuoteNodes = (registry:Map<string,Set<PulseQuoteNode>>,symbol:string,quote:PulseQuote,previous?:PulseQuote) => {
@@ -108,13 +112,14 @@ const MarketPulseChip = memo(function MarketPulseChip({coin,onSelect,quoteNodesR
     const price = priceRef.current
     const change = changeRef.current
     if (!button || !price || !change) return
-    const node:PulseQuoteNode = {button,price,change,label:coin.label,flashTimer:undefined}
+    const node:PulseQuoteNode = {button,price,change,label:coin.label,flashTimer:undefined,flashFrame:undefined}
     const nodes = quoteNodesRef.current.get(coin.symbol) || new Set<PulseQuoteNode>()
     nodes.add(node)
     quoteNodesRef.current.set(coin.symbol,nodes)
     const quote = quoteCacheRef.current[coin.symbol]
     if (quote) paintPulseQuote(node,quote)
     return () => {
+      if (node.flashFrame !== undefined) window.cancelAnimationFrame(node.flashFrame)
       if (node.flashTimer !== undefined) window.clearTimeout(node.flashTimer)
       nodes.delete(node)
       if (!nodes.size) quoteNodesRef.current.delete(coin.symbol)
@@ -157,7 +162,7 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
     observer.observe(group)
     setDurationFromWidth()
     return () => observer.disconnect()
-  },[])
+  },[isMobile])
 
   const fallbackQuotes = useMemo(() => Object.fromEntries(MOBILE_PULSE_COINS.map(coin => {
     const market = markets.find(item => item.symbol.replace('/','').toUpperCase() === coin.symbol)
@@ -175,7 +180,6 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
   },[fallbackQuotes])
 
   useEffect(() => {
-    if (!isMobile) return
     let active = true
     let reconnectTimer = 0
     let snapshotTimer = 0
@@ -251,19 +255,29 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
       pendingQuotesRef.current = {}
       socket?.close()
     }
-  },[isMobile])
+  },[])
 
   return <>
-    <div className="v26DashboardPulseItems desktopMarketPulseItems">
-    {DESKTOP_PULSE_SYMBOLS.map(symbol => {
-      const market = markets.find(item => item.symbol.replace('/','').toUpperCase() === symbol)
-      const hasPrice = typeof market?.price === 'number' && Number.isFinite(market.price)
-      const hasChange = typeof market?.change === 'number' && Number.isFinite(market.change)
-      return <button type="button" key={symbol} onClick={() => onSelect(symbol)}><span><b>{symbol.replace('USDT','/USDT')}</b><small>{hasPrice ? `$${format(market.price)}` : '$—'}</small></span><em className={hasChange ? market.change >= 0 ? 'up' : 'down' : ''}>{hasChange ? `${market.change >= 0 ? '+' : ''}${format(market.change)}%` : '—%'}</em></button>
-    })}
-    </div>
+    {!isMobile && <div className="v26DashboardPulseItems desktopMarketPulseItems">
+      {TABLET_PULSE_SYMBOLS.map(symbol => {
+        const market = markets.find(item => item.symbol.replace('/','').toUpperCase() === symbol)
+        const hasPrice = typeof market?.price === 'number' && Number.isFinite(market.price)
+        const hasChange = typeof market?.change === 'number' && Number.isFinite(market.change)
+        return <button type="button" key={symbol} onClick={() => onSelect(symbol)}><span><b>{symbol.replace('USDT','/USDT')}</b><small>{hasPrice ? `$${format(market.price)}` : '$—'}</small></span><em className={hasChange ? market.change >= 0 ? 'up' : 'down' : ''}>{hasChange ? `${market.change >= 0 ? '+' : ''}${format(market.change)}%` : '—%'}</em></button>
+      })}
+    </div>}
+    {!isMobile && <div className="marketPulseLine desktopMarketPulseLine">
+      <i className="marketPulseLiveDot" role="img" aria-label="Canlı veri" />
+      <div className="v26DashboardPulseItems marketPulseScroller">
+        <div className="marketPulseTrack">
+          {[false,true].map(clone => <div className="marketPulseGroup" key={clone ? 'desktop-clone' : 'desktop-primary'} aria-hidden={clone || undefined}>
+            {MOBILE_PULSE_COINS.map(coin => <MarketPulseChip key={coin.symbol} coin={coin} onSelect={onSelect} quoteNodesRef={quoteNodesRef} quoteCacheRef={quoteCacheRef} clone={clone}/>) }
+          </div>)}
+        </div>
+      </div>
+    </div>}
 
-    <div className="marketPulseLine" key="mobile-market-pulse">
+    {isMobile && <div className="marketPulseLine mobileMarketPulseLine" key="mobile-market-pulse">
       <i className="marketPulseLiveDot" role="img" aria-label="Canlı veri" />
       <div className="v26DashboardPulseItems marketPulseScroller">
         <div className="marketPulseTrack" key="mobile-market-pulse-track" ref={trackRef}>
@@ -272,7 +286,7 @@ const MobileMarketPulse = memo(function MobileMarketPulse({markets,onSelect}:{ma
           </div>)}
         </div>
       </div>
-    </div>
+    </div>}
   </>
 })
 
@@ -658,8 +672,8 @@ export default function TestnetFirstApp() {
             {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <button type="button" key={item.id} className={`v26NotificationItem ${item.severity}${item.read ? ' isRead' : ''}`} onClick={() => void openNotification(item)}><i><Bell/></i><span><b>{item.title}</b><p>{item.message}</p><small>{item.timestamp ? new Date(item.timestamp).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</small></span></button>)}</div> : <div className="v26NotificationEmpty"><Bell/><b>Bildirim yok</b><p>Gerçek bir sistem olayı oluştuğunda burada görünecek.</p></div>}
           </section>}
         </div>
+        <div className="v26HeaderProfileSlot" />
       </div>
-      <div className="v26HeaderProfileSlot" />
     </header> : <button type="button" className="workspaceBack" onClick={() => setView('dashboard')}><ArrowLeft/> <span>Home</span></button>}
 
     {view !== 'dashboard' && <section className="v26ModeBar">
@@ -687,6 +701,7 @@ export default function TestnetFirstApp() {
         <MobileMarketPulse markets={markets} onSelect={selectPulseSymbol}/>
       </section>
     </section>}
+    {view === 'dashboard' && <footer className="v26Footer"><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'API CONNECTED' : health ? 'API DISCONNECTED' : 'API CHECKING'}</span><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'SYSTEM ONLINE' : health ? 'SYSTEM OFFLINE' : 'SYSTEM CHECKING'}</span><span>TESTNET FIRST</span></footer>}
 
     {view === 'trading' && <>
       <section className="v26MarketBar">
@@ -782,7 +797,6 @@ export default function TestnetFirstApp() {
         </div>
       </div>
     </section>}
-    {view === 'dashboard' && <footer className="v26Footer"><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'API CONNECTED' : health ? 'API DISCONNECTED' : 'API CHECKING'}</span><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'SYSTEM ONLINE' : health ? 'SYSTEM OFFLINE' : 'SYSTEM CHECKING'}</span><span>TESTNET FIRST</span></footer>}
     {complianceOpen && <div className="v26ComplianceBackdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setComplianceOpen(false) }} style={{position:'fixed',inset:0,background:'rgba(2,6,23,0.76)',display:'grid',placeItems:'center',padding:'1rem',zIndex:1000}}>
       <aside className="v26ComplianceModal" role="dialog" aria-modal="true" aria-label="Trust and compliance" style={{width:'min(760px, 100%)',maxHeight:'80vh',overflowY:'auto',background:'#0f172a',border:'1px solid rgba(148,163,184,0.3)',borderRadius:'20px',padding:'1.25rem',boxShadow:'0 30px 80px rgba(2,6,23,0.6)'}} onClick={event => event.stopPropagation()}>
         <header style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'1rem',marginBottom:'1rem'}}>
