@@ -1,3 +1,87 @@
+.appRecoveryShell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px 16px;
+  background: radial-gradient(ellipse at 50% 42%, rgba(39, 174, 170, .08), transparent 42%), #080d12;
+  color: #e8eef2;
+}
+.appRecoveryCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(480px, 100%);
+  padding: 30px 34px 26px;
+  border: 1px solid rgba(157, 179, 192, .16);
+  border-radius: 18px;
+  background: linear-gradient(155deg, rgba(21, 31, 39, .97), rgba(13, 20, 27, .98));
+  box-shadow: 0 20px 56px rgba(0, 0, 0, .28);
+  text-align: center;
+  animation: appRecoveryEnter .18s ease-out both;
+}
+.appRecoveryMode {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgba(66, 190, 181, .2);
+  border-radius: 999px;
+  background: rgba(36, 143, 140, .1);
+  color: #8bd6ce;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.appRecoveryMode i { width: 6px; height: 6px; border-radius: 50%; background: #66c9bb; }
+.appRecoveryIcon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin: 21px 0 15px;
+  border: 1px solid rgba(71, 192, 183, .17);
+  border-radius: 17px;
+  background: rgba(42, 153, 150, .1);
+  color: #72d1c6;
+  animation: appRecoveryIconEnter .2s ease-out both;
+}
+.appRecoveryEyebrow { color: #91a5ae; font-size: 10px; font-weight: 700; letter-spacing: .13em; }
+.appRecoveryCard h1 { max-width: 390px; margin: 9px 0 0; color: #f0f4f6; font-size: 26px; font-weight: 600; line-height: 1.25; }
+.appRecoveryCard > p { max-width: 365px; margin: 13px 0 0; color: #aab8bf; font-size: 14px; line-height: 1.55; }
+.appRecoveryCard > p.appRecoveryHint { margin-top: 5px; color: #788a94; font-size: 12px; }
+.appRecoveryAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  margin-top: 23px;
+  padding: 0 18px;
+  border: 1px solid rgba(228, 160, 71, .42);
+  border-radius: 12px;
+  background: #b97932;
+  color: #fff8ed;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color .16s ease, border-color .16s ease, transform .16s ease;
+}
+.appRecoveryAction:hover { transform: translateY(-1px); border-color: rgba(245, 185, 105, .7); background: #c4863d; }
+.appRecoveryAction svg { transition: transform .2s ease; }
+.appRecoveryAction:hover svg { transform: rotate(35deg); }
+.appRecoveryDetails { width: 100%; margin-top: 18px; color: #82929b; text-align: left; }
+.appRecoveryDetails summary { width: fit-content; margin: 0 auto; cursor: pointer; font-size: 11px; }
+.appRecoveryDetails summary:hover { color: #b7c5ca; }
+.appRecoveryDetails pre { max-height: 120px; overflow: auto; margin: 11px 0 0; padding: 10px 12px; border: 1px solid rgba(157, 179, 192, .12); border-radius: 8px; background: rgba(4, 8, 12, .5); color: #9caeb7; font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+@keyframes appRecoveryEnter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes appRecoveryIconEnter { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+@media (max-width: 520px) {
+  .appRecoveryCard { padding: 25px 20px 22px; }
+  .appRecoveryCard h1 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .appRecoveryCard, .appRecoveryIcon { animation: none; }
+  .appRecoveryAction, .appRecoveryAction svg { transition: none; }
+}
 :root {
   --bg: #05070c;
   --card: #1e293b;

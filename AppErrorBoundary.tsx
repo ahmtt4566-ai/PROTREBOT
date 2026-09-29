@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { RefreshCw, ShieldCheck } from 'lucide-react'
 
 type Props = { children:ReactNode }
 type State = { failed:boolean; message:string }
@@ -26,12 +27,20 @@ export default class AppErrorBoundary extends Component<Props,State> {
     if (!this.state.failed) return this.props.children
     return <main className="appRecoveryShell" role="alert">
       <section className="appRecoveryCard">
-        <span className="appRecoveryLogo">X</span>
-        <small>GÜVENLİ EKRAN KORUMASI</small>
-        <h1>Panel kapatılmadı</h1>
-        <p>Geçici veya eksik bir veri yakalandı. Demo işlem gerçek emir değildir; mevcut kayıt korunur.</p>
-        <div><b>Tekrar yüklemek güvenlidir</b><span>{this.state.message || 'Veri yeniden istenecek.'}</span></div>
-        <button type="button" onClick={this.recover}>PANELİ GÜVENLİ YENİLE</button>
+        <span className="appRecoveryMode"><i aria-hidden="true" />DEMO MODE</span>
+        <span className="appRecoveryIcon" aria-hidden="true"><ShieldCheck size={34} strokeWidth={1.7} /></span>
+        <small className="appRecoveryEyebrow">SECURE RECOVERY</small>
+        <h1>Panel geçici olarak yüklenemedi</h1>
+        <p>Demo işlem masası verileri şu anda yüklenemedi. Mevcut işlem kaydı korunuyor.</p>
+        <p className="appRecoveryHint">Yenilemeyi deneyebilir veya birkaç saniye sonra tekrar açabilirsiniz.</p>
+        <button className="appRecoveryAction" type="button" onClick={this.recover}>
+          <RefreshCw size={16} aria-hidden="true" />
+          Paneli yeniden yükle
+        </button>
+        <details className="appRecoveryDetails">
+          <summary>Teknik ayrıntılar</summary>
+          <pre>{this.state.message || 'Veri yeniden istenecek.'}</pre>
+        </details>
       </section>
     </main>
   }
