@@ -1074,3 +1074,132 @@
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystMetricCards span {
 	border: 0 !important;
 }
+
+/* Analyst workspace: reuse the lower panels' dark surface instead of the
+   olive/gold gradient, and swap the gold accent for the home page's orange. */
+.coinAnalysisCenter .analystWorkspace {
+	background: #0f1720;
+	box-shadow: none;
+}
+.coinAnalysisCenter .analystEyebrow,
+.coinAnalysisCenter .analystCommandGroup > header > span,
+.coinAnalysisCenter .analystCoinSelector > header span,
+.coinAnalysisCenter .analystResultWorkspace > header span,
+.coinAnalysisCenter .analystAskBar > div > span,
+.coinAnalysisCenter .analystWhyResult > span {
+	color: #ff8a3d !important;
+}
+.coinAnalysisCenter .analystWorkspaceContext {
+	border: 0;
+	background: rgba(255, 255, 255, .04);
+}
+.coinAnalysisCenter .analystCommandGroup {
+	border: 0;
+	background: rgba(255, 255, 255, .03);
+}
+.coinAnalysisCenter .analystCommandGroup > header {
+	border-bottom: 0;
+}
+.coinAnalysisCenter .analystCommandGroup > header > span {
+	border: 0;
+	background: rgba(255, 138, 61, .12);
+}
+.coinAnalysisCenter .analystCommandItems button {
+	border: 0;
+	background: rgba(255, 255, 255, .04);
+	cursor: pointer;
+	transition: background-color 150ms ease, transform 150ms ease;
+}
+.coinAnalysisCenter .analystCommandItems button:hover {
+	border-color: transparent;
+	background: rgba(255, 255, 255, .08);
+	transform: none;
+}
+.coinAnalysisCenter .analystCommandItems button:active {
+	transform: scale(.95);
+}
+.coinAnalysisCenter .analystCommandItems button.active {
+	border-color: transparent;
+	background: rgba(255, 138, 61, .16);
+	box-shadow: none;
+}
+.coinAnalysisCenter .analystCommandItems button.active b { color: #ffd9b8; }
+.coinAnalysisCenter .analystCommandItems button:focus-visible {
+	outline: 2px solid rgba(255, 138, 61, .55);
+	outline-offset: 2px;
+}
+.coinAnalysisCenter .analystCoinSelector {
+	border: 0;
+	background: #0b1219;
+}
+.coinAnalysisCenter .analystCoinSelector > header {
+	border-bottom: 0;
+}
+.coinAnalysisCenter .analystSelectorToolbar label {
+	border: 0;
+	background: rgba(255, 255, 255, .04);
+}
+.coinAnalysisCenter .analystSelectorFilters button.active,
+.coinAnalysisCenter .analystSelectorFilters button:hover {
+	border-color: transparent;
+	color: #ff8a3d;
+	background: rgba(255, 138, 61, .1);
+}
+.coinAnalysisCenter .analystSelectorList > button.selected {
+	border-color: transparent;
+	background: rgba(255, 138, 61, .1);
+}
+.coinAnalysisCenter .analystSelectorSnapshot b { color: #ff8a3d; }
+.coinAnalysisCenter .analystResultWorkspace {
+	border: 0;
+	background: #0b1219;
+	scroll-margin-top: 90px;
+}
+.coinAnalysisCenter .analystResultWorkspace > header {
+	border-bottom: 0;
+}
+.coinAnalysisCenter .analystResultWorkspace > header > strong {
+	border: 0;
+	background: rgba(255, 138, 61, .14);
+	color: #ff8a3d;
+}
+.coinAnalysisCenter .analystResultMeta span,
+.coinAnalysisCenter .analystMetricCards span {
+	border: 0;
+	background: rgba(255, 255, 255, .03);
+}
+.coinAnalysisCenter .analystMetricCards b { color: #ff8a3d; }
+.coinAnalysisCenter .analystDataError button {
+	border-color: #ff8a3d;
+	color: #ff8a3d;
+}
+.coinAnalysisCenter .analystWhyResult {
+	border-left-color: #ff8a3d;
+	background: rgba(255, 138, 61, .06);
+}
+.coinAnalysisCenter .analystPromptChips button,
+.coinAnalysisCenter .analystChips button {
+	border: 0;
+	background: rgba(255, 255, 255, .04);
+	cursor: pointer;
+	transition: background-color 150ms ease, transform 150ms ease;
+}
+.coinAnalysisCenter .analystPromptChips button:hover,
+.coinAnalysisCenter .analystChips button:hover {
+	background: rgba(255, 255, 255, .08);
+}
+.coinAnalysisCenter .analystPromptChips button:active,
+.coinAnalysisCenter .analystChips button:active {
+	transform: scale(.95);
+}
+.coinAnalysisCenter .analystPromptChips button.active,
+.coinAnalysisCenter .analystChips button.active {
+	border-color: transparent;
+	background: rgba(255, 138, 61, .16);
+	color: #ffd9b8;
+}
+.coinAnalysisCenter .analystPromptChips button:focus-visible,
+.coinAnalysisCenter .analystChips button:focus-visible {
+	outline: 2px solid rgba(255, 138, 61, .55);
+	outline-offset: 2px;
+}
