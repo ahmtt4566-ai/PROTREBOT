@@ -95,7 +95,7 @@ const paintPulseQuote = (node:PulseQuoteNode,quote:PulseQuote,flashDirection?:'u
     node.flashTimer = window.setTimeout(() => {
       node.price.classList.remove('flash-up','flash-down')
       node.flashTimer = undefined
-    },300)
+    },700)
   })
 }
 

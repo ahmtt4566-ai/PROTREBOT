@@ -2407,7 +2407,7 @@
     display: inline-flex !important;
     flex: 0 0 auto !important;
     align-items: center;
-    gap: 4px !important;
+    gap: 6px !important;
     width: auto !important;
     min-width: 0 !important;
     height: 36px !important;
@@ -2424,17 +2424,6 @@
     backdrop-filter: none !important;
   }
 
-  #root > main.v26App.homeRoute .marketPulseChip::after {
-    position: absolute;
-    top: 11px;
-    right: -13px;
-    width: 1px;
-    height: 14px;
-    background: rgba(255,255,255,.2);
-    content: '';
-    pointer-events: none;
-  }
-
   #root > main.v26App.homeRoute .marketPulseChip > b {
     color: rgba(255,255,255,.6) !important;
     font-size: 13px !important;
@@ -2447,24 +2436,24 @@
     color: #fff !important;
     font-size: 13px !important;
     font-variant-numeric: tabular-nums;
-    flex: 0 0 88px;
-    width: 88px;
-    min-width: 88px;
+    flex: 0 0 auto;
+    width: auto !important;
+    min-width: 0 !important;
     box-sizing: border-box;
+    padding: 2px 6px;
+    border-radius: 6px;
     text-align: right;
     background-color: transparent;
     opacity: 1;
-    transition: opacity 300ms ease, background-color 300ms ease;
+    transition: background-color 700ms ease;
   }
 
   #root > main.v26App.homeRoute .marketPulseChip > span.flash-up {
-    background-color: rgba(34,197,94,.2);
-    opacity: .72;
+    background-color: rgba(34,197,94,.15);
   }
 
   #root > main.v26App.homeRoute .marketPulseChip > span.flash-down {
-    background-color: rgba(239,68,68,.2);
-    opacity: .72;
+    background-color: rgba(239,68,68,.15);
   }
 
   #root > main.v26App.homeRoute .marketPulseChip > em {
@@ -2473,11 +2462,10 @@
     font-size: 13px !important;
     font-style: normal;
     font-variant-numeric: tabular-nums;
-    flex: 0 0 80px;
-    width: 80px;
-    min-width: 80px;
+    width: auto;
+    min-width: 0;
     box-sizing: border-box;
-    text-align: right;
+    text-align: left;
   }
 
   #root > main.v26App.homeRoute .marketPulseChip > em.up {
@@ -3189,17 +3177,6 @@
     box-shadow: 0 0 12px rgba(255, 255, 255, .12);
   }
 
-  #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip::after {
-    position: absolute;
-    top: 14px;
-    right: -17px;
-    width: 1px;
-    height: 14px;
-    background: rgba(255, 255, 255, .16);
-    content: '';
-    pointer-events: none;
-  }
-
   #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > b {
     color: rgba(255, 255, 255, .65);
     font-size: 14px;
@@ -3208,10 +3185,12 @@
 
   #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > span {
     display: inline-block;
-    flex: 0 0 88px;
-    width: 88px;
-    min-width: 88px;
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
     box-sizing: border-box;
+    padding: 2px 6px;
+    border-radius: 6px;
     color: #fff;
     font-size: 14px;
     font-variant-numeric: tabular-nums;
@@ -3222,23 +3201,23 @@
   }
 
   #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > span.flash-up {
-    animation: desktopMarketPulseFlashUp 300ms ease-out both;
+    animation: desktopMarketPulseFlashUp 700ms ease-out both;
   }
 
   #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > span.flash-down {
-    animation: desktopMarketPulseFlashDown 300ms ease-out both;
+    animation: desktopMarketPulseFlashDown 700ms ease-out both;
   }
 
   #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > em {
-    flex: 0 0 80px;
-    width: 80px;
-    min-width: 80px;
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
     box-sizing: border-box;
     color: #ef4444;
     font-size: 14px;
     font-style: normal;
     font-variant-numeric: tabular-nums;
-    text-align: right;
+    text-align: left;
   }
 
   #root > main.v26App.homeRoute .desktopMarketPulseLine .marketPulseChip > em.up {
@@ -3283,12 +3262,12 @@
 
   @keyframes desktopMarketPulseFlashUp {
     0%, 100% { background-color: transparent; }
-    40% { background-color: rgba(34, 197, 94, .15); }
+    25% { background-color: rgba(34, 197, 94, .15); }
   }
 
   @keyframes desktopMarketPulseFlashDown {
     0%, 100% { background-color: transparent; }
-    40% { background-color: rgba(239, 68, 68, .15); }
+    25% { background-color: rgba(239, 68, 68, .15); }
   }
 }
 
