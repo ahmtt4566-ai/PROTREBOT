@@ -1,12 +1,12 @@
 import { createPortal } from 'react-dom'
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
-import { Activity, ArrowRight, Eye, EyeOff, KeyRound, LogOut, MailCheck, ShieldCheck, UserRound } from 'lucide-react'
+import { Activity, ArrowRight, Eye, EyeOff, KeyRound, LogOut, MailCheck, ShieldAlert, ShieldCheck, UserRound, Wrench } from 'lucide-react'
 import { API_BASE, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import AdminPanel from './AdminPanel'
 import './auth.css'
 
 type User = { id:string; email:string; display_name:string; role:string; active:boolean; email_verified?:boolean }
-type Session = { user:User }
+type Session = { user:User; maintenance?:{mode:string} }
 type Mode = 'login'|'register'|'forgot'|'reset'|'verify'
 type ProfileData = {user:User;profile?:{full_name?:string;preferences?:Record<string,unknown>};subscription?:{plan?:string;status?:string;currentPeriodStart?:string;currentPeriodEnd?:string}}
 
@@ -48,6 +48,23 @@ function passwordRules(password:string) {
     ['Rakam', /\d/.test(password)],
     ['Sembol', /[^A-Za-z0-9]/.test(password)],
   ] as const
+}
+
+function MaintenanceScreen({mode,onAdminLogin}:{mode:string;onAdminLogin:()=>void}) {
+  const emergency = mode === 'EMERGENCY'
+  return <main className={`authMaintenance${emergency ? ' emergency' : ''}`}>
+    <section className="authMaintenancePanel" role="status" aria-live="polite">
+      <div className="authMaintenanceMark">{emergency ? <ShieldAlert/> : <Wrench/>}</div>
+      <span className="authMaintenanceBrand">PROTREBOT</span>
+      <h1>{emergency ? 'SİSTEM GEÇİCİ OLARAK KULLANILAMIYOR' : 'SİSTEM BAKIMDA'}</h1>
+      <p>{emergency ? 'Sistem korunurken yeni işlem girişleri devre dışı bırakıldı.' : 'Kısa bir sistem bakımı yapıyoruz.'}</p>
+      <p>Yeni işlem girişleri geçici olarak kapalı.</p>
+      <div className="authMaintenanceStatus"><i/>{emergency ? 'SİSTEM GEÇİCİ OLARAK KULLANILAMIYOR' : 'SİSTEM BAKIMDA'}</div>
+      <p className="authMaintenanceNote">{emergency ? 'Mevcut pozisyonlar ve koruma mekanizmaları aktif çalışmaya devam ediyor.' : 'Mevcut pozisyonlar ve risk korumaları aktif.'}</p>
+      <p className="authMaintenanceHint">Lütfen kısa süre sonra tekrar deneyin.</p>
+      <button type="button" className="authMaintenanceAdmin" onClick={onAdminLogin}>Yönetici girişi</button>
+    </section>
+  </main>
 }
 
 function ProfileSettings({token,user,onLogout}:{token:string;user:User;onLogout:()=>void}) {
@@ -156,6 +173,20 @@ export default function AuthGate({children}:{children:ReactNode}) {
   }
 
   useEffect(() => { void loadSession(token) }, [])
+
+  // Fail-open: on error or while the tab is hidden, keep the last known maintenance mode.
+  useEffect(() => {
+    if (!token) return
+    const pollMaintenance = async () => {
+      if (document.visibilityState === 'hidden') return
+      try {
+        const current = await request<Session>('/session',{headers:{Authorization:`Bearer ${token}`}})
+        setSession(previous => previous ? {...previous,maintenance:current.maintenance} : previous)
+      } catch { /* fail-open: keep last known maintenance state */ }
+    }
+    const timer = window.setInterval(() => void pollMaintenance(),45000)
+    return () => window.clearInterval(timer)
+  },[token])
 
   useEffect(() => {
     if (mode !== 'verify' || autoVerificationStarted.current) return
@@ -284,6 +315,10 @@ export default function AuthGate({children}:{children:ReactNode}) {
   if (path.startsWith('/admin') && session.user.role !== 'OWNER') return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>403 · ERİŞİM YOK</b><span>Bu alan yalnızca yönetici hesaplarına açıktır.</span><button onClick={() => {history.replaceState(null,'','/dashboard'); location.reload()}}>Dashboard'a dön</button></div></main>
   if (path.startsWith('/admin')) return <><div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>ADMIN</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><AdminPanel token={token} onBack={() => {history.replaceState(null,'','/dashboard');location.reload()}}/></>
   if (path.startsWith('/settings')) return <><div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>{session.user.role === 'OWNER' ? 'ADMIN' : 'MEMBER'}</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><ProfileSettings token={token} user={session.user} onLogout={() => void logout()}/></>
+  const maintenanceMode = session.maintenance?.mode
+  if (session.user.role !== 'OWNER' && (maintenanceMode === 'MAINTENANCE' || maintenanceMode === 'EMERGENCY')) {
+    return <MaintenanceScreen mode={maintenanceMode} onAdminLogin={() => {history.pushState(null,'','/admin'); location.reload()}}/>
+  }
   const memberMenu = memberMenuOpen ? createPortal(<div ref={memberMenuRef} className="authMemberMenu authMemberPortalMenu" role="menu" style={{top:memberMenuPosition.top,left:memberMenuPosition.left}}><div className="authMemberMenuHead"><small>SECURE ACCOUNT</small><strong>{session.user.email}</strong></div>{session.user.role === 'OWNER' && <button type="button" role="menuitem" onClick={() => {setMemberMenuOpen(false);location.assign('/admin')}}><ShieldCheck/><span><b>Admin Dashboard</b><small>Control center</small></span></button>}<button type="button" role="menuitem" onClick={() => {setMemberMenuOpen(false);location.assign('/settings')}}><UserRound/><span><b>Profile &amp; Settings</b><small>Identity and security</small></span></button><button className="authMemberLogout" type="button" role="menuitem" onClick={() => void logout()}><LogOut/><span><b>Çıkış</b><small>End secure session</small></span></button></div>,document.body) : null
   const profileControl = <div className="authSessionBar"><button ref={memberTriggerRef} className="authMemberTrigger" type="button" aria-label="Profil menüsünü aç" aria-expanded={memberMenuOpen} aria-haspopup="menu" onClick={() => setMemberMenuOpen(value => !value)}><svg className="authProfileGlyph" viewBox="3.5 3.8 17 17.9" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><circle cx="12" cy="8" r="3.15"/><path d="M4.7 20.1c.55-3.55 3.35-5.55 7.3-5.55s6.75 2 7.3 5.55c.05.32-.2.6-.52.6H5.22c-.32 0-.57-.28-.52-.6Z"/></svg></button></div>
   return <>{profileHeaderSlot ? createPortal(profileControl,profileHeaderSlot) : profileControl}{memberMenu}{children}</>

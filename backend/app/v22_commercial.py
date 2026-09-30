@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .binance_demo import credentials_configured, public_status as demo_public_status, restore_demo_state_for_user
 from .v21_demo import restore_v21_state_for_user
+from .maintenance import get_maintenance_mode
 from .commercial_core import (
     FeeGuardInput,
     V22_VERSION,
@@ -989,7 +990,8 @@ async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Requ
 async def v22_session(request: Request):
     user = authenticated_user(request)
     state = runtime(request)["state"]
-    return {"user": public_user(user), "license": active_license(state, user["id"]), "access": access_snapshot(state, user), "demo_only": True}
+    mode = get_maintenance_mode(getattr(request.app.state, "maintenance", None))
+    return {"user": public_user(user), "license": active_license(state, user["id"]), "access": access_snapshot(state, user), "demo_only": True, "maintenance": {"mode": mode}}
 
 
 @router.get("/profile")

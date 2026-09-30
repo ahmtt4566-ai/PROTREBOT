@@ -106,6 +106,21 @@ class MaintenanceWiringTests(unittest.TestCase):
         self.assertIn("authenticated_user(request, owner=True)", set_block)
         self.assertIn("set_maintenance_mode(", set_block)
 
+    def test_session_endpoint_exposes_mode_to_any_authenticated_user(self):
+        """Regular (non-owner) logged-in users must be able to read the mode -
+        this is what lets the frontend show/hide the maintenance screen."""
+        session_source = (APP_DIR / "v22_commercial.py").read_text(encoding="utf-8")
+        session_block = session_source.split('async def v22_session(request: Request):', 1)[1].split("\n\n\n", 1)[0]
+        self.assertIn("get_maintenance_mode(", session_block)
+        self.assertIn('"maintenance"', session_block)
+        self.assertNotIn("owner=True", session_block)
+
+    def test_maintenance_screen_only_blocks_non_owner_and_is_fail_open(self):
+        auth_source = (Path(__file__).parents[2] / "AuthGate.tsx").read_text(encoding="utf-8")
+        self.assertIn("session.user.role !== 'OWNER' && (maintenanceMode === 'MAINTENANCE' || maintenanceMode === 'EMERGENCY')", auth_source)
+        self.assertIn("catch { /* fail-open: keep last known maintenance state */ }", auth_source)
+        self.assertIn("if (document.visibilityState === 'hidden') return", auth_source)
+
 
 if __name__ == "__main__":
     unittest.main()
