@@ -4725,3 +4725,64 @@ body:has(.riskOnlyDeck),
   border: 0 !important;
   background: transparent !important;
 }
+
+/* Desktop (>=1024px) header parity: every route must render the exact same
+   flat, borderless header as the home page (.v26App:has(.v26Dashboard)). */
+@media (min-width: 1024px) {
+  #root > main.v26App > .v26Header.v26HomeHeader {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #05070c !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App > .v26Header.v26HomeHeader .v26Brand > span {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App > .v26Header.v26HomeHeader .v26HomeHeaderStatus {
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
+  #root > main.v26App > .v26Header.v26HomeHeader .v26Refresh,
+  #root > main.v26App > .v26Header.v26HomeHeader .v26NotificationButton {
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    color: #aeb8c4 !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App > .v26Header.v26HomeHeader .v26Refresh:hover:not(:disabled),
+  #root > main.v26App > .v26Header.v26HomeHeader .v26NotificationButton:hover {
+    background: rgba(255, 255, 255, .1) !important;
+    color: #e5d4ad !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App > .v26Header.v26HomeHeader .v26Refresh:focus-visible,
+  #root > main.v26App > .v26Header.v26HomeHeader .v26NotificationButton:focus-visible {
+    outline: 2px solid rgba(212, 168, 79, .48);
+    outline-offset: 2px;
+  }
+
+  /* Setup/Connections page: flatten card borders, replace dividers with tone. */
+  #root > main.v26App.workspaceRoute .connectionCenterHeader,
+  #root > main.v26App.workspaceRoute .connectionDemoPanel,
+  #root > main.v26App.workspaceRoute .connectionLivePanel,
+  #root > main.v26App.workspaceRoute .connectionSecurityPanel {
+    border: 0 !important;
+    background: rgba(255, 255, 255, .03) !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute .connectionStatusRail,
+  #root > main.v26App.workspaceRoute .connectionWorkflow {
+    border: 0 !important;
+    background: rgba(255, 255, 255, .03) !important;
+  }
+}
