@@ -687,6 +687,11 @@ export default function TestnetFirstApp() {
   },[view])
 
   useEffect(() => {
+    window.scrollTo(0,0)
+    setHeaderHidden(false)
+  },[view])
+
+  useEffect(() => {
     if (!mobileMenuOpen) return
     const closeOnEscape = (event:KeyboardEvent) => {if (event.key === 'Escape') setMobileMenuOpen(false)}
     document.addEventListener('keydown',closeOnEscape)

@@ -2043,7 +2043,7 @@
 
 @media (max-width: 900px) {
   #root > main.v26App {
-    padding-top: calc(var(--mobile-top) + 54px);
+    padding-top: 0;
   }
 
   .authSessionBar {
@@ -2053,7 +2053,7 @@
   }
 
   #root > main.v26App .v26Header {
-    top: calc(var(--mobile-top) + 54px);
+    top: 0;
     z-index: 1100;
   }
 
@@ -2063,7 +2063,7 @@
   }
 
   #root > main.v26App .v26NotificationPanel {
-    top: calc(env(safe-area-inset-top) + var(--mobile-top) + 58px) !important;
+    top: calc(env(safe-area-inset-top) + 58px) !important;
     right: max(10px, env(safe-area-inset-right)) !important;
     left: max(10px, env(safe-area-inset-left)) !important;
     max-height: min(76vh, 560px) !important;
@@ -4693,4 +4693,35 @@ body:has(.riskOnlyDeck),
   #root > main.v26App.homeRoute > .v26Footer {
     margin-bottom: calc(68px + env(safe-area-inset-bottom, 0px)) !important;
   }
+}
+
+/* Workspace title bar / market bar: plain heading + subtle-tone strip instead
+   of a bordered card nested inside another card. */
+#root > main.v26App.workspaceRoute > .v26ModeBar {
+  min-height: 0 !important;
+  margin: 14px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+#root > main.v26App.workspaceRoute > .v26ModeBar aside {
+  border: 0 !important;
+  background: rgba(255, 255, 255, .04) !important;
+}
+
+#root > main.v26App.workspaceRoute .v26MarketBar {
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, .03) !important;
+  box-shadow: none !important;
+}
+
+#root > main.v26App.workspaceRoute .v26MarketTitle {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
 }

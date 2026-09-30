@@ -969,10 +969,10 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
 
   return <section ref={demoDeckRef} className={`binanceDemoDeck${focusMode ? ' demoFocusMode' : ''}${isolatedRisk ? ' riskOnlyDeck' : ''}`} aria-label="Binance Futures Demo Köprüsü" data-build-marker="BUILD_COMMIT" data-build-commit={import.meta.env.VITE_BUILD_COMMIT} data-position-source="reconciled_active_positions" data-diagnostics="exchange_position_diagnostics">
     {tab === 'trade' && <section className="demoHero">
-      <div className="demoHeroCopy"><span>DEMO / TESTNET</span><h2>DEMO TRADING</h2><small className="demoHeroSymbol">{symbol.replace('USDT','/USDT')} · 15m</small><p>Binance Futures Demo hesabında piyasa akışını izle ve emirleri güvenlik kapılarıyla doğrula.</p><div><b><ShieldCheck/> DEMO ONLY</b><span>{status?.rest_host || 'https://demo-fapi.binance.com'}</span></div><button type="button" className="demoHeroConnect" onClick={connect} disabled={busy || !status?.configured}><Radio/> Binance Demo'ya Bağlan</button></div>
+      <div className="demoHeroCopy"><span>DEMO / TESTNET</span><h2>DEMO TRADING</h2><small className="demoHeroSymbol">{symbol.replace('USDT','/USDT')} · 15m</small><p>Binance Futures Demo hesabında piyasa akışını izle ve emirleri güvenlik kapılarıyla doğrula.</p><div><b><ShieldCheck/> Yalnızca demo</b><span>{status?.rest_host || 'https://demo-fapi.binance.com'}</span></div><button type="button" className="demoHeroConnect" onClick={connect} disabled={busy || !status?.configured}><Radio/> Binance Demo'ya Bağlan</button></div>
       <div className="demoHeroStatus">
-        <span className={status?.connected ? 'demoOk' : 'demoWait'}><Radio/><small>CONNECTION</small><b>{status?.connected ? '● DEMO CONNECTED' : '○ DISCONNECTED'}</b></span>
-        <span className={status?.armed ? 'demoArmed' : 'demoSafe'}>{status?.armed ? <UnlockKeyhole/> : <LockKeyhole/>}<small>EMİR KİLİDİ</small><b>{status?.armed ? `${Math.floor(armSeconds/60)}:${String(armSeconds%60).padStart(2,'0')}` : 'KAPALI'}</b></span>
+        <span className={status?.connected ? 'demoOk' : 'demoWait'}><Radio/><small>CONNECTION</small><b>{status?.connected ? '● Bağlı' : '○ Bağlı değil'}</b></span>
+        <span className={status?.armed ? 'demoArmed' : 'demoSafe'}>{status?.armed ? <UnlockKeyhole/> : <LockKeyhole/>}<small>EMİR KİLİDİ</small><b>{status?.armed ? `${Math.floor(armSeconds/60)}:${String(armSeconds%60).padStart(2,'0')}` : 'Kapalı'}</b></span>
         <span className="demoSymbolStatus"><LineChart/><small>TIMEFRAME</small><b>N/A</b></span>
         <button type="button" className="demoHeroStop" onClick={emergency} disabled={busy || !status?.configured}><TriangleAlert/> ACİL DEMO DURDUR</button>
       </div>
