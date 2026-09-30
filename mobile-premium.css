@@ -3414,3 +3414,1007 @@
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
+
+/* Risk workspace presentation */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v26ModeBar {
+  display: none !important;
+}
+
+html:has(.riskOnlyDeck),
+body:has(.riskOnlyDeck),
+#root:has(.riskOnlyDeck) {
+  background: #000 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) {
+  --workspace-surface: #000 !important;
+  --workspace-surface-raised: #111 !important;
+  background: #000 !important;
+  background-image: none !important;
+  color: var(--text) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .riskOnlyDeck {
+  background: transparent !important;
+  color: var(--text) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  --card: var(--workspace-surface) !important;
+  --card-alt: var(--workspace-surface-raised) !important;
+  --muted: var(--workspace-muted) !important;
+  --orange: var(--workspace-accent) !important;
+  --orange-hover: var(--workspace-accent-hover) !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 20px !important;
+  width: 100% !important;
+  max-width: 1200px !important;
+  margin: 0 auto !important;
+  padding: 20px 0 28px !important;
+  background: transparent !important;
+  background-image: none !important;
+  color: var(--text) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead {
+  grid-row: 1 !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: space-between !important;
+  gap: 20px !important;
+  margin: 0 !important;
+  padding: 4px 0 8px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead > div:first-child {
+  min-width: 0 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead > div:first-child > span {
+  color: var(--workspace-accent) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  line-height: 1.4 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead h2 {
+  margin: 6px 0 !important;
+  color: var(--text) !important;
+  font-size: 26px !important;
+  line-height: 1.2 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead p {
+  max-width: 680px !important;
+  margin: 0 !important;
+  color: var(--workspace-muted) !important;
+  font-size: 14px !important;
+  line-height: 1.55 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21HeaderActions {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskStatus {
+  min-height: 40px !important;
+  padding: 9px 12px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: var(--workspace-surface-raised) !important;
+  color: var(--workspace-muted) !important;
+  font-size: 12px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskReturn,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  min-height: 46px !important;
+  padding: 11px 16px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: var(--workspace-accent) !important;
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1.3 !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskReturn:hover,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:not(:disabled):hover {
+  background: var(--workspace-accent-hover) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button:disabled {
+  background: var(--workspace-surface-raised) !important;
+  color: var(--workspace-muted) !important;
+  cursor: not-allowed !important;
+  opacity: .75 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskSummary {
+  grid-row: 2 !important;
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 16px 18px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--workspace-surface) !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary::before {
+  display: none !important;
+  content: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  display: grid !important;
+  align-content: center !important;
+  gap: 7px !important;
+  min-width: 0 !important;
+  min-height: 60px !important;
+  padding: 7px 14px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  border-right: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span:last-child {
+  border-right: 0 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary small {
+  color: var(--workspace-muted) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1.35 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary b {
+  color: var(--text) !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  line-height: 1.25 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskLayout {
+  grid-row: 3 !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  align-items: start !important;
+  gap: 16px !important;
+  margin: 0 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card {
+  min-width: 0 !important;
+  padding: 20px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--workspace-surface) !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  margin: 0 0 18px !important;
+  padding: 0 0 14px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  border-bottom: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header > svg {
+  flex: 0 0 20px !important;
+  width: 20px !important;
+  height: 20px !important;
+  color: var(--workspace-accent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header small {
+  color: var(--workspace-muted) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  line-height: 1.4 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > header h3 {
+  margin: 3px 0 0 !important;
+  color: var(--text) !important;
+  font-size: 17px !important;
+  line-height: 1.3 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote, .v21SettingsGrid, .v21SettingsUnavailable, .v21RiskResult) {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+  margin: 0 0 18px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote > span, .v21CalcQuote > label, .v21SettingsGrid > label, .v21SettingsUnavailable > span, .v21RiskResult > span) {
+  display: grid !important;
+  align-content: center !important;
+  gap: 7px !important;
+  min-width: 0 !important;
+  min-height: 58px !important;
+  margin: 0 !important;
+  padding: 8px 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote small, .v21SettingsGrid label > span, .v21SettingsUnavailable small, .v21RiskResult small) {
+  color: var(--workspace-muted) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  line-height: 1.4 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote b, .v21SettingsUnavailable b, .v21RiskResult b) {
+  color: var(--text) !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+  line-height: 1.4 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote label > div {
+  display: flex !important;
+  align-items: center !important;
+  gap: 9px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote input, .v21SettingsGrid input, .v21SettingsGrid select) {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  padding: 9px 11px !important;
+  border: 0 !important;
+  border-radius: 5px !important;
+  background: var(--workspace-surface-raised) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+  accent-color: var(--workspace-accent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote em, .v21SettingsGrid em) {
+  color: var(--workspace-muted) !important;
+  font-size: 12px !important;
+  font-style: normal !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Switch {
+  grid-template-columns: 36px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 10px !important;
+  min-height: 54px !important;
+  cursor: pointer !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Switch input {
+  width: 36px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  margin: 0 !important;
+  accent-color: var(--workspace-accent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Switch span {
+  display: grid !important;
+  gap: 3px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Switch b {
+  color: var(--text) !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Switch small {
+  color: var(--workspace-muted) !important;
+  font-size: 11px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskResult p, .v21EmptyMini) {
+  grid-column: 1 / -1 !important;
+  margin: 0 !important;
+  padding: 12px 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--workspace-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(button, input, select):focus-visible {
+  outline: 3px solid var(--workspace-accent) !important;
+  outline-offset: 3px !important;
+}
+
+@media (max-width: 1023px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead {
+    align-items: flex-start !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskLayout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 700px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+    gap: 14px !important;
+    padding: 14px 0 24px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead {
+    display: grid !important;
+    gap: 14px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead h2 {
+    font-size: 22px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21HeaderActions {
+    justify-content: flex-start !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    padding: 10px 12px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span:nth-child(2) {
+    border-right: 0 !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card {
+    padding: 16px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskReturn,
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card > .action-button {
+    width: 100% !important;
+    min-height: 46px !important;
+  }
+
+  #root:has(.riskOnlyDeck) .globalBackToTop {
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21CalcQuote, .v21SettingsGrid, .v21SettingsUnavailable, .v21RiskResult) {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) > .binanceDemoDeck.riskOnlyDeck {
+  display: block !important;
+  width: 100% !important;
+  max-width: 1200px !important;
+  min-width: 0 !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskLayout {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  grid-auto-rows: 1fr !important;
+  align-items: stretch !important;
+  gap: 24px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Calculator > .action-button {
+  margin-top: auto !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21CalcQuote > span {
+  justify-items: end !important;
+  text-align: right !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21WorkspaceHead > div:first-child > span, .v21Card > header small, .v21RiskSummary small) {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+@media (max-width: 1023px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskLayout {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-auto-rows: auto !important;
+    gap: 16px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card {
+    height: auto !important;
+  }
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskSummary,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card {
+  background: var(--workspace-surface-raised) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .18) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21SettingsUnavailable b {
+  color: var(--workspace-muted) !important;
+  font-weight: 500 !important;
+}
+
+/* Risk console: professional trading-terminal density pass */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskOverview {
+  grid-row: 2 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskLayout {
+  grid-row: 3 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskSummary {
+  grid-row: 4 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskOverview {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 22px !important;
+  margin: 0 !important;
+  padding: 13px 18px !important;
+  border-radius: 11px !important;
+  background: var(--workspace-surface-raised) !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .16) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21OverviewItem {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  min-width: 84px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21OverviewItem small {
+  color: var(--workspace-muted) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .04em !important;
+  text-transform: uppercase !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21OverviewItem b {
+  color: var(--text) !important;
+  font-size: 17px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21OverviewStatus {
+  margin-left: auto !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21OverviewStatus b {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  padding: 5px 12px !important;
+  border-radius: 999px !important;
+  background: var(--workspace-surface) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1.4 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21StatusDot {
+  display: inline-block !important;
+  width: 7px !important;
+  height: 7px !important;
+  border-radius: 50% !important;
+  background: var(--workspace-muted) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21StatusDot.ready {
+  background: var(--workspace-positive) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21StatusDot.busy {
+  background: var(--workspace-warning) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ConsoleHeader {
+  justify-content: space-between !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ConsoleHeader > div {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ConsoleSubline {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin-top: 5px !important;
+  color: var(--workspace-muted) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21StatusPill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 4px 10px !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--workspace-positive) 16%, transparent) !important;
+  color: var(--workspace-positive) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21StatusPill i {
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  background: currentColor !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21FieldGrid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  margin: 0 0 16px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Field {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  min-height: 44px !important;
+  padding: 8px 12px !important;
+  border-radius: 9px !important;
+  background: var(--workspace-surface) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Field small {
+  color: var(--workspace-muted) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Field b {
+  color: var(--text) !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21FieldInput {
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21InputRow {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  height: 44px !important;
+  padding: 0 12px !important;
+  border: 1px solid color-mix(in srgb, var(--workspace-muted) 28%, transparent) !important;
+  border-radius: 9px !important;
+  background: var(--workspace-surface) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21InputRow:focus-within {
+  border-color: var(--workspace-accent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21InputRow :is(input, select) {
+  flex: 1 !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  font-size: 14px !important;
+  box-shadow: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21InputRow :is(input, select):focus {
+  outline: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21InputRow em {
+  color: var(--workspace-muted) !important;
+  font-size: 11px !important;
+  font-style: normal !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21PrimaryButton {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-height: 44px !important;
+  margin-top: auto !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  background: var(--workspace-accent) !important;
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21PrimaryButton:hover:not(:disabled) {
+  background: var(--workspace-accent-hover) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21PrimaryButton:disabled {
+  background: var(--workspace-surface) !important;
+  color: var(--workspace-muted) !important;
+  cursor: not-allowed !important;
+  opacity: .7 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21PrimaryButton svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21HelperText {
+  margin: 10px 0 0 !important;
+  color: var(--workspace-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ResultPanel {
+  margin-top: 14px !important;
+  padding: 14px !important;
+  border-radius: 10px !important;
+  background: var(--workspace-surface) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ResultLabel {
+  display: block !important;
+  margin: 0 0 10px !important;
+  color: var(--workspace-muted) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .05em !important;
+  text-transform: uppercase !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ResultGrid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ResultItem {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ResultItem small {
+  color: var(--workspace-muted) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ResultItem b {
+  color: var(--text) !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ResultNote {
+  margin: 12px 0 0 !important;
+  color: var(--workspace-muted) !important;
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ProtectionGrid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  margin: 4px 0 16px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ProtectionRow {
+  padding: 8px 12px !important;
+  border-radius: 9px !important;
+  background: var(--workspace-surface) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ProtectionRow.active {
+  background: color-mix(in srgb, var(--workspace-accent) 14%, var(--workspace-surface)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--workspace-accent) 45%, transparent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary::before {
+  display: block !important;
+  content: 'Risk Durumu' !important;
+  grid-column: 1 / -1 !important;
+  margin: 0 0 4px !important;
+  color: var(--workspace-muted) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: .05em !important;
+  text-transform: uppercase !important;
+}
+
+@media (max-width: 700px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskOverview {
+    gap: 16px !important;
+    padding: 12px 14px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21OverviewItem {
+    min-width: 40% !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21OverviewStatus {
+    margin-left: 0 !important;
+  }
+}
+
+@media (max-width: 430px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21FieldGrid, .v21ResultGrid, .v21ProtectionGrid) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* Risk console: fintech terminal density pass 2 — reclaim desktop width, thin card borders, de-emphasize secondary controls, strengthen bottom metrics */
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) > .binanceDemoDeck.riskOnlyDeck,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  max-width: 1400px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+  gap: 16px !important;
+  padding: 16px 0 22px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead {
+  align-items: center !important;
+  padding: 10px 0 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21HeaderTitle {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21HeaderTitle > svg {
+  flex: 0 0 22px !important;
+  width: 22px !important;
+  height: 22px !important;
+  color: var(--workspace-accent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead h2 {
+  margin: 0 !important;
+  font-size: 21px !important;
+  line-height: 1.15 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead p {
+  max-width: none !important;
+  margin: 2px 0 0 !important;
+  font-size: 12.5px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskStatus {
+  min-height: 30px !important;
+  padding: 6px 10px !important;
+  background: transparent !important;
+  border: 1px solid color-mix(in srgb, var(--workspace-muted) 32%, transparent) !important;
+  font-size: 11px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskReturn {
+  min-height: 34px !important;
+  padding: 7px 13px !important;
+  background: transparent !important;
+  border: 1px solid color-mix(in srgb, var(--workspace-muted) 32%, transparent) !important;
+  color: var(--workspace-muted) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskReturn:hover {
+  background: transparent !important;
+  border-color: var(--workspace-accent) !important;
+  color: var(--text) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskOverview,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card {
+  border: 1px solid color-mix(in srgb, var(--workspace-muted) 16%, transparent) !important;
+  border-radius: 11px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskLayout {
+  gap: 14px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ConsoleHeader h3 {
+  font-size: 16px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ConsoleHeader small {
+  font-size: 11px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21Field small, .v21ResultItem small, .v21OverviewItem small) {
+  font-size: 11px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskSummary {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  gap: 12px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary::before {
+  display: none !important;
+  content: none !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary > span,
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  padding: 12px 14px !important;
+  border: 1px solid color-mix(in srgb, var(--workspace-muted) 16%, transparent) !important;
+  border-radius: 10px !important;
+  background: var(--workspace-surface-raised) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary .v21MetricPrimary {
+  border-color: color-mix(in srgb, var(--workspace-accent) 40%, transparent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskSummary b {
+  font-size: 19px !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ProtectionRow {
+  grid-template-columns: 34px minmax(0, 1fr) auto !important;
+  border: 1px solid color-mix(in srgb, var(--workspace-muted) 16%, transparent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ProtectionRow.active {
+  border-color: color-mix(in srgb, var(--workspace-accent) 45%, transparent) !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ProtectionState {
+  justify-self: end !important;
+  padding: 3px 9px !important;
+  border-radius: 999px !important;
+  background: var(--workspace-surface-raised) !important;
+  color: var(--workspace-muted) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  font-style: normal !important;
+  letter-spacing: .04em !important;
+  text-transform: uppercase !important;
+}
+
+#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21ProtectionRow.active .v21ProtectionState {
+  background: color-mix(in srgb, var(--workspace-accent) 22%, transparent) !important;
+  color: var(--workspace-accent) !important;
+}
+
+@media (max-width: 700px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21RiskSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Risk console: mobile-only fintech pass — compact header pills, 2-col fields, no stretched controls */
+@media (max-width: 599px) {
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement {
+    gap: 12px !important;
+    padding: 10px 0 20px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    gap: 8px 10px !important;
+    padding: 8px 0 !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead h2 {
+    font-size: 19px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement > .v21WorkspaceHead p {
+    display: -webkit-box !important;
+    max-width: none !important;
+    overflow: hidden !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21HeaderActions {
+    width: 100% !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21RiskStatus, .v21RiskReturn) {
+    width: auto !important;
+    flex: 0 1 auto !important;
+    min-height: 32px !important;
+    padding: 6px 12px !important;
+    font-size: 11px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21Card {
+    padding: 14px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(.v21FieldGrid, .v21ResultGrid) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px 10px !important;
+  }
+
+  #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskOverview {
+    padding: 10px 12px !important;
+  }
+}
