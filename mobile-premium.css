@@ -4786,3 +4786,16 @@ body:has(.riskOnlyDeck),
     background: rgba(255, 255, 255, .03) !important;
   }
 }
+
+/* Notification bell caret: was rendered unconditionally on every route except
+   .homeRoute, so it stayed visible even with the panel closed. Show it only
+   while the panel is actually in the DOM (:has), matching home's behavior. */
+@media (min-width: 701px) {
+  #root > main.v26App > .v26Header.v26HomeHeader .v26Notifications::after {
+    display: none;
+  }
+
+  #root > main.v26App > .v26Header.v26HomeHeader .v26Notifications:has(.v26NotificationPanel)::after {
+    display: block;
+  }
+}
