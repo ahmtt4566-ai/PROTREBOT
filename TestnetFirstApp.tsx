@@ -696,11 +696,20 @@ export default function TestnetFirstApp() {
   useEffect(() => {
     let previousY = window.scrollY
     let ticking = false
+    const isInteractionActive = () => {
+      if (mobileMenuOpen || notificationsOpen || marketPickerOpen || complianceOpen) return true
+      const active = document.activeElement as HTMLElement | null
+      return !!active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable)
+    }
     const updateScrollState = () => {
       const currentY = window.scrollY
       const delta = currentY - previousY
-      if (currentY <= 12) setHeaderHidden(false)
-      else if (Math.abs(delta) >= 8) setHeaderHidden(delta > 0)
+      if (currentY < 8 || isInteractionActive()) {
+        setHeaderHidden(false)
+      } else if (Math.abs(delta) >= 8) {
+        if (delta > 0 && currentY > 64) setHeaderHidden(true)
+        else if (delta < 0) setHeaderHidden(false)
+      }
       previousY = currentY
       ticking = false
     }
@@ -709,11 +718,11 @@ export default function TestnetFirstApp() {
     }
     window.addEventListener('scroll',onScroll,{passive:true})
     return () => window.removeEventListener('scroll',onScroll)
-  },[])
+  },[mobileMenuOpen,notificationsOpen,marketPickerOpen,complianceOpen])
 
   return <main className={`v26App ${view === 'dashboard' ? 'homeRoute' : 'workspaceRoute'} ${view === 'master-trade' ? 'masterTradeRoute' : ''}${connectionOffline ? ' backendOffline' : ''}`}>
     {connectionOffline && <section className="v26OfflineNotice" role="status" aria-live="polite"><span><i/><b>Sunucu bağlantısı bekleniyor</b><small>Veriler güncellenemiyor. Bağlantı kurulduğunda otomatik olarak yeniden denenecek.</small></span><button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'KONTROL EDİLİYOR…' : 'YENİDEN DENE'}</button></section>}
-    {view === 'dashboard' ? <header className={`v26Header v26HomeHeader ${headerHidden ? 'v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
+    <header className={`v26Header v26HomeHeader${headerHidden ? ' v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
       <div className="v26Brand"><span>X</span><div><b>PROTREBOT ELITE X</b><small>TESTNET ÖNCELİKLİ İŞLEM PLATFORMU</small></div></div>
       <div className="v26HomeHeaderStatus" aria-label="Sistem durumu"><i className={connectionOffline ? 'pending' : health?.status === 'ok' ? 'ok' : 'pending'}/>{connectionOffline ? 'BAĞLANTI BEKLENİYOR' : 'ÇEVRİMİÇİ'}</div>
       <div className="v26HeaderActions">
@@ -727,7 +736,8 @@ export default function TestnetFirstApp() {
         </div>
         <div className="v26HeaderProfileSlot" />
       </div>
-    </header> : <BackButton onClick={() => setView('dashboard')}/>}
+    </header>
+    {view !== 'dashboard' && <BackButton onClick={() => setView('dashboard')}/>}
 
     {view !== 'dashboard' && <section className="v26ModeBar">
       <div><small>WORKSPACE</small><h1>{view === 'trading' ? 'İşlem Masası' : view === 'risk' ? 'Risk Kasası' : view === 'analyst' ? 'Analyst' : view === 'scanner' ? 'Scanner' : view === 'performance' ? 'Performance' : view === 'ops' ? 'Bulut Operasyon ve Kanıt Merkezi' : view === 'live' ? 'Gerçek Futures Hazırlık Merkezi' : view === 'pricing' ? 'Plans & Pricing' : view === 'billing' ? 'Billing & Subscription' : view === 'master-trade' ? 'Master Trade' : 'Sunucu ve Anahtar Kapıları'}</h1><p>{view === 'trading' ? 'Market, sinyal, grafik ve testnet işlem yönetimi.' : view === 'risk' ? 'Risk limiti, pozisyon boyutu ve koruma ayarları.' : view === 'analyst' ? 'Scanner snapshot üzerinden market intelligence ve sinyal analizi.' : view === 'scanner' ? 'Piyasadaki uygun adayları ve sinyalleri tara.' : view === 'performance' ? 'İşlem sonuçlarını, PnL ve risk ölçümlerini incele.' : view === 'ops' ? 'Otonom taramanın son kararı, pozisyonlar ve yeniden başlatmaya dayanıklı PostgreSQL kanıt defteri.' : view === 'live' ? 'Şifreli canlı kasa kaydı ve tüm risk kapıları tamamlanana kadar emir gönderimi fail-closed olarak kilitli.' : view === 'pricing' || view === 'billing' ? 'Choose a subscription level for your trading intelligence workspace.' : 'Anahtar değerleri tarayıcıya veya GitHub’a yazılmaz; yalnızca sunucu tarafındaki şifreli kasa veya güvenli geçiş değişkenlerinde tutulur.'}</p></div>

@@ -2930,6 +2930,8 @@
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem b,
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem span,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem strong,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem em,
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinTableScroll td:first-child b {
   min-width: 0 !important;
   white-space: nowrap !important;
@@ -2985,11 +2987,8 @@
   }
 
   #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinHistoryPanel {
-    max-height: 300px !important;
-    overflow-y: auto !important;
-    overscroll-behavior: contain !important;
-    scrollbar-width: thin;
-    scrollbar-color: #4a4a4a #0b0b0b;
+    max-height: none !important;
+    overflow-y: visible !important;
   }
 
   #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem {
@@ -3001,6 +3000,7 @@
   #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .historyItem em {
     grid-column: 2;
     justify-self: start;
+    white-space: nowrap !important;
   }
 }
 
@@ -4398,5 +4398,251 @@ body:has(.riskOnlyDeck),
 
   #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement .v21RiskOverview {
     padding: 10px 12px !important;
+  }
+}
+
+/* Smart header: one shared Header on every route (home + workspace), sticky with
+   scroll-aware hide/show. Sticky (not fixed) keeps the header's box reserved in
+   normal flow, so hiding it never shifts the page content. */
+#root > main.v26App > .v26Header.v26HomeHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1100;
+  transition: transform 250ms ease-out;
+  will-change: transform;
+}
+#root > main.v26App > .v26Header.v26HomeHeader.v26HeaderHidden {
+  transform: translateY(-100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  #root > main.v26App > .v26Header.v26HomeHeader {
+    transition: none !important;
+  }
+}
+
+/* Extend the existing homeRoute mobile header layout to workspaceRoute pages
+   (Analyst, Scanner, etc.) so the auth profile control always finds its slot
+   inside the header instead of falling back to a page-fixed floating button. */
+@media (max-width: 700px) {
+  #root > main.v26App.workspaceRoute {
+    margin-top: 0 !important;
+    overflow-x: clip !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader {
+    left: 0 !important;
+    right: 0 !important;
+    display: flex !important;
+    flex-wrap: nowrap;
+    align-items: center;
+    box-sizing: border-box;
+    width: calc(100% + 28px) !important;
+    max-width: none !important;
+    margin: 0 -14px 0 !important;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px 8px !important;
+    border-radius: 0 !important;
+    gap: 8px !important;
+    background: rgba(10, 20, 32, .94) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader > .v26Brand {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    overflow: hidden;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader > .v26Brand > div {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader > .v26Brand b,
+  #root > main.v26App.workspaceRoute > .v26HomeHeader > .v26Brand small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader > .v26HomeHeaderStatus {
+    display: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26HeaderActions {
+    display: flex !important;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px !important;
+    min-width: 80px;
+    padding-right: 0;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26Notifications {
+    display: flex;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26Refresh,
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26NotificationButton {
+    display: inline-flex !important;
+    flex: 0 0 36px !important;
+    flex-shrink: 0 !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26HeaderProfileSlot {
+    display: flex !important;
+    flex: 0 0 36px !important;
+    flex-shrink: 0 !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26HeaderProfileSlot > .authSessionBar {
+    position: static !important;
+    display: flex !important;
+    flex: 0 0 36px !important;
+    flex-shrink: 0 !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    box-sizing: border-box;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .authMemberTrigger {
+    display: inline-flex !important;
+    flex: 0 0 36px !important;
+    flex-shrink: 0 !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .authProfileGlyph {
+    width: 18px !important;
+    height: 18px !important;
+    flex: 0 0 18px !important;
+  }
+
+  #root > main.v26App.workspaceRoute .homeBackButton {
+    margin-top: 10px !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26HeaderActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26Refresh,
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26NotificationButton,
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26Notifications {
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26HeaderProfileSlot {
+    display: flex;
+    flex: 0 0 36px;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .v26HeaderProfileSlot > .authSessionBar {
+    position: static !important;
+    inset: auto !important;
+    display: flex !important;
+    flex: 0 0 36px;
+    align-items: center;
+    justify-content: center;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 9px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .authMemberTrigger {
+    display: inline-flex !important;
+    flex: 0 0 36px !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    padding: 0 !important;
+    border-radius: 9px !important;
+  }
+
+  #root > main.v26App.workspaceRoute > .v26HomeHeader .authProfileGlyph {
+    width: 18px !important;
+    height: 18px !important;
+    flex: 0 0 18px !important;
+  }
+}
+
+/* Bottom nav: frameless floating pill instead of an edge-to-edge bordered bar. */
+@media (max-width: 1024px) {
+  .v26MobileBottomNav {
+    right: 10px !important;
+    bottom: max(10px, env(safe-area-inset-bottom)) !important;
+    left: 10px !important;
+    border-top: 0 !important;
+    border-radius: 16px !important;
+    background: rgba(9, 16, 26, .88) !important;
+    box-shadow: 0 10px 28px rgba(0,0,0,.32), 0 0 0 1px rgba(255,255,255,.06) inset !important;
+    transition: transform 250ms ease-out;
+    will-change: transform;
+  }
+
+  #root > main.v26App > .v26Header.v26HomeHeader.v26HeaderHidden ~ .v26MobileBottomNav {
+    transform: translateY(calc(100% + 16px));
+  }
+
+  /* Reserve room so page content (incl. the last Analyst signal card) never
+     sits underneath the floating bottom nav. Additive: does not touch the
+     existing main.v26App padding-bottom shorthand. */
+  #root > main.v26App.workspaceRoute > .coinAnalysisCenter {
+    padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v26MobileBottomNav {
+    transition: none !important;
   }
 }

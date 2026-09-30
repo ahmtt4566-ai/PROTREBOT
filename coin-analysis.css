@@ -102,11 +102,26 @@
 .rowBadges strong.negative{background:rgba(228,119,112,.12);color:var(--terminal-short)}
 .rowBadges em{border-radius:4px;background:rgba(229,184,102,.12);color:var(--terminal-amber)}
 .featuredOpportunities{padding:16px;background:#0f1720!important}
-.featuredList{gap:0;border-top:1px solid var(--terminal-line);border-bottom:1px solid var(--terminal-line)}
-.featuredList button{min-width:0;padding:12px;border:0;border-right:1px solid var(--terminal-line);border-radius:0;background:transparent}
-.featuredList button:last-child{border-right:0}
-.featuredList button:hover{background:#16222d}
-.featuredList>button>strong{color:var(--terminal-amber)}
+.featuredList{gap:10px;border-top:0;border-bottom:0}
+.featuredCard{display:grid;grid-template-rows:auto auto auto auto auto;gap:8px;min-width:0;height:100%;padding:14px;border:0;border-radius:10px;background:#0f1a24;box-shadow:0 6px 18px rgba(0,0,0,.18);color:inherit;text-align:left;cursor:pointer}
+.featuredCard:hover{background:#16222d}
+.featuredCardTop{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.featuredCardSymbol{overflow:hidden;min-width:0;color:var(--terminal-text);font-size:15px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.featuredCardBadge{flex:0 0 auto;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.04em;white-space:nowrap}
+.featuredCardBadge.positive{background:rgba(85,201,138,.16);color:var(--terminal-long)}
+.featuredCardBadge.negative{background:rgba(228,119,112,.16);color:var(--terminal-short)}
+.featuredCardBadge.neutral{background:rgba(148,163,184,.16);color:var(--terminal-muted)}
+.featuredCardScore{display:flex;align-items:baseline;gap:4px}
+.featuredCardScore b{color:var(--terminal-amber);font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.featuredCardScore small{color:var(--terminal-muted);font-size:12px}
+.featuredCardMetrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;min-width:0}
+.featuredCardMetrics span{display:grid;gap:3px;min-width:0}
+.featuredCardMetrics small{color:var(--terminal-muted);font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.featuredCardMetrics b{overflow:hidden;color:var(--terminal-text);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap}
+.featuredCardMetrics b em{margin-left:4px;font-size:11px;font-style:normal;font-variant-numeric:tabular-nums}
+.featuredCardChips{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.featuredChip{overflow:hidden;max-width:100%;padding:4px 10px;border-radius:999px;background:rgba(148,163,184,.12);color:var(--terminal-muted);font-size:11px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.featuredCardCta{display:block;width:100%;margin-top:2px;padding:9px;border-radius:7px;background:rgba(229,184,102,.14);color:var(--terminal-amber);font-size:12px;font-weight:800;text-align:center}
 .coinTablePanel,.coinDetailPanel{background:#0f1720!important}
 .coinTableMeta{border-color:var(--terminal-line)}
 .coinTableScroll th{background:#16222d;color:var(--terminal-muted)}
@@ -129,6 +144,23 @@
 .coinMobileCards>button:hover{background:#16222d}
 .coinMobileCards .mobileScore{color:var(--terminal-amber)}
 .selectedRow,.coinMobileCards>button.selectedRow{border-left-color:var(--terminal-amber)!important;background:rgba(229,184,102,.1)!important}
+.coinAnalysisCenter .coinToolsHeader{display:block;padding-bottom:10px;border-bottom:1px solid var(--terminal-line)}
+.coinAnalysisCenter .coinToolsHeader h3{margin:0;color:var(--terminal-text);font-size:16px;font-weight:800}
+.coinAnalysisCenter .coinToolsSubtitle{margin:4px 0 0;color:var(--terminal-muted);font-size:12px;font-weight:500}
+.coinAnalysisCenter .historyList{display:grid;gap:2px;margin-top:8px}
+.coinAnalysisCenter .historyDirection{white-space:nowrap}
+.coinAnalysisCenter .historySymbol{overflow:hidden;min-width:0;color:#c7d6c5;text-overflow:ellipsis;white-space:nowrap}
+.coinAnalysisCenter .historyScore{color:var(--terminal-amber)!important;font-variant-numeric:tabular-nums}
+.coinAnalysisCenter .historyStatus{overflow:hidden;text-overflow:ellipsis}
+.coinAnalysisCenter .historyShowAll{display:block;width:100%;margin-top:8px;padding:9px;border:0;border-radius:7px;background:rgba(148,163,184,.12);color:var(--terminal-text);font-size:12px;font-weight:700;cursor:pointer}
+.coinAnalysisCenter .historyShowAll:hover{background:rgba(148,163,184,.2)}
+.coinAnalysisCenter .coinPaperPanel{display:grid;align-content:start;gap:8px}
+.coinAnalysisCenter .coinPaperPanel h3{margin:0;color:var(--terminal-text);font-size:16px;font-weight:800}
+.coinAnalysisCenter .paperBalance{color:var(--terminal-text);font-size:28px;font-weight:800;font-variant-numeric:tabular-nums}
+.coinAnalysisCenter .coinPaperPanel>p{margin:0}
+.coinAnalysisCenter .paperTradeCta{width:100%;margin-top:4px;padding:12px;border:0!important;border-radius:8px;background:var(--terminal-amber)!important;color:#1a1d20!important;font-size:13px;font-weight:800;cursor:pointer}
+.coinAnalysisCenter .paperTradeCta:hover:not(:disabled){background:#f0c979!important}
+.coinAnalysisCenter .paperTradeCta:disabled{opacity:.55;cursor:not-allowed}
 
 @media(max-width:650px){
 	.coinAnalysisCenter{gap:10px;margin-top:10px}
@@ -144,17 +176,13 @@
 	.marketPulseCards article{min-height:60px;padding:9px 12px;border-right:1px solid var(--terminal-line)!important;border-bottom:1px solid var(--terminal-line)!important}
 	.marketPulseCards article:nth-child(even){border-right:0!important}
 	.marketPulseCards article.regimeCard{grid-column:1/-1;border-right:0!important}
-	.featuredList{grid-template-columns:repeat(2,minmax(0,1fr))}
-	.featuredList button:nth-child(2n){border-right:0}
+	.featuredList{grid-template-columns:1fr;gap:10px}
 }
 @media(max-width:380px){
 	.coinAnalysisHeader h2{font-size:19px}
 	.coinHeaderStatus small{font-size:9px}
 	.marketPulseCards article{padding-inline:9px}
 	.marketPulseCards article b{font-size:18px}
-	.featuredList{grid-template-columns:1fr}
-	.featuredList button{border-right:0;border-bottom:1px solid var(--terminal-line)}
-	.featuredList button:last-child{border-bottom:0}
 	.coinDetailMetrics{grid-template-columns:repeat(2,minmax(0,1fr));}
 	.coinDetailMetrics span{min-width:0;overflow:hidden;}
 	.coinDetailMetrics b{overflow-wrap:anywhere;word-break:break-word;}
