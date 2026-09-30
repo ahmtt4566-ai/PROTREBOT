@@ -1930,13 +1930,6 @@ html, body, #root, .app, .workspace, .page,
   grid-column: auto !important;
 }
 
-#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .workspaceBack {
-  min-height: 28px !important;
-  margin: 4px 0 0 !important;
-  padding: 0 6px !important;
-  font-size: 12px !important;
-}
-
 /* Final Risk Kasasi readability pass. Keep every visible label legible on the dark surface. */
 #root main.v26App.workspaceRoute:has(.riskOnlyDeck) .v21RiskManagement :is(h1, h2, h3, h4, h5, h6, p, label, small, strong, b, em, span, button) {
   color: #dce5eb !important;
@@ -2134,12 +2127,8 @@ html, body, #root, .app, .workspace, .page,
 }
 
 .v26App.workspaceRoute .v21Tabs button:hover,
-.v26App.workspaceRoute .workspaceBack:hover {
+.v26App.workspaceRoute .homeBackButton:hover {
   color: #f1f5f7 !important;
-}
-
-#root main.v26App.workspaceRoute:has(.riskOnlyDeck) .workspaceBack {
-  transform: translate(-3px, -2px) !important;
 }
 
 .v26App.workspaceRoute:not(.masterTradeRoute) .v21RiskManagement > .v21WorkspaceHead,
