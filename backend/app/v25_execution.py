@@ -57,6 +57,7 @@ from .binance_demo import (
     verify_symbol_configuration,
 )
 from .credential_store import load_live_consent
+from .maintenance import guard_new_entry
 from .execution_core import (
     DEFAULT_EXECUTION_POLICY,
     configured_min_confidence,
@@ -2957,6 +2958,7 @@ async def execute_live_order(
     credentials: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     state = application.state.v25_execution
+    guard_new_entry(getattr(application.state, "maintenance", None))
     if not state.get("recovery_ready", False):
         raise HTTPException(503, "Canlı durum kurtarma tamamlanmadı; yeni emir gönderilmedi.")
     if source == "V25_AUTO":

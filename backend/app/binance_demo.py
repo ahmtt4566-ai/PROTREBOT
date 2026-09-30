@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .binance_rate_limit import BINANCE_RATE_LIMITER
+from .maintenance import guard_new_entry
 from .stop_evidence import observe_position_snapshot
 
 
@@ -3801,6 +3802,7 @@ async def execute_demo_order(
 ) -> dict[str, Any]:
     """Submit one hard-capped Demo order for the manual or V21 automation path."""
     state = demo_state if demo_state is not None else (state_for(request) if request is not None else application.state.binance_demo)
+    guard_new_entry(getattr(application.state, "maintenance", None))
     resolved_v21_state = v21_state
     if resolved_v21_state is None and request is not None:
         from .v21_demo import state_for as v21_state_for

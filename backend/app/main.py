@@ -57,6 +57,7 @@ from .v27_cloud_ops import (
     shutdown_v27_cloud,
 )
 from .execution_core import configured_min_confidence, configured_mtf_allow_either_timeframe, evaluate_entry_gates, risk_sized_order
+from .maintenance import default_maintenance_state, guard_new_entry, set_maintenance_mode
 from .paper_autonomy import (
     PAPER_AUTONOMY_VERSION,
     autonomy_policy,
@@ -1021,6 +1022,7 @@ async def lifespan(app: FastAPI):
     app.state.snapshot_lock = asyncio.Lock()
     app.state.health_lock = asyncio.Lock()
     app.state.health_snapshot = None
+    app.state.maintenance = default_maintenance_state()
     app.state.infrastructure = {"api": "BAĞLI", "database": "BAĞLANIYOR", "redis": "BAĞLANIYOR", "paper_storage": "BEKLENİYOR" if PAPER_ENABLED else "DEVRE DIŞI", "self_healing": "AKTİF", "last_checked": None, "message": "Testnet-First altyapısı kontrol ediliyor."}
     app.state.paper = {
         "balance": 10_000.0,
@@ -1301,6 +1303,23 @@ async def admin_health(request: Request):
 async def admin_health_check(request: Request):
     authenticated_user(request, owner=True)
     return await run_health_checks(request.app)
+
+
+@app.get("/api/v22/admin/maintenance")
+async def admin_maintenance_get(request: Request):
+    authenticated_user(request, owner=True)
+    return dict(request.app.state.maintenance)
+
+
+@app.post("/api/v22/admin/maintenance")
+async def admin_maintenance_set(request: Request, payload: dict[str, Any]):
+    user = authenticated_user(request, owner=True)
+    mode = str(payload.get("mode") or "").strip().upper()
+    reason = str(payload.get("reason") or "").strip()
+    try:
+        return set_maintenance_mode(request.app.state.maintenance, mode, reason=reason, updated_by=user.get("email") if isinstance(user, dict) else None)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/health")
@@ -6643,6 +6662,7 @@ async def paper_limit_cancel(order_id: int):
 
 @app.post("/api/paper/open")
 async def paper_open(order: PaperOrder):
+    guard_new_entry(getattr(app.state, "maintenance", None))
     await refresh_paper_positions()
     paper = app.state.paper
     async with paper["lock"]:
