@@ -764,7 +764,7 @@ export default function TestnetFirstApp() {
         <MobileMarketPulse markets={markets} onSelect={selectPulseSymbol}/>
       </section>
     </section>}
-    {view === 'dashboard' && <footer className="v26Footer"><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'API CONNECTED' : health ? 'API DISCONNECTED' : 'API CHECKING'}</span><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'SYSTEM ONLINE' : health ? 'SYSTEM OFFLINE' : 'SYSTEM CHECKING'}</span><span>TESTNET FIRST</span></footer>}
+    {view === 'dashboard' && <footer className="v26Footer"><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'API bağlı' : health ? 'API bağlantısı kesildi' : 'API kontrol ediliyor'}</span><span><i className={health?.status === 'ok' ? 'ok' : health ? 'error' : 'pending'}/>{health?.status === 'ok' ? 'Sistem çevrimiçi' : health ? 'Sistem çevrimdışı' : 'Sistem kontrol ediliyor'}</span><span><i className="pending"/>Testnet öncelikli</span></footer>}
 
     {view === 'trading' && <>
       <section className="v26MarketBar">
