@@ -129,3 +129,16 @@
   width: 180px !important;
   height: 47px !important;
 }
+
+#root > main.v26App .v26HeaderProfileSlot {
+  display: flex;
+  align-items: center;
+  min-width: 45px;
+  min-height: 45px;
+}
+
+#root > main.v26App .v26HeaderProfileSlot .authSessionBar {
+  position: static !important;
+  inset: auto !important;
+  z-index: 1 !important;
+}
