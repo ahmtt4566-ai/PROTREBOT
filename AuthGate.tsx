@@ -55,7 +55,7 @@ function MaintenanceScreen({mode}:{mode:string}) {
   return <main className={`authMaintenance${emergency ? ' emergency' : ''}`}>
     <section className="authMaintenancePanel" role="status" aria-live="polite">
       <div className="authMaintenanceMark">{emergency ? <ShieldAlert/> : <Wrench/>}</div>
-      <span className="authMaintenanceBrand"><img src="/YENİ LOGO.jpeg" alt="KaiStrade"/></span>
+      <span className="authMaintenanceBrand"><img src="/kaistrade-logo.png" alt="KaiStrade"/></span>
       <h1>{emergency ? 'SİSTEM GEÇİCİ OLARAK KULLANILAMIYOR' : 'SİSTEM BAKIMDA'}</h1>
       <p>{emergency ? 'Sistem şu anda korunuyor.' : 'Kısa bir sistem bakımı yapıyoruz.'}</p>
       <div className="authMaintenanceStatus"><i/>{emergency ? 'Koruma modu aktif' : 'Bakım devam ediyor'}</div>
@@ -300,7 +300,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   if (!session) {
     const registrationStrength = strength(register.password)
     return <main className="authPage">
-      <section className="authIntro"><div className="authBrand"><span className="authBrandMark"><img src="/YENİ LOGO.jpeg" alt="KaiStrade"/></span></div><span className="authEyebrow">SECURE TRADING WORKSPACE</span><h1>Trading operasyonlarınızı daha kontrollü yönetin.</h1><p>Demo, analiz ve risk araçlarını tek bir güvenli hesapla yönetin. Sade, kontrollü ve gerçek para hareketinden ayrıştırılmış bir trading çalışma alanı.</p><div className="authProof"><span><ShieldCheck/> Güvenli hesap sistemi</span><span><KeyRound/> Hızlı erişim</span><span><Activity/> Kontrollü trading altyapısı</span></div><div className="authAtmosphere"><i/><i/><i/><i/><i/><i/></div></section>
+      <section className="authIntro"><div className="authBrand"><span className="authBrandMark"><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div><span className="authEyebrow">SECURE TRADING WORKSPACE</span><h1>Trading operasyonlarınızı daha kontrollü yönetin.</h1><p>Demo, analiz ve risk araçlarını tek bir güvenli hesapla yönetin. Sade, kontrollü ve gerçek para hareketinden ayrıştırılmış bir trading çalışma alanı.</p><div className="authProof"><span><ShieldCheck/> Güvenli hesap sistemi</span><span><KeyRound/> Hızlı erişim</span><span><Activity/> Kontrollü trading altyapısı</span></div><div className="authAtmosphere"><i/><i/><i/><i/><i/><i/></div></section>
       <section className={`authCard ${mode === 'verify' ? 'authCardVerify' : ''}`}>
         <div className="authCardHead"><div className="authMark">{mode === 'verify' ? <MailCheck/> : <UserRound/>}</div><div><span>MEMBER ACCESS</span><h2>{mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'register' ? 'Hesabınızı oluşturun' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı kontrol edin'}</h2></div></div>
         <p className="authCardLead">{mode === 'login' ? 'Çalışma alanınıza güvenli şekilde erişin.' : mode === 'register' ? 'Güvenli çalışma alanınızı oluşturun.' : mode === 'forgot' ? 'Hesabınıza yeniden erişmek için güvenli bir bağlantı gönderelim.' : mode === 'reset' ? 'Yeni ve güçlü bir parola belirleyin.' : 'Gelen kutunuzdaki bağlantıyla hesabınızı güvenle etkinleştirin.'}</p>

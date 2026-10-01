@@ -6,7 +6,7 @@
   display: block;
   width: 160px;
   height: 42px;
-  background: url('/YENİ LOGO.jpeg') center / contain no-repeat;
+  background: url('/kaistrade-logo.png') center / contain no-repeat;
   mix-blend-mode: screen;
 }
 
@@ -17,7 +17,7 @@
   height: 34px;
   overflow: hidden;
   font-size: 0;
-  background: url('/YENİ LOGO.jpeg') left center / contain no-repeat;
+  background: url('/kaistrade-logo.png') left center / contain no-repeat;
   mix-blend-mode: screen;
 }
 
@@ -29,7 +29,7 @@
   display: block;
   width: 160px;
   height: 42px;
-  background: url('/YENİ LOGO.jpeg') center / contain no-repeat;
+  background: url('/kaistrade-logo.png') center / contain no-repeat;
   mix-blend-mode: screen;
 }
 

@@ -1152,7 +1152,7 @@ export default function App() {
 
   return <main className={`appShell tab-${workspaceTab} view-${workspaceView}`}>
     <header>
-      <div className="brand"><img className="kaiStradeBrandLogo" src="/YENİ LOGO.jpeg" alt="KaiStrade"/></div>
+      <div className="brand"><img className="kaiStradeBrandLogo" src="/kaistrade-logo.png" alt="KaiStrade"/></div>
       <div className="live"><i/> {status}</div><div className={streamLive ? 'streamLive' : 'streamIdle'}>● {streamLive ? 'CANLI VERİ AKIŞI' : 'AKIŞ BAĞLANIYOR'}</div><div className="analysisLive">✓ GERÇEK ANALİZ AKTİF</div>
       <div className="v7Version">V25 · FAIL-CLOSED EXECUTION</div>
       <div className="safe"><ShieldCheck/> GÜVENLİ ANALİZ MODU</div>
