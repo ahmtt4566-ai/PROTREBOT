@@ -765,7 +765,7 @@ export default function TestnetFirstApp() {
     </section>}
 
     {view === 'dashboard' && <section className="v26Dashboard" aria-labelledby="dashboard-title">
-      <header className="v26DashboardHero"><div><h1 id="dashboard-title">İşlem Terminali</h1><p>Bir çalışma alanı seçin.</p></div></header>
+      <header className="v26DashboardHero"><div><h1 id="dashboard-title"><span className="dashboardTitlePlain">İşlem</span>{' '}<span className="dashboardTitleGradient">Terminali</span></h1><p>Bir çalışma alanı seçin.</p></div></header>
       <section className="v26DashboardWorkspaces" aria-label="Çalışma alanları">
         <div className="v26DashboardChoices">
           <button type="button" onClick={() => setView('trading')}><Activity/><span><b>İŞLEM</b><small>İşlem açın ve yönetin</small></span><em>→</em></button>

@@ -47,3 +47,85 @@
 #root > main.v26App .v26Header::before {
   display: none !important;
 }
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button {
+  border-color: rgba(104, 166, 139, .22) !important;
+  background: #0b1218 !important;
+  color: #f5f7f7 !important;
+  box-shadow: none !important;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button:hover,
+#root > main.v26App.homeRoute .v26DashboardChoices > button:focus-visible {
+  border-color: rgba(116, 203, 163, .48) !important;
+  background: rgba(72, 130, 104, .08) !important;
+  color: #f5f7f7 !important;
+  box-shadow: 0 0 16px rgba(73, 174, 124, .08) !important;
+  transform: translateY(-2px);
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button > svg,
+#root > main.v26App.homeRoute .v26DashboardChoices > button:nth-child(2) > svg {
+  background: transparent !important;
+  color: #72cfa8 !important;
+  filter: none;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button:hover > svg,
+#root > main.v26App.homeRoute .v26DashboardChoices > button:focus-visible > svg,
+#root > main.v26App.homeRoute .v26DashboardChoices > button[aria-current='page'] > svg {
+  color: #9be6c2 !important;
+  filter: drop-shadow(0 0 5px rgba(116, 218, 169, .2));
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button b {
+  color: #f5f7f7 !important;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button small {
+  color: #a7b5b3 !important;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button em {
+  color: rgba(114, 207, 168, .72) !important;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button:hover em,
+#root > main.v26App.homeRoute .v26DashboardChoices > button:focus-visible em,
+#root > main.v26App.homeRoute .v26DashboardChoices > button[aria-current='page'] em {
+  color: #9be6c2 !important;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button:nth-child(2) {
+  border-color: rgba(104, 166, 139, .22) !important;
+  background: #0b1218 !important;
+  box-shadow: none !important;
+}
+
+#root > main.v26App.homeRoute .v26DashboardChoices > button:nth-child(2):hover,
+#root > main.v26App.homeRoute .v26DashboardChoices > button:nth-child(2):focus-visible {
+  border-color: rgba(116, 203, 163, .48) !important;
+  background: rgba(72, 130, 104, .08) !important;
+  box-shadow: 0 0 16px rgba(73, 174, 124, .08) !important;
+}
+
+#root > main.v26App.homeRoute .v26DashboardHero h1 .dashboardTitlePlain {
+  color: #f5f7f7 !important;
+}
+
+#root > main.v26App.homeRoute .v26DashboardHero h1 .dashboardTitleGradient {
+  background: linear-gradient(to right, #f5f7f7 0%, #c4ddd2 42%, #8ed9b8 74%, #69e6b0 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+#root > main.v26App.homeRoute .v26DashboardHero p {
+  color: #f5f7f7 !important;
+}
+
+#root > main.v26App .v26BrandLogo {
+  flex-basis: 180px !important;
+  width: 180px !important;
+  height: 47px !important;
+}
