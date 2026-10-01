@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -80,6 +81,17 @@ LEGACY_V25_API_CONTRACT = 'version="25.0.0"'
 DEPLOYMENT_PATCH = "28.0.0-in-app-encrypted-exchange-vault"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
+_DB_CREDENTIAL_RE = re.compile(r"(?i)(\w+://)[^\s@/]+@")
+
+
+def _sanitize_db_error(exc: BaseException) -> str:
+    """Strips DSN credentials from a database exception message before logging."""
+    message = str(exc)
+    if DATABASE_URL:
+        message = message.replace(DATABASE_URL, "[redacted-connection-string]")
+    return _DB_CREDENTIAL_RE.sub(r"\1[redacted]@", message)
+
+
 WEB_REQUIRE_AUTH = env_flag("PROTREBOT_WEB_REQUIRE_AUTH", default=False)
 WEB_ACCESS_TOKEN = os.getenv("PROTREBOT_WEB_ACCESS_TOKEN", "").strip()
 PRODUCTION_WEB_ORIGIN = "https://frontend-nu-two-18.vercel.app"
@@ -676,7 +688,8 @@ async def ensure_infrastructure(application: FastAPI) -> None:
     if db_pool is not None:
         try:
             await db_pool.fetchval("SELECT 1")
-        except Exception:
+        except Exception as exc:
+            logger.exception("PostgreSQL pool health check failed: %s", _sanitize_db_error(exc))
             await db_pool.close()
             application.state.db_pool = None
             application.state.paper_schema_ready = False
@@ -687,7 +700,8 @@ async def ensure_infrastructure(application: FastAPI) -> None:
             application.state.db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2, timeout=3)
             application.state.paper_schema_ready = False
             application.state.market_twin_schema_ready = False
-        except Exception:
+        except Exception as exc:
+            logger.exception("PostgreSQL pool creation failed: %s", _sanitize_db_error(exc))
             application.state.db_pool = None
             infrastructure["paper_storage"] = "BEKLENİYOR" if PAPER_ENABLED else "DEVRE DIŞI"
 

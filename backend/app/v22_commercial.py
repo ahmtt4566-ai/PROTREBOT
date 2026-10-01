@@ -335,6 +335,14 @@ async def ensure_commercial_schema(application: Any) -> None:
     )
 
 
+_DB_CREDENTIAL_RE = re.compile(r"(?i)(\w+://)[^\s@/]+@")
+
+
+def _sanitize_db_error(exc: BaseException) -> str:
+    """Strips DSN credentials from a database exception message before logging."""
+    return _DB_CREDENTIAL_RE.sub(r"\1[redacted]@", str(exc))
+
+
 async def persist_v22_commercial(application: Any) -> bool:
     pool = getattr(application.state, "db_pool", None)
     if pool is None or not hasattr(application.state, "v22_commercial"):
@@ -359,7 +367,8 @@ async def persist_v22_commercial(application: Any) -> bool:
             state["_database_dirty"] = False
         rt["storage_status"] = "POSTGRESQL_KALICI"
         return True
-    except Exception:
+    except Exception as exc:
+        logger.exception("persist_v22_commercial database write failed: %s", _sanitize_db_error(exc))
         rt["storage_status"] = "YEREL_YEDEK"
         return False
 
