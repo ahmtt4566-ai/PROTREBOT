@@ -2475,6 +2475,23 @@
   }
 }
 
+@media (min-width: 1101px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > .coinAnalysisCenter .coinAnalysisLayout > .coinTablePanel {
+    align-self: stretch !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) > .coinAnalysisCenter .coinTableScroll {
+    flex: 1 1 auto !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+  }
+}
+
 /* Desktop Analyst layout: pair the ask rail with the result and let the selector own the full lower row. */
 @media (min-width: 701px) {
   #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace {
