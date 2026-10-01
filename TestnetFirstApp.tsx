@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries, type IPriceLine } from 'lightweight-charts'
 import { Activity, BarChart3, Bell, BrainCircuit, CheckCircle2, CircleDollarSign, Cloud, CloudCog, Home, KeyRound, LockKeyhole, Menu, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2, X } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
@@ -472,7 +472,7 @@ export default function TestnetFirstApp() {
   const [complianceTab,setComplianceTab] = useState<'risk'|'privacy'|'terms'|'support'>('risk')
   const notificationRef = useRef<HTMLDivElement>(null)
   const marketPickerRef = useRef<HTMLDivElement>(null)
-  const headerRef = useRef<HTMLElement>(null)
+  const headerScrollYRef = useRef(0)
   const unreadNotifications = notifications.filter(item => !item.read).length
   const selectedMarket = markets.find(market => market.symbol === symbol)
 
@@ -711,6 +711,7 @@ export default function TestnetFirstApp() {
   useEffect(() => {
     window.scrollTo(0,0)
     setHeaderHidden(false)
+    headerScrollYRef.current = 0
   },[view])
 
   useEffect(() => {
@@ -720,8 +721,12 @@ export default function TestnetFirstApp() {
     return () => document.removeEventListener('keydown',closeOnEscape)
   },[mobileMenuOpen])
 
+  // Global header visibility: one scroll listener for every route, ref-tracked
+  // (no per-render recreation), direction-only (no delta/position threshold -
+  // even a 1px move must flip it) and state is only touched when the computed
+  // visibility actually differs from the current one, so a held/jittery scroll
+  // never triggers redundant renders or re-starts the hide/show transition.
   useEffect(() => {
-    let previousY = window.scrollY
     let ticking = false
     const isInteractionActive = () => {
       if (mobileMenuOpen || notificationsOpen || marketPickerOpen || complianceOpen) return true
@@ -730,15 +735,13 @@ export default function TestnetFirstApp() {
     }
     const updateScrollState = () => {
       const currentY = window.scrollY
-      const delta = currentY - previousY
-      if (currentY < 8 || isInteractionActive()) {
-        setHeaderHidden(false)
-      } else if (Math.abs(delta) >= 8) {
-        if (delta > 0 && currentY > 64) setHeaderHidden(true)
-        else if (delta < 0) setHeaderHidden(false)
-      }
-      previousY = currentY
+      const previousY = headerScrollYRef.current
+      headerScrollYRef.current = currentY
       ticking = false
+      if (currentY <= 0 || isInteractionActive()) { setHeaderHidden(hidden => hidden ? false : hidden); return }
+      if (currentY === previousY) return
+      const scrollingDown = currentY > previousY
+      setHeaderHidden(hidden => hidden === scrollingDown ? hidden : scrollingDown)
     }
     const onScroll = () => {
       if (!ticking) {ticking=true;window.requestAnimationFrame(updateScrollState)}
@@ -747,21 +750,9 @@ export default function TestnetFirstApp() {
     return () => window.removeEventListener('scroll',onScroll)
   },[mobileMenuOpen,notificationsOpen,marketPickerOpen,complianceOpen])
 
-  // Fixed header: publish its real rendered height as a CSS var so content can
-  // reserve exactly that much top offset, instead of guessing per-breakpoint.
-  useLayoutEffect(() => {
-    const node = headerRef.current
-    if (!node) return
-    const publishHeight = () => document.documentElement.style.setProperty('--v26-header-height', `${node.getBoundingClientRect().height}px`)
-    publishHeight()
-    const observer = new ResizeObserver(publishHeight)
-    observer.observe(node)
-    return () => observer.disconnect()
-  },[])
-
   return <main className={`v26App ${view === 'dashboard' ? 'homeRoute' : 'workspaceRoute'} ${view === 'master-trade' ? 'masterTradeRoute' : ''}${connectionState === 'offline' ? ' backendOffline' : ''}`}>
     {showConnectionNotice && <section className={`v26OfflineNotice ${connectionState}`} role="status" aria-live="polite"><span><i/><b>{connectionState === 'offline' ? 'Sunucu bağlantısı bekleniyor' : connectionState === 'checking' ? 'Sunucu bağlantısı kontrol ediliyor' : 'Sunucu bağlantısı kuruldu'}</b><small>{connectionState === 'offline' ? 'Veriler güncellenemiyor. Bağlantı kurulduğunda otomatik olarak yeniden denenecek.' : connectionState === 'checking' ? 'Sunucu ve piyasa verileri kontrol ediliyor…' : 'Veriler güncellenmeye devam ediyor.'}</small></span>{connectionState !== 'online' && <button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'KONTROL EDİLİYOR…' : 'YENİDEN DENE'}</button>}</section>}
-    <header ref={headerRef} className={`v26Header v26HomeHeader${headerHidden ? ' v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
+    <header className={`v26Header v26HomeHeader${headerHidden ? ' v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
       <div className="v26Brand" role="button" tabIndex={0} aria-label="Ana sayfaya dön" onClick={() => navigate('dashboard')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); navigate('dashboard') } }}><span className="v26BrandLogo"><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div>
       <div className="v26HomeHeaderStatus" aria-label="Sistem durumu"><i className={connectionState === 'online' && health?.status === 'ok' ? 'ok' : connectionState === 'offline' ? 'error' : 'pending'}/>{connectionState === 'offline' ? 'BAĞLANTI BEKLENİYOR' : connectionState === 'checking' ? 'KONTROL EDİLİYOR' : 'ÇEVRİMİÇİ'}</div>
       <div className="v26HeaderActions">
