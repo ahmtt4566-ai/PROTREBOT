@@ -51,7 +51,7 @@ def confirm_token(candidate):
 
 
 def adoption_request(state, token, *, db_pool=None):
-    application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=db_pool))
+    application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=db_pool, maintenance={"mode": "NORMAL"}))
     request = SimpleNamespace(app=application)
     body = v25_execution.AdoptExternalPositionRequest(
         symbol="MUBARAKUSDT",
@@ -224,7 +224,7 @@ def test_new_v25_auto_order_is_blocked_when_real_trading_locked():
     async def exercise():
         state = ready_state(real_trading_locked=True)
         state["auto"].update({"enabled": True, "session_until": v25_execution.time.time() + 3600})
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, maintenance={"mode": "NORMAL"}))
         body = v25_execution.LiveOrderRequest(
             symbol="MUBARAKUSDT",
             direction="LONG",

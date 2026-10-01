@@ -65,7 +65,7 @@ from .paper_autonomy import (
     dynamic_paper_allocation,
     rank_paper_candidates,
 )
-from .web_security import PUBLIC_PATHS, bearer_token, cors_origins, env_flag, evaluate_access, is_allowed_cors_origin
+from .web_security import PUBLIC_PATHS, VERCEL_PREVIEW_ORIGIN_RE, bearer_token, cors_origins, env_flag, evaluate_access, is_allowed_cors_origin
 
 logger = logging.getLogger(__name__)
 
@@ -82,16 +82,13 @@ WEB_REQUIRE_AUTH = env_flag("PROTREBOT_WEB_REQUIRE_AUTH", default=False)
 WEB_ACCESS_TOKEN = os.getenv("PROTREBOT_WEB_ACCESS_TOKEN", "").strip()
 PRODUCTION_WEB_ORIGIN = "https://frontend-nu-two-18.vercel.app"
 WEB_CORS_ORIGINS = list(dict.fromkeys([
-    *cors_origins(os.getenv("PROTREBOT_CORS_ORIGINS"), fallback=[]),
     PRODUCTION_WEB_ORIGIN,
-    "http://127.0.0.1:5173",
-    "http://localhost:5173",
-    "http://127.0.0.1:4173",
-    "http://localhost:4173",
-    "http://127.0.0.1:4175",
-    "http://localhost:4175",
+    *[
+        origin for origin in cors_origins(os.getenv("PROTREBOT_CORS_ORIGINS"), fallback=[])
+        if VERCEL_PREVIEW_ORIGIN_RE.fullmatch(origin)
+    ],
 ]))
-WEB_CORS_ORIGIN_REGEX = r"https://(?:frontend-nu-two-18|frontend-gh7asjvqj-ahmet-f11)(?:-[a-z0-9-]+)*\.vercel\.app"
+WEB_CORS_ORIGIN_REGEX = VERCEL_PREVIEW_ORIGIN_RE.pattern
 PAPER_ENABLED = env_flag("PROTREBOT_PAPER_ENABLED", default=True)
 RISK_PER_TRADE = 0.01
 SHORT_MTF_ALIGNMENT_MAX = 80.0

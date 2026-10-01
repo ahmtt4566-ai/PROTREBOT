@@ -182,7 +182,7 @@ def test_duplicate_lifecycle_event_and_restart_incomplete_state_are_idempotent()
 
 def test_confirmed_same_slot_entry_gate_rejects_before_exchange_mutation():
     existing = stop_plan()
-    application = SimpleNamespace(state=SimpleNamespace())
+    application = SimpleNamespace(state=SimpleNamespace(maintenance={"mode": "NORMAL"}))
     demo_state = {"plans": {"plan-1": existing}, "lock": asyncio.Lock(), "_user_id": "user-a", "_app": application, "armed_until": 0}
     v21_state = v21_demo.initial_state()
     v21_state["_user_id"] = "user-a"

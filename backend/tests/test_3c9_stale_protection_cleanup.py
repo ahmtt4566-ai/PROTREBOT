@@ -79,7 +79,7 @@ class StaleProtectionCleanupTests(unittest.IsolatedAsyncioTestCase):
 
         async def signed(method, path, params=None):
             calls.append((method, params))
-            return {}
+            return [] if method == "GET" else {}
 
         client.signed = signed
         await binance_demo.cleanup_closed_plan(

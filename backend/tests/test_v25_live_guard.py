@@ -70,7 +70,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
     def test_external_history_keeps_unmatched_binance_records_read_only(self):
         state = initial_state()
         state["events"] = [{"kind": "ORPHAN_PROTECTION_CLEANUP", "symbol": "4USDT"}]
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, maintenance={"mode": "NORMAL"}))
         request = SimpleNamespace(app=application)
         calls = []
 
@@ -430,7 +430,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         state = initial_state()
         state.update({"recovery_ready": True, "real_trading_locked": True})
         state["lock"] = asyncio.Lock()
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, maintenance={"mode": "NORMAL"}))
         with self.assertRaises(v25_execution.HTTPException) as raised:
             asyncio.run(v25_execution.execute_live_order(
                 application,
@@ -457,6 +457,63 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(state["real_trading_locked"])
         self.assertFalse(state["live_auto_trade"])
         self.assertFalse(state["auto"]["enabled"])
+
+    def test_live_entry_rejects_each_required_safety_block(self):
+        body = LiveOrderRequest(symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1, stop_loss=98, tp1=102, tp2=104, tp3=106)
+        cases = (
+            ("locked", {"armed_until": time.time() + 300, "real_trading_locked": True}, None),
+            ("without_arm", {"armed_until": 0, "real_trading_locked": False}, None),
+            ("consent", {"armed_until": time.time() + 300, "real_trading_locked": False}, {"ready": False, "gates": [{"key": "consent_active", "passed": False}]}),
+            ("emergency", {"armed_until": time.time() + 300, "real_trading_locked": False, "emergency": {"active": True}}, None),
+            ("risk_blocked", {"armed_until": time.time() + 300, "real_trading_locked": False}, {"ready": False, "gates": [{"key": "risk", "passed": False}]}),
+        )
+        for name, updates, readiness_result in cases:
+            with self.subTest(name=name):
+                state = initial_state()
+                state.update({"recovery_ready": True, "connected": True, **updates})
+                state["lock"] = asyncio.Lock()
+                application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, maintenance={"mode": "NORMAL"}))
+                readiness_patch = patch.object(v25_execution, "readiness_for", return_value=readiness_result) if readiness_result else patch.object(v25_execution, "readiness_for", wraps=v25_execution.readiness_for)
+                with readiness_patch:
+                    with self.assertRaises(v25_execution.HTTPException) as raised:
+                        asyncio.run(v25_execution.execute_live_order(application, body, source="MANUAL"))
+                self.assertEqual(raised.exception.status_code, 423)
+
+    def test_live_auto_entry_rejects_ambiguous_recovery_with_503(self):
+        state = initial_state()
+        state.update({
+            "recovery_ready": False,
+            "recovery_error": "PostgreSQL recovery pending.",
+            "real_trading_locked": False,
+            "connected": True,
+            "armed_until": time.time() + 300,
+        })
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, maintenance={"mode": "NORMAL"}))
+        with self.assertRaises(v25_execution.HTTPException) as raised:
+            asyncio.run(v25_execution.execute_live_order(application, LiveOrderRequest(
+                symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1,
+                stop_loss=98, tp1=102, tp2=104, tp3=106,
+            ), source="V25_AUTO"))
+        self.assertEqual(raised.exception.status_code, 503)
+
+    def test_live_auto_entry_rejects_missing_credentials_with_423(self):
+        state = initial_state()
+        state.update({
+            "recovery_ready": True,
+            "real_trading_locked": False,
+            "connected": True,
+            "live_auto_trade": True,
+        })
+        state["auto"].update({"enabled": True, "session_until": time.time() + 3600})
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, maintenance={"mode": "NORMAL"}))
+        with self.assertRaises(v25_execution.HTTPException) as raised:
+            asyncio.run(v25_execution.execute_live_order(application, LiveOrderRequest(
+                symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1,
+                stop_loss=98, tp1=102, tp2=104, tp3=106,
+            ), source="V25_AUTO"))
+        self.assertEqual(raised.exception.status_code, 423)
 
     def test_live_stream_uses_supervised_vault_credentials(self):
         state = initial_state()
@@ -626,6 +683,92 @@ class V25LiveGuardCoreTests(unittest.TestCase):
             {"symbol": "BTCUSDT", "client_algo_id": "PTB_FOREIGN"},
         ]
         self.assertEqual(owned_protection_rows(plan, rows), [rows[0]])
+
+    def test_unknown_algo_id_is_protection_unknown_and_not_matched(self):
+        plan = {
+            "symbol": "BTCUSDT",
+            "direction": "LONG",
+            "stop_client_id": "PTB_SL_owned",
+            "stop_algo_id": 101,
+        }
+        rows = [{
+            "symbol": "BTCUSDT",
+            "client_algo_id": "PTB_FOREIGN",
+            "algo_id": 999,
+            "side": "SELL",
+            "type": "STOP_MARKET",
+            "status": "NEW",
+        }]
+
+        status, matched, reason = classify_plan_protection(plan, rows)
+
+        self.assertEqual(status, "UNKNOWN")
+        self.assertEqual(matched, rows)
+        self.assertEqual(reason, "FALLBACK_SYMBOL_DIRECTION_TYPE")
+
+    def test_cancel_owned_algos_never_deletes_foreign_stop(self):
+        plan = {
+            "id": "plan-1",
+            "symbol": "BTCUSDT",
+            "intent_id": "intent-1",
+            "stop_client_id": "PTB_SL_owned",
+            "provenance_state": "CONFIRMED",
+            "status": "KAPANDI",
+        }
+        rows = [{
+            "symbol": "BTCUSDT",
+            "client_algo_id": "PTB_FOREIGN",
+            "algo_id": 999,
+        }]
+        client = SimpleNamespace(signed=AsyncMock())
+
+        cancelled = asyncio.run(v25_execution.cancel_owned_algos_for_symbol(client, rows, plan))
+
+        self.assertEqual(cancelled, 0)
+        client.signed.assert_not_awaited()
+
+    def test_unavailable_protection_snapshot_locks_new_entries(self):
+        state = initial_state()
+        state.update({
+            "recovery_ready": True,
+            "real_trading_locked": False,
+            "connected": True,
+            "armed_until": time.time() + 300,
+            "plans": {
+                "plan-1": {
+                    "id": "plan-1",
+                    "source": "V25_AUTO",
+                    "provenance_state": "CONFIRMED",
+                    "status": "OPEN",
+                    "symbol": "BTCUSDT",
+                    "direction": "LONG",
+                    "quantity": "1",
+                    "entry_order_id": 101,
+                    "entry_client_order_id": "PTB_ENTRY_plan-1",
+                },
+            },
+        })
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, maintenance={"mode": "NORMAL"}))
+        client = SimpleNamespace(time_offset_ms=0)
+        snapshot = complete_reconciliation_snapshot(
+            positions=[{"symbol": "BTCUSDT", "positionAmt": "1"}],
+            open_algo_orders_available=False,
+            algo_orders_quality="UNKNOWN",
+        )
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=snapshot)), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["plans"]["plan-1"]["protection_state"], "UNKNOWN")
+        self.assertEqual(state["execution_state"], "UNKNOWN")
+        self.assertTrue(state["reconciliation_required"])
+        body = LiveOrderRequest(symbol="ETHUSDT", direction="LONG", margin_usdt=5, leverage=1, stop_loss=98, tp1=102, tp2=104, tp3=106)
+        with self.assertRaises(v25_execution.HTTPException) as raised:
+            asyncio.run(v25_execution.execute_live_order(application, body, source="MANUAL"))
+        self.assertEqual(raised.exception.status_code, 423)
 
     def test_protection_classification_matches_exact_client_or_algo_identity(self):
         plan = {"symbol": "BTCUSDT", "direction": "LONG", "stop_client_id": "PTB_SL_owned", "stop_algo_id": 101}
@@ -1013,7 +1156,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             self.assertEqual(sum(1 for method, path in client.calls if method == "POST" and path == "/fapi/v1/order"), 0)
 
     def test_emergency_unknown_and_recovery_incomplete_states_reject(self):
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=initial_state()))
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=initial_state(), maintenance={"mode": "NORMAL"}))
         state = application.state.v25_execution
         state["lock"] = asyncio.Lock()
         state.update({"recovery_ready": True, "live_auto_trade": True})
@@ -1223,7 +1366,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         state.update({"recovery_ready": True, "real_trading_locked": False, "live_auto_trade": True})
         state["auto"].update({"enabled": True, "session_until": time.time() + 300})
         state["lock"] = asyncio.Lock()
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None, maintenance={"mode": "NORMAL"}))
         spec = {
             "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "order_type": "MARKET",
             "margin_usdt": 5.0, "leverage": 1, "notional_usdt": 5.0, "quantity": "0.050",
@@ -1591,7 +1734,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         state["auto"].update({"enabled": True, "session_until": time.time() + 300, "last_scan": None})
         state["live_auto_trade"] = True
         state["lock"] = asyncio.Lock()
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None, maintenance={"mode": "NORMAL"}))
         state["_app"] = application
         session_until_before_failure = state["auto"]["session_until"]
         v25_execution.lock_reconciliation_failure(state)
@@ -1676,7 +1819,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             "armed_until": time.time() + 300,
         })
         state["auto"].update({"enabled": True, "session_until": time.time() + 300, "last_scan": None})
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None, maintenance={"mode": "NORMAL"}))
         state["_app"] = application
         state["lock"] = asyncio.Lock()
         transport = FakeTransport()
@@ -2102,7 +2245,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("X-ProTreBot-Owner':ownerAccessToken()", ACTIVE_COMMERCIAL_SOURCE)
 
     def test_vercel_build_targets_current_render_api(self):
-        self.assertIn('"VITE_API_URL": "https://protrebot-rkpt.onrender.com"', VERCEL_SOURCE)
+        self.assertIn('"VITE_API_BASE": "https://protrebot-rkpt.onrender.com"', VERCEL_SOURCE)
         self.assertNotIn("tradebt8.onrender.com", VERCEL_SOURCE)
 
     def test_render_manifest_matches_production_service(self):

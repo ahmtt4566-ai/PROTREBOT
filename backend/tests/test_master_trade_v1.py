@@ -32,10 +32,13 @@ class MasterTradeSafetyTests(unittest.TestCase):
         self.assertIn("trade history", source.lower())
         self.assertIn("/v25/position/close", source)
 
-    def test_master_trade_local_cors_allowlist_is_explicit_and_non_wildcard(self):
+    def test_master_trade_cors_allowlist_is_vercel_only_and_non_wildcard(self):
         main_source = (BACKEND / "app" / "main.py").read_text(encoding="utf-8")
-        self.assertIn('"http://127.0.0.1:4173"', main_source)
-        self.assertIn('"http://localhost:4173"', main_source)
+        self.assertIn('PRODUCTION_WEB_ORIGIN', main_source)
+        self.assertIn('VERCEL_PREVIEW_ORIGIN_RE.fullmatch(origin)', main_source)
+        self.assertIn('WEB_CORS_ORIGIN_REGEX = VERCEL_PREVIEW_ORIGIN_RE.pattern', main_source)
+        self.assertNotIn('"http://127.0.0.1:4173"', main_source)
+        self.assertNotIn('"http://localhost:4173"', main_source)
         self.assertNotIn('allow_origins=["*"]', main_source)
 
 

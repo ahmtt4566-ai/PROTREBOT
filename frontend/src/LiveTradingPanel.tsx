@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, CheckCircle2, CircleDollarSign, Eye, EyeOff, KeyRound, LockKeyhole, Power, RefreshCw, Send, ShieldAlert, ShieldCheck, TriangleAlert, UnlockKeyhole, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
+import { liveCopy } from '../../ui-copy'
 
 type LivePolicy = Record<string, unknown>
 type LiveStatus = {
@@ -98,6 +99,9 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [showSecret, setShowSecret] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [externalHistory, setExternalHistory] = useState<ExternalHistory | null>(null)
+  const [reviewResult, setReviewResult] = useState<{message: string; notional?: number; estimated_stop_loss_usdt?: number} | null>(null)
+  const [credentialModalOpen, setCredentialModalOpen] = useState(false)
+  const [refreshPending, setRefreshPending] = useState(false)
   const [adoptionCandidate, setAdoptionCandidate] = useState<{
     symbol: string
     candidatePlan: any
@@ -133,17 +137,28 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       setRateLimitSeconds(seconds)
       throw new Error(rateLimitMessage(seconds || null))
     }
-    if (!response.ok) throw new Error(errorMessage(payload, 'LIVE isteği reddedildi.'))
+    if (!response.ok) {
+      const statusLabel = response.status === 423
+        ? 'LIVE KİLİTLİ / GATE BLOCKED'
+        : response.status === 502
+          ? 'BELİRSİZ YÜRÜTME / MANUEL İNCELEME GEREKLİ'
+          : response.status === 503
+            ? 'BAKIM MODU / YENİ GİRİŞLER KAPALI'
+            : `LIVE HTTP ${response.status}`
+      throw new Error(`${statusLabel}: ${errorMessage(payload, 'LIVE isteği reddedildi.')}`)
+    }
     return payload as T
   }
 
   const refresh = async (quiet = true) => {
+    setRefreshPending(true)
     if (onRefreshStatus) {
       try {
         await onRefreshStatus(!quiet)
       } catch (error) {
         if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
       }
+      finally { setRefreshPending(false) }
       return
     }
     if (refreshInFlight.current) return
@@ -162,6 +177,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
     } finally {
       refreshInFlight.current = false
+      setRefreshPending(false)
     }
   }
 
@@ -171,7 +187,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setConfirm(null)
     setConfirmText('')
     void refresh()
-    const timer = onRefreshStatus ? undefined : window.setInterval(() => void refresh(), 5000)
+    const timer = window.setInterval(() => void refresh(), 10000)
     return () => { if (timer !== undefined) window.clearInterval(timer) }
   }, [active, symbol, Boolean(onRefreshStatus)])
 
@@ -235,7 +251,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const activePlanState = status === null ? 'UNKNOWN' : activePlans ? 'CONFLICT' : 'READY'
   const emergencyState = status === null ? 'UNKNOWN' : emergency ? 'ACTIVE' : 'CLEAR'
   const autoReady = Boolean(status && connections && authorizationValid && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
-  const manualOrderReady = Boolean(status && connected && authorizationValid && readinessReady && !recoveryRequired && !emergency)
+  const manualOrderReady = Boolean(status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
   const policy = policyDraft || status?.policy || {}
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
@@ -279,7 +295,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       setNotice({kind: 'error', text: 'LIVE ARM için tüm backend readiness gate’leri PASS olmalıdır.'})
       return
     }
-    setConfirm({title: 'LIVE ARM onayı', message: 'REAL MONEY — LIVE ACCOUNT. Backend readiness gate’leri geçmeden kilit açılmaz. LIVE ARM AUTO-TRADE başlatmaz.', expected: 'CANLI EMİR RİSKİNİ KABUL EDİYORUM', action: async () => {
+    setConfirm({title: 'LIVE ARM onayı', message: 'REAL MONEY — LIVE ACCOUNT. Backend readiness gate’leri geçmeden kilit açılmaz. LIVE ARM AUTO-TRADE başlatmaz.', expected: 'ONAYLIYORUM', action: async () => {
       await call(V25, '/arm', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI EMİR RİSKİNİ KABUL EDİYORUM'})})
       setArmPendingSync(true)
     }})
@@ -321,6 +337,13 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
   const emergencyStop = () => {
     setConfirm({title: 'EMERGENCY STOP', message: 'Yeni LIVE submissions bloklanacak, AUTO-TRADE kapanacak ve recovery gerekecek. Mevcut protection yönetimi merkezi backend kurallarına bırakılır.', expected: 'CANLI ACİL DURDUR', action: async () => { await call(V25, '/emergency', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI ACİL DURDUR', close_tracked_positions: true})}) }})
+    setConfirmText('')
+  }
+
+  const clearEmergency = () => {
+    setConfirm({title: 'Emergency Stop kaldırma', message: 'Bu işlem yalnızca backend recovery temizse emergency kilidini kaldırır. Gerçek emir kilidi açık kalır ve yeniden ARM gerekir.', expected: 'ACİL DURDURMAYI KALDIRIYORUM', action: async () => {
+      await call(V25, '/emergency/clear', {method: 'POST', body: JSON.stringify({confirmation: 'ACİL DURDURMAYI KALDIRIYORUM'})})
+    }})
     setConfirmText('')
   }
 
@@ -371,24 +394,49 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     }
   }
 
-  const fillAnalysis = () => setOrder(current => ({...current, direction: analysis?.direction === 'SHORT' ? 'SHORT' : 'LONG', limit_price: text(analysis?.entry).replace('—', ''), stop_loss: text(analysis?.stop_loss).replace('—', ''), tp1: text(analysis?.tp1).replace('—', ''), tp2: text(analysis?.tp2).replace('—', ''), tp3: text(analysis?.tp3).replace('—', '')}))
+  const fillAnalysis = () => {
+    if (!analysis || !Number.isFinite(Number(analysis.entry))) {
+      setNotice({kind: 'error', text: liveCopy.noSelectedCoin})
+      return
+    }
+    setOrder(current => ({...current, direction: analysis.direction === 'SHORT' ? 'SHORT' : 'LONG', limit_price: text(analysis.entry).replace('—', ''), stop_loss: text(analysis.stop_loss).replace('—', ''), tp1: text(analysis.tp1).replace('—', ''), tp2: text(analysis.tp2).replace('—', ''), tp3: text(analysis.tp3).replace('—', '')}))
+    setNotice({kind: 'ok', text: 'Seçili analiz yönü ve seviyeleri forma dolduruldu.'})
+  }
   const reviewOrder = (nextOrder = order) => {
     const values = [nextOrder.margin_usdt, nextOrder.leverage, nextOrder.stop_loss, nextOrder.tp1, nextOrder.tp2, nextOrder.tp3]
     if (!nextOrder.symbol.endsWith('USDT') || values.some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)) {
-      setNotice({kind: 'error', text: 'LIVE order için symbol, margin, leverage, Stop ve TP seviyelerini geçerli girin.'}); return
+      setNotice({kind: 'error', text: 'Sembol, miktar, kaldıraç, Stop Loss ve tüm TP seviyeleri pozitif olmalıdır.'}); return
     }
     const leverage = Number(nextOrder.leverage)
     if (!Number.isInteger(leverage) || leverage < 1 || leverage > 50) {
-      setNotice({kind: 'error', text: 'LIVE leverage 1x ile 50x arasında tam sayı olmalı.'}); return
+      setNotice({kind: 'error', text: 'Kaldıraç 1x ile 50x arasında tam sayı olmalıdır.'}); return
+    }
+    if (nextOrder.order_type === 'LIMIT' && (!Number.isFinite(Number(nextOrder.limit_price)) || Number(nextOrder.limit_price) <= 0)) {
+      setNotice({kind: 'error', text: 'Limit emir için pozitif bir limit fiyatı girin.'}); return
+    }
+    const referencePrice = nextOrder.order_type === 'LIMIT' ? Number(nextOrder.limit_price) : Number(analysis?.entry)
+    const stop = Number(nextOrder.stop_loss)
+    const targets = [Number(nextOrder.tp1), Number(nextOrder.tp2), Number(nextOrder.tp3)]
+    if (!Number.isFinite(referencePrice) || referencePrice <= 0) {
+      setNotice({kind: 'error', text: 'Stop Loss yönünü doğrulamak için giriş fiyatını analizden doldurun veya Limit seçin.'}); return
+    }
+    const validDirection = nextOrder.direction === 'LONG' ? stop < referencePrice && targets[0] > referencePrice : stop > referencePrice && targets[0] < referencePrice
+    const orderedTargets = nextOrder.direction === 'LONG' ? targets[0] < targets[1] && targets[1] < targets[2] : targets[0] > targets[1] && targets[1] > targets[2]
+    if (!validDirection) {
+      setNotice({kind: 'error', text: 'Stop Loss, seçilen yöne göre giriş fiyatının doğru tarafında olmalıdır.'}); return
+    }
+    if (!orderedTargets) {
+      setNotice({kind: 'error', text: 'TP seviyeleri seçilen yöne göre sıralı olmalıdır.'}); return
     }
     const availableBalance = Number(status?.account?.available_balance)
     if (Number.isFinite(availableBalance) && availableBalance > 0 && Number(nextOrder.margin_usdt) > availableBalance) {
       setNotice({kind: 'error', text: `Seçilen marjin ${Number(nextOrder.margin_usdt).toFixed(2)} USDT; kullanılabilir bakiye yalnızca ${availableBalance.toFixed(2)} USDT.`}); return
     }
-    setConfirm({title: 'İŞLEM BAŞLATILACAK', message: `${nextOrder.symbol} ${nextOrder.direction} ${nextOrder.order_type} işlemi gerçek Binance hesabında açılacak. Stop Loss ve TP korumaları emirle birlikte kurulacak. Emin misiniz?`, simple: true, action: async () => {
-      await call(V25, '/order', {method: 'POST', body: JSON.stringify({...nextOrder, margin_usdt: Number(nextOrder.margin_usdt), leverage: Number(nextOrder.leverage), limit_price: nextOrder.order_type === 'LIMIT' ? Number(nextOrder.limit_price) : null, stop_loss: Number(nextOrder.stop_loss), tp1: Number(nextOrder.tp1), tp2: Number(nextOrder.tp2), tp3: Number(nextOrder.tp3), confirmation: 'CANLI EMİR GÖNDER', intent_id: `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`})})
-    }})
-    setConfirmText('')
+    const payload = {...nextOrder, margin_usdt: Number(nextOrder.margin_usdt), leverage, limit_price: nextOrder.order_type === 'LIMIT' ? Number(nextOrder.limit_price) : null, stop_loss: Number(nextOrder.stop_loss), tp1: Number(nextOrder.tp1), tp2: Number(nextOrder.tp2), tp3: Number(nextOrder.tp3), intent_id: `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`}
+    void run('review', async () => {
+      const result = await call<{message?: string; notional_usdt?: number; estimated_stop_loss_usdt?: number}>(V25, '/order/test', {method: 'POST', body: JSON.stringify(payload)})
+      setReviewResult({message: result.message || 'Dry-run tamamlandı; gerçek emir gönderilmedi.', notional: result.notional_usdt, estimated_stop_loss_usdt: result.estimated_stop_loss_usdt})
+    }, 'Dry-run tamamlandı; gerçek emir gönderilmedi.')
   }
 
   const confirmAction = () => {
@@ -448,8 +496,39 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const autoStatusLabel = status === null ? 'UNKNOWN' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : 'OFF'
   const liveState = status === null ? 'UNKNOWN' : emergency || recoveryRequired ? 'BLOCKED' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : liveArmed ? 'ARMED' : readinessReady ? 'READY' : 'LOCKED'
   const activeConfirm = confirm
+  const statusValue = (value: string) => value === 'READY' || value === 'CLEAR' || value === 'CONNECTED' || value === 'ON' || value === 'PROTECTED' ? 'READY' : value === 'UNKNOWN' ? 'UNKNOWN' : 'BLOCKED'
+  const statusItems = [
+    [liveCopy.status.liveTrading, status === null ? 'UNKNOWN' : statusValue(liveState === 'READY' || liveState === 'ARMED' ? 'READY' : liveState)],
+    [liveCopy.status.autoTrade, status === null ? 'UNKNOWN' : statusValue(status.live_auto_trade ? 'ON' : 'BLOCKED')],
+    [liveCopy.status.marketData, status === null ? 'UNKNOWN' : statusValue(marketDataConnected ? 'CONNECTED' : 'DISCONNECTED')],
+    [liveCopy.status.liveAccount, status === null ? 'UNKNOWN' : statusValue(connected ? 'CONNECTED' : 'DISCONNECTED')],
+    [liveCopy.status.risk, status === null ? 'UNKNOWN' : statusValue(riskState)],
+    [liveCopy.status.exposure, status === null ? 'UNKNOWN' : statusValue(exposureState)],
+    [liveCopy.status.protection, status === null ? 'UNKNOWN' : statusValue(currentProtection)],
+    [liveCopy.status.recovery, status === null ? 'UNKNOWN' : statusValue(recoveryState)],
+    [liveCopy.status.emergency, status === null ? 'UNKNOWN' : statusValue(emergencyState)],
+  ] as const
+  const closeCredentialModal = () => {
+    setCredentialModalOpen(false)
+    setShowSecret(false)
+    setCredentials({apiKey: '', secretKey: '', accepted: false})
+  }
   const confirmationModal = activeConfirm && typeof document !== 'undefined' ? createPortal(
     <div className="liveConfirmBackdrop"><section className="liveConfirm" role="dialog" aria-modal="true"><h2>{activeConfirm.title}</h2><p>{activeConfirm.message}</p>{!activeConfirm.simple && <label>TYPE TO CONFIRM<input autoFocus value={confirmText} onChange={event => setConfirmText(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') confirmAction()}} placeholder={activeConfirm.expected}/></label>}<div><button type="button" onClick={() => {setConfirm(null);setConfirmText('')}}>{activeConfirm.simple ? 'HAYIR' : 'CANCEL'}</button><button type="button" disabled={!activeConfirm.simple && confirmText.trim().toUpperCase() !== activeConfirm.expected} onClick={confirmAction}>{activeConfirm.simple ? 'EVET' : 'CONFIRM'}</button></div></section></div>,
+    document.body,
+  ) : null
+  const credentialModal = credentialModalOpen && typeof document !== 'undefined' ? createPortal(
+    <div className="liveCredentialBackdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget) closeCredentialModal() }}>
+      <section className="liveCredentialModal" role="dialog" aria-modal="true" aria-labelledby="live-credentials-title">
+        <header><div><small>{liveCopy.configureCredentials}</small><h2 id="live-credentials-title">{liveCopy.credentialsTitle}</h2></div><button type="button" onClick={closeCredentialModal} aria-label={liveCopy.close}>×</button></header>
+        <p>{liveCopy.credentialsHint} Gerçek emir gönderilmez.</p>
+        <label>{liveCopy.apiKey}<input type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})}/></label>
+        <label>{liveCopy.secretKey}<input type={showSecret ? 'text' : 'password'} autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})}/></label>
+        <label className="liveCredentialCheck"><input type="checkbox" checked={credentials.accepted} onChange={event => setCredentials({...credentials, accepted: event.target.checked})}/><span>Secret yalnızca şifreli sunucu kasasında tutulur.</span></label>
+        <div className="liveCredentialActions"><button type="button" onClick={testConnection} disabled={Boolean(busy)}>{busy === 'test' ? 'TEST EDİLİYOR...' : liveCopy.testConnection}</button><button type="button" className="primary" onClick={connectAndSave} disabled={Boolean(busy)}>{busy === 'connect-save' ? 'BAĞLANIYOR...' : liveCopy.saveAndConnect}</button></div>
+        <small className="liveCredentialNote">Test ve kaydetme bağlantı doğrulaması yapar; bu işlemler emir oluşturmaz.</small>
+      </section>
+    </div>,
     document.body,
   ) : null
 
@@ -480,12 +559,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     ['Risk', riskState === 'READY' ? 'PASS' : riskState, riskGate?.detail || 'Risk policy is backend-controlled'],
     ['Exposure', exposureState === 'READY' ? 'PASS' : exposureState, activePlanState === 'CONFLICT' ? 'Active plan conflict' : `Current exposure ${money(liveExposure)}`],
     ['Protection', protectionState === 'READY' ? 'PASS' : protectionState, protectionGate?.detail || 'Protection readiness is backend-controlled'],
-    ['LIVE lock', manualOrderReady ? 'MANUAL READY' : 'BLOCKED', manualOrderReady ? 'Manual LIVE orders use the EVET confirmation; ARM LIVE is only for Auto Trade.' : blocker],
+    ['LIVE lock', manualOrderReady ? 'MANUAL READY' : 'BLOCKED', manualOrderReady ? 'Manual LIVE orders require the active ARM window and final EVET confirmation.' : blocker],
     ['Execution', status?.execution_state === 'UNKNOWN' || status?.reconciliation_required ? 'BLOCKED' : readinessReady ? 'PASS' : 'WARNING', status?.reconciliation_required ? 'Reconciliation required' : blocker],
   ] as const
 
   const renderManualOrderCard = () => (
-    <div className="liveUxGrid liveUxOrderGrid"><section className="liveUxCard liveUxManual"><header><Send/><div><small>MANUAL LIVE ORDER</small><h3>Review before real submission</h3></div><b>{executionLocked ? 'LOCKED' : 'V25 CHAIN ONLY'}</b></header><div className="liveUxForm"><label>Symbol<input value={order.symbol} onChange={event => setOrder({...order, symbol: event.target.value.toUpperCase()})}/></label><div className="liveChoice"><span>Side</span><button type="button" className={order.direction === 'LONG' ? 'selectedLong' : ''} onClick={() => setOrder({...order, direction: 'LONG'})}>BUY / LONG</button><button type="button" className={order.direction === 'SHORT' ? 'selectedShort' : ''} onClick={() => setOrder({...order, direction: 'SHORT'})}>SELL / SHORT</button></div><label>Order Type<select value={order.order_type} onChange={event => setOrder({...order, order_type: event.target.value as OrderDraft['order_type']})}><option>MARKET</option><option>LIMIT</option></select></label><label>Quantity / Margin<input type="number" min="5" value={order.margin_usdt} onChange={event => setOrder({...order, margin_usdt: event.target.value})}/></label>{order.order_type === 'LIMIT' && <label>Entry Price<input type="number" value={order.limit_price} onChange={event => setOrder({...order, limit_price: event.target.value})}/></label>}<label>Stop Loss<input type="number" value={order.stop_loss} onChange={event => setOrder({...order, stop_loss: event.target.value})}/></label><label>Take Profit 1<input type="number" value={order.tp1} onChange={event => setOrder({...order, tp1: event.target.value})}/></label><label>Take Profit 2<input type="number" value={order.tp2} onChange={event => setOrder({...order, tp2: event.target.value})}/></label><label>Take Profit 3<input type="number" value={order.tp3} onChange={event => setOrder({...order, tp3: event.target.value})}/></label></div><div className="liveUxFormActions"><button type="button" onClick={fillAnalysis}><CircleDollarSign/> FILL FROM ANALYSIS</button><button type="button" className="primary" onClick={reviewOrder} disabled={Boolean(busy)}><Send/> REVIEW LIVE ORDER</button></div></section><section className="liveUxCard liveUxSummary"><header><ShieldCheck/><div><small>ORDER SUMMARY</small><h3>{order.symbol || 'UNKNOWN SYMBOL'}</h3></div><b>LIVE · {executionLocked ? 'LOCKED' : status?.armed ? 'ARMED' : 'NOT ARMED'}</b></header><div className="liveUxSummaryLead"><strong>{order.direction === 'LONG' ? 'BUY' : 'SELL'}</strong><span>{order.order_type}</span></div><div className="liveUxMetrics"><span><small>QUANTITY / MARGIN</small><b>{text(order.margin_usdt)} USDT</b></span><span><small>STOP LOSS</small><b>{text(order.stop_loss)}</b></span><span><small>TP1</small><b>{text(order.tp1)}</b></span><span><small>TP2</small><b>{text(order.tp2)}</b></span><span><small>TP3</small><b>{text(order.tp3)}</b></span><span><small>RISK</small><b>{riskState}</b></span><span><small>EXPOSURE</small><b>{exposureState}</b></span><span><small>PROTECTION</small><b>{protectionState}</b></span></div></section></div>
+    <div className="liveUxGrid liveUxOrderGrid"><section className="liveUxCard liveUxManual"><header><Send/><div><small>{liveCopy.manualOrder}</small><h3>Dry-run öncesi emir hazırlığı</h3></div><b>{executionLocked ? 'KİLİTLİ' : 'V25 ZİNCİRİ'}</b></header><div className="liveUxForm"><label>{liveCopy.symbol}<input value={order.symbol} onChange={event => setOrder({...order, symbol: event.target.value.toUpperCase()})}/></label><div className="liveChoice"><span>{liveCopy.side}</span><button type="button" className={order.direction === 'LONG' ? 'selectedLong' : ''} onClick={() => setOrder({...order, direction: 'LONG'})}>{liveCopy.long}</button><button type="button" className={order.direction === 'SHORT' ? 'selectedShort' : ''} onClick={() => setOrder({...order, direction: 'SHORT'})}>{liveCopy.short}</button></div><label>{liveCopy.orderType}<select value={order.order_type} onChange={event => setOrder({...order, order_type: event.target.value as OrderDraft['order_type']})}><option>{liveCopy.market}</option><option>{liveCopy.limit}</option></select></label><label>{liveCopy.margin}<input type="number" min="5" value={order.margin_usdt} onChange={event => setOrder({...order, margin_usdt: event.target.value})}/></label>{order.order_type === 'LIMIT' && <label>{liveCopy.limitPrice}<input type="number" value={order.limit_price} onChange={event => setOrder({...order, limit_price: event.target.value})}/></label>}<label>{liveCopy.stopLoss}<input type="number" value={order.stop_loss} onChange={event => setOrder({...order, stop_loss: event.target.value})}/></label><label>{liveCopy.tp1}<input type="number" value={order.tp1} onChange={event => setOrder({...order, tp1: event.target.value})}/></label><label>{liveCopy.tp2}<input type="number" value={order.tp2} onChange={event => setOrder({...order, tp2: event.target.value})}/></label><label>{liveCopy.tp3}<input type="number" value={order.tp3} onChange={event => setOrder({...order, tp3: event.target.value})}/></label></div><div className="liveUxFormActions"><button type="button" onClick={fillAnalysis}><CircleDollarSign/> {liveCopy.fillAnalysis}</button><button type="button" className="primary" onClick={reviewOrder} disabled={Boolean(busy)}><Send/> {liveCopy.reviewOrder}</button></div>{reviewResult && <p className="liveUxReviewResult" role="status">{reviewResult.message} Gerçek emir gönderilmedi.</p>}</section><section className="liveUxCard liveUxSummary"><header><ShieldCheck/><div><small>{liveCopy.orderSummary}</small><h3>{order.symbol || 'SEMBOL YOK'}</h3></div><b>LIVE · {executionLocked ? 'KİLİTLİ' : status?.armed ? 'ARMED' : 'ARM YOK'}</b></header><div className="liveUxSummaryLead"><strong>{order.direction === 'LONG' ? liveCopy.long : liveCopy.short}</strong><span>{order.order_type}</span></div><div className="liveUxMetrics"><span><small>{liveCopy.margin}</small><b>{text(order.margin_usdt)} USDT</b></span><span><small>{liveCopy.stopLoss}</small><b>{text(order.stop_loss)}</b></span><span><small>{liveCopy.tp1}</small><b>{text(order.tp1)}</b></span><span><small>{liveCopy.tp2}</small><b>{text(order.tp2)}</b></span><span><small>{liveCopy.tp3}</small><b>{text(order.tp3)}</b></span><span><small>RİSK</small><b>{riskState}</b></span><span><small>MARUZİYET</small><b>{exposureState}</b></span><span><small>KORUMA</small><b>{protectionState}</b></span></div></section></div>
   )
 
   if (!active) return null
@@ -584,10 +663,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     </section>
     {confirmationModal}
   </section>
-  return <section className="liveTradingPanel liveTerminal liveUx" aria-label="LIVE Trading Operations Terminal">
-    <header className="liveUxHero"><div><span className="liveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE TRADING</h2><p>Binance Futures Mainnet · backend state only</p></div><div className={`liveUxState ${liveState.toLowerCase()}`}><ShieldAlert/><strong>{liveState}</strong><small>AUTO TRADE · {status?.live_auto_trade ? 'ON' : 'OFF'}</small></div></header>
-    <div className="liveUxStatus"><div><small>LIVE TRADING</small><b>{liveState}</b></div><div><small>AUTO TRADE</small><b>{status?.live_auto_trade ? 'ON' : 'OFF'}</b></div><div><small>MARKET DATA</small><b>{marketDataConnected ? 'CONNECTED' : status === null ? 'UNKNOWN' : 'DISCONNECTED'}</b></div><div><small>LIVE ACCOUNT</small><b>{connected ? 'CONNECTED' : 'DISCONNECTED'}</b></div><div><small>RISK</small><b>{riskState}</b></div><div><small>EXPOSURE</small><b>{exposureState}</b></div><div><small>PROTECTION</small><b>{currentProtection}</b></div><div><small>RECOVERY</small><b>{recoveryState}</b></div><div><small>EMERGENCY</small><b>{emergencyState}</b></div></div>
-    <div className={`liveUxNow ${liveState.toLowerCase()}`}><div><small>WHAT TO DO NOW</small><strong>{ownershipUncertain ? 'OWNERSHIP UNCERTAIN' : liveState === 'BLOCKED' ? '⚠ LIVE IS BLOCKED' : liveState === 'READY' ? 'LIVE IS READY' : '🔒 LIVE IS LOCKED'}</strong><p>{ownershipUncertain ? `${text(ownershipUncertain.symbol)} ownership checks failed: ${ownershipUncertain.failures?.join(', ') || 'unknown'}.` : blocker}</p></div><div className="liveUxNowActions"><button type="button" className="liveCredentialCta" onClick={() => window.dispatchEvent(new CustomEvent('protrebot-navigate', {detail: 'setup'}))}><KeyRound/> CONFIGURE LIVE CREDENTIALS</button><button type="button" onClick={() => void refresh(false)} disabled={Boolean(busy)}><RefreshCw/> REFRESH STATUS</button></div></div>
+  return <section className="liveTradingPanel liveTerminal liveUx" aria-label={liveCopy.ariaLabel}>
+    <header className="liveUxHero"><div><span className="liveKicker">{liveCopy.eyebrow}</span><h2>{liveCopy.title}</h2><p>{liveCopy.description}</p></div><div className={`liveUxState ${liveState.toLowerCase()}`}><ShieldAlert/><strong>{liveState === 'READY' ? liveCopy.ready : liveState === 'UNKNOWN' ? liveCopy.unknown : liveCopy.blocked}</strong><small>AUTO TRADE · {status?.live_auto_trade ? 'AÇIK' : 'KAPALI'}</small></div></header>
+    <div className="liveUxStatus" aria-label="Canlı durum şeridi">{statusItems.map(([label, value]) => <div key={label} className={`liveStatusItem ${value.toLowerCase()}`}><i/><span>{label}</span><b>{value}</b></div>)}</div>
+    <div className={`liveUxNow ${liveState.toLowerCase()}`}><div><small>{liveCopy.now}</small><strong>{ownershipUncertain ? 'SAHİPLİK BELİRSİZ' : liveState === 'BLOCKED' ? 'LIVE ENGELLENDİ' : liveState === 'READY' ? 'LIVE HAZIR' : 'LIVE KİLİTLİ'}</strong><p>{ownershipUncertain ? `${text(ownershipUncertain.symbol)} sahiplik kontrolü başarısız: ${ownershipUncertain.failures?.join(', ') || 'bilinmiyor'}.` : blocker}</p></div><div className="liveUxNowActions"><button type="button" className="liveCredentialCta" onClick={() => setCredentialModalOpen(true)}><KeyRound/> {liveCopy.configureCredentials}</button><button type="button" onClick={() => void refresh(false)} disabled={Boolean(busy) || refreshPending}>{refreshPending ? <RefreshCw className="spin"/> : <RefreshCw/>} {liveCopy.refreshStatus}</button></div></div>
 
     <div className="liveUxGrid liveUxTopGrid"><div className="liveUxPositionStack">{positions.length ? positions.map((position, index) => { const activePlanForPosition = findActivePlanForPosition(position); const protectionLabel = activePlanForPosition ? protectionLabelForPlan(activePlanForPosition) : 'EXTERNAL / NOT MANAGED'; const isExternal = !recoveryRequired && !activePlanForPosition; return <section className="liveUxCard liveUxPosition" key={`${String(position.symbol)}-${index}`}><header><CircleDollarSign/><div><small>CURRENT POSITION</small><h3>{text(position.symbol)}</h3></div><b>OPEN</b></header><div className="liveUxPositionSide"><strong>{text(position.direction)}</strong><span>Position Status · OPEN</span></div><div className="liveUxMetrics"><span><small>ENTRY</small><b>{text(position.entry_price)}</b></span><span><small>MARK PRICE</small><b>{text(position.mark_price)}</b></span><span><small>QUANTITY</small><b>{text(position.quantity)}</b></span><span><small>UNREALIZED PNL</small><b>{money(position.unrealized_pnl)}</b></span><span><small>STOP LOSS</small><b>{text(activePlanForPosition?.stop_loss)}</b></span><span><small>TAKE PROFIT 1</small><b>{text(activePlanForPosition?.targets?.[0])}</b></span><span><small>TAKE PROFIT 2</small><b>{text(activePlanForPosition?.targets?.[1])}</b></span><span><small>TAKE PROFIT 3</small><b>{text(activePlanForPosition?.targets?.[2])}</b></span></div><div className={`liveUxProtectionBadge ${protectionLabel.toLowerCase().replaceAll(' ', '-')}`}>PROTECTION · {protectionLabel}</div>{isExternal && <button type="button" className="liveArmButton" onClick={() => void previewAdoption(String(position.symbol))} disabled={Boolean(busy) || !connected || recoveryRequired}>ADOPT &amp; MANAGE</button>}</section> }) : <section className="liveUxCard liveUxPosition"><header><CircleDollarSign/><div><small>CURRENT POSITION</small><h3>NO OPEN POSITION</h3></div><b>NO ACTIVE POSITION</b></header><p className="liveUxEmpty">No active LIVE position. Position data is read from the backend account snapshot.</p></section>}</div>
       <section className="liveUxCard liveUxControls"><header><UnlockKeyhole/><div><small>LIVE ARM</small><h3>Release control</h3></div><b>{liveArmed ? 'ARMED' : 'LOCKED'}</b></header><div className="liveUxControlState"><strong>{liveArmed ? 'ARMED' : 'LOCKED'}</strong><span>Arming LIVE does not start an order. Auto Trade must be enabled separately.</span></div><button type="button" className="liveArmButton" onClick={liveArmed ? disarmLive : armLive} disabled={Boolean(busy) || (!liveArmed && (!authorizationValid || !configured || !connected || emergency || recoveryRequired || !readinessReady))}>{liveArmed ? <LockKeyhole/> : <UnlockKeyhole/>}{liveArmed ? ' DISARM LIVE' : ' ARM LIVE'}</button><small className="liveUxReason">{liveArmed ? 'New-entry authority is active until the backend arm window expires.' : 'Current backend blocker: ' + (blocker || 'unknown')}</small></section></div>
@@ -596,10 +675,11 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
     {renderManualOrderCard()}
 
-    <div className="liveUxGrid liveUxLowerGrid"><section className="liveUxCard"><header><CircleDollarSign/><div><small>LAST ORDER</small><h3>{recentOrder ? 'Recent LIVE activity' : 'NO RECENT LIVE ORDER'}</h3></div></header>{recentOrder ? <div className="liveUxMetrics"><span><small>EVENT</small><b>{text(recentOrder.kind)}</b></span><span><small>MESSAGE</small><b>{text(recentOrder.message)}</b></span><span><small>CREATED</small><b>{date(recentOrder.created_at)}</b></span><span><small>EXECUTION STATE</small><b>{text(status?.execution_state)}</b></span></div> : <p className="liveUxEmpty">No recent LIVE order is available from the backend.</p>}</section><section className="liveUxCard"><header><ShieldCheck/><div><small>PROTECTION SUMMARY</small><h3>{currentProtection}</h3></div><b>{currentProtection}</b></header><div className="liveUxProtectionList"><span>AGGREGATE STATUS <b>{currentProtection}</b></span></div></section></div>
-    <div className="liveUxGrid liveUxLowerGrid"><section className="liveUxCard"><header><RefreshCw/><div><small>RECOVERY</small><h3>{recoveryState === 'READY' ? 'READY' : recoveryRequired ? 'RECOVERY REQUIRED' : 'BLOCKED'}</h3></div><b>{recoveryState}</b></header><p className="liveUxReason">{status?.reconciliation_diagnostic?.exception_message || status?.recovery_error || (status?.reconciliation_required ? 'Reconciliation is required before LIVE execution can continue.' : 'Recovery state is read from the live execution backend.')}</p><button type="button" onClick={checkRecovery} disabled={Boolean(busy)}>CHECK RECOVERY</button></section><section className="liveUxCard liveUxEmergency"><header><ShieldAlert/><div><small>EMERGENCY STOP</small><h3>{emergency ? 'LIVE BLOCKED' : 'NORMAL'}</h3></div><b>{emergency ? 'ACTIVE' : 'CLEAR'}</b></header><p>Immediately blocks live execution and automatic trading.</p><button type="button" onClick={emergencyStop} disabled={Boolean(busy)}><ShieldAlert/> EMERGENCY STOP</button></section></div>
-    <section className="liveUxCard liveUxExternalHistory" aria-label="External Binance trade history"><header><RefreshCw/><div><small>EXTERNAL / NOT MANAGED BY V25</small><h3>Plan-dışı Binance geçmişi</h3></div><b>{externalHistory?.external_trades?.length ?? 0}</b></header><p className="liveUxReason">Read-only userTrades and REALIZED_PNL income records without a matching V25 plan.</p>{externalHistory?.external_trades?.length ? <div className="liveUxTableWrap"><table><thead><tr><th>Symbol</th><th>Side</th><th>Price</th><th>Quantity</th><th>Realized PnL</th><th>Time</th></tr></thead><tbody>{externalHistory.external_trades.slice(0, 30).map((trade, index) => <tr key={`${String(trade.trade_id || trade.order_id)}-${index}`}><td>{text(trade.symbol)}</td><td>{text(trade.side)}</td><td>{text(trade.price)}</td><td>{text(trade.quantity)}</td><td className={Number(trade.realized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{money(Number(trade.realized_pnl || 0))}</td><td>{externalDate(trade.time)}</td></tr>)}</tbody></table></div> : <div className="liveUxEmpty"><strong>No unmatched Binance trades found</strong><span>Only verified V25 plans appear in managed history; this is read-only fallback evidence.</span></div>}</section>
+    <div className="liveUxGrid liveUxLowerGrid"><section className="liveUxCard"><header><CircleDollarSign/><div><small>{liveCopy.lastOrder}</small><h3>{recentOrder ? 'Son LIVE aktivitesi' : liveCopy.noRecord}</h3></div></header>{recentOrder ? <div className="liveUxMetrics"><span><small>OLAY</small><b>{text(recentOrder.kind)}</b></span><span><small>MESAJ</small><b>{text(recentOrder.message)}</b></span><span><small>ZAMAN</small><b>{date(recentOrder.created_at)}</b></span><span><small>YÜRÜTME</small><b>{text(status?.execution_state)}</b></span></div> : <p className="liveUxEmpty">Backend snapshot içinde son emir kaydı yok.</p>}</section><section className="liveUxCard"><header><ShieldCheck/><div><small>{liveCopy.protectionSummary}</small><h3>{currentProtection}</h3></div><b>{currentProtection}</b></header><div className="liveUxProtectionList"><span>TOPLAM DURUM <b>{currentProtection}</b></span></div></section></div>
+    <div className="liveUxGrid liveUxLowerGrid"><section className="liveUxCard"><header><RefreshCw/><div><small>{liveCopy.recovery}</small><h3>{recoveryState === 'READY' ? 'READY' : recoveryRequired ? 'RECOVERY GEREKLİ' : 'BLOCKED'}</h3></div><b>{recoveryState}</b></header><p className="liveUxReason">{status?.reconciliation_diagnostic?.exception_message || status?.recovery_error || (status?.reconciliation_required ? 'Yeni LIVE işlemlerden önce uzlaştırma gerekir.' : 'Recovery durumu backend verisinden okunur.')}</p><button type="button" onClick={checkRecovery} disabled={Boolean(busy)}>{busy === 'recovery' ? 'KONTROL EDİLİYOR...' : liveCopy.checkRecovery}</button></section><section className="liveUxCard liveUxEmergency"><header><ShieldAlert/><div><small>{liveCopy.emergencyStop}</small><h3>{emergency ? 'LIVE ENGELLENDİ' : 'NORMAL'}</h3></div><b>{emergency ? 'BLOCKED' : 'CLEAR'}</b></header><p>Yeni canlı yürütmeyi ve otomatik işlemleri engeller.</p><div className="liveUxActionRow"><button type="button" onClick={emergencyStop} disabled={Boolean(busy)}><ShieldAlert/> {liveCopy.emergencyStop}</button>{emergency && <button type="button" onClick={clearEmergency} disabled={Boolean(busy)}>RECOVERY SONRASI TEMİZLE</button>}</div></section></div>
+    <section className="liveUxCard liveUxExternalHistory" aria-label={liveCopy.history}><header><RefreshCw/><div><small>READ-ONLY · V25 DIŞI</small><h3>{liveCopy.history}</h3></div><b>{externalHistory?.external_trades?.length ?? 0}</b></header><p className="liveUxReason">V25 planıyla eşleşmeyen Binance işlemleri salt-okunur gösterilir.</p>{externalHistory?.external_trades?.length ? <div className="liveUxTableWrap"><table><thead><tr><th>Sembol</th><th>Yön</th><th>Fiyat</th><th>Miktar</th><th>Gerçekleşen PnL</th><th>Zaman</th></tr></thead><tbody>{externalHistory.external_trades.slice(0, 30).map((trade, index) => <tr key={`${String(trade.trade_id || trade.order_id)}-${index}`}><td>{text(trade.symbol)}</td><td>{text(trade.side)}</td><td>{text(trade.price)}</td><td>{text(trade.quantity)}</td><td className={Number(trade.realized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{money(Number(trade.realized_pnl || 0))}</td><td>{externalDate(trade.time)}</td></tr>)}</tbody></table></div> : <div className="liveUxEmpty"><strong>{liveCopy.noHistory}</strong><span>Bu alan yalnızca gerçek Binance read-only verisini gösterir.</span></div>}</section>
     <div className={`liveNotice ${notice.kind}`}>{notice.kind === 'error' ? <TriangleAlert/> : notice.kind === 'ok' ? <CheckCircle2/> : <ShieldCheck/>}<span>{notice.text}</span></div>
+    {credentialModal}
     {confirmationModal}
   </section>
 

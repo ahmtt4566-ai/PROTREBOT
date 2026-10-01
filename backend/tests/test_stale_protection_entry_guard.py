@@ -107,7 +107,7 @@ class StaleProtectionEntryGuardTests(unittest.TestCase):
         self.assertEqual(state, {"plans": {}})
 
     def test_second_snapshot_conflict_returns_409_before_entry_submission(self):
-        application = SimpleNamespace(state=SimpleNamespace(http=object(), v21_demo={}))
+        application = SimpleNamespace(state=SimpleNamespace(http=object(), v21_demo={}, maintenance={"mode": "NORMAL"}))
         demo_state = {
             "lock": asyncio.Lock(),
             "_user_id": "user-a",

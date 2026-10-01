@@ -2460,6 +2460,7 @@ def _protection_classification(
     *,
     required_ids: set[int] | None = None,
     plans: list[dict[str, Any]] | None = None,
+    strict_unassigned: bool = True,
 ) -> tuple[str, list[int], list[int]]:
     if snapshot.get("open_algo_orders_available") is False:
         return "UNKNOWN", [], []
@@ -2506,10 +2507,15 @@ def _protection_classification(
             status = str(order.get("status") or "").upper()
             side = str(order.get("side") or "").upper()
             if not order_type or not status or not side:
-                if algo_id in protection_ids:
+                if required_ids is None or algo_id in protection_ids:
                     return "UNKNOWN", [], []
                 continue
             parsed_orders.append((algo_id, order))
+
+    unassigned_ids = {algo_id for algo_id, _order in parsed_orders if algo_id not in protection_ids}
+    if strict_unassigned and unassigned_ids:
+        if required_ids is None or not any(algo_id in {item[0] for item in parsed_orders} for algo_id in required_ids):
+            return "UNKNOWN", [], sorted(unassigned_ids)
 
     active_statuses = {"NEW", "WORKING", "PENDING_NEW", "PARTIALLY_FILLED"}
     expected_stop_id = _single_plan_algo_id(plan, "stop_algo_id")
@@ -3128,7 +3134,7 @@ async def _repair_missing_stop_protection(
         if plan.get("protection_repair_pending"):
             return False
         protection_state, _matched_ids, missing_ids = _protection_classification(
-            plan, snapshot, plans=plans
+            plan, snapshot, plans=plans, strict_unassigned=False
         )
         stop_algo_id = _single_plan_algo_id(plan, "stop_algo_id")
         if protection_state != "MISSING" or stop_algo_id is None or stop_algo_id not in missing_ids:

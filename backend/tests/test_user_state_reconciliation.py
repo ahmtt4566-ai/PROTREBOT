@@ -23,6 +23,7 @@ class UserStateReconciliationTests(unittest.TestCase):
                 v21_demo={"settings": dict(v21_demo.DEFAULT_SETTINGS)},
                 _binance_demo_user_state={},
                 _v21_demo_user_state={},
+                maintenance={"mode": "NORMAL"},
             )
         )
 

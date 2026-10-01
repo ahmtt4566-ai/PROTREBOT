@@ -510,6 +510,10 @@ class EmergencyRequest(BaseModel):
     close_tracked_positions: bool = True
 
 
+class EmergencyClearRequest(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=64)
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2961,10 +2965,9 @@ async def execute_live_order(
     guard_new_entry(getattr(application.state, "maintenance", None))
     if not state.get("recovery_ready", False):
         raise HTTPException(503, "Canlı durum kurtarma tamamlanmadı; yeni emir gönderilmedi.")
-    if source == "V25_AUTO":
-        if not auto_session_active(state):
-            raise HTTPException(423, "Bir saatlik gözetimli canlı otomasyon oturumu kapalı veya süresi doldu.")
-    elif source != "MANUAL" and not is_armed(state):
+    if source == "V25_AUTO" and not auto_session_active(state):
+        raise HTTPException(423, "Bir saatlik gözetimli canlı otomasyon oturumu kapalı veya süresi doldu.")
+    if source != "V25_AUTO" and not is_armed(state):
         raise HTTPException(423, "24 saatlik canlı emir kilidi kapalı veya süresi doldu.")
     if live_execution_blocked(state):
         raise HTTPException(423, "Canlı yürütme kilitli; acil durum veya belirsiz emir uzlaştırması tamamlanmadı.")
@@ -4799,3 +4802,43 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
         return {"ok": True, "cancelled_bot_orders": cancelled_orders, "cancelled_bot_algos": cancelled_algos, "closed_tracked_positions": closed, "armed": False}
     except (LiveExchangeError, BinanceDemoError) as exc:
         raise safe_exchange_error(exc) from exc
+
+
+@router.post("/emergency/clear")
+async def v25_emergency_clear(request: Request, body: EmergencyClearRequest) -> dict[str, Any]:
+    user = execution_owner(request)
+    if body.confirmation.strip().upper() != "ACİL DURDURMAYI KALDIRIYORUM":
+        raise HTTPException(422, "Emergency kaldırma için ACİL DURDURMAYI KALDIRIYORUM yazın.")
+    state = request.app.state.v25_execution
+    emergency = state.get("emergency") if isinstance(state.get("emergency"), dict) else {}
+    if emergency.get("active") is not True:
+        raise HTTPException(409, "Aktif emergency kilidi yok.")
+    if state.get("reconciliation_required") or state.get("execution_state") == "UNKNOWN":
+        raise HTTPException(409, "Önce recovery/reconciliation tamamlanmalı.")
+    active_plans = [
+        plan for plan in state.get("plans", {}).values()
+        if isinstance(plan, dict) and live_plan_can_mutate(plan)
+        and str(plan.get("status") or "").upper() not in {"KAPANDI", "İPTAL", "ACİL DURDURULDU", "CLOSED", "CANCELLED"}
+    ]
+    if active_plans:
+        raise HTTPException(409, "Açık V25 planları kapanmadan emergency kaldırılamaz.")
+    try:
+        snapshot = await account_snapshot(client_for(request.app, request))
+    except (LiveExchangeError, BinanceDemoError) as exc:
+        raise safe_exchange_error(exc) from exc
+    owned_open_orders = [
+        row for row in [*snapshot.get("open_orders", []), *snapshot.get("open_algo_orders", [])]
+        if any(str(row.get(key) or "").startswith(LIVE_CLIENT_PREFIX) for key in ("client_order_id", "client_algo_id"))
+    ]
+    if owned_open_orders:
+        raise HTTPException(409, "Açık V25 emirleri varken emergency kaldırılamaz.")
+    state["emergency"] = {"active": False, "triggered_at": emergency.get("triggered_at"), "reason": "MANUAL_EMERGENCY_CLEARED"}
+    state["execution_state"] = "LOCKED"
+    state["reconciliation_required"] = False
+    state["real_trading_locked"] = True
+    state["armed_until"] = 0.0
+    state["live_auto_trade"] = False
+    state.setdefault("auto", {}).update({"enabled": False, "session_until": 0.0})
+    add_event(state, "LIVE_EMERGENCY_CLEARED", "Emergency temizlendi; canlı yürütme kilidi korunuyor.", actor=user["id"])
+    persist_state(state)
+    return {"ok": True, "emergency": False, "execution_state": "LOCKED", "armed": False}

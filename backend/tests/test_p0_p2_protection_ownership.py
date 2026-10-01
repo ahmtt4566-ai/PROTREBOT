@@ -255,12 +255,12 @@ class P0P2ProtectionOwnershipTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result, ("MATCHED", [101], []))
 
-    def test_missing_expected_id_with_foreign_same_symbol_stop_is_missing(self):
+    def test_missing_expected_id_with_foreign_same_symbol_stop_is_unknown(self):
         plan = self.plan(protection_ids=[101], stop_algo_id=101)
         result = binance_demo._protection_classification(
             plan, self.snapshot([self.algo(202)])
         )
-        self.assertEqual(result, ("MISSING", [], [101]))
+        self.assertEqual(result[0], "UNKNOWN")
 
     def test_same_symbol_foreign_stop_without_plan_id_is_unknown(self):
         plan = self.plan(protection_ids=[])
@@ -582,7 +582,7 @@ class P0P2ProtectionOwnershipTests(unittest.IsolatedAsyncioTestCase):
             client, plan, snapshot=self.snapshot([self.algo(202)])
         )
         client.signed.assert_not_awaited()
-        self.assertEqual(plan["protection_ids"], [])
+        self.assertEqual(plan["protection_ids"], [101])
 
     async def test_cleanup_matched_deletes_exact_id(self):
         plan = self.plan(protection_ids=[101], stop_algo_id=101)

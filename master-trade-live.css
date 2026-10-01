@@ -274,3 +274,160 @@
   .masterTradeLiveConnectionCard > .masterTradeLiveApiMeta { grid-template-columns: 1fr 1fr; }
   .masterTradeLiveSecurityStrip { display: grid; gap: 7px; }
 }
+
+/* Analyst-aligned token layer for the active Live Trading surface. */
+.liveTradingPanel.liveUx {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.liveTradingPanel.liveUx .liveUxCard,
+.liveTradingPanel.liveUx .liveUxNow,
+.liveTradingPanel.liveUx .liveUxStatus > div {
+  background: var(--surface);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.liveTradingPanel.liveUx .liveUxCard:hover,
+.liveTradingPanel.liveUx .liveUxNow:hover { background: var(--surface-hover); }
+.liveTradingPanel.liveUx small,
+.liveTradingPanel.liveUx .liveUxReason,
+.liveTradingPanel.liveUx p { color: var(--text-muted); }
+.liveTradingPanel.liveUx h2,
+.liveTradingPanel.liveUx h3,
+.liveTradingPanel.liveUx b,
+.liveTradingPanel.liveUx strong { color: var(--text); }
+.liveTradingPanel.liveUx button { border-color: transparent; background: var(--surface-active); color: var(--text); }
+.liveTradingPanel.liveUx button:hover { background: var(--accent); color: var(--bg); }
+.liveTradingPanel.liveUx input,
+.liveTradingPanel.liveUx select { border-color: var(--line); background: var(--surface); color: var(--text); }
+.liveTradingPanel.liveUx input:focus,
+.liveTradingPanel.liveUx select:focus { border-color: var(--focus); outline: 2px solid var(--accent-soft); }
+.liveTradingPanel.liveUx .liveArmButton { background: var(--accent); color: var(--bg); }
+.liveTradingPanel.liveUx .liveEmergencyButton { background: var(--short-soft); color: var(--short); }
+.liveTradingPanel.liveUx .liveUxActionRow { display: flex; flex-wrap: wrap; gap: 8px; }
+.liveTradingPanel.liveUx .selectedLong,
+.liveTradingPanel.liveUx .long { color: var(--long); }
+.liveTradingPanel.liveUx .selectedShort,
+.liveTradingPanel.liveUx .short { color: var(--short); }
+
+@media (max-width: 700px) {
+  .liveTradingPanel.liveUx .liveUxGrid,
+  .liveTradingPanel.liveUx .liveUxStatus { grid-template-columns: 1fr; }
+  .liveTradingPanel.liveUx .liveUxActionRow button { flex: 1 1 100%; }
+}
+
+/* Flatten the live workspace: only controls retain a visible boundary. */
+.masterTradeLiveUx .masterTradeLiveHeader,
+.masterTradeLiveUx .masterTradeLiveSection,
+.masterTradeLiveUx .masterTradeLiveConnection,
+.masterTradeLiveUx .masterTradeLiveApiDrawer,
+.masterTradeLiveUx .masterTradeLiveEmergency,
+.masterTradeLiveUx .masterTradeLiveConfirmationGrid article,
+.liveTradingPanel.liveUx .liveUxCard,
+.liveTradingPanel.liveUx .liveUxNow,
+.liveTradingPanel.liveUx .liveUxStatus > div {
+  border: 0;
+  box-shadow: none;
+  background-image: none;
+}
+
+.liveTradingPanel.liveUx {
+  display: grid;
+  gap: 14px;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding: 8px 0 28px;
+  background: var(--bg);
+  font-family: var(--font-ui);
+}
+.liveTradingPanel.liveUx .liveUxHero,
+.liveTradingPanel.liveUx .liveUxNow,
+.liveTradingPanel.liveUx .liveUxCard { border: 0; border-radius: 8px; box-shadow: none; background: var(--surface); }
+.liveTradingPanel.liveUx .liveUxHero { padding: 22px 24px; background: var(--surface); }
+.liveTradingPanel.liveUx .liveUxHero h2 { margin: 6px 0 4px; color: var(--text); font-size: var(--text-heading); letter-spacing: 0; }
+.liveTradingPanel.liveUx .liveUxHero p { margin: 0; color: var(--text-muted); font-size: var(--text-body); }
+.liveTradingPanel.liveUx .liveKicker,
+.liveTradingPanel.liveUx .liveUxCard header small,
+.liveTradingPanel.liveUx .liveUxNow small { color: var(--accent); font-size: var(--text-label); letter-spacing: 0; }
+.liveTradingPanel.liveUx .liveUxState { min-width: 160px; padding: 12px 16px; border: 0; border-radius: 8px; background: var(--surface-hover); }
+.liveTradingPanel.liveUx .liveUxState svg { color: var(--accent); }
+.liveTradingPanel.liveUx .liveUxState strong { color: var(--text); font-size: var(--text-body); }
+.liveTradingPanel.liveUx .liveUxState small { color: var(--text-muted); font-size: var(--text-label); }
+.liveTradingPanel.liveUx .liveUxStatus { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--surface); }
+.liveTradingPanel.liveUx .liveStatusItem { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px; min-width: 0; min-height: 52px; padding: 8px 10px; background: var(--surface); }
+.liveTradingPanel.liveUx .liveStatusItem + .liveStatusItem { border-left: 1px solid var(--surface-hover); }
+.liveTradingPanel.liveUx .liveStatusItem i { width: 7px; height: 7px; border-radius: 50%; background: var(--watch); }
+.liveTradingPanel.liveUx .liveStatusItem.ready i { background: var(--long); }
+.liveTradingPanel.liveUx .liveStatusItem.blocked i { background: var(--short); }
+.liveTradingPanel.liveUx .liveStatusItem.unknown i { background: var(--watch); }
+.liveTradingPanel.liveUx .liveStatusItem span { overflow: hidden; color: var(--text-muted); font-size: var(--text-label); text-overflow: ellipsis; white-space: nowrap; }
+.liveTradingPanel.liveUx .liveStatusItem b { grid-column: 2; color: var(--text); font-size: var(--text-label); font-weight: 700; }
+.liveTradingPanel.liveUx .liveUxNow { align-items: center; padding: 16px 20px; }
+.liveTradingPanel.liveUx .liveUxNow strong { color: var(--text); font-size: var(--text-body); }
+.liveTradingPanel.liveUx .liveUxNow p { margin: 5px 0 0; color: var(--text-muted); font-size: var(--text-body); line-height: 1.45; }
+.liveTradingPanel.liveUx .liveUxNowActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.liveTradingPanel.liveUx button { border: 0; border-radius: 6px; background: var(--surface-active); color: var(--text); font-family: var(--font-ui); }
+.liveTradingPanel.liveUx button:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+.liveTradingPanel.liveUx input,
+.liveTradingPanel.liveUx select { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-family: var(--font-ui); }
+.liveTradingPanel.liveUx input:focus,
+.liveTradingPanel.liveUx select:focus { border-color: var(--focus); outline: 2px solid var(--accent-soft); }
+.liveTradingPanel.liveUx .liveUxCard header h3,
+.liveTradingPanel.liveUx .liveUxCard b,
+.liveTradingPanel.liveUx .liveUxCard strong { color: var(--text); }
+.liveTradingPanel.liveUx .liveUxLowerGrid { gap: 14px; }
+.liveTradingPanel.liveUx .liveUxReviewResult { margin: 10px 0 0; color: var(--long); font-size: var(--text-body); }
+.liveCredentialBackdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--bg) 82%, transparent); }
+.liveCredentialModal { display: grid; gap: 12px; width: min(460px, 100%); padding: 20px; border-radius: 8px; background: var(--surface); color: var(--text); }
+.liveCredentialModal header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.liveCredentialModal header small { color: var(--accent); font-size: var(--text-label); }
+.liveCredentialModal h2 { margin: 5px 0 0; color: var(--text); font-size: var(--text-heading); }
+.liveCredentialModal p, .liveCredentialNote { margin: 0; color: var(--text-muted); font-size: var(--text-body); line-height: 1.45; }
+.liveCredentialModal label { display: grid; gap: 6px; color: var(--text-muted); font-size: var(--text-label); }
+.liveCredentialModal input { min-height: 40px; padding: 0 10px; }
+.liveCredentialModal .liveCredentialCheck { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px; }
+.liveCredentialModal .liveCredentialCheck input { min-height: auto; }
+.liveCredentialActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.liveCredentialActions button { flex: 1 1 180px; min-height: 40px; }
+.liveCredentialActions .primary { background: var(--accent); color: var(--bg); }
+@media (max-width: 900px) { .liveTradingPanel.liveUx .liveUxStatus { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 650px) { .liveTradingPanel.liveUx .liveUxStatus { grid-template-columns: 1fr 1fr; } .liveTradingPanel.liveUx .liveStatusItem + .liveStatusItem { border-left: 0; } .liveTradingPanel.liveUx .liveUxHero, .liveTradingPanel.liveUx .liveUxNow { align-items: flex-start; flex-direction: column; } .liveTradingPanel.liveUx .liveUxNowActions, .liveTradingPanel.liveUx .liveUxNowActions button { width: 100%; } }
+
+.masterTradeLiveUx .masterTradeLiveHeader,
+.masterTradeLiveUx .masterTradeLiveControl,
+.masterTradeLiveUx .masterTradeLiveSignal {
+  background: transparent;
+}
+
+.masterTradeLiveUx .masterTradeLiveSection,
+.masterTradeLiveUx .masterTradeLiveConnection,
+.masterTradeLiveUx .masterTradeLiveApiDrawer,
+.masterTradeLiveUx .masterTradeLiveEmergency,
+.liveTradingPanel.liveUx .liveUxCard {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.masterTradeLiveUx .masterTradeLiveControlMeta,
+.masterTradeLiveUx .masterTradeLiveAdvanced,
+.masterTradeLiveUx .masterTradeLiveActivity li,
+.masterTradeLiveUx .masterTradeLiveSafetyList details,
+.masterTradeLiveUx .masterTradeLiveTableWrap td {
+  border-color: transparent;
+}
+
+.masterTradeLiveUx .masterTradeLiveMarkets button,
+.masterTradeLiveUx .masterTradeLiveSide button,
+.masterTradeLiveUx input,
+.masterTradeLiveUx select,
+.liveTradingPanel.liveUx input,
+.liveTradingPanel.liveUx select {
+  border-color: var(--line, var(--live-line));
+}
+
+.masterTradeLiveUx .masterTradeLiveMarkets button.selected,
+.masterTradeLiveUx .masterTradeLiveSide button.selected {
+  border-color: var(--accent, var(--live-green));
+}

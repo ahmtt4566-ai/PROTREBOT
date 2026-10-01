@@ -59,3 +59,17 @@ export const marketCopy = {
   noAnomalies: 'Anomali tespit edilmedi.',
   details: 'DETAYLARI GÖR',
 } as const
+
+export const liveCopy = {
+  ariaLabel: 'Gerçek Futures Hazırlık Merkezi',
+  eyebrow: 'GERÇEK FUTURES HAZIRLIK MERKEZİ',
+  title: 'Live Trading',
+  description: 'Salt-okunur hesap durumu ve güvenli dry-run hazırlığı.',
+  unknown: 'UNKNOWN', ready: 'READY', blocked: 'BLOCKED', disconnected: 'DISCONNECTED',
+  status: { liveTrading: 'Live Trading', autoTrade: 'Auto Trade', marketData: 'Market Data', liveAccount: 'Live Account', risk: 'Risk', exposure: 'Exposure', protection: 'Protection', recovery: 'Recovery', emergency: 'Emergency' },
+  now: 'ŞİMDİ NE YAPMALI', configureCredentials: 'CANLI CREDENTIAL YAPILANDIR', refreshStatus: 'DURUMU YENİLE',
+  credentialsTitle: 'Canlı credential yapılandırması', credentialsHint: 'Anahtarlar yalnızca mevcut şifreli backend kasasına gönderilir.',
+  apiKey: 'API KEY', secretKey: 'SECRET KEY', saveAndConnect: 'KAYDET VE SALT-OKUNUR BAĞLAN', testConnection: 'BAĞLANTIYI TEST ET', close: 'KAPAT',
+  manualOrder: 'MANUEL EMİR', orderSummary: 'EMİR ÖZETİ', symbol: 'Sembol', side: 'Yön', long: 'LONG', short: 'SHORT', orderType: 'Emir türü', market: 'MARKET', limit: 'LIMIT', limitPrice: 'Limit fiyatı', margin: 'Miktar / Marjin', leverage: 'Kaldıraç', stopLoss: 'Stop Loss', tp1: 'TP1', tp2: 'TP2', tp3: 'TP3',
+  fillAnalysis: 'ANALİZDEN DOLDUR', reviewOrder: 'EMRİ DRY-RUN İNCELE', lastOrder: 'SON EMİR', protectionSummary: 'KORUMA ÖZETİ', recovery: 'RECOVERY', checkRecovery: 'RECOVERY KONTROLÜ', emergencyStop: 'ACİL DURDUR', history: 'PLAN-DIŞI BINANCE GEÇMİŞİ', noRecord: 'Kayıt yok', noSelectedCoin: 'Seçili coin yok; önce Analyst/Coin Analiz sayfasından bir coin seçin.', noHistory: 'Plan-dışı Binance kaydı yok.', connectionLost: 'Bağlantı yok',
+} as const
