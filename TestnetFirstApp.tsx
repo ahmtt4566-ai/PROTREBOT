@@ -459,8 +459,6 @@ export default function TestnetFirstApp() {
   const [marketError,setMarketError] = useState(false)
   const [connectionState,setConnectionState] = useState<'checking'|'offline'|'online'>('checking')
   const [showConnectionNotice,setShowConnectionNotice] = useState(true)
-  const connectionStateRef = useRef<'checking'|'offline'|'online'>('checking')
-  const connectionNoticeTimerRef = useRef<number | null>(null)
   const [credentials,setCredentials] = useState({demoApiKey:'',demoSecretKey:'',liveApiKey:'',liveSecretKey:''})
   const [demoSaveState,setDemoSaveState] = useState<'idle'|'saving'|'saved'|'error'>('idle')
   const [demoVerifyState,setDemoVerifyState] = useState<'idle'|'verifying'|'verified'|'error'>('idle')
@@ -478,17 +476,24 @@ export default function TestnetFirstApp() {
   const selectedMarket = markets.find(market => market.symbol === symbol)
 
   const updateConnectionState = (nextState:'checking'|'offline'|'online') => {
-    const previousState = connectionStateRef.current
-    connectionStateRef.current = nextState
     setConnectionState(nextState)
-    if (connectionNoticeTimerRef.current !== null) window.clearTimeout(connectionNoticeTimerRef.current)
-    if (nextState === 'online' && previousState !== 'online') {
-      setShowConnectionNotice(true)
-      connectionNoticeTimerRef.current = window.setTimeout(() => setShowConnectionNotice(false), 2400)
-    } else {
-      setShowConnectionNotice(true)
-    }
   }
+
+  // Global "server connected" banner auto-hide: this effect's dependency array
+  // ([connectionState]) only re-runs on an actual PENDING->CONNECTED (or
+  // reverse) transition, never on same-state refetches (e.g. the 60s poll in
+  // refresh()) or unrelated re-renders, so the 3s timer is scheduled exactly
+  // once per transition. The cleanup clears it on the next transition or
+  // unmount, which also makes React StrictMode's dev double-invoke safe (no
+  // duplicate/leaked timeouts).
+  useEffect(() => {
+    if (connectionState !== 'online') {
+      setShowConnectionNotice(true)
+      return
+    }
+    const timer = window.setTimeout(() => setShowConnectionNotice(false), 3000)
+    return () => window.clearTimeout(timer)
+  },[connectionState])
 
   const navigate = useCallback((target:View) => {
     setMobileMenuOpen(false)

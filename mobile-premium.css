@@ -5484,6 +5484,23 @@ body:has(.riskOnlyDeck),
   }
 }
 
+/* #root's (and body's) mobile overflow-x:hidden guard (above/terminal-theme.css)
+   makes them an extra, non-scrolling "scroll container" (CSS forces overflow-y
+   to compute as "auto" whenever overflow-x isn't "visible" - this cannot be
+   avoided by setting overflow-y explicitly). An intermediate container like
+   this, sitting between <html> (the real viewport/root scroller) and the
+   header below it, breaks the header's position:sticky (it has nothing real to
+   stick against - the box itself never scrolls, since its height always
+   matches its own content). <html> keeps its existing overflow-x:hidden guard
+   (that alone fully prevents horizontal page scroll), so clearing it on #root
+   and body restores the header's sticky reference to <html>, the real
+   document scroller. */
+#root,
+body {
+  overflow-x: visible !important;
+  overflow-y: visible;
+}
+
 /* Smart header: one shared Header on every route (home + workspace), sticky with
    scroll-aware hide/show. Sticky (not fixed) keeps the header's box reserved in
    normal flow, so hiding it never shifts the page content. */
@@ -5496,6 +5513,12 @@ body:has(.riskOnlyDeck),
 }
 #root > main.v26App > .v26Header.v26HomeHeader.v26HeaderHidden {
   transform: translateY(-100%);
+}
+/* Site-wide: the header/logo must stay pinned in place while scrolling on
+   every route (home included) - cancel the scroll-down auto-hide transform
+   above unconditionally instead of only for workspaceRoute. */
+#root > main.v26App > .v26Header.v26HomeHeader.v26HeaderHidden {
+  transform: none;
 }
 @media (prefers-reduced-motion: reduce) {
   #root > main.v26App > .v26Header.v26HomeHeader {

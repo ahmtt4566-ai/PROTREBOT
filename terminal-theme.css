@@ -9559,6 +9559,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
   background: transparent;
 }
 
+/* Keep the Master Trade top bar pinned while scrolling; reuse the page's own
+   base color (see .masterTradePage below) so content never shows through. */
+.masterTradeRoute .masterTradeTerminalHeader {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #060b10;
+}
+
 .masterTradeRoute .terminalStatusStrip {
   min-height: 30px;
   padding: 2px 0 0;
