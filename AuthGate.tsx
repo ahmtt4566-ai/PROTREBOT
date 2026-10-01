@@ -43,7 +43,7 @@ function AuthIntroPanel({data,status,movers}:{data:LiveTickerData;status:LiveTic
 function LoginMarketShell({children}:{children:(market:{data:LiveTickerData;status:LiveTickerStatus;movers:ReturnType<typeof useTopMovers>}) => ReactNode}) {
   const live = useLiveTickers(LIVE_MARKET_CONFIG.map(config => config.symbol))
   const movers = useTopMovers()
-  return <><TickerTape data={live.data} status={live.status}/>{children({data:live.data,status:live.status,movers})}</>
+  return <div className="authRoot"><TickerTape data={live.data} status={live.status}/>{children({data:live.data,status:live.status,movers})}<footer className="authFooter"><span>© 2026 KalsTrade</span><a href="/privacy">Gizlilik Politikası</a><a href="/terms">Kullanım Şartları</a><a href="/risk">Risk Uyarısı</a></footer></div>
 }
 
 function detail(payload:unknown):string {
@@ -332,6 +332,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   if (!session) {
     const registrationStrength = strength(register.password)
     return <LoginMarketShell>{market => <main className="authPage">
+      <p className="authMobileSlogan">Piyasayı tek ekrandan takip edin</p>
       <AuthIntroPanel data={market.data} status={market.status} movers={market.movers}/>
       <section className={`authCard ${mode === 'verify' ? 'authCardVerify' : ''}`}>
         <div className="authLoginBrand"><img src="/kaistrade-logo.png" alt="KaiStrade"/></div>
@@ -350,7 +351,6 @@ export default function AuthGate({children}:{children:ReactNode}) {
         {message && message !== 'Oturum doğrulanıyor…' && <p className="authMessage">{message}</p>}
         <div className="authLinks">{mode === 'login' && <><button onClick={() => setMode('forgot')}>Parolamı unuttum</button><button onClick={() => setMode('register')}>Yeni hesap oluştur</button></>}{mode !== 'login' && <button onClick={() => setMode('login')}>Giriş ekranına dön</button>}</div>
       </section>
-      <footer className="authFooter"><span>© 2026 KalsTrade</span><a href="/privacy">Gizlilik Politikası</a><a href="/terms">Kullanım Şartları</a><a href="/risk">Risk Uyarısı</a></footer>
     </main>}</LoginMarketShell>
   }
 
