@@ -2400,9 +2400,17 @@
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystPromptChips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   margin-top: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystPromptChips::-webkit-scrollbar { display: none; }
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystPromptChips button {
+  flex: 0 0 auto;
 }
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystPromptChips button {
@@ -2419,6 +2427,469 @@
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystPromptChips button:hover {
   background: var(--surface-active) !important;
   color: var(--accent) !important;
+}
+
+/* Final Analyst density overrides must remain last in the cascade. */
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystDetailColumn {
+  align-content: start !important;
+  align-items: start !important;
+  min-height: 0 !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid {
+  grid-auto-rows: max-content !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector {
+  grid-template-rows: auto auto max-content !important;
+  min-height: 0 !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystDetailColumn {
+  display: block !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid .analystLegacyResultWorkspace {
+  display: none !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList {
+  max-height: 330px !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin: 10px 0 2px;
+  min-width: 0;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 5px;
+  background: var(--surface-hover);
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot b {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot b.positive { color: var(--long) !important; }
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot b.negative { color: var(--short) !important; }
+
+@media (max-width: 700px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList {
+    max-height: 220px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot > div {
+    padding: 7px 8px;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot b {
+    font-size: 12px;
+  }
+}
+
+/* Analyst terminal refinement: use tone and spacing to separate surfaces, not lines. */
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace {
+  gap: 12px !important;
+  padding: 14px !important;
+  border: 0 !important;
+  background: var(--surface) !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceHeader {
+  display: flex !important;
+  align-items: center !important;
+  gap: 16px !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceHeader h2 {
+  margin: 3px 0 !important;
+  font-size: 20px !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceHeader p {
+  font-size: 11px !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystHeaderControls {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-left: auto;
+  min-width: min(390px, 42%);
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceContext,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAutoScan {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0 !important;
+  border-radius: 6px;
+  background: var(--surface-hover);
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceContext {
+  flex: 1 1 135px;
+  text-align: left !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAutoScan {
+  position: relative;
+  display: grid;
+  flex: 1 1 165px;
+  gap: 3px;
+  align-content: center;
+  cursor: pointer;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAutoScan input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAutoScan span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAutoScan small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAutoScan:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .scanDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: analystScanPulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes analystScanPulse { to { opacity: .35; transform: scale(.7); } }
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 4px !important;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--surface-hover);
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup {
+  min-width: 0;
+  padding: 8px 9px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup > header {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+  padding: 0 2px 7px !important;
+  border: 0 !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup > header > span {
+  flex: 0 0 20px;
+  width: 20px !important;
+  height: 20px !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  background: var(--surface-active) !important;
+  color: var(--accent) !important;
+  font-size: 9px;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup > header strong {
+  font-size: 10px !important;
+  letter-spacing: .08em;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup > header small {
+  display: none !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems {
+  display: flex !important;
+  flex-wrap: nowrap;
+  gap: 4px !important;
+  margin: 0 !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems::-webkit-scrollbar { display: none; }
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button {
+  flex: 0 0 auto;
+  min-height: 30px !important;
+  padding: 6px 9px !important;
+  border: 0 !important;
+  border-radius: 5px !important;
+  background: var(--surface) !important;
+  color: var(--text-muted) !important;
+  box-shadow: none !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button b {
+  font-size: 10px !important;
+  white-space: nowrap;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button small { display: none !important; }
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button.active,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button:hover {
+  background: var(--surface-active) !important;
+  color: var(--accent) !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid {
+  gap: 10px !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid :is(.analystCoinSelector, .analystLegacyResultWorkspace, .analystAskBar) {
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--surface-hover) !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLegacyResultWorkspace {
+  padding: 13px !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector > header,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLegacyResultWorkspace > header {
+  padding-bottom: 8px !important;
+  border: 0 !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorToolbar { margin: 8px 0 !important; }
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList > button {
+  min-height: 48px;
+  border: 0 !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList > button.selected {
+  background: var(--surface-active) !important;
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystMetricCards {
+  gap: 11px 14px !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWhyResult {
+  margin-top: 12px !important;
+  padding: 9px 10px !important;
+  border: 0 !important;
+  border-radius: 5px;
+  background: var(--surface-active) !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid .analystAskBar {
+  padding: 10px 13px !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystPromptChips { margin-top: 6px; }
+
+@media (max-width: 700px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceHeader {
+    display: grid !important;
+    gap: 9px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystHeaderControls {
+    width: 100%;
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGrid {
+    grid-template-columns: 1fr !important;
+    gap: 3px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup {
+    padding: 7px 6px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandGroup > header {
+    padding-bottom: 5px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button {
+    min-height: 32px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid .analystCoinSelector {
+    min-height: 0 !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid .analystDetailColumn {
+    gap: 8px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystHeaderControls {
+    gap: 5px;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceContext,
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAutoScan {
+    padding-inline: 8px;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspaceContext strong,
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystAutoScan small {
+    font-size: 8px;
+  }
+}
+
+/* Keep the primary result surface authoritative and let every grid size itself. */
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystDetailColumn {
+  align-content: start !important;
+  align-items: start !important;
+  min-height: 0 !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid {
+  grid-auto-rows: max-content !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector {
+  grid-template-rows: auto auto max-content !important;
+  min-height: 0 !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystDetailColumn {
+  display: block !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLegacyResultWorkspace {
+  display: none !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList {
+  max-height: 330px !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin: 10px 0 2px;
+  min-width: 0;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 5px;
+  background: var(--surface-hover);
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot b {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot b.positive { color: var(--long) !important; }
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot b.negative { color: var(--short) !important; }
+
+@media (max-width: 700px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList {
+    max-height: 220px !important;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot > div {
+    padding: 7px 8px;
+  }
+
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot b {
+    font-size: 12px;
+  }
 }
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) :is(.analystSelectorToolbar input, .analystSelectorList button, .analystSelectorFilters button, .analystPromptChips button):focus-visible {
@@ -5317,7 +5788,7 @@ body:has(.riskOnlyDeck),
 }
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystLowerGrid .analystLegacyResultWorkspace {
-  display: flex !important;
+  display: none !important;
 }
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList > button {
