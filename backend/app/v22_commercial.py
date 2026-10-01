@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from pydantic import BaseModel, ConfigDict, Field
+from .error_monitoring import build_error_event, schedule_log_event
 
 from .binance_demo import credentials_configured, public_status as demo_public_status, restore_demo_state_for_user
 from .v21_demo import restore_v21_state_for_user
@@ -107,9 +108,11 @@ def gmail_failure_log(exc: BaseException) -> dict[str, str]:
     return {"type": type(exc).__name__, "code": str(code) if code is not None else "none", "reason": reason, "message": sanitized[:500]}
 
 
-def log_gmail_failure(exc: BaseException) -> None:
+def log_gmail_failure(exc: BaseException, application: Any | None = None) -> None:
     details = gmail_failure_log(exc)
     logger.warning("Gmail API email delivery failed: reason=%s type=%s code=%s message=%s", details["reason"], details["type"], details["code"], details["message"])
+    if application is not None:
+        schedule_log_event(application, build_error_event(source="backend", service="gmail_oauth", kind=details["type"], code="EMAIL_DELIVERY_FAILED", severity="ERROR", message=details["message"], details={"reason": details["reason"], "provider_code": details["code"]}))
 
 
 def gmail_configured() -> bool:
@@ -405,6 +408,14 @@ async def persist_subscription_record(application: Any, row: dict[str, Any]) -> 
         )
 
 
+async def persist_subscription_record_safe(application: Any, row: dict[str, Any]) -> None:
+    try:
+        await persist_subscription_record(application, row)
+    except Exception as exc:
+        schedule_log_event(application, build_error_event(source="backend", service="subscriptions", kind=type(exc).__name__, code="SUBSCRIPTION_PERSIST_FAILED", severity="ERROR", message=str(exc), details={"subscription_id": row.get("stripe_subscription_id") or row.get("stripeSubscriptionId")}))
+        raise
+
+
 async def restore_v22_commercial(application: Any) -> bool:
     pool = getattr(application.state, "db_pool", None)
     if pool is None or not hasattr(application.state, "v22_commercial"):
@@ -497,13 +508,16 @@ def authenticated_user(request: Request, *, owner: bool = False) -> dict[str, An
     try:
         payload = verify_token(bearer(request), rt["secret"], expected_kind="USER")
     except ValueError as exc:
+        schedule_log_event(request.app, build_error_event(source="backend", service="auth", kind="AuthenticationError", code="TOKEN_INVALID", severity="WARNING", message=str(exc), route=request.url.path, method=request.method, request_id=getattr(request.state, "request_id", None)))
         raise HTTPException(401, str(exc)) from exc
     user = next((item for item in rt["state"]["users"] if item.get("id") == payload["sub"] and item.get("active")), None)
     if not user:
+        schedule_log_event(request.app, build_error_event(source="backend", service="auth", kind="AuthenticationError", code="USER_INACTIVE", severity="WARNING", message="Authenticated user is inactive.", route=request.url.path, method=request.method, request_id=getattr(request.state, "request_id", None)))
         raise HTTPException(401, "Kullanıcı etkin değil")
     if user.get("role") != "OWNER" and user.get("email_verified") is False:
         raise HTTPException(403, "E-posta doğrulaması gerekli")
     if int(payload.get("ver", 1)) != int(user.get("auth_version", 1)):
+        schedule_log_event(request.app, build_error_event(source="backend", service="auth", kind="AuthenticationError", code="SESSION_STALE", severity="WARNING", message="Session version is stale.", route=request.url.path, method=request.method, request_id=getattr(request.state, "request_id", None), user_id=user.get("id")))
         raise HTTPException(401, "Oturum yenilenmeli")
     if owner and user.get("role") != "OWNER":
         raise HTTPException(403, "Yönetici yetkisi gerekli")
@@ -905,7 +919,7 @@ async def v22_register(payload: RegisterRequest, request: Request):
         try:
             await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Verify your ProTreBot account", title="Verify your ProTreBot account", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="VERIFY EMAIL")
         except (OSError, RuntimeError, ValueError) as exc:
-            log_gmail_failure(exc)
+            log_gmail_failure(exc, request.app)
             async with rt["lock"]:
                 rt["state"]["users"] = [item for item in rt["state"]["users"] if item.get("id") != user["id"]]
                 rt["state"]["profiles"] = [item for item in rt["state"].get("profiles", []) if item.get("user_id") != user["id"]]
@@ -963,7 +977,7 @@ async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
             try:
                 await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
             except (OSError, RuntimeError, ValueError) as exc:
-                log_gmail_failure(exc)
+                log_gmail_failure(exc, request.app)
                 pass
         if env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
             response["development_reset_token"] = reset_token
@@ -1319,14 +1333,14 @@ async def v22_subscription_webhook(request: Request):
     if event_type in {"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.trial_will_end"}:
         row = next((item for item in reversed(rt["state"].get("subscriptions", [])) if str(item.get("stripe_subscription_id") or item.get("stripeSubscriptionId") or "") == str(stripe_value(event_object, "id") or "")), None)
         if row:
-            await persist_subscription_record(request.app, row)
+            await persist_subscription_record_safe(request.app, row)
     elif event_type in {"invoice.paid", "invoice.payment_failed"}:
         subscription_id = str(stripe_value(event_object, "subscription") or "")
         customer_id = str(stripe_value(event_object, "customer") or "")
         row = next((item for item in reversed(rt["state"].get("subscriptions", [])) if str(item.get("stripe_subscription_id") or item.get("stripeSubscriptionId") or "") == subscription_id), None)
         row = row or next((item for item in reversed(rt["state"].get("subscriptions", [])) if str(item.get("stripe_customer_id") or item.get("stripeCustomerId") or "") == customer_id), None)
         if row:
-            await persist_subscription_record(request.app, row)
+            await persist_subscription_record_safe(request.app, row)
     if pool is not None:
         await pool.execute(
             """
@@ -1536,7 +1550,7 @@ async def v22_admin_password_reset(user_id: str, request: Request):
         try:
             await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
         except (OSError, RuntimeError, ValueError) as exc:
-            log_gmail_failure(exc)
+            log_gmail_failure(exc, request.app)
     return {"ok": True, "message": "Parola yenileme bağlantısı gönderildi.", "demo_only": True}
 
 

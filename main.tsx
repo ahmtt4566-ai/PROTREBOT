@@ -6,7 +6,7 @@ import WebAccessGate from './WebAccessGate'
 import AuthGate from './AuthGate'
 import CopyProtection from './CopyProtection'
 import BackToTop from './BackToTop'
-import { installAuthorizedFetch } from './api'
+import { installAuthorizedFetch, installErrorMonitoring } from './api'
 import './frontend/src/binance-demo.css'
 import './tokens.css'
 import './master-trade-live.css'
@@ -20,4 +20,5 @@ import './branding-overrides.css'
 import './back-to-top.css'
 
 installAuthorizedFetch()
+installErrorMonitoring()
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><CopyProtection/><BackToTop/><AppErrorBoundary><WebAccessGate><AuthGate><TestnetFirstApp/></AuthGate></WebAccessGate></AppErrorBoundary></React.StrictMode>)

@@ -176,7 +176,7 @@ class V22CommercialTests(unittest.TestCase):
         self.assertIn("/admin/system-health", panel_source)
         self.assertIn("/admin/system-health/check", panel_source)
         self.assertIn("await refreshHealth()", panel_source)
-        self.assertIn("45000", panel_source)
+        self.assertIn("15000", panel_source)
         self.assertIn("last_checked_at", panel_source)
 
     def test_health_routes_treat_request_as_request_context(self):

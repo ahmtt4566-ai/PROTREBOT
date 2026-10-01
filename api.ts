@@ -10,6 +10,7 @@ export const API_BASE = normalizedApiBase(import.meta.env.VITE_API_BASE || impor
 
 const originalFetch = window.fetch.bind(window)
 let installed = false
+let errorMonitoringInstalled = false
 
 export function ownerAccessToken(): string {
   return sessionStorage.getItem(TOKEN_KEY) || ''
@@ -114,6 +115,22 @@ export function installAuthorizedFetch(): void {
     }
     return originalFetch(input, {...init, headers})
   }
+}
+
+export function reportClientError(error: unknown, context: Record<string, unknown> = {}): void {
+  const value = error instanceof Error ? error : new Error(String(error))
+  void originalFetch(`${API_BASE}/client-errors`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({kind:value.name || 'ClientError', message:value.message, stack:value.stack, route:window.location.pathname, context}),
+    keepalive: true,
+  }).catch(() => undefined)
+}
+
+export function installErrorMonitoring(): void {
+  if (errorMonitoringInstalled) return
+  errorMonitoringInstalled = true
+  window.addEventListener('error', event => reportClientError(event.error || event.message, {filename:event.filename, lineno:event.lineno}))
+  window.addEventListener('unhandledrejection', event => reportClientError(event.reason, {type:'unhandledrejection'}))
 }
 
 export async function verifyOwnerAccess(token: string): Promise<{authorized: boolean}> {

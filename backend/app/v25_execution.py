@@ -78,6 +78,7 @@ from .local_storage import DATA_DIR, migrate_legacy_files
 from .trade_review import write_trade_review
 from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user, subscription_for_user
+from .error_monitoring import build_error_event, log_event, schedule_log_event
 
 
 PersistenceWriteResult = Literal["INSERTED", "UPDATED", "SKIPPED"]
@@ -208,6 +209,12 @@ def lock_live_execution(
     state["reconciliation_required"] = bool(unknown)
     state.setdefault("emergency", {"active": False, "triggered_at": None, "reason": ""})
     state["emergency"].update({"active": True, "triggered_at": now_iso(), "reason": reason})
+    if reason in {"KILL_SWITCH_TRIGGERED", "AUTO_EXCEPTION", "RECONCILIATION_FAILURE", "POSITION_SYNC_MISMATCH"}:
+        schedule_log_event(state.get("_app"), build_error_event(
+            source="backend", service="trading_engine", kind="LiveExecutionLock", code=reason,
+            severity="CRITICAL", message=f"Live execution locked: {reason}.",
+            context={"symbol": symbol, "client_order_id_suffix": str(client_id or "")[-8:] or None, "unknown_execution": unknown},
+        ))
     add_event(
         state,
         "LIVE_UNKNOWN_EXECUTION" if unknown else "LIVE_FAIL_CLOSED",
@@ -279,6 +286,7 @@ def lock_reconciliation_failure(state: dict[str, Any]) -> None:
         "auto_session_was_active": auto_session_was_active,
         "auto_session_until": session_until if auto_session_was_active else 0.0,
     } if auto_session_was_active else None
+    schedule_log_event(state.get("_app"), build_error_event(source="backend", service="trading_engine", kind="PositionSyncError", code="POSITION_SYNC_MISMATCH", severity="CRITICAL", message="Exchange position state does not match the local execution state."))
     lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=False)
     state["armed_until"] = 0.0
     state["real_trading_locked"] = True
@@ -580,6 +588,7 @@ def initial_state() -> dict[str, Any]:
         "policy_ack_digest": None,
         "connected": False,
         "connection": {"last_checked": None, "last_error": None, "clock_offset_ms": None},
+        "heartbeat": {"last_heartbeat": None, "last_heartbeat_epoch": 0.0, "last_successful_order": None, "open_orders": 0, "open_positions": 0},
         "stream": {
             "status": "ANAHTAR BEKLİYOR",
             "transport": "REST UZLAŞTIRMA",
@@ -1092,13 +1101,14 @@ def auto_session_is_active(state: dict[str, Any]) -> bool:
 
 
 class BinanceLiveClient:
-    def __init__(self, http: httpx.AsyncClient, api_key: str, secret_key: str, *, require_credentials: bool = True, diagnostic_state: dict[str, Any] | None = None) -> None:
+    def __init__(self, http: httpx.AsyncClient, api_key: str, secret_key: str, *, require_credentials: bool = True, diagnostic_state: dict[str, Any] | None = None, application: Any | None = None) -> None:
         if require_credentials and (len(api_key) < 10 or len(secret_key) < 10):
             raise LiveExchangeError("Canlı API bağlantısı aktif değil. Borsa Bağlantıları bölümünden gerçek hesap anahtarını kaydedip salt-okunur bağlantıyı aktifleştirin.", http_status=412)
         self.http = http
         self.api_key = api_key
         self.secret_key = secret_key
         self.diagnostic_state = diagnostic_state
+        self.application = application
         self.time_offset_ms = 0
         self.last_time_sync = 0.0
         self._clock_lock = asyncio.Lock()
@@ -1160,13 +1170,14 @@ class BinanceLiveClient:
             raise LiveExchangeError("Canlı Binance sunucu kilidi doğrulanamadı.", http_status=500)
         headers = {"X-MBX-APIKEY": self.api_key} if signed or api_key_header else {}
         request_url = f"{url}?{encoded_query}&signature={signature}" if signed else url
+        started = time.perf_counter()
         try:
             async with BINANCE_RATE_LIMITER.slot(LIVE_REST_BASE) as rate_limit:
                 response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
                 rate_limit.observe(response)
         except httpx.TimeoutException as exc:
             transient_read_failure = is_transient_read_request(method, path, exc)
-            self._record_request_error(method, path, exc, timed_out=True, transient_read_failure=transient_read_failure)
+            await self._record_request_error(method, path, exc, params=params, elapsed_ms=(time.perf_counter() - started) * 1000, timed_out=True, transient_read_failure=transient_read_failure)
             raise LiveExchangeError(
                 "Canlı market-data okuması geçici olarak başarısız oldu." if transient_read_failure else "Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.",
                 unknown_execution=not transient_read_failure,
@@ -1177,7 +1188,7 @@ class BinanceLiveClient:
             ) from exc
         except httpx.RequestError as exc:
             transient_read_failure = is_transient_read_request(method, path, exc)
-            self._record_request_error(method, path, exc, transient_read_failure=transient_read_failure)
+            await self._record_request_error(method, path, exc, params=params, elapsed_ms=(time.perf_counter() - started) * 1000, transient_read_failure=transient_read_failure)
             raise LiveExchangeError(
                 "Canlı market-data okuması geçici olarak başarısız oldu." if transient_read_failure else "Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.",
                 unknown_execution=not transient_read_failure,
@@ -1195,6 +1206,7 @@ class BinanceLiveClient:
             if self.api_key:
                 message = message.replace(self.api_key, "[gizli]")
             if response.status_code in {429, 418}:
+                await self._record_exchange_error(method, path, params, "RATE_LIMITED", message, code, (time.perf_counter() - started) * 1000)
                 message = "Binance API hız sınırı; yeni emir gönderilmedi. Geri çekilme süresi bekleniyor."
                 retry_after = retry_after_seconds(response)
                 logger.warning(
@@ -1210,14 +1222,47 @@ class BinanceLiveClient:
             unknown = response.status_code >= 500
             if unknown:
                 message = "Emir yürütme sonucu belirsiz; benzersiz emir kimliğiyle sorgulanacak, kör tekrar yapılmayacak."
+            await self._record_exchange_error(method, path, params, self._exchange_error_code(response.status_code, code), message, code, (time.perf_counter() - started) * 1000)
             raise LiveExchangeError(message, http_status=429 if response.status_code in {429, 418} else 502, exchange_code=int(code) if isinstance(code, int) else None, unknown_execution=unknown)
+        if isinstance(self.diagnostic_state, dict):
+            heartbeat = self.diagnostic_state.setdefault("heartbeat", {})
+            heartbeat.update({"last_heartbeat": now_iso(), "last_heartbeat_epoch": time.time()})
         recover_transient_market_data(self.diagnostic_state, method, path)
         try:
-            return response.json()
+            payload = response.json()
         except (ValueError, json.JSONDecodeError):
-            return {}
+            payload = {}
+        if isinstance(self.diagnostic_state, dict):
+            heartbeat = self.diagnostic_state.setdefault("heartbeat", {})
+            snapshot = self.diagnostic_state.get("snapshot") if isinstance(self.diagnostic_state.get("snapshot"), dict) else {}
+            heartbeat.update({
+                "last_heartbeat": now_iso(), "last_heartbeat_epoch": time.time(),
+                "open_orders": len(snapshot.get("open_orders", [])), "open_positions": len([item for item in snapshot.get("positions", []) if float(item.get("quantity") or item.get("positionAmt") or 0) != 0]),
+            })
+            if method == "POST" and path in {"/fapi/v1/order", "/fapi/v1/algoOrder"}:
+                heartbeat["last_successful_order"] = now_iso()
+        return payload
 
-    def _record_request_error(self, method: str, path: str, error: BaseException, *, timed_out: bool = False, transient_read_failure: bool = False) -> None:
+    @staticmethod
+    def _exchange_error_code(status: int, code: Any) -> str:
+        if status in {429, 418}: return "RATE_LIMITED"
+        if status >= 500: return "EXCHANGE_DOWN"
+        if code in {-2015, -2014}: return "API_KEY_PERMISSION"
+        if code in {-2011, -2013}: return "ORDER_REJECTED"
+        if code in {-2019, -2022}: return "INSUFFICIENT_BALANCE"
+        if code in {-1111, -1013}: return "PRICE_FILTER"
+        return "ORDER_REJECTED"
+
+    async def _record_exchange_error(self, method: str, path: str, params: dict[str, Any], code: str, message: str, exchange_code: Any, elapsed_ms: float) -> None:
+        await log_event(getattr(self.application.state, "db_pool", None) if self.application is not None else None, build_error_event(
+            source="backend", service="live_trading", kind="ExchangeError", code=code, message=message,
+            severity="CRITICAL" if code in {"STOP_LOSS_FAILED", "KILL_SWITCH_TRIGGERED"} else "ERROR",
+            route=path, method=method, user_id=((self.diagnostic_state or {}).get("live_session_authorization") or {}).get("user_id"),
+            context={"exchange": "BINANCE", "symbol": params.get("symbol"), "direction": params.get("side"), "order_type": params.get("type"), "quantity": params.get("quantity"), "price": params.get("price"), "order_id": params.get("orderId"), "bot": "V25", "raw_exchange_code": exchange_code},
+            details={"response_time_ms": round(elapsed_ms, 2), "attempt": 1, "params": params},
+        ))
+
+    async def _record_request_error(self, method: str, path: str, error: BaseException, *, params: dict[str, Any], elapsed_ms: float, timed_out: bool = False, transient_read_failure: bool = False) -> None:
         state = self.diagnostic_state
         if not isinstance(state, dict):
             return
@@ -1245,6 +1290,13 @@ class BinanceLiveClient:
             retry_policy="NO_PER_REQUEST_RETRY",
             transient_read_failure=transient_read_failure,
         )
+        await log_event(getattr(self.application.state, "db_pool", None) if self.application is not None else None, build_error_event(
+            source="backend", service="live_trading", kind=type(error).__name__, code="EXCHANGE_TIMEOUT" if timed_out else "EXCHANGE_DOWN",
+            message=str(error), severity="ERROR", route=path, method=method,
+            user_id=((state or {}).get("live_session_authorization") or {}).get("user_id"),
+            context={"exchange": "BINANCE", "symbol": params.get("symbol"), "direction": params.get("side"), "order_type": params.get("type"), "quantity": params.get("quantity"), "price": params.get("price"), "bot": "V25"},
+            details={"response_time_ms": round(elapsed_ms, 2), "attempt": 1, "timed_out": timed_out, "params": params},
+        ))
 
 
 def client_for(
@@ -1253,7 +1305,7 @@ def client_for(
     credentials: tuple[str, str] | None = None,
 ) -> BinanceLiveClient:
     api_key, secret_key = credentials or live_credentials_status(request)[:2]
-    return BinanceLiveClient(application.state.http, api_key, secret_key, diagnostic_state=getattr(application.state, "v25_execution", None))
+    return BinanceLiveClient(application.state.http, api_key, secret_key, diagnostic_state=getattr(application.state, "v25_execution", None), application=application)
 
 
 def client_for_with_credentials(
@@ -1268,7 +1320,7 @@ def client_for_with_credentials(
 
 def public_client_for(application: Any) -> BinanceLiveClient:
     """Public Futures market data remains visible before API setup."""
-    return BinanceLiveClient(application.state.http, "", "", require_credentials=False, diagnostic_state=getattr(application.state, "v25_execution", None))
+    return BinanceLiveClient(application.state.http, "", "", require_credentials=False, diagnostic_state=getattr(application.state, "v25_execution", None), application=application)
 
 
 def safe_exchange_error(exc: LiveExchangeError | BinanceDemoError) -> HTTPException:
@@ -1782,6 +1834,11 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
         stop_result = await post_algo(client, {**common, "type": "STOP_MARKET", "triggerPrice": plan["stop_loss"], "closePosition": "true", "clientAlgoId": stop_client})
         plan["stop_algo_id"] = int(stop_result.get("algoId") or 0) or None
     except LiveExchangeError as exc:
+        await log_event(getattr(client.application.state, "db_pool", None) if client.application is not None else None, build_error_event(
+            source="backend", service="trading_engine", kind="ProtectionError", code="STOP_LOSS_FAILED", message=str(exc), severity="CRITICAL",
+            user_id=((state.get("live_session_authorization") or {}).get("user_id")), context={"exchange":"BINANCE","symbol":symbol,"direction":direction,"order_type":"STOP_MARKET","quantity":decimal_text(abs(amount)),"price":plan.get("stop_loss"),"bot":"V25"},
+            details={"exchange_code":exc.exchange_code,"response_time_ms":None,"attempt":1,"order_id":stop_client},
+        ))
         plan["status"] = "STOP BAŞARISIZ · KAPATILIYOR"
         add_event(state, "PROTECTION_FAIL", f"{symbol} Stop kurulamadı; tracked pozisyon reduce-only kapatılıyor.", symbol=symbol)
         close_intent = f"protection-{plan['id']}"
@@ -1815,6 +1872,10 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
             else:
                 monitoring.extend(["TP1", "TP2"])
         except LiveExchangeError:
+            await log_event(getattr(client.application.state, "db_pool", None) if client.application is not None else None, build_error_event(
+                source="backend", service="trading_engine", kind="ProtectionError", code="ORDER_REJECTED", message="Partial take-profit protection was rejected.", severity="ERROR",
+                user_id=((state.get("live_session_authorization") or {}).get("user_id")), context={"exchange":"BINANCE","symbol":symbol,"direction":direction,"order_type":"TAKE_PROFIT_MARKET","quantity":decimal_text(combined_partial),"price":plan["targets"][0],"bot":"V25"}, details={"attempt":1},
+            ))
             monitoring.extend(["TP1", "TP2"])
     else:
         monitoring.extend(["TP1", "TP2"])
@@ -1822,7 +1883,11 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
         result = await post_algo(client, {**common, "type": "TAKE_PROFIT_MARKET", "triggerPrice": plan["targets"][2], "closePosition": "true", "clientAlgoId": client_id_for("TP3", plan["intent_id"])})
         if result.get("algoId"):
             ids.append(int(result["algoId"]))
-    except LiveExchangeError:
+    except LiveExchangeError as exc:
+        await log_event(getattr(client.application.state, "db_pool", None) if client.application is not None else None, build_error_event(
+            source="backend", service="trading_engine", kind="ProtectionError", code="ORDER_REJECTED", message=str(exc), severity="ERROR",
+            user_id=((state.get("live_session_authorization") or {}).get("user_id")), context={"exchange":"BINANCE","symbol":symbol,"direction":direction,"order_type":"TAKE_PROFIT_MARKET","price":plan["targets"][2],"bot":"V25"}, details={"attempt":1},
+        ))
         monitoring.append("TP3")
     plan.update({
         "protection_ids": ids,
@@ -2002,6 +2067,10 @@ async def live_user_stream_loop(application: Any) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            await log_event(getattr(application.state, "db_pool", None), build_error_event(
+                source="backend", service="live_trading", kind=type(exc).__name__, code="EXCHANGE_DOWN", message=str(exc), severity="ERROR",
+                user_id=((state.get("live_session_authorization") or {}).get("user_id")), context={"exchange":"BINANCE","bot":"V25","stream":"USER_STREAM"}, details={"attempt":int(state["stream"].get("reconnect_count") or 0) + 1},
+            ))
             state["stream"]["reconnect_count"] = int(state["stream"].get("reconnect_count") or 0) + 1
             state["stream"].update({
                 "status": "YENİDEN BAĞLANIYOR",
@@ -2890,6 +2959,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "policy_acknowledged": state.get("policy_ack_digest") == policy_digest(state["policy"]),
         "reconciliation_diagnostic": latest_reconciliation_diagnostic(state),
         "last_order_error": state.get("last_order_error"),
+        "heartbeat": state.get("heartbeat"),
         "trade_review": state.get("trade_review"),
         "readiness": release,
         "account": {"wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"), "unrealized_pnl": snapshot.get("unrealized_pnl"), "positions": snapshot.get("positions", []), "open_orders": snapshot.get("open_orders", []), "open_algo_orders": snapshot.get("open_algo_orders", []), "hedge_mode": snapshot.get("hedge_mode")},
@@ -3471,6 +3541,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         state["auto"]["last_cycle_stage"] = "error"
         state["auto"].update({"last_error": str(exc)[:240], "last_decision": "Canlı otomasyon turu güvenli biçimde durduruldu."})
         lock_live_execution(state, "AUTO_EXCEPTION")
+        schedule_log_event(application, build_error_event(source="backend", service="trading_engine", kind="StrategyException", code="STRATEGY_EXCEPTION", severity="CRITICAL", message=str(exc), context={"stage": state["auto"].get("last_cycle_stage"), "bot": "V25"}))
         add_event(state, "AUTO_ERROR", "Canlı otomasyon turu hata nedeniyle yeni emir göndermedi.")
     finally:
         state["auto"]["busy"] = False

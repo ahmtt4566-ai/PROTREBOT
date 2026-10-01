@@ -2060,6 +2060,30 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertFalse(asyncio.run(restore_v25_state(failed)))
         self.assertFalse(failed.state.v25_execution["recovery_loaded"])
 
+    def test_exchange_error_logging_failure_does_not_stop_request_flow(self):
+        from app.v25_execution import BinanceLiveClient
+
+        class FailedPool:
+            async def execute(self, *args):
+                raise RuntimeError("monitoring database unavailable")
+
+        class Response:
+            status_code = 200
+
+            def json(self):
+                return {"orderId": 123, "status": "NEW"}
+
+        class Http:
+            timeout = None
+
+            async def request(self, *args, **kwargs):
+                return Response()
+
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=FailedPool(), v25_execution={"heartbeat": {}, "snapshot": {}, "live_session_authorization": {}}))
+        client = BinanceLiveClient(Http(), "api-key-safe", "secret-key-safe", diagnostic_state=application.state.v25_execution, application=application)
+        result = asyncio.run(client._request("POST", "/fapi/v1/order", {"symbol": "BTCUSDT", "side": "BUY", "type": "MARKET"}, signed=False))
+        self.assertEqual(result["orderId"], 123)
+
     def test_live_decision_adapter_uses_canonical_closed_candle_contract(self):
         from app.v25_execution import canonical_live_decision
 

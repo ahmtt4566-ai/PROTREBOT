@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping
@@ -57,6 +58,7 @@ from .v27_cloud_ops import (
     shutdown_v27_cloud,
 )
 from .execution_core import configured_min_confidence, configured_mtf_allow_either_timeframe, evaluate_entry_gates, risk_sized_order
+from .error_monitoring import build_error_event, ensure_error_schema, exception_event, log_event, schedule_log_event
 from .maintenance import default_maintenance_state, guard_new_entry, set_maintenance_mode
 from .paper_autonomy import (
     PAPER_AUTONOMY_VERSION,
@@ -735,6 +737,12 @@ async def ensure_infrastructure(application: FastAPI) -> None:
         elif application.state.paper_dirty:
             await persist_paper_snapshot(application)
     if database_ok:
+        if not getattr(application.state, "error_schema_ready", False):
+            try:
+                await ensure_error_schema(application.state.db_pool)
+                application.state.error_schema_ready = True
+            except Exception:
+                application.state.error_schema_ready = False
         await sync_v22_storage(application)
         if hasattr(application.state, "v25_execution") and not application.state.v25_execution.get("recovery_loaded"):
             await restore_v25_state(application)
@@ -838,7 +846,7 @@ async def health_check_redis(application: FastAPI) -> dict:
         return health_item("Redis", "ERROR", "Redis connection failed.", started)
 
 
-async def health_check_gmail() -> dict:
+async def health_check_gmail(application: FastAPI) -> dict:
     started = time.perf_counter()
     if not gmail_configured():
         return health_item("Email / Gmail API", "NOT CONFIGURED", "Gmail OAuth configuration is incomplete.", started)
@@ -854,8 +862,10 @@ async def health_check_gmail() -> dict:
         await asyncio.wait_for(asyncio.to_thread(credentials.refresh, GoogleAuthRequest()), timeout=10)
         return health_item("Email / Gmail API", "ACTIVE", "OAuth connection healthy.", started)
     except asyncio.TimeoutError:
+        schedule_log_event(application, build_error_event(source="backend", service="gmail_oauth", kind="GmailOAuthError", code="OAUTH_TIMEOUT", severity="ERROR", message="Gmail OAuth refresh timed out."))
         return health_item("Email / Gmail API", "WARNING", "OAuth refresh timed out.", started)
-    except Exception:
+    except Exception as exc:
+        schedule_log_event(application, build_error_event(source="backend", service="gmail_oauth", kind=type(exc).__name__, code="OAUTH_REFRESH_FAILED", severity="ERROR", message=str(exc)))
         return health_item("Email / Gmail API", "ERROR", "OAuth connection unavailable.", started)
 
 
@@ -880,9 +890,24 @@ async def health_check_market_data(application: FastAPI) -> dict:
             return health_item("Market data", "ACTIVE", "Read-only market data endpoint reachable.", started)
         return health_item("Market data", "ERROR", f"Market data responded with HTTP {response.status_code}.", started)
     except asyncio.TimeoutError:
+        schedule_log_event(application, build_error_event(source="backend", service="market_data", kind="MarketDataError", code="MARKET_DATA_TIMEOUT", severity="ERROR", message="Market data request timed out."))
         return health_item("Market data", "WARNING", "Market data request timed out.", started)
-    except Exception:
+    except Exception as exc:
+        schedule_log_event(application, build_error_event(source="backend", service="market_data", kind=type(exc).__name__, code="MARKET_DATA_UNAVAILABLE", severity="ERROR", message=str(exc)))
         return health_item("Market data", "ERROR", "Market data endpoint unreachable.", started)
+
+
+async def health_check_live_trading(application: FastAPI) -> dict:
+    started = time.perf_counter()
+    state = getattr(application.state, "v25_execution", {})
+    if not LIVE_CHANNEL_ENABLED:
+        return health_item("Live trading", "DISABLED", "Live order channel is disabled.", started)
+    if not state.get("connected") and not state.get("recovery_ready"):
+        return health_item("Live trading", "NOT CONFIGURED", "Live readiness is not established.", started)
+    heartbeat = state.get("heartbeat") if isinstance(state.get("heartbeat"), dict) else {}
+    age = time.time() - float(heartbeat.get("last_heartbeat_epoch") or 0)
+    status = "ERROR" if age > 300 else "WARNING" if age > 60 else "ACTIVE"
+    return health_item("Live trading", status, f"Heartbeat age {round(age)}s; {heartbeat.get('open_positions', 0)} open positions, {heartbeat.get('open_orders', 0)} open orders.", started)
 
 
 async def run_health_checks(application: FastAPI) -> dict:
@@ -891,9 +916,10 @@ async def run_health_checks(application: FastAPI) -> dict:
         checks = await asyncio.gather(
             health_check_database(application),
             health_check_redis(application),
-            health_check_gmail(),
+            health_check_gmail(application),
             health_check_frontend(application),
             health_check_market_data(application),
+            health_check_live_trading(application),
             return_exceptions=True,
         )
         normalized = []
@@ -909,7 +935,6 @@ async def run_health_checks(application: FastAPI) -> dict:
             health_item("Subscriptions", "ACTIVE" if state.get("subscriptions") is not None else "ERROR", "Subscription state is loaded." if state.get("subscriptions") is not None else "Subscription state unavailable.", started),
             health_item("Admin API", "ACTIVE", "OWNER-protected admin API is available.", started),
             health_item("Trading engine", "NOT CONFIGURED", "No independent trading-engine heartbeat is exposed.", started),
-            health_item("Live trading", "DISABLED" if not LIVE_CHANNEL_ENABLED else "NOT CONFIGURED", "Live order channel is disabled." if not LIVE_CHANNEL_ENABLED else "Live readiness is not established.", started),
         ])
         counts = {status: sum(1 for item in normalized if item["status"] == status) for status in ("ACTIVE", "WARNING", "ERROR", "DISABLED", "NOT CONFIGURED")}
         overall_status = "ERROR" if counts["ERROR"] else "WARNING" if counts["WARNING"] else "ACTIVE"
@@ -1014,6 +1039,7 @@ async def lifespan(app: FastAPI):
     app.state.paper_schema_ready = False
     app.state.paper_restore_attempted = False
     app.state.market_twin_schema_ready = False
+    app.state.error_schema_ready = False
     app.state.market_twin_restore_attempted = False
     app.state.paper_dirty = False
     app.state.snapshot_lock = asyncio.Lock()
@@ -1157,7 +1183,7 @@ app.add_middleware(
 )
 
 MEMBER_PUBLIC_PATHS = frozenset({
-    "/api/health", "/api/health/database", "/api/web/access/check", "/api/v22/public", "/api/v22/bootstrap",
+    "/api/health", "/api/health/database", "/api/web/access/check", "/api/client-errors", "/api/v22/public", "/api/v22/bootstrap",
     "/api/v22/auth/login", "/api/v22/auth/register", "/api/v22/auth/verify-email",
     "/api/v22/auth/verification-status", "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
 })
@@ -1215,6 +1241,7 @@ def apply_cors_headers(request, response):
 
 @app.middleware("http")
 async def owner_preview_gate(request, call_next):
+    request.state.request_id = request.headers.get("x-request-id", "").strip()[:100] or str(uuid.uuid4())
     decision = evaluate_access(
         required=WEB_REQUIRE_AUTH,
         configured_token=WEB_ACCESS_TOKEN,
@@ -1256,6 +1283,13 @@ async def owner_preview_gate(request, call_next):
         )
     try:
         response = await call_next(request)
+    except Exception as exc:
+        member = getattr(request.state, "member", None) or {}
+        await log_event(
+            getattr(request.app.state, "db_pool", None),
+            exception_event(exc, route=request.url.path, method=request.method, request_id=request.state.request_id, user_id=member.get("id")),
+        )
+        response = JSONResponse({"detail": "Internal server error.", "request_id": request.state.request_id}, status_code=500)
     finally:
         member = getattr(request.state, "member", None)
         user_id = str((member or {}).get("id") or "").strip()
@@ -1264,6 +1298,7 @@ async def owner_preview_gate(request, call_next):
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Request-ID", request.state.request_id)
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     if request.url.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
@@ -1276,6 +1311,110 @@ app.include_router(v24_commerce_router)
 app.include_router(v25_execution_router)
 app.include_router(v27_cloud_router)
 app.include_router(exchange_connections_router)
+
+
+def monitoring_admin(request: Request) -> dict[str, Any]:
+    user = authenticated_user(request)
+    if user.get("role") not in {"OWNER", "ADMIN"}:
+        raise HTTPException(403, "Yönetici yetkisi gerekli")
+    return user
+
+
+@app.post("/api/client-errors")
+async def client_error(request: Request, payload: dict[str, Any]):
+    now = time.monotonic()
+    client_key = request.client.host if request.client else "unknown"
+    buckets = getattr(request.app.state, "client_error_buckets", {})
+    recent = [stamp for stamp in buckets.get(client_key, []) if now - stamp < 60]
+    if len(recent) >= 30:
+        raise HTTPException(429, "Too many client error reports")
+    recent.append(now)
+    buckets[client_key] = recent
+    event = build_error_event(
+        source="frontend", kind=str(payload.get("kind") or "ClientError"),
+        message=str(payload.get("message") or "Unknown client error"), severity=str(payload.get("severity") or "ERROR"),
+        service="frontend",
+        route=str(payload.get("route") or request.headers.get("referer") or ""), method=str(payload.get("method") or ""),
+        request_id=request.state.request_id, user_id=(getattr(request.state, "member", None) or {}).get("id"),
+        context=payload.get("context") if isinstance(payload.get("context"), dict) else {}, stack=str(payload.get("stack") or ""),
+    )
+    await log_event(getattr(request.app.state, "db_pool", None), event)
+    return {"accepted": True, "request_id": request.state.request_id}
+
+
+@app.get("/api/v22/admin/errors")
+async def admin_errors(request: Request, status: str = Query("OPEN"), severity: str | None = Query(None), source: str | None = Query(None), service: str | None = Query(None), limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)):
+    monitoring_admin(request)
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        return {"items": [], "total": 0}
+    clauses: list[str] = []
+    args: list[Any] = []
+    if status.upper() != "ALL":
+        args.append(status.upper())
+        clauses.append(f"status = ${len(args)}")
+    for value, field in ((severity, "severity"), (source, "source")):
+        if value:
+            args.append(value.upper() if field == "severity" else value[:40])
+            clauses.append(f"{field} = ${len(args)}")
+    if service:
+        services = [item.strip()[:40] for item in service.split(",") if item.strip()]
+        if services:
+            args.append(services)
+            clauses.append(f"service = ANY(${len(args)}::text[])")
+    where = " AND ".join(clauses) or "TRUE"
+    total = await pool.fetchval(f"SELECT COUNT(*) FROM error_events WHERE {where}", *args)
+    rows = await pool.fetch(f"SELECT id, fingerprint, source, service, kind, code, severity, status, message, route, method, request_id, user_id, context, details, stack, occurrences, first_seen, last_seen, acknowledged_at, resolved_at FROM error_events WHERE {where} ORDER BY last_seen DESC LIMIT ${len(args)+1} OFFSET ${len(args)+2}", *args, limit, offset)
+    return {"items": [dict(row) for row in rows], "total": int(total or 0), "limit": limit, "offset": offset}
+
+
+@app.get("/api/v22/admin/errors/summary")
+async def admin_error_summary(request: Request):
+    monitoring_admin(request)
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        return {"total": 0, "open": 0, "critical": 0, "by_source": {}}
+    row = await pool.fetchrow("SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'OPEN') AS open, COUNT(*) FILTER (WHERE severity = 'CRITICAL' AND status = 'OPEN') AS critical, COUNT(*) FILTER (WHERE last_seen >= NOW() - INTERVAL '24 hours') AS last_24h, MAX(last_seen) AS latest FROM error_events")
+    sources = await pool.fetch("SELECT source, COUNT(*) AS count FROM error_events WHERE status = 'OPEN' GROUP BY source ORDER BY count DESC")
+    return {"total": int(row["total"]), "open": int(row["open"]), "critical": int(row["critical"]), "last_24h": int(row["last_24h"]), "latest": row["latest"].isoformat() if row["latest"] else None, "by_source": {item["source"]: int(item["count"]) for item in sources}}
+
+
+@app.post("/api/v22/admin/errors/test")
+async def admin_error_test(request: Request):
+    user = monitoring_admin(request)
+    if user.get("role") != "OWNER":
+        raise HTTPException(403, "Owner yetkisi gerekli")
+    event = build_error_event(source="system", kind="TestEvent", message="Owner test error event", severity="WARNING", route="/api/v22/admin/errors/test", request_id=request.state.request_id, user_id=user.get("id"), context={"test": True})
+    await log_event(getattr(request.app.state, "db_pool", None), event)
+    return {"accepted": True, "fingerprint": event["fingerprint"]}
+
+
+@app.get("/api/v22/admin/errors/{event_id}")
+async def admin_error_detail(request: Request, event_id: int):
+    monitoring_admin(request)
+    pool = getattr(request.app.state, "db_pool", None)
+    row = await pool.fetchrow("SELECT * FROM error_events WHERE id = $1", event_id) if pool is not None else None
+    if row is None:
+        raise HTTPException(404, "Error event not found")
+    return dict(row)
+
+
+@app.patch("/api/v22/admin/errors/{event_id}")
+async def admin_error_update(request: Request, event_id: int, payload: dict[str, Any]):
+    actor = monitoring_admin(request)
+    status = str(payload.get("status") or "").upper()
+    if status not in {"OPEN", "ACKNOWLEDGED", "RESOLVED"}:
+        raise HTTPException(422, "Status must be OPEN, ACKNOWLEDGED or RESOLVED")
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(503, "Error monitoring storage unavailable")
+    notes = str(payload.get("notes") or "").strip()[:2_000] or None
+    row = await pool.fetchrow("UPDATE error_events SET status = $2, notes = COALESCE($3, notes), acknowledged_at = CASE WHEN $2 = 'ACKNOWLEDGED' THEN NOW() ELSE acknowledged_at END, resolved_at = CASE WHEN $2 = 'RESOLVED' THEN NOW() ELSE resolved_at END WHERE id = $1 RETURNING *", event_id, status, notes)
+    if row is None:
+        raise HTTPException(404, "Error event not found")
+    return dict(row)
+
+
 
 
 @app.get("/api/v22/admin/system-health")

@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { RefreshCw, ShieldCheck } from 'lucide-react'
+import { reportClientError } from './api'
 
 type Props = { children:ReactNode }
 type State = { failed:boolean; message:string }
@@ -16,6 +17,7 @@ export default class AppErrorBoundary extends Component<Props,State> {
 
   componentDidCatch(error:unknown, info:ErrorInfo) {
     console.error('ProTreBot güvenli ekran koruması', error, info.componentStack)
+    reportClientError(error, {componentStack:info.componentStack})
   }
 
   private recover = () => {
