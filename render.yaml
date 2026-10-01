@@ -22,6 +22,8 @@ services:
         value: "true"
       - key: PROTREBOT_WEB_ACCESS_TOKEN
         sync: false
+      - key: PROTREBOT_SESSION_SECRET
+        sync: false
       - key: PROTREBOT_CORS_ORIGINS
         value: https://frontend-nu-two-18.vercel.app
       - key: APP_BASE_URL

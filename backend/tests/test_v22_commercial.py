@@ -40,7 +40,7 @@ from app.binance_demo import (  # noqa: E402
 )
 from app.exchange_connections import SaveCredentialsRequest  # noqa: E402
 from app.v21_demo import state_for as v21_state_for  # noqa: E402
-from app.v22_commercial import BootstrapRequest, access_snapshot, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_verification_status  # noqa: E402
+from app.v22_commercial import BootstrapRequest, access_snapshot, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_register, v22_verification_status  # noqa: E402
 from app.main import database_health, database_health_status, health_check_redis, health_item, healthz, run_health_checks  # noqa: E402
 
 
@@ -472,6 +472,32 @@ class V22CommercialTests(unittest.TestCase):
         self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": False})
         user["email_verified"] = True
         self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": True})
+
+    def test_durable_registration_requires_a_stable_session_secret(self):
+        state = default_commercial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"secret": b"temporary", "state": state, "lock": asyncio.Lock()}))
+        request = SimpleNamespace(app=application)
+        payload = SimpleNamespace(terms_accepted=True, password="StrongPassword!123", confirm_password="StrongPassword!123", email="user@example.com", display_name="Test User")
+        with patch("app.v22_commercial.DURABLE_AUTH_REQUIRED", True), patch.dict(os.environ, {"PROTREBOT_SESSION_SECRET": "", "PROTREBOT_WEB_ACCESS_TOKEN": ""}), patch("app.v22_commercial.gmail_configured", return_value=True):
+            with self.assertRaisesRegex(HTTPException, "oturum anahtarı"):
+                asyncio.run(v22_register(payload, request))
+        self.assertEqual(state["users"], [])
+
+    def test_durable_registration_rolls_back_when_database_persistence_fails(self):
+        state = default_commercial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"secret": b"stable-test-secret", "state": state, "lock": asyncio.Lock()}))
+        request = SimpleNamespace(app=application)
+        payload = SimpleNamespace(terms_accepted=True, password="StrongPassword!123", confirm_password="StrongPassword!123", email="user@example.com", display_name="Test User")
+        persist = AsyncMock(return_value=False)
+        with patch("app.v22_commercial.DURABLE_AUTH_REQUIRED", True), patch.dict(os.environ, {"PROTREBOT_SESSION_SECRET": "stable-test-session-secret-long-enough", "PROTREBOT_WEB_ACCESS_TOKEN": ""}), patch("app.v22_commercial.gmail_configured", return_value=True), patch("app.v22_commercial.persist_v22_commercial", new=persist), patch("app.v22_commercial.save_state"), patch("app.v22_commercial.send_auth_email") as send_email:
+            with self.assertRaisesRegex(HTTPException, "Kalıcı hesap veritabanı"):
+                asyncio.run(v22_register(payload, request))
+        self.assertEqual(state["users"], [])
+        self.assertEqual(state["profiles"], [])
+        self.assertEqual(state["subscriptions"], [])
+        self.assertEqual(state["auth_tokens"], [])
+        self.assertEqual(persist.await_count, 2)
+        send_email.assert_not_called()
 
     def test_gmail_delivery_requires_oauth_configuration_without_sending(self):
         with patch.dict(os.environ, {}, clear=True), patch("app.v22_commercial.build") as gmail_build:

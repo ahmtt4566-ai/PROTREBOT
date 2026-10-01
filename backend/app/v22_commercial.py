@@ -202,6 +202,12 @@ def load_secret() -> bytes:
     return raw
 
 
+def has_stable_session_secret() -> bool:
+    configured = str(os.getenv("PROTREBOT_SESSION_SECRET") or "").strip()
+    web_owner_token = str(os.getenv("PROTREBOT_WEB_ACCESS_TOKEN") or "").strip()
+    return len(configured) >= 32 or len(web_owner_token) >= MIN_ACCESS_TOKEN_LENGTH
+
+
 def sanitize_state(payload: Any) -> dict[str, Any]:
     base = default_commercial_state()
     if not isinstance(payload, dict):
@@ -763,11 +769,12 @@ async def v22_public(request: Request):
     rt = runtime(request)
     state = rt["state"]
     storage_ready = rt.get("storage_status") == "POSTGRESQL_KALICI" or not DURABLE_AUTH_REQUIRED
+    auth_ready = storage_ready and (not DURABLE_AUTH_REQUIRED or has_stable_session_secret())
     return {
         "version": V22_VERSION,
         "edition": "COMMERCIAL COMPLETE · LAUNCH LAB",
-        "setup_required": storage_ready and not bool(state.get("owner_user_id")),
-        "auth_available": storage_ready,
+        "setup_required": auth_ready and not bool(state.get("owner_user_id")),
+        "auth_available": auth_ready,
         "plans": state["plans"],
         "billing": state["billing"],
         "security": state["security"],
@@ -893,6 +900,8 @@ async def v22_register(payload: RegisterRequest, request: Request):
     if payload.password != payload.confirm_password:
         raise HTTPException(422, "Parolalar eşleşmiyor")
     rt = runtime(request)
+    if DURABLE_AUTH_REQUIRED and not has_stable_session_secret():
+        raise HTTPException(503, "Kalıcı oturum anahtarı yapılandırılmamış; kayıt güvenli şekilde başlatılamıyor")
     email = normalize_email(payload.email)
     if "@" not in email:
         raise HTTPException(422, "Geçerli bir e-posta yazın")
@@ -917,7 +926,16 @@ async def v22_register(payload: RegisterRequest, request: Request):
         verification_status_token = issue_token(user_id, user["role"], rt["secret"], kind="EMAIL_STATUS", ttl_seconds=24 * 60 * 60)
         add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
         save_state(state)
-    await persist_v22_commercial(request.app)
+    persisted = await persist_v22_commercial(request.app)
+    if DURABLE_AUTH_REQUIRED and not persisted:
+        async with rt["lock"]:
+            rt["state"]["users"] = [item for item in rt["state"]["users"] if item.get("id") != user["id"]]
+            rt["state"]["profiles"] = [item for item in rt["state"].get("profiles", []) if item.get("user_id") != user["id"]]
+            rt["state"]["subscriptions"] = [item for item in rt["state"].get("subscriptions", []) if item.get("user_id") != user["id"]]
+            rt["state"]["auth_tokens"] = [item for item in rt["state"].get("auth_tokens", []) if item.get("user_id") != user["id"]]
+            save_state(rt["state"])
+        await persist_v22_commercial(request.app)
+        raise HTTPException(503, "Kalıcı hesap veritabanı hazır değil; kayıt güvenli şekilde tamamlanamadı")
     if gmail_configured():
         try:
             await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Verify your ProTreBot account", title="Verify your ProTreBot account", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="VERIFY EMAIL")
