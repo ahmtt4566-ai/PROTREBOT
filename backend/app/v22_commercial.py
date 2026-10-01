@@ -25,8 +25,10 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from google.auth.exceptions import GoogleAuthError, RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from pydantic import BaseModel, ConfigDict, Field
 from .error_monitoring import build_error_event, schedule_log_event
 
@@ -87,6 +89,7 @@ DEFAULT_GMAIL_FROM_EMAIL = "privacykais@gmail.com"
 DEFAULT_GMAIL_FROM_NAME = "ProTreBot"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
+GMAIL_DELIVERY_ERRORS = (HttpError, GoogleAuthError, RefreshError, OSError, RuntimeError, ValueError)
 
 
 def now_iso() -> str:
@@ -918,7 +921,7 @@ async def v22_register(payload: RegisterRequest, request: Request):
     if gmail_configured():
         try:
             await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Verify your ProTreBot account", title="Verify your ProTreBot account", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="VERIFY EMAIL")
-        except (OSError, RuntimeError, ValueError) as exc:
+        except GMAIL_DELIVERY_ERRORS as exc:
             log_gmail_failure(exc, request.app)
             async with rt["lock"]:
                 rt["state"]["users"] = [item for item in rt["state"]["users"] if item.get("id") != user["id"]]
@@ -976,7 +979,7 @@ async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
         if gmail_configured():
             try:
                 await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
-            except (OSError, RuntimeError, ValueError) as exc:
+            except GMAIL_DELIVERY_ERRORS as exc:
                 log_gmail_failure(exc, request.app)
                 pass
         if env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False):
@@ -1549,7 +1552,7 @@ async def v22_admin_password_reset(user_id: str, request: Request):
     if gmail_configured():
         try:
             await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
-        except (OSError, RuntimeError, ValueError) as exc:
+        except GMAIL_DELIVERY_ERRORS as exc:
             log_gmail_failure(exc, request.app)
     return {"ok": True, "message": "Parola yenileme bağlantısı gönderildi.", "demo_only": True}
 
