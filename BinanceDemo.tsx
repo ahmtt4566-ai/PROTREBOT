@@ -504,7 +504,7 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
     if (newest.id === lastNotificationId.current) return
     lastNotificationId.current = newest.id
     if (v21?.settings.notifications && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification(`ProTreBot · ${newest.kind}`, {body:newest.message,tag:newest.id})
+      new Notification(`KaiStrade · ${newest.kind}`, {body:newest.message,tag:newest.id})
     }
   },[v21?.journal?.[0]?.id])
 
@@ -984,7 +984,7 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
       <button type="button" className={form.direction === 'SHORT' ? 'activeShort' : ''} onClick={() => setForm({...form,direction:'SHORT'})}>SHORT</button>
     </div>}
 
-    {tab === 'dashboard' && <section className="v21DashboardHome" aria-label="ProTreBot dashboard">
+    {tab === 'dashboard' && <section className="v21DashboardHome" aria-label="KaiStrade dashboard">
       <header className="v21DashboardWelcome"><div><h2>Hoş geldin</h2><p>Botunu tek merkezden yönet, performansını izle ve sistem durumunu kontrol et.</p></div><strong className={v21?.stream.status === 'CANLI' ? 'active' : 'waiting'}><i/>{v21?.stream.status === 'CANLI' ? 'TESTNET AKTİF' : v21 ? 'TESTNET BEKLİYOR' : 'SİSTEM DURUMU YÜKLENİYOR'}</strong></header>
       <section className="v21DashboardSubscription"><div><span>ABONELİĞİN</span><h3>Billing &amp; Subscription</h3><p>Plan ve yenileme bilgileri mevcut Billing ekranından yönetilir.</p></div><button type="button" onClick={() => window.dispatchEvent(new CustomEvent('protrebot-navigate',{detail:'billing'}))}>ABONELİĞİ YÖNET <span>→</span></button></section>
       <section className="v21DashboardStatus"><header><div><span>SİSTEM DURUMU</span><h3>Bot ve bağlantılar</h3></div><button type="button" onClick={() => void refreshV21()} aria-label="Sistem durumunu yenile"><RefreshCw/></button></header><div className="v21DashboardStatusGrid"><span><small>TRADING ENGINE</small><b>{v21?.auto.enabled ? 'AKTİF' : v21?.auto.last_error || v21?.auto.rejection_reason ? 'HATA' : v21 ? 'KAPALI' : 'BEKLENİYOR'}</b></span><span><small>MARKET DATA</small><b>{v21?.scanner.last_error ? 'HATA' : v21?.scanner.last_scan_at && v21.scanner.coins_scanned > 0 ? 'BAĞLI' : v21 ? 'N/A' : 'BEKLENİYOR'}</b></span><span><small>BINANCE TESTNET</small><b>{status?.connected ? 'BAĞLI' : status?.last_error ? 'HATA' : status ? 'N/A' : 'BEKLENİYOR'}</b></span><span><small>EVIDENCE LEDGER</small><b>{v21?.certificate ? 'AKTİF' : v21 ? 'N/A' : 'BEKLENİYOR'}</b></span></div><small className="v21DashboardSync">{v21?.auto.last_error || v21?.auto.rejection_reason || v21?.scanner.last_error || `Son senkronizasyon: ${stamp(v21?.stream.last_sync || v21?.last_saved)}`}</small></section>

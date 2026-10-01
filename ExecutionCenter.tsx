@@ -200,7 +200,7 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
     void run('auto','/auto/start',{confirmation:phrase},'Bir saatlik kontrollü canlı tarama başladı; her giriş bütün risk kapılarından geçer.')
   }
   const emergency = () => {
-    const phrase = window.prompt('Yalnızca ProTreBot emirlerini iptal edip tracked pozisyonları kapatmak için aynen yazın: CANLI ACİL DURDUR')
+    const phrase = window.prompt('Yalnızca KaiStrade emirlerini iptal edip tracked pozisyonları kapatmak için aynen yazın: CANLI ACİL DURDUR')
     if (!phrase) return
     void run('emergency','/emergency',{confirmation:phrase,close_tracked_positions:true},'Canlı acil durdurma komutu işlendi.')
   }

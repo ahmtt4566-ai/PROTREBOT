@@ -726,7 +726,7 @@ export default function App() {
     const event = gridEngine.events[0]
     const eventKey = `${event.created_at}-${event.kind}-${event.profile}`
     if (notificationRef.current && notificationRef.current !== eventKey) {
-      new Notification('ProTreBot Elite X V6', {body:event.message})
+      new Notification('KaiStrade V6', {body:event.message})
     }
     notificationRef.current = eventKey
   }, [gridEngine?.events, notificationsEnabled])
@@ -770,7 +770,7 @@ export default function App() {
     const event = orchestrator.events[0]
     const eventKey = `${event.created_at}-${event.kind}-${event.symbol}`
     if (v7NotificationRef.current && v7NotificationRef.current !== eventKey) {
-      new Notification('ProTreBot Elite X V7', {body:event.message})
+      new Notification('KaiStrade V7', {body:event.message})
     }
     v7NotificationRef.current = eventKey
   }, [orchestrator?.events, notificationsEnabled])
@@ -1152,7 +1152,7 @@ export default function App() {
 
   return <main className={`appShell tab-${workspaceTab} view-${workspaceView}`}>
     <header>
-      <div className="brand"><span className="logo">X</span><div><b>PROTREBOT ELITE X</b><small>V25.1.2 · LIVE GUARD</small></div></div>
+      <div className="brand"><img className="kaiStradeBrandLogo" src="/YENİ LOGO.jpeg" alt="KaiStrade"/></div>
       <div className="live"><i/> {status}</div><div className={streamLive ? 'streamLive' : 'streamIdle'}>● {streamLive ? 'CANLI VERİ AKIŞI' : 'AKIŞ BAĞLANIYOR'}</div><div className="analysisLive">✓ GERÇEK ANALİZ AKTİF</div>
       <div className="v7Version">V25 · FAIL-CLOSED EXECUTION</div>
       <div className="safe"><ShieldCheck/> GÜVENLİ ANALİZ MODU</div>

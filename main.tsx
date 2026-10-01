@@ -16,6 +16,7 @@ import './coin-analysis.css'
 import './scanner-modern.css'
 import './theme.css'
 import './mobile-premium.css'
+import './branding-overrides.css'
 import './back-to-top.css'
 
 installAuthorizedFetch()
