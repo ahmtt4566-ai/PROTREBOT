@@ -744,7 +744,7 @@ export default function TestnetFirstApp() {
   return <main className={`v26App ${view === 'dashboard' ? 'homeRoute' : 'workspaceRoute'} ${view === 'master-trade' ? 'masterTradeRoute' : ''}${connectionState === 'offline' ? ' backendOffline' : ''}`}>
     {showConnectionNotice && <section className={`v26OfflineNotice ${connectionState}`} role="status" aria-live="polite"><span><i/><b>{connectionState === 'offline' ? 'Sunucu bağlantısı bekleniyor' : connectionState === 'checking' ? 'Sunucu bağlantısı kontrol ediliyor' : 'Sunucu bağlantısı kuruldu'}</b><small>{connectionState === 'offline' ? 'Veriler güncellenemiyor. Bağlantı kurulduğunda otomatik olarak yeniden denenecek.' : connectionState === 'checking' ? 'Sunucu ve piyasa verileri kontrol ediliyor…' : 'Veriler güncellenmeye devam ediyor.'}</small></span>{connectionState !== 'online' && <button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'KONTROL EDİLİYOR…' : 'YENİDEN DENE'}</button>}</section>}
     <header className={`v26Header v26HomeHeader${headerHidden ? ' v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
-      <div className="v26Brand"><span>X</span><div><b>PROTREBOT ELITE X</b><small>TESTNET ÖNCELİKLİ İŞLEM PLATFORMU</small></div></div>
+      <div className="v26Brand" role="button" tabIndex={0} aria-label="Ana sayfaya dön" onClick={() => navigate('dashboard')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); navigate('dashboard') } }}><span className="v26BrandLogo"><img src="/YENİ LOGO.jpeg" alt="KaiStrade"/></span></div>
       <div className="v26HomeHeaderStatus" aria-label="Sistem durumu"><i className={connectionState === 'online' && health?.status === 'ok' ? 'ok' : connectionState === 'offline' ? 'error' : 'pending'}/>{connectionState === 'offline' ? 'BAĞLANTI BEKLENİYOR' : connectionState === 'checking' ? 'KONTROL EDİLİYOR' : 'ÇEVRİMİÇİ'}</div>
       <div className="v26HeaderActions">
         <button className="v26Refresh" aria-label="Piyasa verisini yenile" title="Piyasa verisini yenile" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/></button>
@@ -765,7 +765,7 @@ export default function TestnetFirstApp() {
     </section>}
 
     {view === 'dashboard' && <section className="v26Dashboard" aria-labelledby="dashboard-title">
-      <header className="v26DashboardHero"><div><small>PROTREBOT ELITE X</small><h1 id="dashboard-title">İşlem Terminali</h1><p>Bir çalışma alanı seçin.</p></div></header>
+      <header className="v26DashboardHero"><div><h1 id="dashboard-title">İşlem Terminali</h1><p>Bir çalışma alanı seçin.</p></div></header>
       <section className="v26DashboardWorkspaces" aria-label="Çalışma alanları">
         <div className="v26DashboardChoices">
           <button type="button" onClick={() => setView('trading')}><Activity/><span><b>İŞLEM</b><small>İşlem açın ve yönetin</small></span><em>→</em></button>
@@ -856,7 +856,7 @@ export default function TestnetFirstApp() {
     </nav>
     {mobileMenuOpen && <div className="v26MobileMenuBackdrop" role="presentation" onClick={event => {if (event.target === event.currentTarget) setMobileMenuOpen(false)}}>
       <section className="v26MobileMenuSheet" role="dialog" aria-modal="true" aria-label="Çalışma alanları">
-        <header><div><small>PROTREBOT</small><h2>Çalışma alanları</h2></div><button type="button" aria-label="Menüyü kapat" onClick={() => setMobileMenuOpen(false)}><X/></button></header>
+        <header><div><h2>Çalışma alanları</h2></div><button type="button" aria-label="Menüyü kapat" onClick={() => setMobileMenuOpen(false)}><X/></button></header>
         <div className="v26MobileMenuChoices">
           <button type="button" onClick={() => navigate('scanner')}><Radar/><span><b>Tarama</b><small>Piyasa fırsatları</small></span></button>
           <button type="button" onClick={() => navigate('live')}><RadioTower/><span><b>Canlı hazırlık</b><small>Güvenlik ve durum</small></span></button>
@@ -894,7 +894,7 @@ export default function TestnetFirstApp() {
           {(['risk','privacy','terms','support'] as const).map(tab => <button key={tab} type="button" onClick={() => setComplianceTab(tab)} style={{padding:'0.55rem 0.8rem',borderRadius:'999px',border: complianceTab === tab ? '1px solid rgba(96,165,250,0.7)' : '1px solid rgba(148,163,184,0.2)',background: complianceTab === tab ? 'rgba(59,130,246,0.12)' : 'transparent',color: complianceTab === tab ? '#dbeafe' : '#cbd5e1',fontWeight:700,textTransform:'capitalize',cursor:'pointer'}}>{tab}</button>)}
         </nav>
         {complianceTab === 'risk' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
-          <p>ProTreBot is a research and demo-first operating workspace. It is not a guarantee of profit and it does not promise financial returns.</p>
+          <p>This is a research and demo-first operating workspace. It is not a guarantee of profit and it does not promise financial returns.</p>
           <p>Market data, signal quality, order logic, and execution status can change rapidly. The platform uses fail-closed security gates by default. Live orders are never activated automatically and only proceed after explicit validation and safety checks.</p>
           <p>Users must understand that market exposure carries risk, including potential loss of capital. This platform is designed for education, simulation, risk review, and controlled testnet workflows unless a separate live trading authorization is explicitly completed.</p>
         </div>}

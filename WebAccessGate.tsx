@@ -57,7 +57,7 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
 
   return <main className="webAccessShell">
     <section className="webAccessCard">
-      <div className="webAccessBrand"><span>X</span><div><b>PROTREBOT ELITE X</b><small>TESTNET ÖNCELİKLİ İŞLEM PLATFORMU</small></div></div>
+      <div className="webAccessBrand"><span className="webAccessBrandLogo"><img src="/YENİ LOGO.jpeg" alt="KaiStrade"/></span></div>
       <div className="webAccessIcon"><LockKeyhole/></div>
       <h1>Yönetici erişimi</h1>
       <p>Bot paneli ve API uçları internete karşı kilitlidir. Bu ekran Binance anahtarı istemez.</p>

@@ -1,6 +1,6 @@
 export const analystCopy = {
-  ariaLabel: 'ProTreBot Analiz ve Piyasa Zekasi',
-  eyebrow: 'PROTREBOT ANALİST',
+  ariaLabel: 'KaiStrade Analiz ve Piyasa Zekasi',
+  eyebrow: 'ANALİST',
   title: 'Piyasa zekası',
   description: 'Teknik sinyalleri, piyasa yapısını ve riski tek bir görünümde inceleyin.',
   selectedCoin: 'SEÇİLİ COİN',

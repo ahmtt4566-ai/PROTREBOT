@@ -5905,6 +5905,14 @@ body:has(.riskOnlyDeck),
 }
 
 /* Final Analyst chip state wins over the legacy route polish rules above. */
+.adminBrand > span,
+.adminBrand > b { display: none !important; }
+.adminBrand::before { content: ''; display: block; width: 160px; height: 42px; background: url('/YENİ LOGO.jpeg') center / contain no-repeat; mix-blend-mode: screen; }
+#root > main.v26App .v26BrandLogo { border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+#root > main.v26App .v26BrandLogo img { mix-blend-mode: screen; }
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystPanelHeader > div > span,
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystDrawer header > div > span { display: none !important; }
+
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCommandItems button {
   border: 0 !important;
 }

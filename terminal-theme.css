@@ -1164,6 +1164,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .v26Brand, .v26HeaderActions, .v26HeaderSignals, .v26Brand > div { display: flex; align-items: center; }
 .v26Brand { min-width: 0; gap: 12px; }
 .v26Brand > span { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-4); color: var(--accent-strong); font-size: 20px; font-weight: 800; }
+.v26Brand > span img,
+.webAccessBrand > span img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.v26BrandLogo img { mix-blend-mode: screen; }
+.v26BrandLogo { flex: 0 1 160px !important; width: 160px !important; height: 42px !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; }
+.webAccessBrandLogo { width: 180px !important; height: 44px !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
 .v26Brand > div { display: block; }
 .v26Brand b, .v26Brand small { display: block; }
 .v26Brand b { color: var(--text); font-size: 19px; letter-spacing: .04em; }
