@@ -238,23 +238,36 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
         </section>
       </div>
       {renderAnalystResult()}
-      <section className="analystCoinSelector" aria-label={analystCopy.selector}>
+      <div className="analystLowerGrid">
+        <section className="analystCoinSelector" aria-label={analystCopy.selector}>
         <header><div><span>{analystCopy.selector}</span><strong>{rows.length ? `${selectorRows.length} / ${rows.length} piyasa` : analystCopy.scannerWaiting}</strong></div><small>Güncel tarama görünümünden seçim yapın</small></header>
         <div className="analystSelectorToolbar"><label><Search/><input value={selectorQuery} onChange={event => setSelectorQuery(event.target.value)} placeholder={analystCopy.searchCoin} aria-label="Tarama coinlerini ara"/></label><div className="analystSelectorFilters" role="group" aria-label="Tarama coinlerini filtrele">{[['ALL',analystCopy.all],['LONG','LONG'],['SHORT','SHORT'],['WATCH',analystCopy.watch]].map(([value,label]) => <button type="button" key={value} className={selectorDirection === value ? 'active' : ''} aria-pressed={selectorDirection === value} onClick={() => setSelectorDirection(value)}>{label}</button>)}</div></div>
         {loading ? <div className="analystSelectorSkeleton" aria-label="Tarama verileri yükleniyor"><i/><i/><i/><i/></div> : error ? <p className="analystSelectorEmpty">{analystCopy.dataUnavailable}</p> : <div className="analystSelectorList">{selectorRows.map(row => <button type="button" key={row.symbol} className={row.symbol === selected ? 'selected' : ''} onClick={() => selectAnalystCoin(row.symbol)} aria-pressed={row.symbol === selected}><span className="analystSelectorIdentity"><b>{row.symbol}</b><small>{row.display}</small></span><span className={`analystSelectorSignal ${tone(row.direction)}`}><strong>{selectorSignal(row.direction)}</strong><small>{fmt(row.confidence)}% {analystCopy.confidence}</small></span><span className="analystSelectorSnapshot"><b>{fmt(row.price)}</b><small>{row.trend}</small></span></button>)}{!selectorRows.length && <p className="analystSelectorEmpty">{analystCopy.noMatch}</p>}</div>}
-      </section>
-      <section className="analystLegacyResultWorkspace" aria-live="polite">
-        <header><div><span>{analystCopy.analysisResult}</span><h3>{active?.display || 'Aktif piyasa verisi yok'}</h3></div><strong className={active ? tone(active.direction) : 'neutral'}>{active?.direction || analystCopy.waitingResult}</strong></header>
-        {loading ? <div className="analystLoadingState" aria-label="Loading market data"><i/><i/><i/><i/></div> : error ? <div className="analystDataError" role="alert"><strong>DATA UNAVAILABLE</strong><p>Unable to load current market data.</p><button type="button" onClick={() => void load()}>RETRY</button></div> : active ? <>
-          <div className="analystResultMeta"><span><small>COIN</small><b>{active.symbol}</b></span><span><small>MARKET REGIME</small><b>{active.trend}</b></span><span><small>SIGNAL</small><b className={tone(active.direction)}>{active.direction}</b></span><span><small>CONFIDENCE</small><b>{fmt(active.confidence)}%</b></span></div>
-          <div className="analystMetricCards"><span><small>TREND</small><b>{active.trend}</b><em>EMA structure</em></span><span><small>MOMENTUM</small><b>RSI {fmt(active.rsi)}</b><em>Current oscillator view</em></span><span><small>VOLUME</small><b>{active.volume_ratio >= 1 ? '+' : ''}{fmt((active.volume_ratio - 1) * 100)}%</b><em>Versus average</em></span><span><small>RISK</small><b>R/R {fmt(active.risk_reward)}</b><em>-{fmt(active.risk_pct)}% risk</em></span></div>
-          <div className="analystWhyResult"><span>{analystCopy.whyResult}</span><p>{analystAnswer || `${active.display} şu anda ${active.direction}; güncel tarama görünümünde güven seviyesi ${fmt(active.confidence)}%. İşlem öncesi yapı ve risk metriklerini inceleyin.`}</p></div>
-        </> : <p className="analystEmpty">Analiz hazırlanıyor…</p>}
-      </section>
-      <section className="analystAskBar">
+        </section>
+        <div className="analystDetailColumn">
+          <section className="analystLegacyResultWorkspace" aria-live="polite">
+            <header><div><span>{analystCopy.analysisResult}</span><h3>{active?.display || analystCopy.waiting}</h3></div><strong className={active ? tone(active.direction) : 'neutral'}>{active?.direction || analystCopy.waitingResult}</strong></header>
+            {loading ? <div className="analystLoadingState" aria-label={analystCopy.loading}><i/><i/><i/><i/></div> : error ? <div className="analystDataError" role="alert"><strong>{analystCopy.dataUnavailable}</strong><p>{analystCopy.dataUnavailableHint}</p><button type="button" onClick={() => void load()}>{analystCopy.retry}</button></div> : active ? <>
+              <div className="analystDetailHero"><strong className={tone(active.direction)}>{active.direction}</strong><span>{fmt(active.confidence)}% {analystCopy.confidence}</span></div>
+              <div className="analystMetricCards">
+                <span><small>{analystCopy.regime}</small><b>{active.trend}</b></span>
+                <span><small>{analystCopy.entry}</small><b>{fmt(active.entry)}</b></span>
+                <span><small>{analystCopy.exit}</small><b>TP1 {fmt(active.tp1)} · TP2 {fmt(active.tp2)} · TP3 {fmt(active.tp3)}</b></span>
+                <span><small>{analystCopy.risk}</small><b>R/R {fmt(active.risk_reward)} · -{fmt(active.risk_pct)}%</b></span>
+                <span><small>{analystCopy.signalConfidence}</small><b>{fmt(active.confidence)}%</b></span>
+                <span><small>{analystCopy.mtfAlignment}</small><b>{fmt(active.mtf_alignment)}</b></span>
+                <span><small>{analystCopy.momentum}</small><b>RSI {fmt(active.rsi)}</b></span>
+                <span><small>{analystCopy.volume}</small><b>{active.volume_ratio >= 1 ? '+' : ''}{fmt((active.volume_ratio - 1) * 100)}%</b></span>
+              </div>
+              <div className="analystWhyResult"><span>{analystCopy.whyResult}</span><p>{analystAnswer || `${active.display} şu anda ${active.direction}; güncel tarama görünümünde güven seviyesi ${fmt(active.confidence)}%. İşlem öncesi yapı ve risk metriklerini inceleyin.`}</p></div>
+            </> : <p className="analystEmpty">{analystCopy.resultEmpty}</p>}
+          </section>
+          <section className="analystAskBar">
         <div><span>{analystCopy.ask}</span><small>{analystCopy.askHint}</small></div>
         <div className="analystPromptChips">{analystPrompts.map(prompt => <button type="button" className={analystSelection === prompt ? 'active' : ''} aria-pressed={analystSelection === prompt} key={prompt} onClick={() => runAnalyst(prompt,prompt)}>{prompt}</button>)}</div>
-      </section>
+          </section>
+        </div>
+      </div>
     </section>
     <header className="coinAnalysisHeader"><div><span><BarChart3/> {marketCopy.scanner}</span><h2>Coin Analiz Merkezi</h2><p>{marketCopy.subtitle}</p></div><div className="coinHeaderActions"><div className="coinHeaderStatus"><strong><i className={autoScan ? 'liveDot' : 'idleDot'}/>{autoScan ? marketCopy.live : marketCopy.paused}</strong><small>{rows.length} {marketCopy.assets}</small><small>{marketCopy.lastScan} · {scanMessage}</small></div><button type="button" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/>{loading ? marketCopy.scanning : marketCopy.runScan}</button></div></header>
     <div className="coinAnalysisToolbar"><label><Search/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search coin…"/>{query && <button type="button" className="searchClear" aria-label="Aramayı temizle" onClick={() => setQuery('')}><X/></button>}</label><button className="filterTrigger" type="button" onClick={() => { setDraftFilters(filters); setFilterOpen(true) }}><Filter/>FİLTRELER{filterCount(filters) ? ` · ${filterCount(filters)}` : ''}</button><label className="autoScanToggle"><input type="checkbox" checked={autoScan} onChange={event => setAutoScan(event.target.checked)}/><span><i className={autoScan ? 'liveDot' : 'idleDot'}/>AUTO SCAN {autoScan ? 'LIVE' : 'OFF'}</span></label></div>
