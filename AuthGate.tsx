@@ -1,8 +1,9 @@
 import { createPortal } from 'react-dom'
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
-import { Activity, ArrowRight, Eye, EyeOff, KeyRound, LogOut, MailCheck, ShieldAlert, ShieldCheck, UserRound, Wrench } from 'lucide-react'
+import { Activity, ArrowRight, BarChart3, Eye, EyeOff, KeyRound, LogOut, MailCheck, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
 import { API_BASE, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import AdminPanel from './AdminPanel'
+import { AUTH_MARKET_QUOTES } from './auth-market-data'
 import './auth.css'
 
 type User = { id:string; email:string; display_name:string; role:string; active:boolean; email_verified?:boolean }
@@ -13,6 +14,22 @@ type ProfileData = {user:User;profile?:{full_name?:string;preferences?:Record<st
 // Only Playwright's dedicated `--mode test` run bypasses login (it mocks every API response).
 // Regular local dev must go through the real login/register flow so a genuine session token exists.
 const PLAYWRIGHT_TEST_MODE_AUTO_ACCESS = import.meta.env.MODE === 'test'
+
+function AuthSparkline({points,positive}:{points:number[];positive:boolean}) {
+  const coordinates = points.map((point,index) => `${4 + index * 10},${point}`).join(' ')
+  return <svg className={`authSparkline ${positive ? 'isPositive' : 'isNegative'}`} viewBox="0 0 98 40" role="img" aria-label="Piyasa eğilim grafiği"><polyline points={coordinates} fill="none" vectorEffect="non-scaling-stroke"/></svg>
+}
+
+function AuthIntroPanel() {
+  return <section className="authIntro">
+    <div className="authBrand"><span className="authBrandMark" role="link" tabIndex={0} aria-label="Ana sayfaya git" onClick={() => window.location.assign('/')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.assign('/') } }}><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div>
+    <div className="authIntroCopy"><span className="authEyebrow">KAISTRADE WORKSPACE</span><h1>Piyasayı tek ekrandan takip edin</h1><p>Hızlı kararlar, berrak analiz ve güvenli işlem akışı için ihtiyacınız olan her şey tek çalışma alanında.</p></div>
+    <div className="authFeatureList"><span><Zap/> Hızlı işlem</span><span><BarChart3/> Gelişmiş analiz</span><span><ShieldCheck/> Güvenli altyapı</span></div>
+    <div className="authMarketGrid">{AUTH_MARKET_QUOTES.map(quote => <article className="authMarketCard" key={quote.symbol}><div className="authMarketTop"><div><b>{quote.symbol}</b><small>{quote.name}</small></div><span className={quote.positive ? 'isPositive' : 'isNegative'}>{quote.change}</span></div><div className="authMarketBottom"><strong>{quote.price}</strong><AuthSparkline points={quote.sparkline} positive={quote.positive}/></div></article>)}</div>
+    <div className="authTrustBadges"><span><ShieldCheck/> 256-bit şifreleme</span><span><KeyRound/> 2 adımlı doğrulama</span><span><Activity/> 7/24 destek</span></div>
+    <div className="authCandlePattern" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/></div>
+  </section>
+}
 
 function detail(payload:unknown):string {
   if (payload && typeof payload === 'object' && 'detail' in payload) {
@@ -300,7 +317,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   if (!session) {
     const registrationStrength = strength(register.password)
     return <main className="authPage">
-      <section className="authIntro"><div className="authBrand"><span className="authBrandMark" role="link" tabIndex={0} aria-label="Ana sayfaya git" onClick={() => window.location.assign('/')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.assign('/') } }}><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div><span className="authEyebrow">SECURE TRADING WORKSPACE</span><h1>Trading operasyonlarınızı daha kontrollü yönetin.</h1><p>Demo, analiz ve risk araçlarını tek bir güvenli hesapla yönetin. Sade, kontrollü ve gerçek para hareketinden ayrıştırılmış bir trading çalışma alanı.</p><div className="authProof"><span><ShieldCheck/> Güvenli hesap sistemi</span><span><KeyRound/> Hızlı erişim</span><span><Activity/> Kontrollü trading altyapısı</span></div><div className="authAtmosphere"><i/><i/><i/><i/><i/><i/></div></section>
+      <AuthIntroPanel/>
       <section className={`authCard ${mode === 'verify' ? 'authCardVerify' : ''}`}>
         <div className="authLoginBrand"><img src="/kaistrade-logo.png" alt="KaiStrade"/></div>
         <div className="authCardHead"><div className="authMark">{mode === 'verify' ? <MailCheck/> : <UserRound/>}</div><div><span>ÜYE GİRİŞİ</span><h2>{mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'register' ? 'Hesabınızı oluşturun' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı kontrol edin'}</h2></div></div>
@@ -318,6 +335,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         {message && message !== 'Oturum doğrulanıyor…' && <p className="authMessage">{message}</p>}
         <div className="authLinks">{mode === 'login' && <><button onClick={() => setMode('forgot')}>Parolamı unuttum</button><button onClick={() => setMode('register')}>Yeni hesap oluştur</button></>}{mode !== 'login' && <button onClick={() => setMode('login')}>Giriş ekranına dön</button>}</div>
       </section>
+      <footer className="authFooter"><span>© 2026 KalsTrade</span><a href="/privacy">Gizlilik Politikası</a><a href="/terms">Kullanım Şartları</a><a href="/risk">Risk Uyarısı</a></footer>
     </main>
   }
 
