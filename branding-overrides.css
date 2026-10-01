@@ -32,3 +32,18 @@
   background: url('/YENİ LOGO.jpeg') center / contain no-repeat;
   mix-blend-mode: screen;
 }
+
+/* The header shares the page surface; controls keep their own affordances. */
+#root > main.v26App .v26Header,
+#root > main.v26App .v26Header.v26HomeHeader {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  backdrop-filter: none !important;
+}
+
+#root > main.v26App .v26Header::before {
+  display: none !important;
+}
