@@ -3,7 +3,11 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'rea
 import { Activity, ArrowRight, BarChart3, Eye, EyeOff, KeyRound, LogOut, MailCheck, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
 import { API_BASE, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import AdminPanel from './AdminPanel'
-import { AUTH_MARKET_QUOTES } from './auth-market-data'
+import { AUTH_PANEL_MARKETS, LIVE_MARKET_CONFIG } from './live-market-config'
+import TickerTape from './TickerTape'
+import TopMovers from './TopMovers'
+import { type LiveTickerData, type LiveTickerStatus, useLiveTickers } from './use-live-tickers'
+import { useTopMovers } from './use-top-movers'
 import './auth.css'
 
 type User = { id:string; email:string; display_name:string; role:string; active:boolean; email_verified?:boolean }
@@ -20,15 +24,26 @@ function AuthSparkline({points,positive}:{points:number[];positive:boolean}) {
   return <svg className={`authSparkline ${positive ? 'isPositive' : 'isNegative'}`} viewBox="0 0 98 40" role="img" aria-label="Piyasa eğilim grafiği"><polyline points={coordinates} fill="none" vectorEffect="non-scaling-stroke"/></svg>
 }
 
-function AuthIntroPanel() {
+function formatPanelPrice(symbol:string,price:number) {
+  return symbol === 'USDTTRY' ? `₺${price.toFixed(4)}` : new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(price)
+}
+
+function AuthIntroPanel({data,status,movers}:{data:LiveTickerData;status:LiveTickerStatus;movers:ReturnType<typeof useTopMovers>}) {
   return <section className="authIntro">
     <div className="authBrand"><span className="authBrandMark" role="link" tabIndex={0} aria-label="Ana sayfaya git" onClick={() => window.location.assign('/')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.assign('/') } }}><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div>
     <div className="authIntroCopy"><span className="authEyebrow">KAISTRADE WORKSPACE</span><h1>Piyasayı tek ekrandan takip edin</h1><p>Hızlı kararlar, berrak analiz ve güvenli işlem akışı için ihtiyacınız olan her şey tek çalışma alanında.</p></div>
     <div className="authFeatureList"><span><Zap/> Hızlı işlem</span><span><BarChart3/> Gelişmiş analiz</span><span><ShieldCheck/> Güvenli altyapı</span></div>
-    <div className="authMarketGrid">{AUTH_MARKET_QUOTES.map(quote => <article className="authMarketCard" key={quote.symbol}><div className="authMarketTop"><div><b>{quote.symbol}</b><small>{quote.name}</small></div><span className={quote.positive ? 'isPositive' : 'isNegative'}>{quote.change}</span></div><div className="authMarketBottom"><strong>{quote.price}</strong><AuthSparkline points={quote.sparkline} positive={quote.positive}/></div></article>)}</div>
+    <div className="authMarketGrid">{AUTH_PANEL_MARKETS.map(config => { const ticker = data[config.symbol]; const history = ticker?.history.slice(-10) || []; const low = Math.min(...history); const high = Math.max(...history); const range = high - low || 1; const points = history.map(value => 8 + ((high - value) / range) * 24); return <article className={`authMarketCard ${ticker?.flash ? `isFlash-${ticker.flash}` : ''}`} key={config.symbol} aria-label={`${config.displaySymbol} ${config.name} piyasa kartı`}><div className="authMarketTop"><div><b>{config.displaySymbol}</b><small>{config.name}</small></div><div className="authMarketQuoteStatus">{ticker && <span className={ticker.changePercent >= 0 ? 'isPositive' : 'isNegative'}>{ticker.changePercent >= 0 ? '▲' : '▼'} {Math.abs(ticker.changePercent).toFixed(2)}%</span>}<i className={`authMarketStatus status-${status}`}><i/> {status === 'live' ? 'CANLI' : status === 'offline' ? 'ÇEVRİMDIŞI' : 'BAĞLANIYOR'}</i></div></div><div className="authMarketBottom">{ticker ? <strong aria-live="off">{formatPanelPrice(config.symbol,ticker.price)}</strong> : <i className="authMarketSkeleton"/>}{ticker ? <AuthSparkline points={points} positive={ticker.changePercent >= 0}/> : <i className="authSparklineSkeleton"/>}</div><small className="authMarketNote">Veriler Binance'ten alınır, bilgi amaçlıdır, yatırım tavsiyesi değildir.</small></article> })}</div>
+    <TopMovers movers={movers}/>
     <div className="authTrustBadges"><span><ShieldCheck/> 256-bit şifreleme</span><span><KeyRound/> 2 adımlı doğrulama</span><span><Activity/> 7/24 destek</span></div>
     <div className="authCandlePattern" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/></div>
   </section>
+}
+
+function LoginMarketShell({children}:{children:(market:{data:LiveTickerData;status:LiveTickerStatus;movers:ReturnType<typeof useTopMovers>}) => ReactNode}) {
+  const live = useLiveTickers(LIVE_MARKET_CONFIG.map(config => config.symbol))
+  const movers = useTopMovers()
+  return <><TickerTape data={live.data} status={live.status}/>{children({data:live.data,status:live.status,movers})}</>
 }
 
 function detail(payload:unknown):string {
@@ -316,8 +331,8 @@ export default function AuthGate({children}:{children:ReactNode}) {
   if (autoVerifying) return <main className="authLoading"><div className="authLoader"><MailCheck/><b>E-POSTA DOĞRULANIYOR</b><span>E-posta doğrulanıyor...</span></div></main>
   if (!session) {
     const registrationStrength = strength(register.password)
-    return <main className="authPage">
-      <AuthIntroPanel/>
+    return <LoginMarketShell>{market => <main className="authPage">
+      <AuthIntroPanel data={market.data} status={market.status} movers={market.movers}/>
       <section className={`authCard ${mode === 'verify' ? 'authCardVerify' : ''}`}>
         <div className="authLoginBrand"><img src="/kaistrade-logo.png" alt="KaiStrade"/></div>
         <div className="authCardHead"><div className="authMark">{mode === 'verify' ? <MailCheck/> : <UserRound/>}</div><div><span>ÜYE GİRİŞİ</span><h2>{mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'register' ? 'Hesabınızı oluşturun' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı kontrol edin'}</h2></div></div>
@@ -336,7 +351,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         <div className="authLinks">{mode === 'login' && <><button onClick={() => setMode('forgot')}>Parolamı unuttum</button><button onClick={() => setMode('register')}>Yeni hesap oluştur</button></>}{mode !== 'login' && <button onClick={() => setMode('login')}>Giriş ekranına dön</button>}</div>
       </section>
       <footer className="authFooter"><span>© 2026 KalsTrade</span><a href="/privacy">Gizlilik Politikası</a><a href="/terms">Kullanım Şartları</a><a href="/risk">Risk Uyarısı</a></footer>
-    </main>
+    </main>}</LoginMarketShell>
   }
 
   const path = window.location.pathname
