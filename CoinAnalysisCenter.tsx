@@ -10,6 +10,7 @@ type SignalHistoryItem = {id:string;symbol:string;timestamp:string;signal:Direct
 type SignalPerformance = {available:boolean;message?:string;total_signals?:number;tp1_hit_rate?:number;tp2_hit_rate?:number;tp3_hit_rate?:number;stop_rate?:number;average_risk_reward?:number}
 type ScannerAlert = {id:string;symbol:string;signal:string;score_min:number;rsi_min:number;volume_spike:boolean;price_crosses_ema20:boolean;mtf:string;active:boolean;last_triggered_at:string|null}
 type FilterState = {signal:string;strength:string;trend:string;rsiMin:number;rsiMax:number;volume:string;mtf:string;volatility:string;ema20:boolean;ema20_50:boolean;ema50_200:boolean;minRR:number}
+type AnalystMode = ''|'market-overview'|'best-long'|'best-short'|'why-coin'|'technical'|'decision'|'coin-detail'|'prompt'
 const emptyFilters:FilterState = {signal:'ALL',strength:'ANY',trend:'ALL',rsiMin:0,rsiMax:100,volume:'ANY',mtf:'ANY',volatility:'ANY',ema20:false,ema20_50:false,ema50_200:false,minRR:0}
 const intervals = ['1m','5m','15m','30m','1h','4h','1d']
 const ANALYST_SCAN_LIMIT = 40
@@ -49,6 +50,11 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const [analystOpen,setAnalystOpen] = useState(false)
   const [analystAnswer,setAnalystAnswer] = useState('')
   const [analystSelection,setAnalystSelection] = useState('')
+  const [analystMode,setAnalystMode] = useState<AnalystMode>('')
+  const [analystLoading,setAnalystLoading] = useState(false)
+  const [analystError,setAnalystError] = useState('')
+  const [selectorPulse,setSelectorPulse] = useState(false)
+  const analystTimer = useRef<number|null>(null)
   const [selectorQuery,setSelectorQuery] = useState('')
   const [selectorDirection,setSelectorDirection] = useState('ALL')
   const [alertDraft,setAlertDraft] = useState({signal:'ANY',score_min:85,rsi_min:0,volume_spike:false,price_crosses_ema20:false,mtf:'ANY'})
@@ -99,6 +105,9 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
     setAnalystAnswer('')
   },[activeSymbol])
   useEffect(() => {
+    if (rows.length && analystLoading && analystTimer.current === null) setAnalystLoading(false)
+  },[rows.length,analystLoading])
+  useEffect(() => {
     if (!activeSymbol) return
     const controller = new AbortController()
     const request = (path:string) => fetch(`${API_BASE}${path}`,{signal:controller.signal})
@@ -132,10 +141,68 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const timeframeSummary = consensus ? `${consensus.timeframes.filter(item => item.direction === 'LONG').length}/${consensus.timeframes.length} bullish` : 'Ölçülüyor'
   const analystPrompts = useMemo(() => { const symbol = active?.symbol.replace(/USDT$/,'') || 'seçili coin'; return [`${symbol} neden hareket ediyor?`,`${symbol} trendi güçleniyor mu?`,`${symbol} desteği nerede?`,`${symbol} direnci nerede?`,`${symbol} momentumu nasıl?`,`${symbol} hacmi ne gösteriyor?`,`${symbol} riski nedir?`,`${symbol} neden ${active?.direction || 'LONG/SHORT'}?`] },[active?.direction,active?.symbol])
   const answerAnalyst = (question:string) => { if (!active) { setAnalystAnswer('Güncel piyasa verisiyle yanıt oluşturulamıyor.'); return }; const normalized = question.toLowerCase(); const volume = `${active.volume_ratio >= 1 ? '+' : ''}${fmt((active.volume_ratio - 1) * 100)}% ortalamaya göre`; const emaAligned = active.direction === 'LONG' ? active.ema20 > active.ema50 && active.ema50 > active.ema200 : active.direction === 'SHORT' ? active.ema20 < active.ema50 && active.ema50 < active.ema200 : false; let answer = `${active.display} şu anda ${active.direction}; Teknik Sinyal Skoru ${fmt(active.smart_score)}/100, yapı ${active.trend.toLowerCase()}, RSI ${fmt(active.rsi)}, MTF ${active.mtf_alignment} ve R/R ${fmt(active.risk_reward)}.`; if (normalized.includes('hareket')) answer = `${active.display}, ${active.direction} baskısıyla hareket ediyor: yapı ${active.trend.toLowerCase()}, RSI ${fmt(active.rsi)} ve hacim ${volume}.`; else if (normalized.includes('güçlen')) answer = `${active.display} trendi EMA yapısında ${emaAligned ? 'uyumlu' : 'tam uyumlu değil'}; MTF uyumu ${active.mtf_alignment} ve sinyal ${active.direction}.`; else if (normalized.includes('deste')) answer = `${active.display} desteği ${fmt(active.support)}, direnci ${fmt(active.resistance)} ve güncel fiyatı ${fmt(active.price)}.`; else if (normalized.includes('direnc')) answer = `${active.display} direnci ${fmt(active.resistance)}, desteği ${fmt(active.support)} ve güncel fiyatı ${fmt(active.price)}.`; else if (normalized.includes('risk')) answer = `${active.display} stop seviyesine göre ${fmt(active.risk_pct)}% model riski taşıyor; R/R ${fmt(active.risk_reward)} ve sinyal ${active.direction}.`; else if (normalized.includes('momentum')) answer = `${active.display} momentumu RSI ${fmt(active.rsi)} ile ${active.rsi >= 50 ? 'yukarı' : 'aşağı'} yönlü; güncel sinyal ${active.direction}.`; else if (normalized.includes('hacim')) answer = `${active.display} hacmi hareketi ${active.volume_ratio >= 1 ? 'doğruluyor' : 'doğrulamıyor'}: ${volume}.`; else if (normalized.includes('neden') && normalized.includes('long')) answer = `${active.display} LONG çünkü ${active.trend.toLowerCase()} yapı, ${active.mtf_alignment} MTF uyumu, RSI ${fmt(active.rsi)} ve R/R ${fmt(active.risk_reward)} sinyali destekliyor.`; else if (normalized.includes('neden') && normalized.includes('short')) answer = `${active.display} SHORT çünkü ${active.trend.toLowerCase()} yapı, ${active.mtf_alignment} MTF uyumu, RSI ${fmt(active.rsi)} ve R/R ${fmt(active.risk_reward)} sinyali destekliyor.`; setAnalystAnswer(answer) }
-  const runAnalyst = (label:string, question:string) => { setAnalystSelection(label); answerAnalyst(question); resultRef.current?.scrollIntoView({behavior:'smooth',block:'nearest'}) }
+  const runAnalyst = (label:string, question:string) => {
+    const mode:AnalystMode = label === 'Market Overview' ? 'market-overview' : label === 'Best LONG' ? 'best-long' : label === 'Best SHORT' ? 'best-short' : label === 'Why This Coin' ? 'why-coin' : ['Trend Analysis','Momentum','Volume Intelligence','EMA Structure','RSI / MACD','Support / Resistance','Volatility'].includes(label) ? 'technical' : ['Market Regime','Entry Analysis','Exit Analysis','Risk / R:R','Signal Confidence'].includes(label) ? 'decision' : 'prompt'
+    const needsCoin = mode === 'technical' || mode === 'decision' || mode === 'why-coin' || mode === 'prompt'
+    setAnalystSelection(label)
+    setAnalystMode(mode)
+    setAnalystError('')
+    setAnalystAnswer('')
+    if (needsCoin && !active) {
+      setAnalystError(analystCopy.selectCoin)
+      setSelectorPulse(true)
+      window.setTimeout(() => setSelectorPulse(false), 1200)
+      resultRef.current?.scrollIntoView({behavior:'smooth',block:'nearest'})
+      return
+    }
+    if (loading || !rows.length) {
+      setAnalystLoading(true)
+      resultRef.current?.scrollIntoView({behavior:'smooth',block:'nearest'})
+      return
+    }
+    setAnalystLoading(true)
+    if (analystTimer.current !== null) window.clearTimeout(analystTimer.current)
+    analystTimer.current = window.setTimeout(() => {
+      setAnalystLoading(false)
+      if (mode === 'why-coin' || mode === 'prompt') answerAnalyst(question)
+      resultRef.current?.scrollIntoView({behavior:'smooth',block:'nearest'})
+    }, 220)
+  }
+  const selectAnalystCoin = (symbol:string) => {
+    setSelected(symbol)
+    setAnalystSelection('')
+    setAnalystMode('coin-detail')
+    setAnalystError('')
+    resultRef.current?.scrollIntoView({behavior:'smooth',block:'nearest'})
+  }
   const whySignal = active ? [{label:'Trend alignment',ok:active.direction === 'LONG' ? active.ema20 > active.ema50 && active.ema50 > active.ema200 : active.direction === 'SHORT' ? active.ema20 < active.ema50 && active.ema50 < active.ema200 : false},{label:'RSI confirmation',ok:active.direction === 'LONG' ? active.rsi > 50 : active.direction === 'SHORT' ? active.rsi < 50 : false},{label:'Multi-timeframe support',ok:active.mtf_direction === active.direction},{label:`Risk/Reward ${fmt(active.risk_reward)}`,ok:active.risk_reward >= 2}].filter(item => item.ok) : []
   const createAlert = async () => { try { const response = await fetch(`${API_BASE}/scanner-alerts`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...alertDraft,symbol:selected})}); if (!response.ok) throw new Error('Alarm oluşturulamadı'); const item = await response.json() as ScannerAlert; setAlerts(current => [item,...current]); setAlertOpen(false) } catch { setError('Alarm oluşturulamadı; tekrar deneyin.') } }
   const openPaperTrade = async () => { if (!active) return; setPaperBusy(true); try { const direction = active.direction === 'SHORT' ? 'SHORT' : 'LONG'; const response = await fetch(`${API_BASE}/paper/open`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:active.symbol,direction,amount:100,stop_loss:active.stop_loss,take_profit:active.tp1,tp2:active.tp2,tp3:active.tp3,source:'MANUAL',signal_confidence:active.smart_score})}); if (!response.ok) throw new Error('Paper işlem açılamadı'); setPaperOpen(false); setAnalystAnswer('Paper position opened in the existing virtual wallet.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'Paper işlem açılamadı.') } finally { setPaperBusy(false) } }
+  const risingRows = useMemo(() => [...rows].sort((left,right) => right.change - left.change).slice(0,3),[rows])
+  const fallingRows = useMemo(() => [...rows].sort((left,right) => left.change - right.change).slice(0,3),[rows])
+  const marketDirection = summary.long > summary.short ? analystCopy.rising : summary.short > summary.long ? analystCopy.falling : analystCopy.balanced
+  const technicalRows = active ? [
+    [analystCopy.trend, active.trend],
+    [analystCopy.momentum, `RSI ${fmt(active.rsi)} · ${active.rsi >= 50 ? 'yukarı' : 'aşağı'} yönlü`],
+    [analystCopy.volume, `${active.volume_ratio >= 1 ? '+' : ''}${fmt((active.volume_ratio - 1) * 100)}% ortalamaya göre`],
+    [analystCopy.ema, `${fmt(active.ema20)} / ${fmt(active.ema50)} / ${fmt(active.ema200)}`],
+    [analystCopy.oscillator, `RSI ${fmt(active.rsi)} · MTF ${fmt(active.mtf_alignment)}`],
+    [analystCopy.supportResistance, `${fmt(active.support)} / ${fmt(active.resistance)}`],
+    [analystCopy.volatility, `%${fmt(active.volatility_pct)}`],
+  ] : []
+  const decisionRows = active ? [
+    [analystCopy.regime, active.trend],
+    [analystCopy.entry, fmt(active.entry)],
+    [analystCopy.exit, `TP1 ${fmt(active.tp1)} · TP2 ${fmt(active.tp2)} · TP3 ${fmt(active.tp3)}`],
+    [analystCopy.risk, `R/R ${fmt(active.risk_reward)} · -%${fmt(active.risk_pct)}`],
+    [analystCopy.signalConfidence, `%${fmt(active.confidence)} · skor ${fmt(active.smart_score)}`],
+  ] : []
+  const resultRows = (items:Array<[string,string]>) => <div className="analystInsightRows">{items.map(([label,value]) => <div className="analystInsightRow" key={label}><span>{label}</span><b>{value}</b></div>)}</div>
+  const resultOpportunityRows = (items:Row[], empty:string) => items.length ? <div className="analystOpportunityList">{items.map((row,index) => <div className="analystOpportunityRow" key={row.symbol}><span className="analystOpportunityRank">{index + 1}</span><div><strong>{row.display}</strong><small>{row.direction} · RSI {fmt(row.rsi)}</small></div><span><b>{fmt(row.smart_score)}</b><small>{analystCopy.score}</small></span><span><b>{fmt(row.price)}</b><small>{analystCopy.price}</small></span><span><b>{fmt(row.risk_reward)}</b><small>{analystCopy.riskReward}</small></span><button type="button" onClick={() => selectAnalystCoin(row.symbol)}>{analystCopy.detail}</button></div>)}</div> : <p className="analystEmpty">{empty}</p>
+  const renderAnalystResult = () => <section className={`analystResultWorkspace${selectorPulse ? ' selectorPulse' : ''}`} aria-live="polite" ref={resultRef}>
+    <header><div><span>{analystCopy.analysisResult}</span><h3>{analystCopy.resultTitle}</h3></div>{active && <strong className={tone(active.direction)}>{active.display}</strong>}</header>
+    {analystLoading ? <div className="analystInlineLoading"><i/><span>{analystCopy.loading}</span></div> : error ? <div className="analystDataError" role="alert"><strong>{analystCopy.dataUnavailable}</strong><p>{error}</p><button type="button" onClick={() => void load()}>{analystCopy.retry}</button></div> : analystError ? <div className="analystSelectionError" role="status"><strong>{analystError}</strong><button type="button" onClick={() => { setSelectorPulse(true); window.setTimeout(() => setSelectorPulse(false),1200) }}>{analystCopy.selector}</button></div> : !analystMode ? <p className="analystEmpty">{analystCopy.resultEmpty}</p> : analystMode === 'market-overview' ? <><div className="analystOverviewLead"><strong>{marketDirection}</strong><span>{summary.long} LONG · {summary.short} SHORT · {summary.watch} BEKLE</span></div>{resultRows([[analystCopy.opportunities, `${summary.long} LONG`],[analystCopy.declining, `${summary.short} SHORT`],[analystCopy.marketTrend, marketDirection]])}<div className="analystMoverGrid"><div><strong>{analystCopy.highest}</strong>{risingRows.map(row => <button type="button" key={row.symbol} onClick={() => selectAnalystCoin(row.symbol)}><span>{row.display}</span><b>+{fmt(row.change)}%</b></button>)}</div><div><strong>{analystCopy.lowest}</strong>{fallingRows.map(row => <button type="button" key={row.symbol} onClick={() => selectAnalystCoin(row.symbol)}><span>{row.display}</span><b>{fmt(row.change)}%</b></button>)}</div></div></> : analystMode === 'best-long' ? resultOpportunityRows(topLong.slice(0,3), analystCopy.noLong) : analystMode === 'best-short' ? resultOpportunityRows(topShort.slice(0,3), analystCopy.noShort) : analystMode === 'technical' ? <>{<div className="analystSelectedHeading"><strong>{active?.display || analystCopy.selectCoin}</strong><span>{analystCopy.technical}</span></div>}{resultRows(technicalRows)}</> : analystMode === 'decision' ? <>{<div className="analystSelectedHeading"><strong>{active?.display || analystCopy.selectCoin}</strong><span>{analystCopy.decision}</span></div>}{resultRows(decisionRows)}</> : <>{active && <div className="analystSelectedHeading"><strong>{active.display}</strong><span>{analystCopy.signalReason}</span></div>}{analystAnswer && <p className="analystResponseText">{analystAnswer}</p>}{active && resultRows([[analystCopy.trend,active.trend],[analystCopy.signalConfidence,`%${fmt(active.confidence)}`],[analystCopy.riskReward,fmt(active.risk_reward)]])}</>}
+  </section>
 
   return <section className="coinAnalysisCenter">
     <section className="analystWorkspace" aria-label={analystCopy.ariaLabel}>
@@ -170,12 +237,13 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
           </div>
         </section>
       </div>
+      {renderAnalystResult()}
       <section className="analystCoinSelector" aria-label={analystCopy.selector}>
         <header><div><span>{analystCopy.selector}</span><strong>{rows.length ? `${selectorRows.length} / ${rows.length} piyasa` : analystCopy.scannerWaiting}</strong></div><small>Güncel tarama görünümünden seçim yapın</small></header>
         <div className="analystSelectorToolbar"><label><Search/><input value={selectorQuery} onChange={event => setSelectorQuery(event.target.value)} placeholder={analystCopy.searchCoin} aria-label="Tarama coinlerini ara"/></label><div className="analystSelectorFilters" role="group" aria-label="Tarama coinlerini filtrele">{[['ALL',analystCopy.all],['LONG','LONG'],['SHORT','SHORT'],['WATCH',analystCopy.watch]].map(([value,label]) => <button type="button" key={value} className={selectorDirection === value ? 'active' : ''} aria-pressed={selectorDirection === value} onClick={() => setSelectorDirection(value)}>{label}</button>)}</div></div>
-        {loading ? <div className="analystSelectorSkeleton" aria-label="Loading scanner coins"><i/><i/><i/><i/></div> : error ? <p className="analystSelectorEmpty">Market data unavailable. Use RETRY below to refresh the scanner.</p> : <div className="analystSelectorList">{selectorRows.map(row => <button type="button" key={row.symbol} className={row.symbol === selected ? 'selected' : ''} onClick={() => setSelected(row.symbol)} aria-pressed={row.symbol === selected}><span className="analystSelectorIdentity"><b>{row.symbol}</b><small>{row.display}</small></span><span className={`analystSelectorSignal ${tone(row.direction)}`}><strong>{selectorSignal(row.direction)}</strong><small>{fmt(row.confidence)}% confidence</small></span><span className="analystSelectorSnapshot"><b>{fmt(row.price)}</b><small>{row.trend}</small></span></button>)}{!selectorRows.length && <p className="analystSelectorEmpty">No scanner markets match this search.</p>}</div>}
+        {loading ? <div className="analystSelectorSkeleton" aria-label="Tarama verileri yükleniyor"><i/><i/><i/><i/></div> : error ? <p className="analystSelectorEmpty">{analystCopy.dataUnavailable}</p> : <div className="analystSelectorList">{selectorRows.map(row => <button type="button" key={row.symbol} className={row.symbol === selected ? 'selected' : ''} onClick={() => selectAnalystCoin(row.symbol)} aria-pressed={row.symbol === selected}><span className="analystSelectorIdentity"><b>{row.symbol}</b><small>{row.display}</small></span><span className={`analystSelectorSignal ${tone(row.direction)}`}><strong>{selectorSignal(row.direction)}</strong><small>{fmt(row.confidence)}% {analystCopy.confidence}</small></span><span className="analystSelectorSnapshot"><b>{fmt(row.price)}</b><small>{row.trend}</small></span></button>)}{!selectorRows.length && <p className="analystSelectorEmpty">{analystCopy.noMatch}</p>}</div>}
       </section>
-      <section className="analystResultWorkspace" aria-live="polite" ref={resultRef}>
+      <section className="analystLegacyResultWorkspace" aria-live="polite">
         <header><div><span>{analystCopy.analysisResult}</span><h3>{active?.display || 'Aktif piyasa verisi yok'}</h3></div><strong className={active ? tone(active.direction) : 'neutral'}>{active?.direction || analystCopy.waitingResult}</strong></header>
         {loading ? <div className="analystLoadingState" aria-label="Loading market data"><i/><i/><i/><i/></div> : error ? <div className="analystDataError" role="alert"><strong>DATA UNAVAILABLE</strong><p>Unable to load current market data.</p><button type="button" onClick={() => void load()}>RETRY</button></div> : active ? <>
           <div className="analystResultMeta"><span><small>COIN</small><b>{active.symbol}</b></span><span><small>MARKET REGIME</small><b>{active.trend}</b></span><span><small>SIGNAL</small><b className={tone(active.direction)}>{active.direction}</b></span><span><small>CONFIDENCE</small><b>{fmt(active.confidence)}%</b></span></div>
