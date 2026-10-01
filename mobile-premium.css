@@ -5521,6 +5521,277 @@ body {
   }
 }
 
+/* "Gerçek Futures Hazırlık Merkezi" (CANLI / .liveTradingPanel.liveUx) modern
+   terminal redesign. This page already has its own intended "quiet modern"
+   design-token set in tokens.css (--bg/--surface/--surface-hover/--text/
+   --text-muted/--accent/--long/--short/--watch/--line:transparent/--*-soft),
+   partially wired up in master-trade-live.css. Everything below reuses THOSE
+   same tokens (not an invented palette) so the whole page is one coherent
+   system end to end. #root-prefixed everywhere to out-specify the generic
+   workspaceRoute [class*="Card"] card rule (it has four :not() clauses, which
+   otherwise out-specifies a plain class selector and silently wins). Inputs/
+   buttons keep real borders for usability; only static containers/dividers/
+   badges are restyled. */
+#root .liveTradingPanel.liveUx {
+  --live-radius: 12px;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Hero */
+#root .liveTradingPanel.liveUx .liveUxHero {
+  border-color: transparent !important;
+  border-radius: var(--live-radius) !important;
+  background: linear-gradient(135deg, var(--surface-hover), var(--bg)) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .32);
+}
+#root .liveTradingPanel.liveUx .liveUxHero h2 {
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: .01em;
+}
+#root .liveTradingPanel.liveUx .liveKicker {
+  color: var(--text-muted);
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+/* Hero status pill: a real rounded badge instead of a boxy bordered panel */
+#root .liveTradingPanel.liveUx .liveUxState {
+  border-color: transparent !important;
+  border-radius: 999px !important;
+  background: var(--surface-hover) !important;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+}
+#root .liveTradingPanel.liveUx .liveUxState svg { width: 18px; height: 18px; color: var(--watch); }
+#root .liveTradingPanel.liveUx .liveUxState strong { color: var(--text); font-size: 13px; }
+#root .liveTradingPanel.liveUx .liveUxState small { color: var(--text-muted); }
+#root .liveTradingPanel.liveUx .liveUxState.ready,
+#root .liveTradingPanel.liveUx .liveUxState.armed {
+  background: var(--long-soft) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxState.ready svg,
+#root .liveTradingPanel.liveUx .liveUxState.armed svg,
+#root .liveTradingPanel.liveUx .liveUxState.ready strong,
+#root .liveTradingPanel.liveUx .liveUxState.armed strong {
+  color: var(--long);
+}
+#root .liveTradingPanel.liveUx .liveUxState.blocked {
+  background: var(--short-soft) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxState.blocked svg,
+#root .liveTradingPanel.liveUx .liveUxState.blocked strong {
+  color: var(--short);
+}
+
+/* Status strip: distinct rounded tiles with a status-colored accent bar,
+   instead of one flat bordered bar with hairline column dividers. */
+#root .liveTradingPanel.liveUx .liveUxStatus {
+  border-color: transparent !important;
+  background: transparent !important;
+  gap: 8px !important;
+}
+#root .liveTradingPanel.liveUx .liveUxStatus > div {
+  position: relative;
+  border-radius: 10px;
+  background: var(--surface) !important;
+  padding-left: 16px !important;
+}
+#root .liveTradingPanel.liveUx .liveUxStatus > div::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--watch);
+}
+#root .liveTradingPanel.liveUx .liveUxStatus > div.connected::before,
+#root .liveTradingPanel.liveUx .liveUxStatus > div.ready::before,
+#root .liveTradingPanel.liveUx .liveUxStatus > div.pass::before {
+  background: var(--long);
+}
+#root .liveTradingPanel.liveUx .liveUxStatus > div.disconnected::before,
+#root .liveTradingPanel.liveUx .liveUxStatus > div.blocked::before {
+  background: var(--short);
+}
+#root .liveTradingPanel.liveUx .liveUxStatus span {
+  color: var(--text-muted);
+  font-weight: 800;
+  letter-spacing: .07em;
+}
+#root .liveTradingPanel.liveUx .liveUxStatus b {
+  color: var(--text);
+}
+
+/* "Next best action" bar */
+#root .liveTradingPanel.liveUx .liveUxNow {
+  border-color: transparent !important;
+  border-radius: var(--live-radius) !important;
+  background: var(--surface) !important;
+  border-left: 3px solid var(--watch) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxNow.ready { border-left-color: var(--long) !important; }
+#root .liveTradingPanel.liveUx .liveUxNow.blocked { border-left-color: var(--short) !important; }
+#root .liveTradingPanel.liveUx .liveUxNow small { color: var(--text-muted); }
+#root .liveTradingPanel.liveUx .liveUxNow strong { color: var(--text); overflow-wrap: anywhere; }
+#root .liveTradingPanel.liveUx .liveUxNow p { color: var(--text-muted); }
+
+/* Cards: one consistent elevated surface with a soft hover lift */
+#root .liveTradingPanel.liveUx .liveUxCard {
+  border-color: transparent !important;
+  border-radius: var(--live-radius) !important;
+  background: var(--surface) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+#root .liveTradingPanel.liveUx .liveUxCard:hover {
+  box-shadow: 0 10px 22px rgba(0, 0, 0, .3);
+  transform: translateY(-1px);
+}
+#root .liveTradingPanel.liveUx .liveUxCard > header {
+  border-color: transparent !important;
+}
+#root .liveTradingPanel.liveUx .liveUxCard > header svg { color: var(--accent); }
+#root .liveTradingPanel.liveUx .liveUxCard > header small {
+  color: var(--text-muted);
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+#root .liveTradingPanel.liveUx .liveUxCard > header h3 {
+  color: var(--text);
+  font-weight: 700;
+}
+#root .liveTradingPanel.liveUx .liveUxCard > header > b {
+  border-color: transparent !important;
+  border-radius: 999px !important;
+  background: var(--surface-hover) !important;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Metric tiles (EMİR ÖZETİ, position metrics, ...) */
+#root .liveTradingPanel.liveUx .liveUxMetrics > span {
+  border-color: transparent !important;
+  border-radius: var(--live-radius) !important;
+  background: var(--surface-hover) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxMetrics > span small {
+  color: var(--text-muted);
+  font-weight: 800;
+  letter-spacing: .06em;
+}
+#root .liveTradingPanel.liveUx .liveUxMetrics > span b {
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+/* Row dividers (protection list) become spacing-only, no hairlines */
+#root .liveTradingPanel.liveUx .liveUxProtectionList span {
+  border-color: transparent !important;
+}
+
+/* Static section containers + legacy hardcoded leftovers from
+   frontend/src/binance-demo.css (the old pre-token-system green palette) */
+#root .liveTradingPanel.liveUx .liveUxEmergency,
+#root .liveTradingPanel.liveUx .liveUxEmpty {
+  border-color: transparent !important;
+}
+#root .liveTradingPanel.liveUx .liveUxEmpty {
+  background: var(--surface) !important;
+  color: var(--text-muted) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxPositionSide span {
+  color: var(--text-muted) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxProtectionBadge {
+  background: var(--long-soft) !important;
+  color: var(--long) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxProtectionBadge.not-protected {
+  background: var(--short-soft) !important;
+  color: var(--short) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxProtectionBadge.unknown {
+  background: color-mix(in srgb, var(--watch) 16%, transparent) !important;
+  color: var(--watch) !important;
+}
+
+/* Inputs: keep a real border (usability), modernize radius/focus ring */
+#root .liveTradingPanel.liveUx .liveUxForm input,
+#root .liveTradingPanel.liveUx .liveUxForm select {
+  border-color: var(--line, rgba(255, 255, 255, .14)) !important;
+  border-radius: 4px !important;
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+#root .liveTradingPanel.liveUx .liveUxForm input:focus,
+#root .liveTradingPanel.liveUx .liveUxForm select:focus {
+  border-color: var(--focus) !important;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Buttons: one consistent surface + a distinct primary/danger treatment */
+#root .liveTradingPanel.liveUx .liveUxCard button,
+#root .liveTradingPanel.liveUx .liveUxNow button,
+#root .liveTradingPanel.liveUx .liveChoice button {
+  border-color: var(--line, rgba(255, 255, 255, .14)) !important;
+  border-radius: 4px !important;
+  background: var(--surface-hover) !important;
+  color: var(--text) !important;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+#root .liveTradingPanel.liveUx .liveUxCard button:hover:not(:disabled),
+#root .liveTradingPanel.liveUx .liveUxNow button:hover:not(:disabled) {
+  background: var(--surface-active) !important;
+  transform: translateY(-1px);
+}
+#root .liveTradingPanel.liveUx .liveChoice button.selectedLong {
+  border-color: var(--long) !important;
+  background: var(--long) !important;
+  color: var(--bg) !important;
+}
+#root .liveTradingPanel.liveUx .liveChoice button.selectedShort {
+  border-color: var(--short) !important;
+  background: var(--short) !important;
+  color: var(--bg) !important;
+}
+/* Primary CTAs: the same accent treatment already used by the credential
+   modal's .primary button (background: var(--accent); color: var(--bg)).
+   Scoped under .liveUxNow/.liveUxActionRow so it out-specifies the generic
+   button rule just above (one extra class beats one extra type selector). */
+#root .liveTradingPanel.liveUx .liveUxNow .liveCredentialCta,
+#root .liveTradingPanel.liveUx .liveUxActionRow button:first-child {
+  border-color: var(--accent) !important;
+  background: var(--accent) !important;
+  color: var(--bg) !important;
+}
+#root .liveTradingPanel.liveUx .liveUxCard.liveUxEmergency button,
+#root .liveTradingPanel.liveUx .liveArmButton {
+  border-color: var(--short) !important;
+  background: var(--short-soft) !important;
+  color: var(--short) !important;
+}
+
+/* Notice bar: left accent + tinted background instead of a flat line box */
+#root .liveTradingPanel.liveUx .liveNotice {
+  border-color: transparent !important;
+  border-radius: 4px !important;
+  border-left: 3px solid var(--watch) !important;
+  background: var(--surface) !important;
+}
+#root .liveTradingPanel.liveUx .liveNotice.ok { border-left-color: var(--long) !important; }
+#root .liveTradingPanel.liveUx .liveNotice.error { border-left-color: var(--short) !important; }
+#root .liveTradingPanel.liveUx .liveNotice.ok svg { color: var(--long); }
+#root .liveTradingPanel.liveUx .liveNotice.error svg { color: var(--short); }
+
 /* Extend the existing homeRoute mobile header layout to workspaceRoute pages
    (Analyst, Scanner, etc.) so the auth profile control always finds its slot
    inside the header instead of falling back to a page-fixed floating button. */
