@@ -431,3 +431,19 @@
 .masterTradeLiveUx .masterTradeLiveSide button.selected {
   border-color: var(--accent, var(--live-green));
 }
+
+/* Keep the live workspace quiet: surfaces separate content, not divider lines. */
+.masterTradeLiveUx *,
+.liveTradingPanel.liveUx * {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.masterTradeLiveUx .masterTradeLiveFlow i {
+  display: none;
+}
+
+.masterTradeLiveUx .masterTradeLiveStatusItem + .masterTradeLiveStatusItem,
+.liveTradingPanel.liveUx .liveStatusItem + .liveStatusItem {
+  border-left: 0 !important;
+}
