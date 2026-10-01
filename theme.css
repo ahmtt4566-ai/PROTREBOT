@@ -4833,6 +4833,25 @@ html, body, #root, .app, .workspace, .page,
   opacity: .65;
 }
 
+.v26OfflineNotice.online {
+  border-color: rgba(42, 190, 113, .48);
+  background: rgba(14, 50, 32, .96);
+  color: #b9f4ca;
+}
+
+.v26OfflineNotice.online i {
+  background: #35c979;
+  box-shadow: 0 0 0 4px rgba(53, 201, 121, .14);
+}
+
+.v26OfflineNotice.online b {
+  color: #d7ffe2;
+}
+
+.v26OfflineNotice.online small {
+  color: #b9e9c7;
+}
+
 .v26App.backendOffline :is(.v26MarketError, .demoMessage-error, .v21ScannerError, .v27Error) {
   display: none !important;
 }

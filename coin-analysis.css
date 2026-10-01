@@ -11,7 +11,7 @@
 .selectedRow,.coinMobileCards>button.selectedRow{border-left:3px solid #9cda68!important;background:#152720!important}
 .coinDetailPanel{border-top:2px solid rgba(156,218,104,.32);background:linear-gradient(180deg,#101b16,#0d1712)}
 @media(max-width:1100px){.coinAnalysisLayout{grid-template-columns:1fr}.coinDetailPanel{order:-1}.featuredList{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:900px){.coinToolsGrid{grid-template-columns:1fr}}
+@media(max-width:900px){#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinToolsGrid{grid-template-columns:1fr!important}}
 @media(max-width:900px){.topOpportunityGrid,.marketSignalsRow{grid-template-columns:1fr}}
 @media(max-width:650px){.coinAnalysisHeader{align-items:flex-start;flex-direction:column;padding:16px}.coinAnalysisHeader h2{font-size:20px}.coinHeaderActions{align-items:center;justify-content:space-between;width:100%}.coinAnalysisHeader button{flex:1}.coinAnalysisToolbar{flex-wrap:wrap}.coinAnalysisToolbar>label:first-child{flex:1 1 170px}.autoScanToggle{margin-left:0}.coinIntervals button,.filterTrigger,.coinAnalysisHeader button,.activeFilterChips button,.analystChips button,.applyFeature{min-height:44px}.analystResult{grid-template-columns:1fr}.coinAnalystPanel{padding:13px}.marketPulseCards{grid-template-columns:1fr 1fr;gap:8px}.marketPulseCards article.regimeCard{grid-column:1/-1}.marketPulseCards article{min-height:56px;padding:9px 11px}.marketPulseCards article b{font-size:17px}.coinSummaryBar i{height:13px}.featuredOpportunities{padding:12px}.featuredOpportunities>header{align-items:flex-start;flex-direction:column}.featuredList{grid-template-columns:1fr 1fr;gap:6px}.featuredList button{padding:9px}.featuredList>button>strong{font-size:15px}.coinTablePanel{display:none}.coinMobileCards{display:grid;gap:7px}.coinMobileCards>button{display:grid;grid-template-columns:1fr auto;gap:7px;min-height:44px;padding:12px 11px;border:1px solid rgba(128,157,119,.25);border-left:3px solid transparent;border-radius:10px;background:#101d16;color:#e5f2e4;text-align:left;cursor:pointer;transition:background-color .12s ease,border-color .12s ease}.coinMobileCards>button:active{transform:scale(.99)}.coinMobileCards>button>div{display:flex;justify-content:space-between;gap:8px}.coinMobileCards b{font-size:15px;font-weight:700}.coinMobileCards strong,.coinMobileCards span,.coinMobileCards em{font-size:13px}.coinMobileCards em{font-style:normal}.coinMobileCards .mobileScore{color:#d8f49c;font-size:16px}.coinMobileCards>button>div:nth-of-type(2),.coinMobileCards>button>small{grid-column:1/-1}.coinMobileCards>button>div:nth-of-type(2){justify-content:flex-start;gap:14px}.coinMobileCards>button>div:nth-of-type(3){grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:flex-start;gap:9px;color:#91a892}.coinMobileCards>button>small{color:#9edc7a;font-size:11px;font-weight:800}.coinDetailPanel{display:none;padding:12px}.coinDetailPanel.mobileOpen{display:block;position:fixed;inset:0;z-index:70;overflow:auto;border:0;border-radius:0;background:#0d1712}.detailClose{display:block}.coinDetailMetrics,.coinDetailLevels{grid-template-columns:repeat(2,1fr)}.tradePlanRow{min-height:44px}.coinDetailChart{height:360px}.mtfRow em{margin-left:0}.whySignal{margin-bottom:20px}}
 .coinAnalysisCenter button:focus-visible,.coinAnalysisCenter input:focus-visible,.coinAnalysisCenter select:focus-visible{outline:2px solid #9cda68;outline-offset:2px}
@@ -1007,6 +1007,17 @@
 	border: 0 !important;
 	box-shadow: none !important;
 	background: #101010 !important;
+}
+
+@media (min-width: 1101px) {
+	#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinToolsGrid {
+		align-content: stretch !important;
+		grid-auto-rows: minmax(0, 1fr) !important;
+	}
+
+	#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) :is(.coinHistoryPanel, .coinPaperPanel) {
+		height: 100% !important;
+	}
 }
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .coinPaperPanel {
 	display: flex !important;

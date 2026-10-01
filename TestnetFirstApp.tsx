@@ -457,7 +457,10 @@ export default function TestnetFirstApp() {
   const [health,setHealth] = useState<Health|null>(null)
   const [loading,setLoading] = useState(false)
   const [marketError,setMarketError] = useState(false)
-  const [connectionOffline,setConnectionOffline] = useState(false)
+  const [connectionState,setConnectionState] = useState<'checking'|'offline'|'online'>('checking')
+  const [showConnectionNotice,setShowConnectionNotice] = useState(true)
+  const connectionStateRef = useRef<'checking'|'offline'|'online'>('checking')
+  const connectionNoticeTimerRef = useRef<number | null>(null)
   const [credentials,setCredentials] = useState({demoApiKey:'',demoSecretKey:'',liveApiKey:'',liveSecretKey:''})
   const [demoSaveState,setDemoSaveState] = useState<'idle'|'saving'|'saved'|'error'>('idle')
   const [demoVerifyState,setDemoVerifyState] = useState<'idle'|'verifying'|'verified'|'error'>('idle')
@@ -473,6 +476,19 @@ export default function TestnetFirstApp() {
   const marketPickerRef = useRef<HTMLDivElement>(null)
   const unreadNotifications = notifications.filter(item => !item.read).length
   const selectedMarket = markets.find(market => market.symbol === symbol)
+
+  const updateConnectionState = (nextState:'checking'|'offline'|'online') => {
+    const previousState = connectionStateRef.current
+    connectionStateRef.current = nextState
+    setConnectionState(nextState)
+    if (connectionNoticeTimerRef.current !== null) window.clearTimeout(connectionNoticeTimerRef.current)
+    if (nextState === 'online' && previousState !== 'online') {
+      setShowConnectionNotice(true)
+      connectionNoticeTimerRef.current = window.setTimeout(() => setShowConnectionNotice(false), 2400)
+    } else {
+      setShowConnectionNotice(true)
+    }
+  }
 
   const navigate = useCallback((target:View) => {
     setMobileMenuOpen(false)
@@ -532,7 +548,7 @@ export default function TestnetFirstApp() {
       ])
       const marketUnavailable = marketResult.status !== 'fulfilled' || !marketResult.value.ok
       const healthUnavailable = healthResult.status !== 'fulfilled' || !healthResult.value.ok
-      setConnectionOffline(marketUnavailable && healthUnavailable)
+      updateConnectionState(marketUnavailable && healthUnavailable ? 'offline' : 'online')
       if (marketResult.status === 'fulfilled' && marketResult.value.ok) {
         try {
           const payload = await marketResult.value.json() as Market[]
@@ -725,11 +741,11 @@ export default function TestnetFirstApp() {
     return () => window.removeEventListener('scroll',onScroll)
   },[mobileMenuOpen,notificationsOpen,marketPickerOpen,complianceOpen])
 
-  return <main className={`v26App ${view === 'dashboard' ? 'homeRoute' : 'workspaceRoute'} ${view === 'master-trade' ? 'masterTradeRoute' : ''}${connectionOffline ? ' backendOffline' : ''}`}>
-    {connectionOffline && <section className="v26OfflineNotice" role="status" aria-live="polite"><span><i/><b>Sunucu bağlantısı bekleniyor</b><small>Veriler güncellenemiyor. Bağlantı kurulduğunda otomatik olarak yeniden denenecek.</small></span><button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'KONTROL EDİLİYOR…' : 'YENİDEN DENE'}</button></section>}
+  return <main className={`v26App ${view === 'dashboard' ? 'homeRoute' : 'workspaceRoute'} ${view === 'master-trade' ? 'masterTradeRoute' : ''}${connectionState === 'offline' ? ' backendOffline' : ''}`}>
+    {showConnectionNotice && <section className={`v26OfflineNotice ${connectionState}`} role="status" aria-live="polite"><span><i/><b>{connectionState === 'offline' ? 'Sunucu bağlantısı bekleniyor' : connectionState === 'checking' ? 'Sunucu bağlantısı kontrol ediliyor' : 'Sunucu bağlantısı kuruldu'}</b><small>{connectionState === 'offline' ? 'Veriler güncellenemiyor. Bağlantı kurulduğunda otomatik olarak yeniden denenecek.' : connectionState === 'checking' ? 'Sunucu ve piyasa verileri kontrol ediliyor…' : 'Veriler güncellenmeye devam ediyor.'}</small></span>{connectionState !== 'online' && <button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'KONTROL EDİLİYOR…' : 'YENİDEN DENE'}</button>}</section>}
     <header className={`v26Header v26HomeHeader${headerHidden ? ' v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
       <div className="v26Brand"><span>X</span><div><b>PROTREBOT ELITE X</b><small>TESTNET ÖNCELİKLİ İŞLEM PLATFORMU</small></div></div>
-      <div className="v26HomeHeaderStatus" aria-label="Sistem durumu"><i className={connectionOffline ? 'pending' : health?.status === 'ok' ? 'ok' : 'pending'}/>{connectionOffline ? 'BAĞLANTI BEKLENİYOR' : 'ÇEVRİMİÇİ'}</div>
+      <div className="v26HomeHeaderStatus" aria-label="Sistem durumu"><i className={connectionState === 'online' && health?.status === 'ok' ? 'ok' : connectionState === 'offline' ? 'error' : 'pending'}/>{connectionState === 'offline' ? 'BAĞLANTI BEKLENİYOR' : connectionState === 'checking' ? 'KONTROL EDİLİYOR' : 'ÇEVRİMİÇİ'}</div>
       <div className="v26HeaderActions">
         <button className="v26Refresh" aria-label="Piyasa verisini yenile" title="Piyasa verisini yenile" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/></button>
         <div className="v26Notifications" ref={notificationRef}>
