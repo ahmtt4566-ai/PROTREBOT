@@ -5520,6 +5520,29 @@ body {
 #root > main.v26App > .v26Header.v26HomeHeader.v26HeaderHidden {
   transform: none;
 }
+
+/* True viewport-fixed header: no scroll position (not even the small initial
+   offset sticky leaves before it first "catches") can move the logo, nav,
+   notification bell or profile control, on any route or breakpoint. The app
+   reserves the header's own measured height (see --v26-header-height, set in
+   TestnetFirstApp.tsx) as top padding so content never starts underneath it.
+   masterTradeRoute hides this shared header entirely (see terminal-theme.css),
+   so it gets no reserved offset here. */
+#root > main.v26App > .v26Header.v26HomeHeader {
+  position: fixed !important;
+  left: 0;
+  right: 0;
+  top: 0;
+}
+#root > main.v26App:not(.masterTradeRoute) {
+  padding-top: var(--v26-header-height, 70px) !important;
+}
+/* The connection banner is a normal-flow sibling right after the header; once
+   scrolled it would otherwise stick at 10px from the real viewport top, i.e.
+   behind the now-fixed header. Push its sticky offset below the header too. */
+.v26OfflineNotice {
+  top: calc(var(--v26-header-height, 70px) + 10px);
+}
 @media (prefers-reduced-motion: reduce) {
   #root > main.v26App > .v26Header.v26HomeHeader {
     transition: none !important;
