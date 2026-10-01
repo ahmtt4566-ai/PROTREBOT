@@ -1203,3 +1203,191 @@
 	outline: 2px solid rgba(255, 138, 61, .55);
 	outline-offset: 2px;
 }
+
+/* Shared ProTreBot visual language: surfaces separate content; only controls
+   that need interaction feedback retain a visible outline. */
+.coinAnalysisCenter {
+	--terminal-bg: var(--bg);
+	--terminal-surface: var(--surface);
+	--terminal-surface-raised: var(--surface-hover);
+	--terminal-line: var(--line);
+	--terminal-muted: var(--text-muted);
+	--terminal-text: var(--text);
+	--terminal-cyan: var(--accent);
+	--terminal-amber: var(--accent);
+	--terminal-long: var(--long);
+	--terminal-short: var(--short);
+	font-family: var(--font-ui);
+	color: var(--text);
+}
+.coinAnalysisCenter :is(
+	.coinAnalysisHeader,
+	.coinAnalysisToolbar,
+	.marketPulse,
+	.featuredOpportunities,
+	.coinTablePanel,
+	.coinDetailPanel,
+	.topOpportunityGrid article,
+	.anomalyPanel,
+	.heatmapPanel,
+	.coinHistoryPanel,
+	.coinPaperPanel,
+	.analystWorkspace,
+	.analystCommandGroup,
+	.analystCoinSelector,
+	.analystResultWorkspace,
+	.analystAskBar
+) {
+	border: 0 !important;
+	border-radius: 0 !important;
+	background: var(--surface) !important;
+	background-image: none !important;
+	box-shadow: none !important;
+}
+.coinAnalysisCenter :is(
+	.coinAnalysisHeader,
+	.coinAnalysisToolbar,
+	.marketPulse,
+	.featuredOpportunities,
+	.coinTablePanel,
+	.coinDetailPanel,
+	.topOpportunityGrid article,
+	.anomalyPanel,
+	.heatmapPanel,
+	.coinHistoryPanel,
+	.coinPaperPanel,
+	.analystWorkspace,
+	.analystCommandGroup,
+	.analystCoinSelector,
+	.analystResultWorkspace,
+	.analystAskBar
+) > header,
+.coinAnalysisCenter :is(
+	.coinTableMeta,
+	.coinDetailTitle,
+	.whySignal,
+	.marketContextRow,
+	.coinToolsHeader,
+	.analystWorkspaceHeader,
+	.analystCommandGroup > header,
+	.analystCoinSelector > header,
+	.analystResultWorkspace > header
+) {
+	border-bottom: 0 !important;
+	border-top: 0 !important;
+}
+.coinAnalysisCenter :is(button, input, select) {
+	font-family: var(--font-ui);
+}
+.coinAnalysisCenter button {
+	border-color: transparent !important;
+}
+.coinAnalysisCenter :is(input, select, .analystSelectorToolbar label, .coinAnalysisToolbar > label:first-child) {
+	border: 1px solid var(--text-muted) !important;
+	background: var(--bg) !important;
+}
+.coinAnalysisCenter :is(input, select):focus-visible {
+	border-color: var(--focus) !important;
+}
+.coinAnalysisCenter :is(button, input, select):focus-visible {
+	outline: 2px solid var(--focus) !important;
+	outline-offset: 2px;
+}
+.coinAnalysisCenter :is(.selected, .selectedRow, .analystSelectorList > button.selected, .analystCommandItems button.active, .analystPromptChips button.active, .analystChips button.active) {
+	border: 1px solid var(--accent) !important;
+	background: var(--accent-soft) !important;
+}
+.coinAnalysisCenter :is(.positive, .long, .entryTone, .tpTone) { color: var(--long) !important; }
+.coinAnalysisCenter :is(.negative, .short, .stopTone) { color: var(--short) !important; }
+.coinAnalysisCenter :is(.neutral, .watch) { color: var(--watch) !important; }
+.coinAnalysisCenter :is(.positive, .negative, .neutral) { border-color: transparent !important; }
+.coinAnalysisCenter :is(h1, h2, h3, h4) { font-weight: 600 !important; }
+.coinAnalysisCenter :is(p, small, span, td, th, button, input, select) { font-weight: 400; }
+.coinAnalysisCenter :is(.coinAnalysisHeader span, .featuredOpportunities header span, .coinTableMeta span, .marketPulseLabel, .topOpportunityGrid header span, .anomalyPanel header span, .heatmapPanel header span, .coinToolsGrid header span, .analystEyebrow, .analystCommandGroup > header > span, .analystResultWorkspace > header span, .analystAskBar > div > span) {
+	color: var(--accent) !important;
+	font-size: var(--text-label);
+	letter-spacing: .04em;
+}
+.coinAnalysisCenter .analystWorkspace {
+	display: grid;
+	grid-template-columns: minmax(250px, .85fr) minmax(0, 1.15fr);
+	gap: 14px;
+	padding: 18px;
+}
+.coinAnalysisCenter .analystWorkspaceHeader,
+.coinAnalysisCenter .analystCommandGrid,
+.coinAnalysisCenter .analystAskBar { grid-column: 1 / -1; }
+.coinAnalysisCenter .analystCommandGrid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 10px;
+}
+.coinAnalysisCenter .analystCommandGroup {
+	padding: 0;
+	background: transparent !important;
+}
+.coinAnalysisCenter .analystCommandGroup > header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 0 0 8px;
+}
+.coinAnalysisCenter .analystCommandGroup > header > span {
+	width: auto !important;
+	height: auto !important;
+	border: 0 !important;
+	background: transparent !important;
+	color: var(--accent) !important;
+}
+.coinAnalysisCenter .analystCommandGroup > header small,
+.coinAnalysisCenter .analystCommandItems small,
+.coinAnalysisCenter .analystAskBar > div > small { display: none; }
+.coinAnalysisCenter .analystCommandItems {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 0;
+}
+.coinAnalysisCenter .analystCommandItems button,
+.coinAnalysisCenter .analystPromptChips button,
+.coinAnalysisCenter .analystChips button {
+	min-height: 0 !important;
+	padding: 8px 11px !important;
+	border: 0 !important;
+	border-radius: 999px !important;
+	background: var(--surface-hover) !important;
+	color: var(--text) !important;
+	text-align: center;
+	transition: background-color .15s ease, color .15s ease;
+}
+.coinAnalysisCenter .analystCommandItems button:hover,
+.coinAnalysisCenter .analystPromptChips button:hover,
+.coinAnalysisCenter .analystChips button:hover {
+	background: var(--surface-active) !important;
+	transform: none;
+}
+.coinAnalysisCenter .analystCommandItems button.active,
+.coinAnalysisCenter .analystPromptChips button.active,
+.coinAnalysisCenter .analystChips button.active {
+	background: var(--accent) !important;
+	color: var(--bg) !important;
+}
+.coinAnalysisCenter .analystCommandItems b { font-size: var(--text-body); font-weight: 500; }
+.coinAnalysisCenter .analystCoinSelector { grid-column: 1; }
+.coinAnalysisCenter .analystResultWorkspace { grid-column: 2; }
+.coinAnalysisCenter .analystSelectorList > button { background: var(--surface-hover) !important; }
+.coinAnalysisCenter .analystSelectorList > button:hover { background: var(--surface-active) !important; }
+.coinAnalysisCenter .analystWhyResult { border-left: 0 !important; background: var(--surface-hover) !important; }
+.coinAnalysisCenter .coinDetailPanel { border-top: 0 !important; }
+.coinAnalysisCenter .heatmapGrid button.positive { background: var(--long-soft) !important; }
+.coinAnalysisCenter .heatmapGrid button.negative { background: var(--short-soft) !important; }
+.coinAnalysisCenter .heatmapGrid button.neutral { background: var(--surface-hover) !important; }
+@media (max-width: 700px) {
+	.coinAnalysisCenter .analystWorkspace { grid-template-columns: 1fr; padding: 14px; }
+	.coinAnalysisCenter .analystWorkspaceHeader,
+	.coinAnalysisCenter .analystCommandGrid,
+	.coinAnalysisCenter .analystAskBar,
+	.coinAnalysisCenter .analystCoinSelector,
+	.coinAnalysisCenter .analystResultWorkspace { grid-column: 1; }
+	.coinAnalysisCenter .analystCommandGrid { grid-template-columns: 1fr; }
+}

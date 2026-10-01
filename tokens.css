@@ -1,0 +1,22 @@
+:root {
+  --bg: #0d0f0c;
+  --surface: #14170f;
+  --surface-hover: #1b1f15;
+  --surface-active: #222718;
+  --text: #e8eadf;
+  --text-muted: #8b917c;
+  --accent: #d9e66b;
+  --long: #77d39a;
+  --short: #e9857e;
+  --watch: #92998a;
+  --focus: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-hover: color-mix(in srgb, var(--accent) 20%, transparent);
+  --long-soft: color-mix(in srgb, var(--long) 14%, transparent);
+  --short-soft: color-mix(in srgb, var(--short) 14%, transparent);
+  --line: transparent;
+  --font-ui: 'Avenir Next', 'Segoe UI', sans-serif;
+  --text-heading: 1.25rem;
+  --text-body: .875rem;
+  --text-label: .6875rem;
+}
