@@ -8,7 +8,7 @@ function formatPrice(symbol:string,price:number) {
 }
 
 function TapeItems({data}:{data:LiveTickerData}) {
-  return <>{LIVE_MARKET_CONFIG.map(config => { const ticker = data[config.symbol]; return <span className={`tickerTapeItem ${ticker?.flash ? `isFlash-${ticker.flash}` : ''}`} key={config.symbol}><b>{config.displaySymbol}</b>{ticker ? <><strong aria-hidden="true">{formatPrice(config.symbol,ticker.price)}</strong><em className={ticker.changePercent >= 0 ? 'isPositive' : 'isNegative'}>{ticker.changePercent >= 0 ? '▲' : '▼'} {Math.abs(ticker.changePercent).toFixed(2)}%</em></> : <i className="tickerTapeSkeleton" aria-hidden="true"/>}</span> })}</>
+  return <>{LIVE_MARKET_CONFIG.map(config => { const ticker = data[config.symbol]; return <span className="tickerTapeItem" key={config.symbol}><b>{config.displaySymbol}</b>{ticker ? <><strong aria-hidden="true">{formatPrice(config.symbol,ticker.price)}</strong><em className={ticker.changePercent >= 0 ? 'isPositive' : 'isNegative'}>{ticker.changePercent >= 0 ? '▲' : '▼'} {Math.abs(ticker.changePercent).toFixed(2)}%</em></> : <i className="tickerTapeSkeleton" aria-hidden="true"/>}</span> })}</>
 }
 
 export default function TickerTape({data,status}:Props) {
