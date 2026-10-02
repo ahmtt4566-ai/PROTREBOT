@@ -25,11 +25,13 @@ from .v22_commercial import access_snapshot, authenticated_user
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analyst", tags=["Analyst credits"])
 
+ANALYSIS_COST = 10
+
 
 @dataclass(frozen=True)
 class CreditConfig:
     total: int = 100
-    cost: int = 1
+    cost: int = ANALYSIS_COST
     window_hours: int = 24
     cache_minutes: int = 15
     rate_limit: int = 30
@@ -38,7 +40,7 @@ class CreditConfig:
     def from_environment(cls) -> CreditConfig:
         config = cls(
             total=int(os.getenv("ANALYST_DAILY_CREDITS", "100")),
-            cost=int(os.getenv("ANALYST_COST", "1")),
+            cost=int(os.getenv("ANALYST_COST", str(ANALYSIS_COST))),
             window_hours=int(os.getenv("CREDIT_WINDOW_HOURS", "24")),
             cache_minutes=int(os.getenv("ANALYST_CACHE_MINUTES", "15")),
         )
@@ -144,6 +146,7 @@ class AnalystCredits:
         resets = window_start + self.config.window_hours * 3600 if window_start is not None else None
         return {
             "remaining": None if premium else remaining, "total": self.config.total,
+            "analysis_cost": self.config.cost,
             "resetsAt": datetime.fromtimestamp(resets, timezone.utc).isoformat() if resets is not None and not premium else None,
             "unlimited": premium,
         }
@@ -165,6 +168,18 @@ class AnalystCredits:
         async with self.store.transaction(user_id, self.config, now) as transaction:
             remaining, start = await self.account(transaction, user_id, now)
             return self.snapshot(remaining, start)
+
+    async def cached_analysis(self, user_id: str, symbol: str, timeframe: str) -> dict[str, Any] | None:
+        now = self.clock()
+        async with self.store.transaction(user_id, self.config, now) as transaction:
+            cached = await transaction.row(
+                "SELECT * FROM analyst_cache WHERE user_id=$1 AND symbol=$2 AND timeframe=$3",
+                user_id, symbol, timeframe,
+            )
+            now = self.clock()
+            if cached is None or not 0 <= now - cached["opened_at"] < self.config.cache_minutes * 60:
+                return None
+            return {"result": json.loads(cached["result"]), "opened_at": cached["opened_at"]}
 
     async def consume(self, user_id: str, premium: bool, symbol: str, timeframe: str, key: str, analyze: Callable[[], Awaitable[dict[str, Any]]]) -> tuple[dict[str, Any], int]:
         now = self.clock()

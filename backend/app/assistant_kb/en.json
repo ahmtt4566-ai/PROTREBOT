@@ -1,0 +1,233 @@
+[
+  {
+    "id": "api-connection",
+    "title": "API keys: save and verify Demo connections",
+    "keywords": ["api", "key", "connection", "save", "verify", "verification", "testnet", "demo"],
+    "content": "Home → AYARLAR (Settings), or mobile Menu → Bağlantılar (Connections), opens API & Connection Center. Enter only Demo/Testnet credentials in Demo API Key and Demo Secret Key, select SAVE SECURELY, then VERIFY DEMO CONNECTION to test and activate the saved connection. Saving alone does not verify the connection or grant ARM. For Demo trading, open Home → İŞLEM; RUN DEMO TEST here is a workflow label, not a separate button. Orders still require existing gates. These actions require premium access. LIVE fields on this page do not test, activate or arm LIVE; manage LIVE in Canlı İşlem/Canlı hazırlık (Live Trading/Live preparation).",
+    "code_sources": ["TestnetFirstApp.tsx", "api.ts", "backend/app/exchange_connections.py", "backend/app/premium_access.py"]
+  },
+  {
+    "id": "secret-safety",
+    "title": "API Secret safety",
+    "keywords": ["secret", "private", "key", "password", "token", "share", "security"],
+    "content": "Never share API Secrets, passwords or session tokens with anyone, the customer assistant or support messages. Enter a Secret only in the designated connection field; it is stored in the encrypted server vault and is not displayed back. If exposed, revoke the key at the exchange and create a replacement. Secret detection is pattern-based and cannot guarantee detection of every leak.",
+    "code_sources": ["TestnetFirstApp.tsx", "backend/app/exchange_connections.py", "backend/app/assistant_api.py"]
+  },
+  {
+    "id": "environments",
+    "title": "Demo/Testnet, LIVE and Paper",
+    "keywords": ["demo", "testnet", "live", "paper", "real", "money", "simulation"],
+    "content": "Demo/Testnet uses the exchange test environment and separate keys; LIVE uses a real Binance Futures account and real capital. Do not mix credentials across environments. Paper is an application simulation engine, not the exchange Demo/Testnet account; it is disabled in the current deployment configuration and is not offered as an available trading feature in the active menu. Demo results do not guarantee profit or equivalent LIVE results.",
+    "code_sources": ["TestnetFirstApp.tsx", "backend/app/binance_demo.py", "backend/app/v25_execution.py", "backend/app/main.py", "render.yaml"]
+  },
+  {
+    "id": "membership",
+    "title": "Register, verify email, sign in and reset passwords",
+    "keywords": ["membership", "register", "registration", "login", "sign", "email", "verification", "password", "forgot", "reset"],
+    "content": "Complete registration on the sign-in screen and accept the terms/privacy notice. Verify your email using the code or link sent to your address, then sign in. Verified membership is required; there is no guest access. If you forgot your password, submit your email using the password-reset option, set a new password from the reset link and sign in again. Email delivery depends on server email configuration.",
+    "code_sources": ["main.tsx", "AuthGate.tsx", "backend/app/v22_commercial.py", "backend/app/main.py"]
+  },
+  {
+    "id": "plans",
+    "title": "Plans, trial and Master Mode",
+    "keywords": ["plan", "premium", "price", "cost", "trial", "master", "subscription"],
+    "content": "Abonelik (Subscription) → VIEW PLANS opens Plans & Pricing. {MASTER_PLAN_NAME} costs {MASTER_MONTHLY_PRICE} USD per month. The trial lasts {TRIAL_DAYS} days and requires a payment method; unless cancelled, it converts to a paid monthly subscription. Master Mode is the immediately paid plan option. Access depends on backend-verified subscription status, not simply clicking checkout.",
+    "code_sources": ["TestnetFirstApp.tsx", "SubscriptionCenter.tsx", "backend/app/subscription_core.py", "backend/app/v22_commercial.py"]
+  },
+  {
+    "id": "billing",
+    "title": "Billing: cancellation and Stripe portal",
+    "keywords": ["billing", "stripe", "portal", "cancel", "cancellation", "subscription", "invoice", "payment", "card"],
+    "content": "Home or mobile Menu → Abonelik (Subscription) opens Billing & Subscription. MANAGE BILLING PORTAL opens payment management for the linked Stripe customer; Stripe configuration and a linked customer are required. CANCEL AT PERIOD END schedules cancellation while access continues through that period. An active trial also offers CANCEL NOW. The assistant cannot change or cancel subscriptions. No refund guarantee is defined in code; billing history currently shows an empty-state component.",
+    "code_sources": ["SubscriptionCenter.tsx", "backend/app/subscription_core.py", "backend/app/v22_commercial.py"]
+  },
+  {
+    "id": "analyst",
+    "title": "Analyst credits",
+    "keywords": ["credit", "credits", "budget", "cost", "reset", "window", "cache", "refund", "analysis"],
+    "content": "Your personal budget is {ANALYST_BUDGET} credits; a fresh analysis costs {ANALYSIS_COST} credits. The {CREDIT_WINDOW_HOURS}-hour window starts with the first spend, not at midnight. After expiry, the next request renews the budget; unused credits do not roll over. A saved result for the same user, symbol and timeframe is free within {ANALYST_CACHE_MINUTES} minutes. A failed analysis refunds its cost once; the same idempotency key cannot double-charge or double-refund. Premium members do not spend credits. Master Trade does not spend Analyst credits. A fresh assistant analysis requires separate explicit user approval.",
+    "code_sources": ["backend/app/analyst_credits.py", "CoinAnalysisCenter.tsx", "analyst-credit-ui.tsx", "backend/app/assistant_tools.py"]
+  },
+  {
+    "id": "premium",
+    "title": "Free members versus premium",
+    "keywords": ["free", "premium", "locked", "blur", "details", "entry", "reasons", "access"],
+    "content": "Verified free members can view Master Trade read-only and use Analyst within their credit budget. Order forms, account connection, ARM, dry-run and starting LIVE Auto Trade require premium access. Entry/SL/TP levels, Why this decision, Long/Short case details, Trigger Monitor and top Scanner opportunity details are premium-locked. Real private details are filtered by the backend, not merely blurred with CSS. Premium can unlock details/execution access but does not bypass connection, risk, Consent, ARM or protection gates. Assistant summaries omit detailed trade levels/reasons even for premium members.",
+    "code_sources": ["backend/app/premium_access.py", "backend/app/v22_commercial.py", "MasterTrade.tsx", "premium-access.tsx", "backend/app/assistant_tools.py"]
+  },
+  {
+    "id": "master-trade",
+    "title": "Where are the Master Trade tabs?",
+    "keywords": ["master", "trade", "analysis", "live", "positions", "connection", "tabs"],
+    "content": "Home → MASTER TRADE opens /master-trade. Analiz (Analysis) shows decision/scores/MTF and trigger conditions; Canlı İşlem (Live Trading) shows preparation, account and safety gates; Pozisyonlar (Positions) shows open positions, orders, history and performance; Bağlantı (Connection) shows connection/status and risk information. Disconnected or stale account data is not current evidence. Final Decision is not order permission; LIVE execution has separate access and safety requirements.",
+    "code_sources": ["TestnetFirstApp.tsx", "MasterTrade.tsx", "frontend/src/LiveTradingPanel.tsx", "masterTradeDecision.ts"]
+  },
+  {
+    "id": "analyst-scanner",
+    "title": "Where are Analyst and Scanner?",
+    "keywords": ["analyst", "scanner", "scan", "coin", "symbol", "opportunity", "filter"],
+    "content": "Home → ANALİST (Analyst) opens the coin selector, filters, scanner snapshot and selected-symbol analysis; mobile bottom navigation includes Analist. Home → TARAMA or mobile Menu → Tarama (Scanner) opens market candidates and signals. A candidate is not an order and scores do not guarantee profit. Fresh Analyst analysis uses credits; do not treat the general Scanner or LIVE Auto Trade scanner as the Analyst purchase flow.",
+    "code_sources": ["TestnetFirstApp.tsx", "CoinAnalysisCenter.tsx", "ScannerCenter.tsx", "backend/app/analyst_credits.py"]
+  },
+  {
+    "id": "workspaces",
+    "title": "Where are Risk, Performance, Operations and Settings?",
+    "keywords": ["risk", "performance", "operations", "ops", "settings", "menu", "trading"],
+    "content": "Home → İŞLEM (Trading) opens the Demo trading desk. RİSK opens the Demo Risk Vault with limits, sizing and protection settings. PERFORMANS shows Demo trade results and PnL/risk metrics, not consolidated performance for every LIVE account. OPERASYON shows Demo automation decisions, server/stream status and persistent evidence records; it is not a support service. AYARLAR opens API & Connection Center; mobile Menu → Bağlantılar is the equivalent path. Mobile bottom navigation includes Trading and Performance; other areas are under Menu. CANLI opens the separate real Futures preparation screen.",
+    "code_sources": ["TestnetFirstApp.tsx", "BinanceDemo.tsx", "CloudOpsCenter.tsx", "frontend/src/LiveTradingPanel.tsx"]
+  },
+  {
+    "id": "gates",
+    "title": "Connection → Consent → ARM → execution safety",
+    "keywords": ["connection", "consent", "arm", "locked", "permission", "safety", "duration", "session", "automation", "auto"],
+    "content": "Save/verify the correct environment connection first; LIVE risk policy acknowledgement, Consent and ARM are separate gates. Premium does not bypass them. Demo ARM lasts {DEMO_ARM_MINUTES} minutes; LIVE Consent {LIVE_CONSENT_HOURS} hours; LIVE ARM {LIVE_ARM_HOURS} hours; the supervised LIVE Auto Trade session {AUTO_SESSION_MINUTES} minutes. They are separate timers, not interchangeable permissions. Consent is bound to user/account/key fingerprint scope; renewed Consent disables ARM and Auto Trade and does not implicitly acknowledge the risk policy. Expired Consent stops new entries; its {CONSENT_GRACE_MINUTES}-minute renewal grace is not permission to enter new trades. Risk, Exposure, Protection, One-way and reconciliation gates must also pass. The assistant only explains; it cannot grant permissions or start trading.",
+    "code_sources": ["backend/app/binance_demo.py", "backend/app/v25_execution.py", "backend/app/execution_core.py", "frontend/src/LiveTradingPanel.tsx"]
+  },
+  {
+    "id": "final-decision",
+    "title": "Final Decision",
+    "keywords": ["final", "decision", "result", "score"],
+    "content": "Final Decision is an analysis score/decision view combining components such as Confidence, liquidity, volatility, MTF, freshness and Risk/Reward. Interpret screen and backend scores in their own context. It is not order permission, an automatic trading command or a profit guarantee.",
+    "code_sources": ["masterTradeDecision.ts", "MasterTrade.tsx", "backend/app/main.py"]
+  },
+  {
+    "id": "confidence",
+    "title": "Confidence",
+    "keywords": ["confidence", "probability", "win", "score"],
+    "content": "Confidence is the analysis engine's signal confidence/alignment score, not a verified probability of winning or a guaranteed success rate. Read it with data freshness and other analysis components.",
+    "code_sources": ["backend/app/analysis.py", "backend/app/main.py", "masterTradeDecision.ts"]
+  },
+  {
+    "id": "opportunity",
+    "title": "Opportunity Score",
+    "keywords": ["opportunity", "score", "candidate", "ranking"],
+    "content": "Opportunity Score ranks potential opportunities. Scanner combines Confidence, MTF alignment, volume, breakout and trap quality; the Master Trade view uses its own decision components. Scores from different screens are not necessarily the same formula or permission to trade.",
+    "code_sources": ["backend/app/main.py", "masterTradeDecision.ts", "ScannerCenter.tsx"]
+  },
+  {
+    "id": "smart-score",
+    "title": "Smart Score",
+    "keywords": ["smart", "score", "ranking", "analyst"],
+    "content": "Smart Score ranks Analyst snapshot results using Confidence, MTF, trend alignment, RSI, volume, Risk/Reward and volatility. It is not the same measurement as Final Decision or Opportunity Score and is not a verified winning probability.",
+    "code_sources": ["backend/app/main.py", "CoinAnalysisCenter.tsx"]
+  },
+  {
+    "id": "mtf",
+    "title": "MTF: Multi-Timeframe",
+    "keywords": ["mtf", "timeframe", "alignment", "trend", "conflict"],
+    "content": "MTF compares directional/trend alignment across timeframes. Alignment or conflict adds analysis context; missing timeframe data must not be treated as confirmed alignment. It is not order permission by itself.",
+    "code_sources": ["masterTradeDecision.ts", "backend/app/main.py"]
+  },
+  {
+    "id": "trigger",
+    "title": "Trigger Monitor",
+    "keywords": ["trigger", "monitor", "condition", "waiting", "armed"],
+    "content": "Trigger Monitor tracks analysis lifecycle conditions including trend, momentum, volume, breakout/breakdown, MTF, Risk/Reward and freshness. Analysis states such as WAITING/ARMED/TRIGGERED/CONFIRMED are not LIVE ARM permission and do not send orders. Details are premium-locked.",
+    "code_sources": ["masterTradeDecision.ts", "MasterTrade.tsx"]
+  },
+  {
+    "id": "invalidation",
+    "title": "Invalidation",
+    "keywords": ["invalidation", "invalid", "scenario", "cancel", "deterioration"],
+    "content": "Invalidation identifies conditions that invalidate an analysis scenario, such as support/resistance loss, MTF conflict, volume deterioration or stale data. An invalid analysis scenario does not mean an exchange position was automatically closed.",
+    "code_sources": ["masterTradeDecision.ts", "MasterTrade.tsx"]
+  },
+  {
+    "id": "risk-reward",
+    "title": "Risk/Reward",
+    "keywords": ["risk", "reward", "rr", "r/r", "ratio", "return"],
+    "content": "Risk/Reward compares target distance to stop distance in the analysis. It is not realized return, win probability or a guaranteed result after fees/slippage. Private trade levels and this detail are filtered from free-member backend responses.",
+    "code_sources": ["backend/app/analysis.py", "backend/app/main.py", "backend/app/premium_access.py"]
+  },
+  {
+    "id": "directions",
+    "title": "LONG / SHORT",
+    "keywords": ["long", "short", "direction", "buy", "sell"],
+    "content": "LONG denotes a bullish analysis/position direction; SHORT denotes a bearish direction. Seeing a direction is not a buy/sell instruction or evidence that an order was opened. The user makes the decision; profit is not guaranteed and capital can be lost.",
+    "code_sources": ["backend/app/analysis.py", "MasterTrade.tsx", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "levels",
+    "title": "Entry / SL / TP",
+    "keywords": ["entry", "sl", "tp", "stop", "loss", "take", "profit", "target"],
+    "content": "Entry is the analysis/plan entry level; SL is the stop-loss level and TP denotes profit-taking targets. An analysis level does not prove that an exchange order exists or works. Entry/SL/TP details are premium-locked; actual protection requires backend verification.",
+    "code_sources": ["backend/app/analysis.py", "MasterTrade.tsx", "backend/app/v25_execution.py", "backend/app/premium_access.py"]
+  },
+  {
+    "id": "locked",
+    "title": "LOCKED",
+    "keywords": ["locked", "lock", "blocked", "gate"],
+    "content": "LOCKED means the relevant action/detail is closed by access or safety gates. A premium lock is not the same as a connection/Consent/ARM/risk lock. Order permission is withheld until required conditions are verified.",
+    "code_sources": ["frontend/src/LiveTradingPanel.tsx", "backend/app/v25_execution.py", "backend/app/premium_access.py"]
+  },
+  {
+    "id": "arm",
+    "title": "ARM / ARMED",
+    "keywords": ["arm", "armed", "permission", "authorization", "duration"],
+    "content": "ARM is a time-limited execution authorization gate, separate for Demo and LIVE. Demo ARM lasts {DEMO_ARM_MINUTES} minutes and LIVE ARM {LIVE_ARM_HOURS} hours. ARMED alone neither opens an order nor bypasses other gates. ARMED in Trigger Monitor is an analysis state, not execution authorization.",
+    "code_sources": ["backend/app/binance_demo.py", "backend/app/v25_execution.py", "masterTradeDecision.ts"]
+  },
+  {
+    "id": "consent",
+    "title": "Consent",
+    "keywords": ["consent", "acknowledgement", "risk", "permission", "fingerprint", "duration"],
+    "content": "Consent is the user's explicit acceptance of LIVE risk. The backend verifies its {LIVE_CONSENT_HOURS}-hour expiry and user/account/key fingerprint scope. Consent is not ARM or risk-policy acknowledgement. Renewed Consent disables ARM and Auto Trade; the assistant cannot grant it.",
+    "code_sources": ["backend/app/v25_execution.py", "frontend/src/LiveTradingPanel.tsx"]
+  },
+  {
+    "id": "dry-run",
+    "title": "Dry-run",
+    "keywords": ["dry", "run", "dry-run", "review", "preview", "order"],
+    "content": "Dry-run checks quantity/direction/SL/TP and balance in the form, then uses Binance's test-order endpoint to validate the signature and order schema without creating a real order. It does not mean all LIVE entry gates passed, protection orders were installed or a later order can be opened. It requires premium access.",
+    "code_sources": ["backend/app/v25_execution.py", "frontend/src/LiveTradingPanel.tsx"]
+  },
+  {
+    "id": "scanner-candidate",
+    "title": "Scanner / Candidate",
+    "keywords": ["scanner", "candidate", "scan", "market", "automation"],
+    "content": "Scanner scans markets; a Candidate is a symbol/setup selected for evaluation. A candidate does not prove an order was opened or all risk gates passed. The general Scanner screen, Demo automation scanner and LIVE Auto Trade scanner are different contexts.",
+    "code_sources": ["ScannerCenter.tsx", "backend/app/main.py", "backend/app/v21_demo.py", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "exposure",
+    "title": "Exposure",
+    "keywords": ["exposure", "notional", "margin", "limit"],
+    "content": "Exposure is positions' total nominal market exposure, not the deposited margin. Existing and candidate trade exposure are checked against the risk policy's total exposure limit. The assistant does not guess account-specific limits from help text.",
+    "code_sources": ["backend/app/execution_core.py", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "protection",
+    "title": "Protection",
+    "keywords": ["protection", "stop", "loss", "working", "verified"],
+    "content": "Protection is the backend's matching of exchange stop/protection orders to a position. An analysis SL is not sufficient evidence. Stale, ambiguous or failed data cannot verify protection; check the Positions screen. The assistant reports only backend-verified results and known data age; verified=false must not be described as working.",
+    "code_sources": ["backend/app/v25_execution.py", "backend/app/assistant_tools.py"]
+  },
+  {
+    "id": "reconciliation",
+    "title": "Reconciliation",
+    "keywords": ["reconciliation", "reconcile", "sync", "exchange", "position"],
+    "content": "Reconciliation compares actual exchange positions/orders/protection with the application's tracking records. Missing or conflicting evidence is not considered safe; unresolved/recovery conditions can lock new entries. The assistant cannot start reconciliation or protection repair.",
+    "code_sources": ["backend/app/v25_execution.py"]
+  },
+  {
+    "id": "account-mode",
+    "title": "One-way / Hedge",
+    "keywords": ["one", "way", "one-way", "hedge", "mode", "account", "direction"],
+    "content": "One-way holds a single net position direction per symbol; Hedge can hold separate LONG and SHORT sides. The current LIVE entry gate requires One-way; Hedge does not satisfy it. Premium does not bypass the account-mode requirement; the assistant cannot change modes.",
+    "code_sources": ["backend/app/execution_core.py", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "fingerprint",
+    "title": "Fingerprint",
+    "keywords": ["fingerprint", "key", "identity", "match", "consent"],
+    "content": "Fingerprint is a hash-based identifier derived from the API key, not its Secret. It checks whether Consent and account/session scope refer to the same key. A fingerprint alone does not prove connection, ARM or protection readiness.",
+    "code_sources": ["backend/app/execution_core.py", "backend/app/exchange_connections.py", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "risk-warning",
+    "title": "Risk warning",
+    "keywords": ["risk", "warning", "guarantee", "profit", "capital", "loss", "advice"],
+    "content": "Analysis and scores are not investment advice or order permission. Profit is not guaranteed; capital can be lost. Demo history, high Confidence and premium membership do not remove risk. The final trading decision belongs to the user.",
+    "code_sources": ["TestnetFirstApp.tsx", "backend/app/assistant_prompt.py", "MasterTrade.tsx"]
+  }
+]

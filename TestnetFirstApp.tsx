@@ -5,6 +5,7 @@ import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
 import BackButton from './BackButton'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 import ScannerCenter from './ScannerCenter'
+import AssistantChat from './AssistantChat'
 
 function BinanceDemoLoadRecovery() {
   useEffect(() => {
@@ -924,5 +925,6 @@ export default function TestnetFirstApp() {
         </div>}
       </aside>
     </div>}
+    <AssistantChat pageContext={view}/>
   </main>
 }

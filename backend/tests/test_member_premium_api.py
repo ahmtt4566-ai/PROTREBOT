@@ -71,15 +71,25 @@ class MemberPremiumApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 401)
 
     async def test_http_credits_are_per_member_and_premium_is_unlimited(self):
+        response = await self.client.get("/api/analyst/credits", headers=self.headers("a"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total"], 100)
+        self.assertEqual(response.json()["analysis_cost"], 10)
         body = {"symbol": "BTCUSDT", "timeframe": "15m", "idempotency_key": "request-000000001"}
         response = await self.client.post("/api/analyst/consume", json=body, headers=self.headers("a"))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["remaining"], 99)
+        self.assertEqual(response.json()["remaining"], 90)
+        self.assertEqual(response.json()["analysis_cost"], 10)
         self.assertEqual(response.json()["result"]["entry"], 987654.321)
         response = await self.client.get("/api/analyst/credits", headers=self.headers("b"))
         self.assertEqual(response.json()["remaining"], 100)
         response = await self.client.post("/api/analyst/consume", json=body, headers=self.headers("premium"))
         self.assertTrue(response.json()["unlimited"])
+        self.assertIsNone(response.json()["remaining"])
+        self.assertEqual(response.json()["analysis_cost"], 10)
+        response = await self.client.get("/api/analyst/credits", headers=self.headers("premium"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["analysis_cost"], 10)
         self.assertIsNone(response.json()["remaining"])
 
     async def test_free_member_cannot_call_entry_endpoint_even_without_valid_body(self):
@@ -108,7 +118,7 @@ class MemberPremiumApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_existing_thirty_minute_timeframe_can_be_purchased(self):
         response = await self.client.post("/api/analyst/consume", json={"symbol": "BTCUSDT", "timeframe": "30m", "idempotency_key": "request-000000030"}, headers=self.headers("a"))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["remaining"], 99)
+        self.assertEqual(response.json()["remaining"], 90)
 
     def test_entry_routes_are_guarded_and_read_routes_are_not(self):
         for path in ("/api/v25/order", "/api/v25/order/test", "/api/v25/arm", "/api/v25/auto/start", "/api/exchange-connections/activate", "/api/binance-demo/order", "/api/paper/open", "/api/grid/engine/start"):

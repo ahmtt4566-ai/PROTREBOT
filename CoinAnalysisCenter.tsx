@@ -269,7 +269,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
         <div>
           <span className="analystEyebrow">{analystCopy.eyebrow}</span>
           <h2>{analystCopy.title}</h2>
-          <p>{analystCopy.description}</p>
+          <p>{analystCopy.description}{!premium && credits.budget && !credits.budget.unlimited && <> {analystCopy.analysisCost(credits.budget.analysis_cost)}</>}</p>
         </div>
         <div className="analystHeaderControls">
           <AnalystCreditBadge budget={credits.budget} now={credits.now}/>

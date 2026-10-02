@@ -40,6 +40,58 @@ services:
         value: ProTreBot
       - key: PROTREBOT_EXPOSE_DEV_TOKENS
         value: "false"
+      - key: ASSISTANT_ENABLED
+        value: "true"
+      - key: ASSISTANT_MODEL
+        value: claude-haiku-4-5-20251001
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ASSISTANT_MAX_INPUT_CHARS
+        value: "500"
+      - key: ASSISTANT_HISTORY_MESSAGES
+        value: "4"
+      - key: ASSISTANT_HISTORY_MESSAGE_MAX_CHARS
+        value: "2000"
+      - key: ASSISTANT_PAGE_CONTEXT_MAX_CHARS
+        value: "300"
+      - key: ASSISTANT_REQUEST_TIMEOUT_SECONDS
+        value: "30"
+      - key: ASSISTANT_PROTECTION_STALE_SECONDS
+        value: "30"
+      - key: ASSISTANT_PROACTIVE_ENABLED
+        value: "true"
+      - key: ASSISTANT_PROACTIVE_INACTIVE_DAYS
+        value: "7"
+      - key: ASSISTANT_PROACTIVE_COOLDOWN_HOURS
+        value: "24"
+      - key: ASSISTANT_PROACTIVE_POLL_SECONDS
+        value: "300"
+      - key: ASSISTANT_SECRET_MIN_ALPHANUMERIC_CHARS
+        value: "40"
+      - key: ASSISTANT_BUDGET_WARNING_FRACTION
+        value: "0.8"
+      - key: ASSISTANT_PER_MINUTE_LIMIT
+        value: "6"
+      - key: ASSISTANT_DAILY_LIMIT
+        value: "20"
+      - key: ASSISTANT_MONTHLY_BUDGET_USD
+        value: "50"
+      - key: ASSISTANT_MAX_OUTPUT_TOKENS
+        value: "500"
+      - key: ASSISTANT_MAX_LLM_CALLS_PER_MESSAGE
+        value: "3"
+      - key: ASSISTANT_MAX_TOTAL_INPUT_TOKENS_PER_MESSAGE
+        value: "12000"
+      - key: ASSISTANT_MAX_TOTAL_OUTPUT_TOKENS_PER_MESSAGE
+        value: "1500"
+      - key: ASSISTANT_CACHE_WRITE_PRICE_USD_PER_MILLION
+        value: "1.25"
+      - key: ASSISTANT_CACHE_READ_PRICE_USD_PER_MILLION
+        value: "0.10"
+      - key: ASSISTANT_INPUT_PRICE_USD_PER_MILLION
+        value: "1"
+      - key: ASSISTANT_OUTPUT_PRICE_USD_PER_MILLION
+        value: "5"
       - key: PROTREBOT_DATA_DIR
         value: /tmp/protrebot-data
       - key: PROTREBOT_EXECUTION_MODE

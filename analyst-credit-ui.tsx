@@ -2,15 +2,21 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { LockKeyhole } from 'lucide-react'
 import { API_BASE } from './api'
 import { useMemberAccess } from './premium-access'
+import { analystCopy } from './ui-copy'
 import './analyst-credit-ui.css'
 
-export type AnalystBudget = {remaining: number | null; total: number; resetsAt: string | null; unlimited: boolean}
+export type AnalystBudget = {remaining: number | null; total: number; analysis_cost: number; resetsAt: string | null; unlimited: boolean}
 export type AnalysisPurchase<T> = AnalystBudget & {result: T; cached: boolean; cacheExpiresAt: string}
 
 function validBudget(payload: AnalystBudget): boolean {
   return Number.isInteger(payload.total) && payload.total > 0
+    && Number.isInteger(payload.analysis_cost) && payload.analysis_cost > 0 && payload.analysis_cost <= payload.total
     && (payload.unlimited === true ? payload.remaining === null : Number.isInteger(payload.remaining) && payload.remaining !== null && payload.remaining >= 0 && payload.remaining <= payload.total)
     && (payload.resetsAt === null || typeof payload.resetsAt === 'string' && Number.isFinite(Date.parse(payload.resetsAt)))
+}
+
+function insufficientCredits(budget: AnalystBudget | null): boolean {
+  return budget !== null && !budget.unlimited && budget.remaining !== null && budget.remaining < budget.analysis_cost
 }
 
 export function useAnalystCredits() {
@@ -74,7 +80,7 @@ export function useAnalystCredits() {
     setError('')
     return payload
   }
-  return {budget, error, now, refresh, purchase, exhausted: !premium && budget?.remaining === 0}
+  return {budget, error, now, refresh, purchase, exhausted: !premium && insufficientCredits(budget)}
 }
 
 export function renewalText(resetsAt: string | null, now: number): string {
@@ -87,7 +93,7 @@ export function AnalystCreditBadge({budget, now}: {budget: AnalystBudget | null;
   const {premium, ready} = useMemberAccess()
   if (premium || !ready) return null
   if (budget?.unlimited) return <div className="analystCreditBadge" role="status"><strong>Kredi yükleniyor</strong></div>
-  return <div className={`analystCreditBadge${budget?.remaining === 0 ? ' creditEmpty' : budget?.remaining !== null && budget?.remaining !== undefined && budget.remaining <= 10 ? ' creditLow' : ''}`} role="status">
+  return <div className={`analystCreditBadge${insufficientCredits(budget) ? ' creditEmpty' : budget?.remaining !== null && budget?.remaining !== undefined && budget.remaining <= budget.analysis_cost ? ' creditLow' : ''}`} role="status">
     <strong>{budget ? `Kredi ${budget.remaining}/${budget.total}` : 'Kredi yükleniyor'}</strong>
     {budget && <small>{budget.resetsAt ? `Yenilenme: ${renewalText(budget.resetsAt, now)}` : renewalText(null, now)}</small>}
   </div>
@@ -96,6 +102,6 @@ export function AnalystCreditBadge({budget, now}: {budget: AnalystBudget | null;
 export function AnalystCreditsExhausted({budget, now}: {budget: AnalystBudget; now: number}) {
   return <section className="analystCreditExhausted" role="status">
     <div className="analystCreditPreview" aria-hidden="true"><span/><span/><span/></div>
-    <div className="analystCreditEmptyCard"><LockKeyhole aria-hidden="true"/><h3>Krediler {renewalText(budget.resetsAt, now)} sonra yenilenir</h3><p>Analyst sayfası açık kalır. Premium ile sınırsız analiz açabilirsiniz.</p><a className="premiumPrimary" href="/pricing">Premium'a geç</a></div>
+    <div className="analystCreditEmptyCard"><LockKeyhole aria-hidden="true"/><h3>Krediler {renewalText(budget.resetsAt, now)} sonra yenilenir</h3><p>{analystCopy.analysisCost(budget.analysis_cost)} Analyst sayfası açık kalır. Premium ile sınırsız analiz açabilirsiniz.</p><a className="premiumPrimary" href="/pricing">Premium'a geç</a></div>
   </section>
 }

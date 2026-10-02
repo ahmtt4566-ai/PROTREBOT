@@ -845,6 +845,29 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
         self.assertIsNone(state["policy_ack_digest"])
 
+    def test_named_consent_duration_preserves_existing_expiry_and_resets(self):
+        now = 1_800_000_000
+        state = initial_state()
+        state["armed_until"] = now + v25_execution.LIVE_ARM_SECONDS
+        state["auto"].update({"enabled": True, "session_until": now + v25_execution.LIVE_AUTO_SESSION_SECONDS})
+        digest = policy_digest(state["policy"])
+        state["policy_ack_digest"] = digest
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None)))
+        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
+            patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
+            patch.object(v25_execution, "persist_state"), \
+            patch.object(v25_execution.time, "time", return_value=now):
+            asyncio.run(v25_execution.v25_web_consent(
+                request, v25_execution.Confirmation(confirmation="CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM"),
+            ))
+        self.assertEqual(v25_execution.LIVE_CONSENT_SECONDS, 24 * 60 * 60)
+        self.assertEqual(v25_execution.LIVE_ARM_SECONDS, 24 * 60 * 60)
+        self.assertEqual(state["web_consent"]["expires_at_epoch"], now + 24 * 60 * 60)
+        self.assertEqual(state["policy_ack_digest"], digest)
+        self.assertEqual(state["armed_until"], 0)
+        self.assertFalse(state["auto"]["enabled"])
+        self.assertEqual(state["auto"]["session_until"], 0)
+
     def test_policy_change_clears_policy_acknowledgement(self):
         state = initial_state()
         state["policy_ack_digest"] = policy_digest(state["policy"])

@@ -2,7 +2,15 @@ import { useEffect } from 'react'
 
 const editableTarget = (target: EventTarget | null): boolean => {
   const element = target instanceof HTMLElement ? target : null
-  return Boolean(element?.matches('input, textarea, select, option, [contenteditable="true"]') || element?.closest('input, textarea, select, option, [contenteditable="true"]'))
+  return Boolean(element?.matches('input, textarea, select, option, [contenteditable="true"]') || element?.closest('input, textarea, select, option, [contenteditable="true"], [data-assistant-chat]'))
+}
+
+const assistantSelection = (): boolean => {
+  const selection = window.getSelection()
+  return Boolean(selection && !selection.isCollapsed && [selection.anchorNode, selection.focusNode].every(node => {
+    const element = node instanceof Element ? node : node?.parentElement
+    return element?.closest('[data-assistant-chat]')
+  }))
 }
 
 export default function CopyProtection() {
@@ -14,10 +22,10 @@ export default function CopyProtection() {
       if (!editableTarget(event.target)) event.preventDefault()
     }
     const onCopyOrCut = (event: ClipboardEvent) => {
-      if (!editableTarget(event.target)) event.preventDefault()
+      if (!editableTarget(event.target) && !assistantSelection()) event.preventDefault()
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (editableTarget(event.target)) return
+      if (editableTarget(event.target) || assistantSelection()) return
       if ((event.ctrlKey || event.metaKey) && ['a', 'c', 'x'].includes(event.key.toLowerCase())) event.preventDefault()
     }
     document.addEventListener('contextmenu', onContextMenu)

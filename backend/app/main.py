@@ -23,6 +23,7 @@ from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field
 from .analysis import analyze
 from .analyst_credits import router as analyst_credits_router
+from .assistant_api import router as assistant_router, shutdown_assistant
 from .premium_access import public_projection, requires_premium
 from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .exchange_connections import (
@@ -1181,6 +1182,7 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(persist_paper_snapshot(app), timeout=3)
         except Exception:
             pass
+    await shutdown_assistant(app)
     if app.state.db_pool is not None:
         await app.state.db_pool.close()
     if app.state.redis_client is not None:
@@ -1318,7 +1320,7 @@ async def owner_preview_gate(request, call_next):
         tasks = pending.pop(user_id, []) if user_id and isinstance(pending, dict) else []
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-    if protected_member_request and request.method == "GET" and not request.state.premium and response.status_code == 200 and "application/json" in response.headers.get("content-type", "") and not request.url.path.startswith("/api/analyst/"):
+    if protected_member_request and request.method == "GET" and not request.state.premium and response.status_code == 200 and "application/json" in response.headers.get("content-type", "") and not request.url.path.startswith("/api/analyst/") and request.url.path not in {"/api/assistant/usage", "/api/assistant/proactive/preferences"}:
         chunks = [chunk async for chunk in response.body_iterator]
         body = b"".join(chunk.encode() if isinstance(chunk, str) else chunk for chunk in chunks)
         headers = {key: value for key, value in response.headers.items() if key not in {"content-length", "content-type", "content-encoding"}}
@@ -1341,6 +1343,7 @@ app.include_router(v25_execution_router)
 app.include_router(v27_cloud_router)
 app.include_router(exchange_connections_router)
 app.include_router(analyst_credits_router)
+app.include_router(assistant_router)
 
 
 async def analyst_analysis(symbol: str, timeframe: str) -> dict:

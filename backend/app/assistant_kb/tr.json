@@ -1,0 +1,233 @@
+[
+  {
+    "id": "api-connection",
+    "title": "API anahtarı: Demo kaydetme ve doğrulama",
+    "keywords": ["api", "anahtar", "bağlantı", "kaydet", "doğrula", "doğrulama", "testnet", "demo"],
+    "content": "Ana sayfa → AYARLAR; mobil Menü → Bağlantılar, API & Connection Center ekranını açar. Demo API Key ve Demo Secret Key alanlarına yalnız Demo/Testnet anahtarlarını gir, SAVE SECURELY ile kaydet, ardından VERIFY DEMO CONNECTION ile kayıtlı bağlantıyı test edip etkinleştir. Kaydetmek tek başına bağlantıyı doğrulamaz veya ARM açmaz. Demo işlemleri için ana sayfa → İŞLEM ekranını aç; RUN DEMO TEST burada ayrı bir düğme değil, akış etiketidir. Emir için mevcut kapılar gerekir. Bu işlemler premium yetkiye tabidir. Bu ekrandaki LIVE alanları LIVE bağlantısını test etmez, etkinleştirmez veya ARM vermez; LIVE yönetimi Canlı İşlem/Canlı hazırlık ekranındadır.",
+    "code_sources": ["TestnetFirstApp.tsx", "api.ts", "backend/app/exchange_connections.py", "backend/app/premium_access.py"]
+  },
+  {
+    "id": "secret-safety",
+    "title": "API Secret güvenliği",
+    "keywords": ["secret", "gizli", "anahtar", "parola", "token", "paylaş", "güvenlik"],
+    "content": "API Secret, parola ve oturum token'ını kimseyle, müşteri asistanıyla veya destek mesajıyla paylaşma. Secret yalnız ilgili bağlantı ekranındaki gizli alana girilir; şifreli sunucu kasasında saklanır ve geri görüntülenmez. Yanlışlıkla paylaştıysan borsada anahtarı iptal edip yenisini oluşturmanı öneririz. Secret tespiti desen tabanlıdır; tüm sızıntıları yakalama garantisi yoktur.",
+    "code_sources": ["TestnetFirstApp.tsx", "backend/app/exchange_connections.py", "backend/app/assistant_api.py"]
+  },
+  {
+    "id": "environments",
+    "title": "Demo/Testnet, LIVE ve Paper farkı",
+    "keywords": ["demo", "testnet", "live", "paper", "gerçek", "para", "simülasyon"],
+    "content": "Demo/Testnet borsanın test ortamı ve ayrı anahtarlarıyla çalışır; LIVE gerçek Binance Futures hesabına ve gerçek sermayeye bağlıdır. Bir ortamın anahtarını diğerinde kullanma. Paper, borsa Demo/Testnet hesabından farklı uygulama içi simülasyon motorudur; mevcut dağıtım ayarında kapalıdır ve aktif menüden kullanılabilir bir işlem özelliği olarak sunulmaz. Demo sonuçları LIVE'da kâr veya aynı sonuç garantisi değildir.",
+    "code_sources": ["TestnetFirstApp.tsx", "backend/app/binance_demo.py", "backend/app/v25_execution.py", "backend/app/main.py", "render.yaml"]
+  },
+  {
+    "id": "membership",
+    "title": "Kayıt, e-posta doğrulama, giriş ve parola sıfırlama",
+    "keywords": ["üyelik", "kayıt", "üye", "giriş", "login", "eposta", "e-posta", "doğrulama", "parola", "şifre", "unuttum", "sıfırlama"],
+    "content": "Giriş ekranında kayıt formunu doldur ve kullanım koşulları/gizlilik onayını ver. Kayıttan sonra e-postadaki doğrulama kodu veya bağlantısıyla adresini doğrula; ardından giriş yap. Üyelik doğrulaması gereklidir, misafir erişimi yoktur. Parolanı unuttuysan giriş ekranındaki parola sıfırlama seçeneğiyle e-postanı gönder, gelen sıfırlama bağlantısında yeni parolanı belirle ve yeniden giriş yap. E-posta teslimi sunucunun e-posta yapılandırmasına bağlıdır.",
+    "code_sources": ["main.tsx", "AuthGate.tsx", "backend/app/v22_commercial.py", "backend/app/main.py"]
+  },
+  {
+    "id": "plans",
+    "title": "Planlar, trial ve Master Mode",
+    "keywords": ["plan", "premium", "fiyat", "ücret", "trial", "deneme", "master", "abonelik"],
+    "content": "Abonelik → VIEW PLANS, Plans & Pricing sayfasını açar. {MASTER_PLAN_NAME} aylık {MASTER_MONTHLY_PRICE} USD'dir. Trial süresi {TRIAL_DAYS} gündür ve ödeme yöntemi gerektirir; iptal edilmezse deneme sonunda ücretli aylık aboneliğe dönüşür. Master Mode doğrudan ücretli plan seçeneğidir. Erişim ödeme ekranına tıklamakla değil, backend'in doğruladığı abonelik durumuyla belirlenir.",
+    "code_sources": ["TestnetFirstApp.tsx", "SubscriptionCenter.tsx", "backend/app/subscription_core.py", "backend/app/v22_commercial.py"]
+  },
+  {
+    "id": "billing",
+    "title": "Billing: iptal ve Stripe portalı",
+    "keywords": ["billing", "stripe", "portal", "iptal", "abonelik", "fatura", "ödeme", "kart"],
+    "content": "Ana sayfa veya mobil menü → Abonelik, Billing & Subscription sayfasını açar. MANAGE BILLING PORTAL ile bağlı Stripe hesabının ödeme yönetimine geçilir; portal için Stripe yapılandırması ve bağlı müşteri gerekir. CANCEL AT PERIOD END iptali dönem sonuna planlar; erişim o zamana kadar sürer. Aktif trial'da CANCEL NOW seçeneği de vardır. Asistan aboneliği değiştirmez veya iptal etmez. Kodda tanımlı bir iade garantisi yoktur; fatura geçmişi alanı şu an boş durum bileşenidir.",
+    "code_sources": ["SubscriptionCenter.tsx", "backend/app/subscription_core.py", "backend/app/v22_commercial.py"]
+  },
+  {
+    "id": "analyst",
+    "title": "Analyst kredi sistemi",
+    "keywords": ["kredi", "bütçe", "maliyet", "yenilenme", "pencere", "cache", "önbellek", "iade", "analiz"],
+    "content": "Kişisel bütçe {ANALYST_BUDGET} kredi, taze analiz maliyeti {ANALYSIS_COST} kredidir. {CREDIT_WINDOW_HOURS} saatlik pencere ilk kredi harcamasında başlar; gece yarısı sıfırlanmaz. Süre dolduktan sonraki istekte bütçe yenilenir; kullanılmayan krediler devretmez. Aynı kullanıcının aynı sembol/zaman dilimi için {ANALYST_CACHE_MINUTES} dakika içindeki kayıtlı analiz sonucu ücretsizdir. Analiz hata verirse harcanan maliyet bir kez iade edilir; aynı idempotency anahtarı tekrar düşüm/iade yapmaz. Premium üyelerde kredi düşmez. Master Trade kredi harcamaz. Asistanın taze analiz isteği ayrı açık kullanıcı onayı gerektirir.",
+    "code_sources": ["backend/app/analyst_credits.py", "CoinAnalysisCenter.tsx", "analyst-credit-ui.tsx", "backend/app/assistant_tools.py"]
+  },
+  {
+    "id": "premium",
+    "title": "Ücretsiz üye ve premium farkı",
+    "keywords": ["ücretsiz", "premium", "kilitli", "bulanık", "detay", "entry", "gerekçe", "yetki"],
+    "content": "Ücretsiz doğrulanmış üye Master Trade'i salt-okunur görüntüleyebilir ve Analyst'i kredi bütçesiyle kullanır. Emir formu, hesap bağlama, ARM, dry-run ve LIVE Auto Trade başlatma premium yetkiye tabidir. Entry/SL/TP seviyeleri, Why this decision, Long/Short case detayları, Trigger Monitor ve Scanner üst fırsat detayları premium kilitlidir. Gerçek özel detaylar backend'de filtrelenir; yalnız CSS bulanıklığına güvenilmez. Premium bu detayları ve işlem yetkisini açabilir, fakat bağlantı, risk, Consent, ARM ve koruma kapılarını kaldırmaz. Asistan özetleri premium üyede de ayrıntılı işlem seviyeleri/gerekçeleri vermez.",
+    "code_sources": ["backend/app/premium_access.py", "backend/app/v22_commercial.py", "MasterTrade.tsx", "premium-access.tsx", "backend/app/assistant_tools.py"]
+  },
+  {
+    "id": "master-trade",
+    "title": "Master Trade sekmeleri nerede?",
+    "keywords": ["master", "trade", "analiz", "canlı", "pozisyonlar", "bağlantı", "sekme"],
+    "content": "Ana sayfa → MASTER TRADE, /master-trade sayfasını açar. Analiz sekmesi karar/puan/MTF ve tetik koşullarını; Canlı İşlem hazırlık, hesap ve güvenlik kapılarını; Pozisyonlar açık pozisyon, emir, geçmiş ve performans görünümünü; Bağlantı bağlantı/durum ve risk görünümünü sunar. Pozisyon veya hesap verisi disconnected/stale ise güncel kabul etme. Final Decision bir emir izni değildir; canlı işlem ayrı yetki ve güvenlik akışıdır.",
+    "code_sources": ["TestnetFirstApp.tsx", "MasterTrade.tsx", "frontend/src/LiveTradingPanel.tsx", "masterTradeDecision.ts"]
+  },
+  {
+    "id": "analyst-scanner",
+    "title": "Analyst ve Scanner nerede?",
+    "keywords": ["analyst", "analist", "scanner", "tarama", "coin", "sembol", "fırsat", "filtre"],
+    "content": "Ana sayfa → ANALİST, coin seçici, filtreler, tarama snapshot'ı ve seçilen sembolün analizini açar; mobil alt çubukta Analist bulunur. Ana sayfa → TARAMA veya mobil Menü → Tarama, piyasa adaylarını ve sinyalleri gösteren Scanner ekranını açar. Piyasa adayı emir değildir; skorlar kâr garantisi değildir. Analyst'in taze analiz akışı krediye tabidir; Scanner'ı Analyst kredi harcamasıyla veya LIVE Auto Trade tarayıcısıyla aynı akış sayma.",
+    "code_sources": ["TestnetFirstApp.tsx", "CoinAnalysisCenter.tsx", "ScannerCenter.tsx", "backend/app/analyst_credits.py"]
+  },
+  {
+    "id": "workspaces",
+    "title": "Risk, Performans, Operasyon ve Ayarlar nerede?",
+    "keywords": ["risk", "performans", "performance", "operasyon", "ops", "ayarlar", "settings", "menü", "işlem"],
+    "content": "Ana sayfa → İŞLEM Demo işlem masasını açar. RİSK, Demo Risk Kasası'nda limit/boyut/koruma ayarlarını gösterir. PERFORMANS, Demo işlem sonuçları ve PnL/risk ölçümleridir; tüm LIVE hesaplarının birleşik performansı değildir. OPERASYON, Demo otomasyon kararını, sunucu/stream durumunu ve kalıcı kanıt kayıtlarını gösterir; destek hizmeti değildir. AYARLAR, API & Connection Center'dır; mobil Menü → Bağlantılar yolundadır. Mobil alt çubukta İşlem ve Performans; diğer alanlar Menü içindedir. CANLI, ayrı gerçek Futures hazırlık ekranıdır.",
+    "code_sources": ["TestnetFirstApp.tsx", "BinanceDemo.tsx", "CloudOpsCenter.tsx", "frontend/src/LiveTradingPanel.tsx"]
+  },
+  {
+    "id": "gates",
+    "title": "Bağlantı → Consent → ARM → işlem güvenlik akışı",
+    "keywords": ["bağlantı", "consent", "arm", "locked", "izin", "güvenlik", "süre", "oturum", "otomasyon", "auto"],
+    "content": "Önce doğru ortam bağlantısını kaydet/doğrula; LIVE için risk politikası ve risk onayı, Consent ve ARM ayrı kapılardır. Premium olmak bunları atlatmaz. Demo ARM {DEMO_ARM_MINUTES} dakika; LIVE Consent {LIVE_CONSENT_HOURS} saat; LIVE ARM {LIVE_ARM_HOURS} saat; LIVE Auto Trade gözetimli oturumu {AUTO_SESSION_MINUTES} dakikadır: farklı sayaçlardır, biri diğerini açmaz. Consent kullanıcı/hesap/anahtar fingerprint kapsamına bağlıdır; yeniden Consent ARM ve Auto Trade'i kapatır, risk politikasını kendiliğinden onaylamaz. Consent sona erdiğinde yeni girişler durur; {CONSENT_GRACE_MINUTES} dakikalık yeniden onay süresi yeni işlem izni değildir. Risk, Exposure, Protection, One-way ve reconciliation kapıları da sağlanmalıdır. Asistan sadece açıklar; bu izinleri vermez veya işlem başlatmaz.",
+    "code_sources": ["backend/app/binance_demo.py", "backend/app/v25_execution.py", "backend/app/execution_core.py", "frontend/src/LiveTradingPanel.tsx"]
+  },
+  {
+    "id": "final-decision",
+    "title": "Final Decision",
+    "keywords": ["final", "decision", "karar", "sonuç", "score"],
+    "content": "Final Decision, analiz bileşenlerinden üretilen puan/karar görünümüdür. Confidence, likidite, volatilite, MTF, veri tazeliği ve Risk/Reward gibi girdiler kullanılır; ekran ve backend puanı aynı bağlamda değerlendirilmelidir. Emir izni, otomatik işlem komutu veya kâr garantisi değildir.",
+    "code_sources": ["masterTradeDecision.ts", "MasterTrade.tsx", "backend/app/main.py"]
+  },
+  {
+    "id": "confidence",
+    "title": "Confidence",
+    "keywords": ["confidence", "güven", "olasılık", "kazanma", "puan"],
+    "content": "Confidence analiz motorunun sinyal güven/uyum skorudur; doğrulanmış kazanma olasılığı veya garanti başarı oranı değildir. Veri tazeliği ve diğer analiz bileşenleriyle birlikte okunmalıdır.",
+    "code_sources": ["backend/app/analysis.py", "backend/app/main.py", "masterTradeDecision.ts"]
+  },
+  {
+    "id": "opportunity",
+    "title": "Opportunity Score",
+    "keywords": ["opportunity", "fırsat", "score", "skor", "aday"],
+    "content": "Opportunity Score fırsat sıralama puanıdır. Scanner bağlamında Confidence, MTF uyumu, hacim, breakout ve trap kalitesi birleşir; Master Trade görünümü kendi karar bileşenlerini kullanır. Farklı ekranların puanları aynı formül veya işlem izni olarak yorumlanmamalıdır.",
+    "code_sources": ["backend/app/main.py", "masterTradeDecision.ts", "ScannerCenter.tsx"]
+  },
+  {
+    "id": "smart-score",
+    "title": "Smart Score",
+    "keywords": ["smart", "score", "skor", "akıllı", "analyst"],
+    "content": "Smart Score, Analyst snapshot'ında Confidence, MTF, trend uyumu, RSI, hacim, Risk/Reward ve volatilite bileşenlerini birleştiren sıralama skorudur. Final Decision veya Opportunity Score ile aynı ölçüm değildir; doğrulanmış kazanma olasılığı değildir.",
+    "code_sources": ["backend/app/main.py", "CoinAnalysisCenter.tsx"]
+  },
+  {
+    "id": "mtf",
+    "title": "MTF: Multi-Timeframe",
+    "keywords": ["mtf", "timeframe", "zaman", "dilim", "uyum", "alignment"],
+    "content": "MTF, farklı zaman dilimlerinin yön/trend uyumunu karşılaştırır. Uyum veya çelişki analiz bağlamını gösterir; eksik zaman dilimi verisi uyum varmış gibi kabul edilmez. Tek başına emir izni değildir.",
+    "code_sources": ["masterTradeDecision.ts", "backend/app/main.py"]
+  },
+  {
+    "id": "trigger",
+    "title": "Trigger Monitor",
+    "keywords": ["trigger", "monitor", "tetik", "koşul", "waiting", "armed"],
+    "content": "Trigger Monitor trend, momentum, hacim, breakout/breakdown, MTF, Risk/Reward ve tazelik koşullarını izleyen analiz yaşam döngüsüdür. WAITING/ARMED/TRIGGERED/CONFIRMED gibi analiz durumları LIVE ARM izniyle aynı değildir ve emir göndermez. Detayları premium kilitlidir.",
+    "code_sources": ["masterTradeDecision.ts", "MasterTrade.tsx"]
+  },
+  {
+    "id": "invalidation",
+    "title": "Invalidation",
+    "keywords": ["invalidation", "geçersiz", "iptal", "senaryo", "bozulma"],
+    "content": "Invalidation analiz senaryosunu geçersiz kılan koşullardır; destek/direnç kaybı, MTF çatışması, hacim bozulması veya bayat veri örnekleridir. Analiz senaryosunun geçersizliği, borsadaki pozisyonun otomatik kapatıldığı anlamına gelmez.",
+    "code_sources": ["masterTradeDecision.ts", "MasterTrade.tsx"]
+  },
+  {
+    "id": "risk-reward",
+    "title": "Risk/Reward",
+    "keywords": ["risk", "reward", "rr", "r/r", "getiri", "oran"],
+    "content": "Risk/Reward, hedefe uzaklığın stop mesafesine oranıdır; analizde olası hedef/risk ilişkisini gösterir. Gerçekleşmiş getiri, kazanma olasılığı veya ücret/slippage sonrası garanti sonuç değildir. Özel işlem seviyeleri ve bu detay ücretsiz üyeye backend'de filtrelenir.",
+    "code_sources": ["backend/app/analysis.py", "backend/app/main.py", "backend/app/premium_access.py"]
+  },
+  {
+    "id": "directions",
+    "title": "LONG / SHORT",
+    "keywords": ["long", "short", "yön", "alış", "satış"],
+    "content": "LONG yükseliş yönlü, SHORT düşüş yönlü analiz/pozisyon etiketidir. Etiketi görmek al/sat talimatı veya açılmış emir anlamına gelmez. İşlem kararı kullanıcıya aittir; kâr garantisi yoktur, sermaye kaybı olabilir.",
+    "code_sources": ["backend/app/analysis.py", "MasterTrade.tsx", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "levels",
+    "title": "Entry / SL / TP",
+    "keywords": ["entry", "sl", "tp", "giriş", "stop", "loss", "take", "profit", "hedef"],
+    "content": "Entry analiz/plan giriş seviyesidir; SL stop-loss seviyesi, TP kâr alma hedefleridir. Analizde bir seviyenin görünmesi o emrin borsada kurulduğunu veya çalıştığını kanıtlamaz. Entry/SL/TP ayrıntıları premium kilitlidir; gerçek koruma durumu backend'de doğrulanmalıdır.",
+    "code_sources": ["backend/app/analysis.py", "MasterTrade.tsx", "backend/app/v25_execution.py", "backend/app/premium_access.py"]
+  },
+  {
+    "id": "locked",
+    "title": "LOCKED",
+    "keywords": ["locked", "kilit", "kilitli", "blocked", "engel"],
+    "content": "LOCKED ilgili işlem veya detayın şu an yetki/güvenlik kapıları nedeniyle kapalı olduğunu belirtir. Premium kilidi ile bağlantı/Consent/ARM/risk kilidi aynı değildir. Gerekli koşullar doğrulanmadan emir izni verilmez.",
+    "code_sources": ["frontend/src/LiveTradingPanel.tsx", "backend/app/v25_execution.py", "backend/app/premium_access.py"]
+  },
+  {
+    "id": "arm",
+    "title": "ARM / ARMED",
+    "keywords": ["arm", "armed", "izin", "yetki", "süre"],
+    "content": "ARM süreli işlem yetkilendirme kapısıdır; Demo ve LIVE için ayrı çalışır. Demo ARM {DEMO_ARM_MINUTES} dakika, LIVE ARM {LIVE_ARM_HOURS} saat sürer. ARMED tek başına emir açmaz ve diğer kapıları kaldırmaz. Trigger Monitor içindeki ARMED ise analiz durumudur, işlem yetkisi değildir.",
+    "code_sources": ["backend/app/binance_demo.py", "backend/app/v25_execution.py", "masterTradeDecision.ts"]
+  },
+  {
+    "id": "consent",
+    "title": "Consent",
+    "keywords": ["consent", "onay", "risk", "izin", "fingerprint", "süre"],
+    "content": "Consent, LIVE riskini kullanıcının açık kabulüdür; {LIVE_CONSENT_HOURS} saatlik süre ve kullanıcı/hesap/anahtar fingerprint kapsamı backend'de doğrulanır. Consent, ARM veya risk politikası onayı yerine geçmez. Yeniden Consent, ARM ve Auto Trade'i kapatır; asistan bu onayı veremez.",
+    "code_sources": ["backend/app/v25_execution.py", "frontend/src/LiveTradingPanel.tsx"]
+  },
+  {
+    "id": "dry-run",
+    "title": "Dry-run",
+    "keywords": ["dry", "run", "dry-run", "incele", "önizleme", "emir"],
+    "content": "Dry-run, formda miktar/yön/SL/TP ve bakiye kontrolleri yaptıktan sonra Binance'in test-order endpoint'iyle imza ve emir şemasını gerçek emir oluşturmadan doğrular. Tüm LIVE giriş kapılarının geçtiği, koruma emirlerinin kurulduğu veya sonradan emir açılabileceği anlamına gelmez. Premium yetkiye tabidir.",
+    "code_sources": ["backend/app/v25_execution.py", "frontend/src/LiveTradingPanel.tsx"]
+  },
+  {
+    "id": "scanner-candidate",
+    "title": "Scanner / Candidate",
+    "keywords": ["scanner", "candidate", "tarayıcı", "aday", "tarama", "otomasyon"],
+    "content": "Scanner piyasayı tarar; Candidate değerlendirmeye alınan sembol/kurulum adayıdır. Aday bulunması emir açıldığı veya tüm risk kapılarının geçtiği anlamına gelmez. Genel Scanner ekranı, Demo otomasyon taraması ve LIVE Auto Trade taraması farklı bağlamlardır.",
+    "code_sources": ["ScannerCenter.tsx", "backend/app/main.py", "backend/app/v21_demo.py", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "exposure",
+    "title": "Exposure",
+    "keywords": ["exposure", "maruziyet", "notional", "marjin", "limit"],
+    "content": "Exposure pozisyonların toplam nominal piyasa maruziyetidir; yatırılan marjinle aynı değildir. Mevcut ve aday işlem maruziyeti risk politikasındaki toplam maruziyet sınırına göre kontrol edilir. Asistan hesaba özel limiti yardım metninden tahmin etmez.",
+    "code_sources": ["backend/app/execution_core.py", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "protection",
+    "title": "Protection",
+    "keywords": ["protection", "koruma", "stop", "loss", "çalışıyor", "doğrulama"],
+    "content": "Protection, backend'in borsadan okuduğu stop/koruma emirlerini pozisyonla eşleştirdiği durumdur. Analizde SL bulunması yeterli kanıt değildir. Veri bayat, belirsiz veya hatalıysa koruma doğrulanmış sayılmaz; Pozisyonlar ekranından kontrol et. Asistan yalnız backend'in doğruladığı sonucu ve bilinen veri yaşını aktarır; verified=false ise çalışıyor demez.",
+    "code_sources": ["backend/app/v25_execution.py", "backend/app/assistant_tools.py"]
+  },
+  {
+    "id": "reconciliation",
+    "title": "Reconciliation",
+    "keywords": ["reconciliation", "reconcile", "uzlaştırma", "senkron", "borsa", "pozisyon"],
+    "content": "Reconciliation, borsadaki gerçek pozisyon/emir/koruma durumunun uygulamanın takip kayıtlarıyla uzlaştırılmasıdır. Eksik veya çelişkili kanıt güvenli kabul edilmez; unresolved/recovery koşulları yeni girişleri kilitleyebilir. Asistan uzlaştırma veya koruma onarımı başlatmaz.",
+    "code_sources": ["backend/app/v25_execution.py"]
+  },
+  {
+    "id": "account-mode",
+    "title": "One-way / Hedge",
+    "keywords": ["one", "way", "one-way", "hedge", "mod", "hesap", "yön"],
+    "content": "One-way sembolde tek net pozisyon yönü; Hedge ayrı LONG ve SHORT taraflarını tutabilen hesap modudur. Mevcut LIVE giriş kapısı One-way ister; Hedge bu kapıyı karşılamaz. Premium olmak hesap modu koşulunu kaldırmaz; asistan modu değiştirmez.",
+    "code_sources": ["backend/app/execution_core.py", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "fingerprint",
+    "title": "Fingerprint",
+    "keywords": ["fingerprint", "parmak", "izi", "anahtar", "eşleşme", "consent"],
+    "content": "Fingerprint, API anahtarının hash tabanlı kimlik izidir; Secret değildir. Consent ve hesap/oturum kapsamının aynı anahtara bağlı olduğunu karşılaştırmak için kullanılır. Fingerprint görmek bağlantının, ARM'ın veya korumanın tek başına hazır olduğunu kanıtlamaz.",
+    "code_sources": ["backend/app/execution_core.py", "backend/app/exchange_connections.py", "backend/app/v25_execution.py"]
+  },
+  {
+    "id": "risk-warning",
+    "title": "Risk uyarısı",
+    "keywords": ["risk", "uyarı", "garanti", "kâr", "sermaye", "kayıp", "tavsiye"],
+    "content": "Analiz ve skorlar yatırım tavsiyesi veya emir izni değildir. Kâr garantisi yoktur; sermaye kaybı olabilir. Demo geçmişi, yüksek Confidence veya premium üyelik riski ortadan kaldırmaz. Nihai işlem kararı kullanıcıya aittir.",
+    "code_sources": ["TestnetFirstApp.tsx", "backend/app/assistant_prompt.py", "MasterTrade.tsx"]
+  }
+]

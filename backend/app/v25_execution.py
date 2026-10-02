@@ -101,6 +101,7 @@ def automation_telemetry(message: str, *, reason: str | None = None) -> None:
 LIVE_REST_BASE = "https://fapi.binance.com"
 LIVE_WS_BASE = "wss://fstream.binance.com/private"
 LIVE_ARM_SECONDS = 24 * 60 * 60
+LIVE_CONSENT_SECONDS = 24 * 60 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
 LIVE_CONSENT_GRACE_SECONDS = 15 * 60
 RECONCILE_SECONDS = 10
@@ -959,6 +960,30 @@ def current_trading_account_id(state: dict[str, Any], request: Request | None, f
             return identity
     normalized = normalize_consent_fingerprint(fingerprint)
     return f"BINANCE:LIVE:FINGERPRINT:{normalized[:64]}" if normalized else ""
+
+
+def read_owned_account_state(state: dict[str, Any], user_id: str, session_binding: str) -> dict[str, Any] | None:
+    """Read only after both authenticated member and exchange session match."""
+    authorization = state.get("live_session_authorization") or {}
+    if not (
+        session_binding and user_id
+        and authorization.get("user_id") == user_id
+        and authorization.get("session_id") == session_binding
+        and state.get("snapshot_session_id") == session_binding
+        and isinstance(state.get("snapshot"), dict)
+        and isinstance(state["snapshot"].get("positions"), list)
+        and all(isinstance(row, dict) for row in state["snapshot"]["positions"])
+        and isinstance(state.get("connection"), dict)
+        and isinstance(state.get("plans"), dict)
+        and all(isinstance(row, dict) for row in state["plans"].values())
+    ):
+        return None
+    from copy import deepcopy
+
+    return deepcopy({
+        key: state.get(key)
+        for key in ("snapshot", "connection", "connected", "recovery_ready", "recovery_error", "reconciliation_required", "plans")
+    })
 
 
 def update_account_snapshot(state: dict[str, Any], snapshot: dict[str, Any], *, session_binding: str | None = None) -> None:
@@ -4150,7 +4175,7 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
     }
     state["web_consent"] = {
         "accepted_at": now_iso(),
-        "expires_at_epoch": time.time() + (24 * 60 * 60),
+        "expires_at_epoch": time.time() + LIVE_CONSENT_SECONDS,
         "key_fingerprint": fingerprint,
         "user_id": str(user["id"]),
         "trading_account_id": trading_account_id,

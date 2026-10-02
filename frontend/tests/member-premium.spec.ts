@@ -12,7 +12,7 @@ const marketRow = {
   mtf_direction: 'LONG', mtf_alignment: 100, mtf_timeframes: [{timeframe: '15m', direction: 'LONG', confidence: 85}], anomaly: null,
 }
 
-async function mockMember(page: Page, premium = false, initialRemaining = 87, marketRows = [marketRow]) {
+async function mockMember(page: Page, premium = false, initialRemaining = 87, marketRows = [marketRow], analysisCost = 10) {
   const requests: string[] = []
   let remaining = initialRemaining
   let consumed = false
@@ -24,24 +24,25 @@ async function mockMember(page: Page, premium = false, initialRemaining = 87, ma
     const user = {id: premium ? 'premium-member' : 'free-member', role: 'CUSTOMER', active: true, email_verified: true}
     const resetsAt = new Date(Date.now() + 24 * 3600000).toISOString()
     if (path === '/api/analyst/consume') {
-      if (remaining === 0 && !consumed && !premium) {
-        await route.fulfill({status: 429, json: {remaining: 0, total: 100, resetsAt, detail: 'Günlük analiz kredileri tükendi.'}})
+      if (remaining < analysisCost && !consumed && !premium) {
+        await route.fulfill({status: 429, json: {remaining, total: 100, analysis_cost: analysisCost, resetsAt, unlimited: false, detail: 'Günlük analiz kredileri tükendi.'}})
         return
       }
       const cached = consumed
-      if (!consumed && !premium) remaining--
+      if (!consumed && !premium) remaining -= analysisCost
       consumed = true
       await route.fulfill({json: {
         result: {...marketRow, entry: 987654.32, stop_loss: 876543.21, tp1: 999111.22, tp2: 1000222.33, tp3: 1000333.44, support: 59000, resistance: 61000, risk_reward: 2, risk_pct: 1, potential_tp3_pct: 5},
-        remaining: premium ? null : remaining, total: 100, resetsAt: premium ? null : resetsAt,
+        remaining: premium ? null : remaining, total: 100, analysis_cost: analysisCost, resetsAt: premium ? null : resetsAt,
         unlimited: premium, cached, cacheExpiresAt: new Date(Date.now() + 15 * 60000).toISOString(),
       }})
       return
     }
     const fixtures: Record<string, unknown> = {
+      '/api/assistant/proactive/preferences': {enabled: false, available: true, poll_interval_seconds: 60},
       '/api/v22/profile': {user, access: {canAccessMasterTrade: true, isPremium: premium}},
       '/api/v22/session': {user},
-      '/api/analyst/credits': {remaining: premium ? null : remaining, total: 100, resetsAt: premium ? null : resetsAt, unlimited: premium},
+      '/api/analyst/credits': {remaining: premium ? null : remaining, total: 100, analysis_cost: analysisCost, resetsAt: premium ? null : resetsAt, unlimited: premium},
       '/api/markets': [{...marketRow, status: 'TRADING', contractType: 'PERPETUAL', quoteAsset: 'USDT'}],
       '/api/analysis-universe': {results: marketRows},
       '/api/v25/status': {connected: false, real_trading_locked: true, execution_state: 'LOCKED', armed: false, live_auto_trade: false, recovery_ready: false, credentials: {configured: false}, stream: {status: 'DISCONNECTED'}, policy: {allowed_symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']}, scanner: {scanned_symbol_count: 0, candidate_count: 0}, account: {}, plans: [], events: []},
@@ -107,11 +108,12 @@ test('Analyst purchase updates the member budget and cache reopening is free', a
   const requests = await mockMember(page)
   await openAnalyst(page)
   await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 87/100')
+  await expect(page.locator('.analystWorkspaceHeader p')).toContainText('Taze analiz: 10 kredi. Önbellek ücretsiz.')
   await page.locator('.analystSelectorList > button').first().click()
-  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 86/100')
+  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 77/100')
   await page.locator('.analystPromptChips button').filter({hasText: 'desteği nerede'}).click()
   await expect(page.locator('.analystCached')).toHaveText('Ücretsiz (son 15 dk)')
-  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 86/100')
+  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 77/100')
   await expect(page.locator('.analystResponseText')).toContainText('59.000')
   await page.locator('.analystWorkspaceHeader').scrollIntoViewIfNeeded()
   await page.screenshot({path: join(process.env.MEMBER_UI_SCREENSHOTS || testInfo.outputDir, 'analyst-credits.png')})
@@ -119,9 +121,9 @@ test('Analyst purchase updates the member budget and cache reopening is free', a
 })
 
 for (const width of [1280, 390]) {
-test(`Using the last Analyst credit removes private content at ${width}px`, async ({page}, testInfo) => {
+test(`Using the last Analyst analysis budget removes private content at ${width}px`, async ({page}, testInfo) => {
   await page.setViewportSize({width, height: 900})
-  const requests = await mockMember(page, false, 1)
+  const requests = await mockMember(page, false, 10)
   await openAnalyst(page)
   await expect(page.locator('.analystCreditBadge')).toHaveClass(/creditLow/)
   await page.locator('.analystSelectorList > button').first().click()
@@ -170,12 +172,46 @@ test('Expired Analyst cache is removed from the DOM without an automatic credit 
   const requests = await mockMember(page)
   await openAnalyst(page)
   await page.locator('.analystSelectorList > button').first().click()
-  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 86/100')
+  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 77/100')
   expect(await page.locator('.coinAnalysisCenter').innerHTML()).toContain('987.654,32')
   await page.clock.fastForward(16 * 60000)
   await expect.poll(async () => (await page.locator('.coinAnalysisCenter').innerHTML()).includes('987.654,32')).toBe(false)
   expect(requests.filter(request => request === 'POST /api/analyst/consume')).toHaveLength(1)
 })
+
+test('Analyst displays and charges the cost returned by the API, not a hardcoded default', async ({page}) => {
+  const requests = await mockMember(page, false, 87, [marketRow], 7)
+  await openAnalyst(page)
+  await expect(page.locator('.analystWorkspaceHeader p')).toContainText('Taze analiz: 7 kredi. Önbellek ücretsiz.')
+  await page.locator('.analystSelectorList > button').first().click()
+  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 80/100')
+  await page.locator('.analystPromptChips button').filter({hasText: 'desteği nerede'}).click()
+  await expect(page.locator('.analystCached')).toHaveText('Ücretsiz (son 15 dk)')
+  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 80/100')
+  expect(requests.filter(request => request === 'POST /api/analyst/consume')).toHaveLength(2)
+})
+
+test('Analyst treats a positive balance below the server cost as insufficient', async ({page}) => {
+  const requests = await mockMember(page, false, 5)
+  await openAnalyst(page)
+  await expect(page.locator('.analystCreditBadge')).toContainText('Kredi 5/100')
+  await expect(page.locator('.analystCreditBadge')).toHaveClass(/creditEmpty/)
+  await expect(page.locator('.analystCreditExhausted').first()).toContainText('Taze analiz: 10 kredi.')
+  expect(requests.filter(request => request === 'POST /api/analyst/consume')).toEqual([])
+})
+
+for (const analysisCost of [undefined, 0, -1, 1.5, 101]) {
+  test(`Analyst rejects an invalid server cost (${analysisCost}) without assuming one credit`, async ({page}) => {
+    const requests = await mockMember(page)
+    await page.route('**/api/analyst/credits', route => route.fulfill({json: {
+      remaining: 100, total: 100, analysis_cost: analysisCost, resetsAt: null, unlimited: false,
+    }}))
+    await openAnalyst(page)
+    await expect(page.locator('.analystCreditError')).toContainText('Sunucudan geçersiz kredi bilgisi döndü.')
+    await expect(page.locator('.analystWorkspaceHeader p')).not.toContainText('Taze analiz:')
+    expect(requests.filter(request => request === 'POST /api/analyst/consume')).toEqual([])
+  })
+}
 
 for (const width of [1440, 768, 390]) {
   test(`Analyst coin selector shows five rows without empty space at ${width}px`, async ({page}) => {

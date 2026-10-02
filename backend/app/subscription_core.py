@@ -10,6 +10,12 @@ MASTER_MODE_PRICE = 119.90
 SUBSCRIPTION_STATUSES = {"TRIALING", "ACTIVE", "PAST_DUE", "UNPAID", "CANCELLED", "EXPIRED"}
 ACCESS_STATUSES = {"TRIALING", "ACTIVE"}
 PAST_DUE_GRACE_SECONDS = max(0, int(os.getenv("STRIPE_PAST_DUE_GRACE_SECONDS", str(3 * 24 * 60 * 60))))
+CANCELLATION_RULES = {
+    "cancel_anytime": True,
+    "default_effective": "period_end",
+    "immediate_cancellation_supported": True,
+    "refund_policy": None,
+}
 
 PLAN_CATALOG: dict[str, dict[str, Any]] = {
     "TRIAL": {
