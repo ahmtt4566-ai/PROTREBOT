@@ -19,6 +19,8 @@ ayrı bir çıktı klasörü, `LIVE_UI_PHASE` ile dosya adı öneki belirtilebil
 Frontend lint: kökte `npm run lint`.
 Build, kredi/premium modüllerinin strict TypeScript kontrolünü de çalıştırır
 (`npm run typecheck:access` ile ayrı çalıştırılabilir).
+Analyst coin seçici aynı anda en fazla beş satır gösterir; diğer coinlere liste
+içinden kaydırılarak erişilir. Arama sonucu azaldığında kart içerik kadar küçülür.
 
 ## Analyst kredileri ve Master Trade Premium
 

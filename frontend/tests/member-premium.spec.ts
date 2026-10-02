@@ -12,7 +12,7 @@ const marketRow = {
   mtf_direction: 'LONG', mtf_alignment: 100, mtf_timeframes: [{timeframe: '15m', direction: 'LONG', confidence: 85}], anomaly: null,
 }
 
-async function mockMember(page: Page, premium = false, initialRemaining = 87) {
+async function mockMember(page: Page, premium = false, initialRemaining = 87, marketRows = [marketRow]) {
   const requests: string[] = []
   let remaining = initialRemaining
   let consumed = false
@@ -43,7 +43,7 @@ async function mockMember(page: Page, premium = false, initialRemaining = 87) {
       '/api/v22/session': {user},
       '/api/analyst/credits': {remaining: premium ? null : remaining, total: 100, resetsAt: premium ? null : resetsAt, unlimited: premium},
       '/api/markets': [{...marketRow, status: 'TRADING', contractType: 'PERPETUAL', quoteAsset: 'USDT'}],
-      '/api/analysis-universe': {results: [marketRow]},
+      '/api/analysis-universe': {results: marketRows},
       '/api/v25/status': {connected: false, real_trading_locked: true, execution_state: 'LOCKED', armed: false, live_auto_trade: false, recovery_ready: false, credentials: {configured: false}, stream: {status: 'DISCONNECTED'}, policy: {allowed_symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']}, scanner: {scanned_symbol_count: 0, candidate_count: 0}, account: {}, plans: [], events: []},
       '/api/exchange-connections/status': {vault: {ready: true}, connections: {LIVE: {configured: false, active: false}}},
       '/api/v25/history': {external_trades: [], external_income: []},
@@ -176,3 +176,56 @@ test('Expired Analyst cache is removed from the DOM without an automatic credit 
   await expect.poll(async () => (await page.locator('.coinAnalysisCenter').innerHTML()).includes('987.654,32')).toBe(false)
   expect(requests.filter(request => request === 'POST /api/analyst/consume')).toHaveLength(1)
 })
+
+for (const width of [1440, 768, 390]) {
+  test(`Analyst coin selector shows five rows without empty space at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width, height: 900})
+    const symbols = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'UNI']
+    const rows = symbols.map(symbol => ({...marketRow, symbol: `${symbol}USDT`, display: `${symbol}/USDT`}))
+    const requests = await mockMember(page, false, 87, rows)
+    await openAnalyst(page)
+    const list = page.locator('.analystSelectorList')
+    await list.scrollIntoViewIfNeeded()
+    await expect(list.locator('> button')).toHaveCount(12)
+    const geometry = await list.evaluate(element => {
+      const outer = element.getBoundingClientRect()
+      const buttons = Array.from(element.querySelectorAll('button'))
+      return {
+        height: element.clientHeight,
+        overflow: element.scrollHeight > element.clientHeight,
+        visibleRows: buttons.filter(button => {
+          const rect = button.getBoundingClientRect()
+          return rect.top >= outer.top - 1 && rect.bottom <= outer.bottom + 1
+        }).length,
+        sixthTop: buttons[5].getBoundingClientRect().top - outer.bottom,
+        fifthBottom: outer.bottom - buttons[4].getBoundingClientRect().bottom,
+      }
+    })
+    expect(geometry.height).toBe(288)
+    expect(geometry.overflow).toBe(true)
+    expect(geometry.visibleRows).toBe(5)
+    expect(geometry.sixthTop).toBeGreaterThanOrEqual(0)
+    expect(geometry.fifthBottom).toBeLessThanOrEqual(1)
+    await list.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await expect(list.locator('> button').last()).toBeInViewport()
+    await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+
+    await page.getByRole('textbox', {name: 'Tarama coinlerini ara'}).fill('BTC')
+    await expect(list.locator('> button')).toHaveCount(1)
+    expect(await list.evaluate(element => element.clientHeight)).toBe(56)
+    const spacing = await page.locator('.analystCoinSelector').evaluate(element => {
+      const outer = element.getBoundingClientRect()
+      const toolbar = element.querySelector('.analystSelectorToolbar')!.getBoundingClientRect()
+      const header = element.querySelector('header')!.getBoundingClientRect()
+      const rows = element.querySelector('.analystSelectorList')!.getBoundingClientRect()
+      return {headerGap: toolbar.top - header.bottom, listGap: rows.top - toolbar.bottom, bottomGap: outer.bottom - rows.bottom}
+    })
+    expect(spacing.headerGap).toBeLessThanOrEqual(16)
+    expect(spacing.listGap).toBeLessThanOrEqual(12)
+    expect(spacing.bottomGap).toBeLessThanOrEqual(20)
+    await page.getByRole('textbox', {name: 'Tarama coinlerini ara'}).fill('NO-MATCH')
+    await expect(list.locator('> button')).toHaveCount(0)
+    expect(await list.evaluate(element => element.clientHeight)).toBeLessThanOrEqual(56)
+    expect(requests.filter(request => request === 'POST /api/analyst/consume')).toEqual([])
+  })
+}

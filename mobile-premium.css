@@ -2496,7 +2496,7 @@
 @media (min-width: 701px) {
   #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystWorkspace {
     grid-template-columns: minmax(0, .95fr) minmax(0, 1.28fr) !important;
-    grid-template-rows: auto auto auto minmax(380px, auto) !important;
+    grid-template-rows: auto auto auto auto !important;
   }
 
   #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystResultWorkspace {
@@ -2569,6 +2569,9 @@
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector {
   grid-template-rows: auto auto max-content !important;
   min-height: 0 !important;
+  height: auto;
+  align-content: start;
+  align-self: start;
 }
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystDetailColumn {
@@ -2941,6 +2944,9 @@
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCoinSelector {
   grid-template-rows: auto auto max-content !important;
   min-height: 0 !important;
+  height: auto;
+  align-content: start;
+  align-self: start;
 }
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystDetailColumn {
@@ -2952,8 +2958,12 @@
 }
 
 #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList {
-  max-height: 330px !important;
+  max-height: calc(5 * 56px + 4 * 2px) !important;
   min-height: 0 !important;
+  height: auto;
+  grid-auto-rows: 56px;
+  align-content: start;
+  gap: 2px;
   overflow-y: auto !important;
 }
 
@@ -2998,7 +3008,7 @@
 
 @media (max-width: 700px) {
   #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList {
-    max-height: 220px !important;
+    max-height: calc(5 * 56px + 4 * 2px) !important;
   }
 
   #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystCompactSnapshot {
@@ -6471,11 +6481,6 @@ body:has(#root .liveTradingPanel.liveUx),
     min-height: 0;
   }
 
-  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList {
-    max-height: none !important;
-    min-height: 0 !important;
-    height: 100%;
-  }
 }
 
 @media (min-width: 701px) {
@@ -6490,9 +6495,12 @@ body:has(#root .liveTradingPanel.liveUx),
     min-height: 0 !important;
   }
 
-  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorList {
-    max-height: none !important;
-    min-height: 0 !important;
-    height: 100%;
+}
+
+@media (max-width: 700px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystSelectorToolbar label {
+    flex: 0 0 auto;
+    width: 100%;
+    box-sizing: border-box;
   }
 }
