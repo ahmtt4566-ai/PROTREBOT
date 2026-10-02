@@ -6,7 +6,8 @@ function normalizedApiBase(value: string | undefined): string {
   return base.endsWith('/api') ? base : `${base}/api`
 }
 
-export const API_BASE = normalizedApiBase(import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL)
+const configuredApiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL
+export const API_BASE = import.meta.env.DEV && !configuredApiBase?.trim() ? '/api' : normalizedApiBase(configuredApiBase)
 
 const originalFetch = window.fetch.bind(window)
 let installed = false

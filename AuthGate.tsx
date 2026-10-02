@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom'
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
-import { Activity, ArrowRight, BarChart3, Eye, EyeOff, KeyRound, LogOut, MailCheck, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
+import { Activity, ArrowRight, BarChart3, Bitcoin, CircleDollarSign, Coins, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, LogOut, Mail, MailCheck, Pause, Play, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
 import { API_BASE, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import AdminPanel from './AdminPanel'
 import { AUTH_PANEL_MARKETS, LIVE_MARKET_CONFIG } from './live-market-config'
@@ -8,16 +8,18 @@ import TickerTape from './TickerTape'
 import TopMovers from './TopMovers'
 import { type LiveTickerData, type LiveTickerStatus, useLiveTickers } from './use-live-tickers'
 import { useTopMovers } from './use-top-movers'
+import '@fontsource-variable/plus-jakarta-sans'
 import './auth.css'
 
 type User = { id:string; email:string; display_name:string; role:string; active:boolean; email_verified?:boolean }
 type Session = { user:User; maintenance?:{mode:string} }
-type Mode = 'login'|'register'|'forgot'|'reset'|'verify'
+type Mode = 'login'|'register'|'bootstrap'|'forgot'|'reset'|'verify'
 type ProfileData = {user:User;profile?:{full_name?:string;preferences?:Record<string,unknown>};subscription?:{plan?:string;status?:string;currentPeriodStart?:string;currentPeriodEnd?:string}}
 
 // Only Playwright's dedicated `--mode test` run bypasses login (it mocks every API response).
 // Regular local dev must go through the real login/register flow so a genuine session token exists.
 const PLAYWRIGHT_TEST_MODE_AUTO_ACCESS = import.meta.env.MODE === 'test'
+const LOCAL_OWNER_SETUP_PAGE = import.meta.env.DEV && API_BASE === '/api' && ['localhost','127.0.0.1','[::1]'].includes(window.location.hostname) && window.location.pathname === '/local-owner-setup'
 
 function AuthSparkline({points,positive}:{points:number[];positive:boolean}) {
   const coordinates = points.map((point,index) => `${4 + index * 10},${point}`).join(' ')
@@ -28,13 +30,25 @@ function formatPanelPrice(symbol:string,price:number) {
   return symbol === 'USDTTRY' ? `₺${price.toFixed(4)}` : new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(price)
 }
 
-function AuthIntroPanel({data,status,movers}:{data:LiveTickerData;status:LiveTickerStatus;movers:ReturnType<typeof useTopMovers>}) {
+function AuthMarketCards({data,status}:{data:LiveTickerData;status:LiveTickerStatus}) {
+  return <div className="authMarketGrid">{AUTH_PANEL_MARKETS.map(config => { const ticker = data[config.symbol]; const history = ticker?.history.slice(-10) || []; const low = Math.min(...history); const high = Math.max(...history); const range = high - low || 1; const points = history.map(value => 8 + ((high - value) / range) * 24); return <article className={`authMarketCard ${ticker?.flash ? `isFlash-${ticker.flash}` : ''}`} key={config.symbol} aria-label={`${config.displaySymbol} ${config.name} piyasa kartı`}><div className="authMarketTop"><div><b>{config.displaySymbol}</b><small>{config.name}</small></div><div className="authMarketQuoteStatus">{ticker && <span className={ticker.changePercent >= 0 ? 'isPositive' : 'isNegative'}>{ticker.changePercent >= 0 ? '▲' : '▼'} {Math.abs(ticker.changePercent).toFixed(2)}%</span>}<i className={`authMarketStatus status-${status}`}><i/> {status === 'live' ? 'CANLI' : status === 'offline' ? 'ÇEVRİMDIŞI' : 'BAĞLANIYOR'}</i></div></div><div className="authMarketBottom">{ticker ? <strong aria-live="off">{formatPanelPrice(config.symbol,ticker.price)}</strong> : <i className="authMarketSkeleton"/>}{ticker ? <AuthSparkline points={points} positive={ticker.changePercent >= 0}/> : <i className="authSparklineSkeleton"/>}</div><small className="authMarketNote">Veriler Binance'ten alınır, bilgi amaçlıdır, yatırım tavsiyesi değildir.</small></article> })}</div>
+}
+
+function AuthCoinScreen({data,status}:{data:LiveTickerData;status:LiveTickerStatus}) {
+  const [paused,setPaused] = useState(false)
+  return <div className="authCoinScreen">
+    <header><div><span className={`authCoinLive status-${status}`}/><h2>Canlı piyasa</h2><small>{status === 'live' ? 'CANLI' : status === 'offline' ? 'ÇEVRİMDIŞI' : 'BAĞLANIYOR'}</small></div><button type="button" onClick={() => setPaused(value => !value)} aria-label={paused ? 'Coin akışını devam ettir' : 'Coin akışını duraklat'} title={paused ? 'Devam et' : 'Duraklat'} aria-pressed={paused}>{paused ? <Play/> : <Pause/>}</button></header>
+    <div className="authCoinViewport"><div className="authCoinTrack" data-paused={paused}>{[false,true].map(duplicate => <div className="authCoinGroup" key={String(duplicate)} aria-hidden={duplicate || undefined}>{LIVE_MARKET_CONFIG.map(config => { const ticker = data[config.symbol]; const Icon = config.symbol === 'BTCUSDT' ? Bitcoin : config.kind === 'fiat' ? CircleDollarSign : Coins; return <div className="authCoinQuote" key={config.symbol}><span className="authCoinAvatar" data-symbol={config.symbol}><Icon aria-hidden="true"/></span><div><b>{config.displaySymbol}</b><small>{config.name}</small></div><div className="authCoinNumbers">{ticker ? <><strong>{formatPanelPrice(config.symbol,ticker.price)}</strong><span className={ticker.changePercent >= 0 ? 'isPositive' : 'isNegative'}>{ticker.changePercent >= 0 ? '+' : ''}{ticker.changePercent.toFixed(2)}%</span></> : <span className="authCoinPending">—</span>}</div></div> })}</div>)}</div></div>
+  </div>
+}
+
+function AuthIntroPanel({data,status,movers,premium = false}:{data:LiveTickerData;status:LiveTickerStatus;movers:ReturnType<typeof useTopMovers>;premium?:boolean}) {
   return <section className="authIntro">
-    <div className="authBrand"><span className="authBrandMark" role="link" tabIndex={0} aria-label="Ana sayfaya git" onClick={() => window.location.assign('/')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.assign('/') } }}><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div>
-    <div className="authIntroCopy"><span className="authEyebrow">KAISTRADE WORKSPACE</span><h1>KAISTrade: Piyasayı tek yerden yönetin</h1><p>Hızlı kararlar, berrak analiz ve güvenli işlem akışı için ihtiyacınız olan her şey tek çalışma alanında.</p></div>
-    <div className="authFeatureList"><span><Zap/> Hızlı işlem</span><span><BarChart3/> Gelişmiş analiz</span><span><ShieldCheck/> Güvenli altyapı</span></div>
-    <div className="authMarketGrid">{AUTH_PANEL_MARKETS.map(config => { const ticker = data[config.symbol]; const history = ticker?.history.slice(-10) || []; const low = Math.min(...history); const high = Math.max(...history); const range = high - low || 1; const points = history.map(value => 8 + ((high - value) / range) * 24); return <article className={`authMarketCard ${ticker?.flash ? `isFlash-${ticker.flash}` : ''}`} key={config.symbol} aria-label={`${config.displaySymbol} ${config.name} piyasa kartı`}><div className="authMarketTop"><div><b>{config.displaySymbol}</b><small>{config.name}</small></div><div className="authMarketQuoteStatus">{ticker && <span className={ticker.changePercent >= 0 ? 'isPositive' : 'isNegative'}>{ticker.changePercent >= 0 ? '▲' : '▼'} {Math.abs(ticker.changePercent).toFixed(2)}%</span>}<i className={`authMarketStatus status-${status}`}><i/> {status === 'live' ? 'CANLI' : status === 'offline' ? 'ÇEVRİMDIŞI' : 'BAĞLANIYOR'}</i></div></div><div className="authMarketBottom">{ticker ? <strong aria-live="off">{formatPanelPrice(config.symbol,ticker.price)}</strong> : <i className="authMarketSkeleton"/>}{ticker ? <AuthSparkline points={points} positive={ticker.changePercent >= 0}/> : <i className="authSparklineSkeleton"/>}</div><small className="authMarketNote">Veriler Binance'ten alınır, bilgi amaçlıdır, yatırım tavsiyesi değildir.</small></article> })}</div>
-    <TopMovers movers={movers}/>
+    <div className="authIntroCopy"><h1 className="authLogoHeading"><span className="authBrandMark" role="link" tabIndex={0} aria-label="Ana sayfaya git" onClick={() => window.location.assign('/')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.assign('/') } }}><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></h1>{premium && <h2 className="authPremiumTitle"><span className="authWordmark" aria-label="KAİSTRADE"><b>KAİS</b><i>TRADE</i></span><span>Piyasanın ritmini yakalayın.</span></h2>}<p>Hızlı kararlar, berrak analiz ve güvenli işlem akışı için ihtiyacınız olan her şey tek çalışma alanında.</p></div>
+    {!premium && <div className="authFeatureList"><span><Zap/> Hızlı işlem</span><span><BarChart3/> Gelişmiş analiz</span><span><ShieldCheck/> Güvenli altyapı</span></div>}
+    <AuthMarketCards data={data} status={status}/>
+    <TopMovers movers={movers} autoScroll={premium}/>
+    {premium && <div className="authFeatureList"><span><Zap/> Hızlı işlem</span><span><BarChart3/> Gelişmiş analiz</span><span><ShieldCheck/> Güvenli altyapı</span></div>}
     <div className="authTrustBadges"><span><ShieldCheck/> 256-bit şifreleme</span><span><KeyRound/> 2 adımlı doğrulama</span><span><Activity/> 7/24 destek</span></div>
     <div className="authCandlePattern" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/></div>
   </section>
@@ -115,7 +129,11 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [token,setToken] = useState(userSessionToken())
   const [session,setSession] = useState<Session|null>(null)
   const [mode,setMode] = useState<Mode>(() => window.location.pathname === '/register' ? 'register' : window.location.pathname === '/forgot-password' ? 'forgot' : window.location.pathname === '/reset-password' ? 'reset' : window.location.pathname === '/verify-email' ? 'verify' : 'login')
+  const isRegistration = mode === 'register' || mode === 'bootstrap'
+  const [ownerSetupAvailable,setOwnerSetupAvailable] = useState(false)
   const [busy,setBusy] = useState(true)
+  const [sessionLoading,setSessionLoading] = useState(true)
+  const [submitFailed,setSubmitFailed] = useState(false)
   const [message,setMessage] = useState('Oturum doğrulanıyor…')
   const [showPassword,setShowPassword] = useState(false)
   const [showConfirmPassword,setShowConfirmPassword] = useState(false)
@@ -140,6 +158,19 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const memberMenuRef = useRef<HTMLDivElement>(null)
   const [memberMenuPosition,setMemberMenuPosition] = useState({top:0,left:12})
   const [profileHeaderSlot,setProfileHeaderSlot] = useState<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!LOCAL_OWNER_SETUP_PAGE) {
+      setOwnerSetupAvailable(false)
+      setMode(current => current === 'bootstrap' ? 'login' : current)
+      return
+    }
+    let active = true
+    request<{setup_required:boolean;auth_available:boolean}>('/public')
+      .then(result => { if (active) setOwnerSetupAvailable(result.setup_required && result.auth_available) })
+      .catch(() => { if (active) setOwnerSetupAvailable(false) })
+    return () => { active = false }
+  },[])
 
   useEffect(() => {
     let currentApp:HTMLElement|null = null
@@ -195,13 +226,13 @@ export default function AuthGate({children}:{children:ReactNode}) {
   },[memberMenuOpen])
 
   const loadSession = async (value:string) => {
-    if (!value) { setBusy(false); return }
+    if (!value) { setBusy(false); setSessionLoading(false); return }
     try {
       const current = await request<Session>('/session',{headers:{Authorization:`Bearer ${value}`}})
       setSession(current); setMessage('')
     } catch {
       clearUserSessionToken(); setToken(''); setSession(null); setMessage('Oturum açmak için devam edin.')
-    } finally { setBusy(false) }
+    } finally { setBusy(false); setSessionLoading(false) }
   }
 
   useEffect(() => { void loadSession(token) }, [])
@@ -268,13 +299,13 @@ export default function AuthGate({children}:{children:ReactNode}) {
 
   const validateForm = ():boolean => {
     const errors:Record<string,string> = {}
-    const emailValue = mode === 'login' ? login.email : mode === 'register' || mode === 'forgot' ? (mode === 'register' ? register.email : email) : ''
-    if (mode === 'login' || mode === 'register' || mode === 'forgot') {
-      if (!emailValue.trim()) errors.email = 'E-posta adresinizi girin.'
-      else if (!/^\S+@\S+\.\S+$/.test(emailValue)) errors.email = 'Lütfen geçerli bir e-posta adresi girin.'
+    const emailValue = mode === 'login' ? login.email : isRegistration || mode === 'forgot' ? (isRegistration ? register.email : email) : ''
+    if (mode === 'login' || isRegistration || mode === 'forgot') {
+      if (!emailValue.trim()) errors.email = 'E-posta girin.'
+      else if (!/^\S+@\S+\.\S+$/.test(emailValue)) errors.email = 'E-posta geçersiz.'
     }
-    if (mode === 'login' && !login.password) errors.password = 'Şifrenizi girin.'
-    if (mode === 'register') {
+    if (mode === 'login' && !login.password) errors.password = 'Parola girin.'
+    if (isRegistration) {
       const missingPasswordRules = passwordRules(register.password).filter(([,passed]) => !passed).map(([label]) => label)
       if (!register.password) errors.password = 'Şifrenizi girin.'
       else if (!passwordRules(register.password).every(([,passed]) => passed)) errors.password = `Eksik parola şartları: ${missingPasswordRules.join(', ')}.`
@@ -285,11 +316,13 @@ export default function AuthGate({children}:{children:ReactNode}) {
     }
     if (mode === 'verify' && !verificationInput && !verificationStatusToken && !verificationLinkToken) errors.verification = 'Doğrulama kodunu girin.'
     setFieldErrors(errors)
-    return !Object.keys(errors).length && (mode !== 'register' || register.terms_accepted)
+    return !Object.keys(errors).length && (!isRegistration || register.terms_accepted)
   }
 
   const submit = async (event:FormEvent) => {
     event.preventDefault()
+    if (busy) return
+    setSubmitFailed(false)
     if (!validateForm()) return
     setBusy(true); setMessage('')
     try {
@@ -300,6 +333,10 @@ export default function AuthGate({children}:{children:ReactNode}) {
         } else {
           saveUserSessionToken(result.token,remember); setMemberMenuOpen(false); setToken(result.token); setSession({user:result.user})
         }
+      } else if (mode === 'bootstrap') {
+        if (!ownerSetupAvailable) throw new Error('Yerel yönetici kurulumu kullanılamıyor.')
+        const result = await request<{token:string;user:User}>('/bootstrap',{method:'POST',body:JSON.stringify({...register,remember})})
+        saveUserSessionToken(result.token,remember); setMemberMenuOpen(false); setToken(result.token); setSession({user:result.user}); setOwnerSetupAvailable(false)
       } else if (mode === 'register') {
         const result = await request<{verification_status_token?:string;message:string}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
         setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setVerificationNotice(true); setMode('verify'); setMessage(result.message)
@@ -314,7 +351,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         await request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:verificationInput})})
         setVerificationNotice(false); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login')
       }
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'İşlem başarısız.') }
+    } catch (error) { setSubmitFailed(true); setMessage(error instanceof Error ? error.message : 'İşlem başarısız.') }
     finally { setBusy(false) }
   }
 
@@ -329,20 +366,21 @@ export default function AuthGate({children}:{children:ReactNode}) {
   }
 
   if (PLAYWRIGHT_TEST_MODE_AUTO_ACCESS) return <>{children}</>
-  if (busy && !session) return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>GÜVENLİ OTURUM</b><span>Hesap durumu kontrol ediliyor…</span></div></main>
+  if (sessionLoading && !session) return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>GÜVENLİ OTURUM</b><span>Hesap durumu kontrol ediliyor…</span></div></main>
   if (autoVerifying) return <main className="authLoading"><div className="authLoader"><MailCheck/><b>E-POSTA DOĞRULANIYOR</b><span>E-posta doğrulanıyor...</span></div></main>
   if (!session) {
     const registrationStrength = strength(register.password)
-    return <LoginMarketShell>{market => <main className={`authPage${mode === 'register' ? ' authPageRegister' : ''}`}>
-      <p className="authMobileSlogan">KAISTrade: Piyasayı tek yerden yönetin</p>
-      <AuthIntroPanel data={market.data} status={market.status} movers={market.movers}/>
-      <section className={`authCard ${mode === 'verify' ? 'authCardVerify' : ''}${mode === 'register' ? ' authCardRegister' : ''}`}>
+    return <LoginMarketShell>{market => <main className={`authPage${isRegistration ? ' authPageRegister' : ''}${mode === 'login' ? ' authPageLogin' : ''}`}>
+      {mode !== 'login' && <p className="authMobileSlogan">KAİSTRADE piyasayı tek yerden yönetin</p>}
+      {mode === 'login' && <header className="authMobileIdentity"><img src="/kaistrade-logo.png" alt="KaiStrade"/><p>KAİSTRADE piyasayı tek yerden yönetin</p></header>}
+      <AuthIntroPanel data={market.data} status={market.status} movers={market.movers} premium={mode === 'login'}/>
+      <section className={`authCard ${mode === 'verify' ? 'authCardVerify' : ''}${isRegistration ? ' authCardRegister' : ''}${mode === 'login' ? ' authCardLogin' : ''}`}>
         <div className="authLoginBrand"><img src="/kaistrade-logo.png" alt="KaiStrade"/></div>
-        <div className="authCardHead"><div className="authMark">{mode === 'verify' ? <MailCheck/> : <UserRound/>}</div><div><span>{mode === 'register' ? 'HESAP OLUŞTUR' : 'ÜYE GİRİŞİ'}</span><h2>{mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'register' ? 'Hesabını oluştur' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı kontrol edin'}</h2></div></div>
-        <p className="authCardLead">{mode === 'login' ? 'Çalışma alanınıza güvenli şekilde erişin.' : mode === 'register' ? 'KAISTrade hesabını oluştur ve piyasaları tek bir yerden takip et.' : mode === 'forgot' ? 'Hesabınıza yeniden erişmek için güvenli bir bağlantı gönderelim.' : mode === 'reset' ? 'Yeni ve güçlü bir parola belirleyin.' : 'Gelen kutunuzdaki bağlantıyla hesabınızı güvenle etkinleştirin.'}</p>
-        <form onSubmit={submit}>
-          {mode === 'login' && <><label className={fieldErrors.email ? 'authFieldError' : ''}>E-posta<input type="email" required autoComplete="username" value={login.email} onChange={event => {setLogin({...login,email:event.target.value});setFieldErrors(current => ({...current,email:''}))}} placeholder="siz@ornek.com"/>{fieldErrors.email && <em>{fieldErrors.email}</em>}</label><label className={fieldErrors.password ? 'authFieldError' : ''}>Parola<div className="authPassword"><input required type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={login.password} onChange={event => {setLogin({...login,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div>{fieldErrors.password && <em>{fieldErrors.password}</em>}</label><label className="authCheck"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Bu cihazda oturumu hatırla</span></label></>}
-          {mode === 'register' && <>
+        <div className="authCardHead"><div className="authMark">{mode === 'verify' ? <MailCheck/> : <UserRound/>}</div><div><span>{mode === 'bootstrap' ? 'YEREL YÖNETİCİ' : mode === 'register' ? 'HESAP OLUŞTUR' : 'ÜYE GİRİŞİ'}</span><h2>{mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'bootstrap' ? 'İlk yönetici hesabı' : mode === 'register' ? 'Hesabını oluştur' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı kontrol edin'}</h2></div></div>
+        <p className="authCardLead">{mode === 'login' ? 'Çalışma alanınıza güvenli şekilde erişin.' : mode === 'bootstrap' ? 'Yerel yönetici hesabınız için güçlü bir parola belirleyin.' : mode === 'register' ? 'KAISTrade hesabını oluştur ve piyasaları tek bir yerden takip et.' : mode === 'forgot' ? 'Hesabınıza yeniden erişmek için güvenli bir bağlantı gönderelim.' : mode === 'reset' ? 'Yeni ve güçlü bir parola belirleyin.' : 'Gelen kutunuzdaki bağlantıyla hesabınızı güvenle etkinleştirin.'}</p>
+        <form onSubmit={submit} noValidate={mode === 'login'} aria-busy={busy}>
+          {mode === 'login' && <><label className={fieldErrors.email ? 'authFieldError' : ''}>E-posta<div className="authInputWithIcon"><Mail aria-hidden="true"/><input type="email" required autoComplete="email" aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? 'login-email-error' : undefined} value={login.email} onChange={event => {setLogin({...login,email:event.target.value});setFieldErrors(current => ({...current,email:''}))}} placeholder="siz@ornek.com"/></div>{fieldErrors.email && <em id="login-email-error" role="alert">{fieldErrors.email}</em>}</label><label className={fieldErrors.password ? 'authFieldError' : ''}>Parola<div className="authPassword authInputWithIcon"><LockKeyhole aria-hidden="true"/><input required type={showPassword ? 'text' : 'password'} autoComplete="current-password" aria-invalid={Boolean(fieldErrors.password)} aria-describedby={fieldErrors.password ? 'login-password-error' : undefined} placeholder="Parolanız" value={login.password} onChange={event => {setLogin({...login,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Parolayı gizle' : 'Parolayı göster'} aria-pressed={showPassword}>{showPassword ? <EyeOff/> : <Eye/>}</button></div>{fieldErrors.password && <em id="login-password-error" role="alert">{fieldErrors.password}</em>}</label><label className="authCheck"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Bu cihazda oturumu hatırla</span></label></>}
+          {isRegistration && <>
             <label>Ad soyad<input required autoComplete="name" value={register.display_name} onChange={event => setRegister({...register,display_name:event.target.value})} placeholder="Ada Yılmaz"/></label>
             <label className={fieldErrors.email ? 'authFieldError' : ''}>E-posta<input type="email" autoComplete="email" value={register.email} onChange={event => {setRegister({...register,email:event.target.value});setFieldErrors(current => ({...current,email:''}))}} placeholder="siz@ornek.com"/>{fieldErrors.email && <em role="alert">{fieldErrors.email}</em>}</label>
             <label className={fieldErrors.password ? 'authFieldError' : ''}>Parola<div className="authPassword"><input type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={register.password} onChange={event => {setRegister({...register,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div><div className={`passwordMeter strength${registrationStrength.score}`}><i style={{width:`${registrationStrength.score * 20}%`}}/><span>{registrationStrength.label} · tüm şartlar sağlanmalı</span></div><div className="passwordRules">{passwordRules(register.password).map(([label,passed]) => <span className={passed ? 'passed' : 'missing'} key={label}>{passed ? '✓' : '•'} {label}</span>)}</div>{fieldErrors.password && <em role="alert">{fieldErrors.password}</em>}</label>
@@ -353,12 +391,14 @@ export default function AuthGate({children}:{children:ReactNode}) {
           {mode === 'forgot' && <label>E-posta<input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="siz@ornek.com"/><small>Kayıtlıysa yenileme bağlantısı hazırlanır.</small></label>}
           {mode === 'verify' && <label className={fieldErrors.verification ? 'authFieldError' : ''}>Doğrulama kodu<input required value={verificationInput} onChange={event => {setVerificationInput(event.target.value);setFieldErrors(current => ({...current,verification:''}))}} placeholder="E-posta doğrulama kodu"/><small>{message || 'Kayıt sonrası e-postanızdaki kodu girin.'}</small>{fieldErrors.verification && <em>{fieldErrors.verification}</em>}</label>}
           {mode === 'reset' && <><label>Doğrulama kodu<input required value={resetToken} onChange={event => setResetToken(event.target.value)}/></label><label>Yeni parola<input required type="password" autoComplete="new-password" value={resetPassword.password} onChange={event => setResetPassword({...resetPassword,password:event.target.value})}/></label><label>Yeni parola tekrar<input required type="password" autoComplete="new-password" value={resetPassword.confirm_password} onChange={event => setResetPassword({...resetPassword,confirm_password:event.target.value})}/></label></>}
-          <button className="authSubmit" disabled={busy}>{busy ? 'İŞLENİYOR…' : mode === 'login' ? 'GÜVENLİ GİRİŞ' : mode === 'register' ? 'HESAP OLUŞTUR' : mode === 'forgot' ? 'YENİLEME BAĞLANTISI GÖNDER' : mode === 'reset' ? 'PAROLAYI GÜNCELLE' : 'E-POSTAYI DOĞRULA'}<ArrowRight/></button>
+          <button className="authSubmit" disabled={busy} aria-busy={busy}>{busy ? 'İŞLENİYOR…' : mode === 'login' ? 'GÜVENLİ GİRİŞ' : mode === 'bootstrap' ? 'YÖNETİCİ HESABINI OLUŞTUR' : mode === 'register' ? 'HESAP OLUŞTUR' : mode === 'forgot' ? 'YENİLEME BAĞLANTISI GÖNDER' : mode === 'reset' ? 'PAROLAYI GÜNCELLE' : 'E-POSTAYI DOĞRULA'}{busy ? <LoaderCircle className="spin"/> : <ArrowRight/>}</button>
         </form>
         {mode === 'login' && <div className="authSocial"><span>veya</span><button type="button" className="authGoogle" aria-label="Google ile devam et"><span className="authGoogleMark" aria-hidden="true">G</span>Google ile devam et</button></div>}
         {mode === 'verify' && verificationNotice && <div className="authVerificationPanel"><b>Doğrulama bağlantısını e-posta adresinize gönderdik.</b><span>E-postayı göremiyor musunuz? Spam / Gereksiz / Tanıtımlar klasörünü de kontrol edin.</span><small>Doğrulama bekleniyor... Bu sayfa başka cihazdan yapılan doğrulamayı otomatik algılar.</small></div>}
-        {message && message !== 'Oturum doğrulanıyor…' && <p className="authMessage">{message}</p>}
+        {message && message !== 'Oturum doğrulanıyor…' && <p className={`authMessage${submitFailed ? ' authMessageError' : ''}`} role={submitFailed ? 'alert' : 'status'}>{message}</p>}
         <div className={`authLinks${mode === 'register' ? ' authRegisterLinks' : ''}`}>{mode === 'login' && <><button onClick={() => setMode('forgot')}>Parolamı unuttum</button><button onClick={() => setMode('register')}>Yeni hesap oluştur</button></>}{mode === 'register' ? <><span>Zaten hesabın var mı?</span><button type="button" onClick={() => setMode('login')}>Giriş yap</button></> : mode !== 'login' && <button onClick={() => setMode('login')}>Giriş ekranına dön</button>}</div>
+        {mode === 'login' && LOCAL_OWNER_SETUP_PAGE && ownerSetupAvailable && <div className="authLinks"><button type="button" onClick={() => {setRegister(current => ({...current,email:login.email,password:'',confirm_password:''}));setMessage('');setFieldErrors({});setTermsError('');setMode('bootstrap')}}><ShieldCheck aria-hidden="true"/> İlk yönetici kurulumu</button></div>}
+        {mode === 'login' && <section className="authMobileMarkets" aria-label="Canlı fiyatlar"><AuthCoinScreen data={market.data} status={market.status}/></section>}
       </section>
     </main>}</LoginMarketShell>
   }

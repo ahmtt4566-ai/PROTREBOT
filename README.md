@@ -44,6 +44,14 @@ Render arka uç servisinde yalnızca mevcut temel değerler gerekir:
 | `PROTREBOT_EXECUTION_MODE` | `TESTNET_FIRST` |
 | `PROTREBOT_LIVE_CHANNEL_ENABLED` | `true` |
 
+Backend Gmail API OAuth2 secrets (Render secret store):
+
+| Variable | Description |
+|---|---|
+| `GMAIL_CLIENT_ID` | Google OAuth client ID |
+| `GMAIL_CLIENT_SECRET` | Google OAuth client secret |
+| `GMAIL_REFRESH_TOKEN` | Gmail OAuth refresh token with `gmail.send` scope |
+
 Binance API anahtarları bu listeye eklenmez. İsterseniz mevcut yönetici kodundan ayrı bir
 kasa anahtarı için `PROTREBOT_VAULT_MASTER_KEY` kullanabilirsiniz; zorunlu değildir.
 
@@ -86,8 +94,19 @@ python -m venv .venv
 Ön yüz:
 
 ```bash
-cd frontend
+cd ..
 npm install
 npm run dev
 ```
+
+On yuz deposunun kok dizininden calistirilir. Yerel gelistirmede API adresi
+ayarlanmamissa `/api` istekleri Vite tarafindan `http://127.0.0.1:8000`
+adresine yonlendirilir; backend ve frontend birlikte calismalidir.
+`VITE_API_BASE` veya `VITE_API_URL` tanimlanmissa bu adres kullanilir.
+
+Ilk yonetici kurulumu normal giris ve musteri kayit ekranlarinda gosterilmez.
+Yalnizca yerel Vite gelistirmesinde `/local-owner-setup` adresinden erisilir.
+Backend uzak baglantilari ve `PROTREBOT_BOOTSTRAP_OWNER_EMAIL` ile eslesmeyen
+hesaplari reddeder; yonetici atandiktan sonra kurulum tekrar acilamaz.
+Mevcut bir hesabin ilk yoneticiye atanmasi dogru parolasini gerektirir.
 

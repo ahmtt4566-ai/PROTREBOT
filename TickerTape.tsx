@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { Pause, Play } from 'lucide-react'
 import { LIVE_MARKET_CONFIG } from './live-market-config'
 import type { LiveTickerData, LiveTickerStatus } from './use-live-tickers'
 
@@ -12,5 +14,6 @@ function TapeItems({data}:{data:LiveTickerData}) {
 }
 
 export default function TickerTape({data,status}:Props) {
-  return <div className="tickerTape" aria-hidden="true"><div className={`tickerTapeStatus status-${status}`}>{status === 'offline' ? 'Bağlantı yok' : <i/>}</div><div className="tickerTapeViewport"><div className="tickerTapeTrack"><div className="tickerTapeGroup"><TapeItems data={data}/></div><div className="tickerTapeGroup" aria-hidden="true"><TapeItems data={data}/></div></div></div></div>
+  const [paused,setPaused] = useState(false)
+  return <div className="tickerTape" role="region" aria-label="Canlı fiyat şeridi"><div className={`tickerTapeStatus status-${status}`} aria-hidden="true">{status === 'offline' ? 'Bağlantı yok' : <i/>}</div><div className="tickerTapeViewport" aria-hidden="true"><div className="tickerTapeTrack" data-paused={paused}><div className="tickerTapeGroup"><TapeItems data={data}/></div><div className="tickerTapeGroup" aria-hidden="true"><TapeItems data={data}/></div></div></div><button type="button" className="tickerTapeToggle" onClick={() => setPaused(value => !value)} aria-label={paused ? 'Fiyat şeridini devam ettir' : 'Fiyat şeridini duraklat'} title={paused ? 'Devam et' : 'Duraklat'} aria-pressed={paused}>{paused ? <Play/> : <Pause/>}</button></div>
 }

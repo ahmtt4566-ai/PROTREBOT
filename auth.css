@@ -128,3 +128,772 @@
 @media (max-width:767px){.authRoot>.authPage.authPageRegister{justify-content:flex-start!important;padding:20px!important}.authRoot>.authPage.authPageRegister>.authCardRegister{padding:20px!important}.authCardRegister .authLoginBrand{margin-bottom:10px!important}.authCardRegister .authLoginBrand img{width:138px!important}.authCardRegister .authCardHead h2{font-size:28px!important}.authCardRegister .authCardLead{margin-bottom:14px!important}.authCardRegister form{gap:11px!important}}
 @media (max-width:430px){.authRoot>.authPage.authPageRegister{padding:16px!important}.authRoot>.authPage.authPageRegister>.authCardRegister{padding:20px!important}.authCardRegister .authLoginBrand img{width:132px!important}.authCardRegister .authCardHead h2{font-size:27px!important}.authCardRegister .passwordRules{column-gap:7px!important}.authCardRegister .passwordRules span{font-size:10.5px!important}}
 @media (max-width:360px){.authRoot>.authPage.authPageRegister>.authCardRegister{padding:18px 16px!important}.authCardRegister .authCardHead h2{font-size:25px!important}}
+
+.authRoot > .authPage.authPageLogin::before {
+	inset: 0 !important;
+	width: auto !important;
+	background: none !important;
+}
+#root .authRoot:has(.authPageLogin) {
+	--auth-font: "Plus Jakarta Sans Variable", sans-serif;
+	--auth-text: #ecf5f0;
+	--auth-muted: #b6c8bf;
+	--auth-accent: #64e3a1;
+	font-family: var(--auth-font);
+	font-synthesis: none;
+	min-height: 100dvh;
+}
+#root .authRoot:has(.authPageLogin) :is(h1, h2, p, span, b, strong, small, label, input, button, a, em) {
+	font-family: var(--auth-font) !important;
+	font-synthesis: none !important;
+	letter-spacing: 0 !important;
+}
+#root .authRoot:has(.authPageLogin) > .authFooter {
+	margin-top: auto !important;
+	padding: 16px 20px !important;
+	gap: 8px 20px;
+	font-size: 13px !important;
+	color: var(--auth-muted);
+}
+#root .authRoot:has(.authPageLogin) > .authFooter a {
+	font-size: 13px;
+	color: var(--auth-muted);
+}
+#root .authPageLogin .authIntroCopy p,
+#root .authPageLogin .authMarketNote,
+#root .authPageLogin .authFeatureList span {
+	font-size: 13px !important;
+	line-height: 1.6;
+	color: var(--auth-muted) !important;
+}
+#root .authPageLogin .authMarketGrid {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	max-width: none;
+	gap: 12px;
+}
+#root .authPageLogin .authMarketCard {
+	border-radius: 16px;
+	background: rgba(17, 35, 30, .6);
+	border: 1px solid rgba(100, 227, 161, .22);
+	backdrop-filter: blur(18px);
+}
+#root .authPageLogin .authCandlePattern {
+	display: none;
+}
+#root .authRoot:has(.authPageLogin) > .tickerTape {
+	height: 28px !important;
+	min-height: 28px;
+	background: #08150f;
+	border-color: rgba(100, 227, 161, .1);
+	backdrop-filter: none;
+}
+#root .authRoot:has(.authPageLogin) .tickerTapeItem {
+	color: var(--auth-muted);
+	font-weight: 400;
+}
+#root .authRoot:has(.authPageLogin) .tickerTapeItem :is(b, strong, em) {
+	font-size: 11px;
+	font-weight: 600;
+}
+.authRoot > .authPage.authPageLogin > .authCardLogin {
+	box-sizing: border-box;
+	width: min(100%, 460px) !important;
+	max-width: 460px !important;
+	padding: 40px !important;
+	border: 1px solid rgba(100, 227, 161, .26) !important;
+	border-radius: 24px !important;
+	background: linear-gradient(145deg, rgba(26, 43, 38, .8), rgba(12, 19, 23, .9)) !important;
+	box-shadow: 0 24px 80px rgba(0, 0, 0, .35), 0 0 44px rgba(52, 211, 153, .08) !important;
+	backdrop-filter: blur(24px);
+}
+.authPageLogin .authBrandMark img {
+	width: 204px !important;
+}
+@media (min-width: 1024px) {
+	.authPageLogin .authBrandMark img {
+		width: 240px !important;
+		max-width: 100%;
+	}
+	#root .authPageLogin .authLogoHeading {
+		margin-bottom: 14px !important;
+	}
+}
+.authPage .authIntroCopy .authLogoHeading {
+	margin: 0 0 18px !important;
+	font-size: 0 !important;
+	line-height: 1 !important;
+}
+.authCardLogin .authLoginBrand {
+	margin: 0 0 18px !important;
+}
+.authCardLogin .authLoginBrand img {
+	width: 240px !important;
+	max-width: 100%;
+}
+.authCardLogin .authCardHead span {
+	margin-bottom: 6px;
+	font-size: 13px !important;
+	letter-spacing: 0;
+}
+.authCardLogin .authCardHead h2 {
+	font-size: 24px !important;
+	line-height: 1.25;
+	font-weight: 600 !important;
+}
+.authCardLogin .authCardLead {
+	margin: 0 0 18px !important;
+	font-size: 13px !important;
+	line-height: 1.5 !important;
+	white-space: normal !important;
+	color: var(--auth-muted) !important;
+}
+.authCardLogin form {
+	gap: 16px !important;
+}
+.authCardLogin form > label:not(.authCheck) {
+	gap: 8px;
+	font-size: 14px !important;
+	letter-spacing: 0;
+	color: var(--auth-text) !important;
+}
+.authCardLogin input:not([type="checkbox"]) {
+	box-sizing: border-box;
+	min-width: 0;
+	width: 100%;
+	height: 52px !important;
+	min-height: 52px !important;
+	padding: 12px 44px !important;
+	border-radius: 12px !important;
+	border: 1px solid #52665b !important;
+	background: rgba(4, 12, 13, .65) !important;
+	color: var(--auth-text) !important;
+	font-size: 16px !important;
+	scroll-margin-block: 20px;
+}
+.authCardLogin input:not([type="checkbox"])::placeholder {
+	font-size: 16px;
+	color: #acbeb4 !important;
+}
+.authCardLogin input:not([type="checkbox"]):focus {
+	border-color: var(--auth-accent) !important;
+	background: #070b0d !important;
+	box-shadow: 0 0 0 3px rgba(100, 227, 161, .2), 0 0 24px rgba(52, 211, 153, .12) !important;
+	outline: none;
+}
+.authCardLogin .authPassword {
+	width: 100%;
+	min-width: 0;
+	background: transparent !important;
+	border: 0 !important;
+}
+#root .authCardLogin label::after {
+	content: none !important;
+}
+.authCardLogin label em,
+.authCardLogin .authMessageError {
+	font-size: 13px !important;
+	font-style: normal;
+	line-height: 1.5;
+	color: #ff9c9c !important;
+}
+.authCardLogin input[aria-invalid="true"] {
+	border-color: #ff9c9c !important;
+}
+.authCardLogin .authPassword input {
+	padding-right: 42px !important;
+}
+.authCardLogin .authPassword button {
+	width: 44px !important;
+	height: 44px !important;
+	right: 2px !important;
+	color: var(--auth-muted) !important;
+	background: transparent !important;
+	border: 0 !important;
+}
+.authCardLogin .authCheck {
+	gap: 8px !important;
+	font-size: 13px !important;
+	color: var(--auth-muted) !important;
+}
+.authCardLogin .authCheck input {
+	width: 16px !important;
+	height: 16px !important;
+	min-height: 16px !important;
+	padding: 0 !important;
+	flex-shrink: 0;
+}
+.authCardLogin .authSubmit,
+.authCardLogin .authGoogle {
+	width: 100%;
+	min-height: 52px !important;
+	padding: 12px 14px !important;
+	border-radius: 12px !important;
+	font-size: 14px !important;
+	font-weight: 700 !important;
+	box-shadow: none !important;
+	scroll-margin-block: 24px;
+}
+.authCardLogin .authSubmit {
+	background: linear-gradient(110deg, #6aefb3, #34d399) !important;
+	color: #062214 !important;
+	border: 1px solid transparent !important;
+}
+.authCardLogin .authSubmit::before,
+.authCardLogin .authSubmit::after {
+	content: none !important;
+}
+.authCardLogin .authSubmit:hover:not(:disabled) {
+	background: linear-gradient(110deg, #9cf8ce, #50e3b0) !important;
+	transform: translateY(-2px) !important;
+	box-shadow: 0 8px 28px rgba(52, 211, 153, .24) !important;
+}
+.authCardLogin .authSubmit:disabled {
+	background: #367254 !important;
+	color: #f2fff8 !important;
+	opacity: 1 !important;
+	filter: none;
+	cursor: not-allowed;
+}
+.authCardLogin .authGoogle {
+	border: 1px solid #52665b !important;
+	background: rgba(255, 255, 255, .035) !important;
+	background-image: none !important;
+	color: var(--auth-text) !important;
+	font-weight: 600 !important;
+}
+.authCardLogin .authGoogle:hover {
+	background: rgba(100, 227, 161, .08) !important;
+}
+.authCardLogin button:focus-visible,
+.authRoot:has(.authPageLogin) .authFooter a:focus-visible {
+	outline: 2px solid var(--auth-accent);
+	outline-offset: 3px;
+}
+.authCardLogin .authSocial {
+	margin-top: 14px !important;
+}
+.authCardLogin .authLinks {
+	margin-top: 16px !important;
+	gap: 8px 12px !important;
+	flex-wrap: wrap;
+}
+.authCardLogin .authLinks button {
+	font-size: 13px !important;
+	min-height: 32px;
+	color: var(--auth-muted) !important;
+}
+.authCardLogin .authSocial > span,
+.authCardLogin .authMessage {
+	font-size: 13px !important;
+	color: var(--auth-muted);
+}
+@media (min-width: 1024px) {
+	#root .authRoot > .authPage.authPageLogin {
+		display: grid !important;
+		grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+		grid-template-rows: minmax(0, 1fr) !important;
+		gap: 0 !important;
+		width: 100% !important;
+		max-width: 1600px !important;
+		box-sizing: border-box;
+		margin-inline: auto;
+		padding: 32px !important;
+		align-items: center !important;
+	}
+	#root .authPageLogin .authIntro {
+		grid-column: 1;
+		grid-row: 1;
+		width: min(100%, 620px);
+		justify-self: center;
+		padding: 24px !important;
+		box-sizing: border-box;
+	}
+	#root .authPageLogin .authCardLogin {
+		grid-column: 2 !important;
+		grid-row: 1 !important;
+		justify-self: center !important;
+		align-self: center !important;
+		margin: 0 !important;
+	}
+	.authCardLogin .authLoginBrand {
+		display: none;
+	}
+}
+@media (max-width: 1023px) {
+	#root .authRoot:has(.authPageLogin) > .tickerTape {
+		display: none;
+	}
+	#root .authRoot > .authPage.authPageLogin {
+		min-height: 0 !important;
+		justify-content: flex-start !important;
+		padding: 32px 20px 24px !important;
+	}
+	#root .authRoot > .authPage.authPageLogin > .authCardLogin {
+		width: min(100%, 460px) !important;
+		padding: 28px 24px !important;
+		border-radius: 20px !important;
+	}
+	.authCardLogin .authLoginBrand {
+		margin-bottom: 8px !important;
+	}
+	.authCardLogin .authLoginBrand img {
+		width: 188px !important;
+	}
+	.authCardLogin .authMobileSlogan {
+		font-size: 13px !important;
+		line-height: 1.5;
+		margin: 0 0 24px;
+		color: var(--auth-muted);
+	}
+	.authCardLogin .authCardHead h2 {
+		font-size: 22px !important;
+	}
+	#root .authPageLogin .authCardLogin .authLinks {
+		display: grid !important;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px !important;
+		align-items: stretch;
+	}
+	#root .authPageLogin .authCardLogin .authLinks button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		width: 100% !important;
+		min-width: 0;
+		min-height: 52px;
+		margin: 0 !important;
+		padding: 8px 4px !important;
+		line-height: 1.4;
+		text-align: center !important;
+		white-space: normal;
+	}
+	#root .authRoot:has(.authPageLogin) > .authFooter {
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 8px 16px;
+	}
+}
+@media (max-width: 1023px) and (max-height: 550px) {
+	#root .authRoot > .authPage.authPageLogin {
+		padding-top: 20px !important;
+	}
+	.authCardLogin .authLoginBrand img {
+		width: 100px !important;
+	}
+	#root .authRoot > .authPage.authPageLogin > .authMobileIdentity img {
+		width: 128px;
+	}
+	#root .authRoot > .authPage.authPageLogin:has(.authCardLogin) {
+		padding-top: 16px !important;
+		gap: 16px !important;
+	}
+	#root .authRoot > .authPage.authPageLogin:has(.authCardLogin:focus-within) > .authMobileIdentity {
+		display: none !important;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.authCardLogin .spin {
+		animation: none;
+	}
+}
+
+#root .authRoot:has(.authPageLogin) {
+	display: flex;
+	flex-direction: column;
+	background: radial-gradient(ellipse at 16% 35%, rgba(16, 185, 129, .14), transparent 55%), #060b0e !important;
+}
+#root .authRoot > .authPage.authPageLogin {
+	flex: 1;
+	position: relative;
+	isolation: isolate;
+}
+#root .authRoot > .authPage.authPageLogin::before {
+	content: "";
+	background: linear-gradient(rgba(137, 214, 178, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(137, 214, 178, .035) 1px, transparent 1px) !important;
+	background-size: 40px 40px !important;
+	mask-image: linear-gradient(90deg, #000, transparent);
+	pointer-events: none;
+	z-index: -1;
+}
+#root .authRoot > .authPage.authPageLogin > .authIntro {
+	position: relative;
+	isolation: isolate;
+	display: flex !important;
+	flex-direction: column;
+	gap: 14px;
+}
+#root .authPageLogin .authBrandMark { display: inline-flex !important; justify-content: flex-start !important; width: auto !important; }
+#root .authPageLogin .authLogoHeading { text-align: left !important; }
+#root .authPageLogin .authIntro::before {
+	content: "";
+	position: absolute;
+	inset: -20px;
+	background: linear-gradient(135deg, rgba(52, 211, 153, .26), transparent 70%);
+	filter: blur(120px);
+	z-index: -1;
+	pointer-events: none;
+	animation: authAmbient 12s ease-in-out infinite alternate;
+}
+#root .authPageLogin .authIntroCopy { padding: 0; }
+#root .authPageLogin .authPremiumTitle {
+	margin: 0 0 16px;
+	font-size: 52px !important;
+	font-weight: 700 !important;
+	line-height: 1.12;
+	background: linear-gradient(110deg, #f1fff8 25%, #6aefb3 85%);
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+}
+#root .authPageLogin .authPremiumTitle span {
+	display: block;
+	margin-top: 8px;
+	font-size: 28px;
+	line-height: 1.3;
+	font-weight: 600;
+}
+#root .authPageLogin .authPremiumTitle .authWordmark {
+	position: relative;
+	display: flex;
+	align-items: baseline;
+	width: max-content;
+	max-width: 100%;
+	margin: 0;
+	font-size: 52px;
+	line-height: 1.12;
+	transform: skewX(-6deg);
+	transform-origin: left center;
+}
+#root .authPageLogin .authWordmark b,
+#root .authPageLogin .authWordmark i {
+	font-size: inherit;
+	font-style: normal;
+	background-clip: text !important;
+	-webkit-text-fill-color: transparent;
+}
+#root .authPageLogin .authWordmark b {
+	font-weight: 700;
+	background: linear-gradient(150deg, #ffffff, #d1e6db);
+}
+#root .authPageLogin .authWordmark i {
+	font-weight: 500;
+	background: linear-gradient(120deg, #9cf2c8, #45d6a0);
+}
+#root .authPageLogin .authWordmark::after {
+	content: "";
+	position: absolute;
+	right: 2px;
+	bottom: -4px;
+	width: 42%;
+	height: 2px;
+	background: linear-gradient(90deg, transparent, #64e3a1);
+}
+#root .authPageLogin .authIntroCopy p { max-width: 460px; margin: 0; }
+#root .authPageLogin .authMarketCard {
+	min-width: 0;
+	padding: 14px;
+	animation: authReveal .7s both, authFloat 7s 1s ease-in-out infinite;
+}
+#root .authPageLogin .authMarketCard:nth-child(2) { animation-delay: .12s, 1.5s; }
+#root .authPageLogin .authMarketCard:nth-child(3) { animation-delay: .24s, 2s; }
+#root .authPageLogin .authMarketTop { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+#root .authPageLogin .authMarketTop b { font-size: 14px; font-weight: 700; }
+#root .authPageLogin .authMarketTop small { font-size: 13px; color: var(--auth-muted); }
+#root .authPageLogin .authMarketQuoteStatus { flex-direction: row; flex-wrap: wrap; gap: 5px; align-items: center; }
+#root .authPageLogin .authMarketQuoteStatus > span { padding: 3px 6px; border-radius: 6px; background: rgba(52, 211, 153, .1); font-size: 11px; }
+#root .authPageLogin .authMarketQuoteStatus > .isNegative { color: #ff9c9c; background: rgba(255, 100, 130, .1); }
+#root .authPageLogin .authMarketStatus { font-size: 9px; }
+#root .authPageLogin .authMarketBottom { display: flex; flex-direction: column; align-items: stretch; gap: 10px; margin-top: 12px; }
+#root .authPageLogin .authMarketBottom strong { font-size: 18px; font-weight: 600; white-space: nowrap; }
+#root .authPageLogin .authSparkline { width: 100%; height: 34px; }
+#root .authPageLogin .authMarketNote { display: none; }
+#root .authPageLogin .authIntro .authMarketGrid::after { content: none; }
+#root .authPageLogin .topMovers { padding: 0; border: 0; background: transparent; box-shadow: none; min-width: 0; }
+#root .authPageLogin .topMovers header { margin-bottom: 10px; }
+#root .authPageLogin .topMovers h2 { font-size: 14px; font-weight: 600; }
+#root .authPageLogin .topMovers header > span { font-size: 13px; color: var(--auth-muted); }
+#root .authPageLogin .topMoversScroller { display: flex; overflow-x: auto; gap: 8px; max-width: 100%; padding-bottom: 6px; }
+#root .authPageLogin .topMoverChip { flex: 0 0 auto; padding: 8px 10px; border-radius: 8px; background: rgba(18, 38, 31, .6); border: 1px solid rgba(100, 227, 161, .16); }
+#root .authPageLogin .topMoverChip b, #root .authPageLogin .topMoverChip em { font-size: 12px; }
+#root .authPageLogin .topMoverChip small { display: none; }
+#root .authPageLogin .authFeatureList { display: flex; flex-wrap: wrap; gap: 12px 18px; margin: 0; }
+#root .authPageLogin .authFeatureList span { display: flex; align-items: center; gap: 7px; }
+#root .authPageLogin .authFeatureList svg { width: 20px; height: 20px; color: var(--auth-accent); }
+#root .authPageLogin .authTrustBadges { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 0; padding-top: 16px; border-top: 1px solid rgba(100, 227, 161, .12); }
+#root .authPageLogin .authTrustBadges span { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--auth-muted); }
+#root .authPageLogin .authTrustBadges svg { width: 14px; height: 14px; }
+#root .authPageLogin .authCardLogin { animation: authReveal .7s .15s both; }
+#root .authPageLogin .authCardLogin .authLoginBrand { display: none; }
+#root .authCardLogin .authMark { background: rgba(52, 211, 153, .1); border: 1px solid rgba(100, 227, 161, .2); color: var(--auth-accent); border-radius: 12px; }
+#root .authCardLogin .authInputWithIcon { position: relative; display: block; width: 100%; }
+#root .authCardLogin .authInputWithIcon > svg { position: absolute; left: 15px; top: 16px; width: 20px; height: 20px; color: var(--auth-muted); pointer-events: none; z-index: 1; }
+#root .authCardLogin .authInputWithIcon:focus-within > svg { color: var(--auth-accent); }
+#root .authCardLogin .authPassword button { top: 4px !important; right: 4px !important; }
+#root .authCardLogin :is(input, button) { transition: border-color .2s, box-shadow .2s, background .2s, transform .2s; }
+#root .authCardLogin .authLinks button:hover { color: var(--auth-accent) !important; }
+#root .authCardLogin .authSocial > span { display: flex; align-items: center; gap: 12px; width: 100%; margin-bottom: 14px; }
+#root .authCardLogin .authSocial > span::before, #root .authCardLogin .authSocial > span::after { content: ""; flex: 1; height: 1px; background: rgba(182, 200, 191, .2); }
+#root .authPageLogin .authMobileIdentity, #root .authPageLogin .authMobileMarkets { display: none; }
+@keyframes authReveal { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes authFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes authAmbient { from { opacity: .3; } to { opacity: .65; } }
+@media (max-width: 1023px) {
+	#root .authRoot > .authPage.authPageLogin { display: flex !important; flex-direction: column; align-items: center; gap: 24px !important; width: 100% !important; max-width: none !important; box-sizing: border-box; }
+	#root .authRoot > .authPage.authPageLogin > .authIntro { display: none !important; }
+	#root .authPageLogin .authMobileIdentity { display: block; text-align: center; width: 100%; animation: authReveal .6s both; }
+	#root .authPageLogin .authMobileIdentity { order: 0; }
+	#root .authRoot > .authPage.authPageLogin > .authCardLogin { order: 1 !important; }
+	#root .authPageLogin .authMobileIdentity img { width: 200px; max-width: 100%; height: auto; }
+	#root .authPageLogin .authMobileIdentity p { font-size: 13px; color: var(--auth-muted); margin: 10px 0 0; }
+	#root .authPageLogin .authMobileMarkets { display: block; width: min(100%, 460px); min-width: 0; order: 2; }
+	#root .authPageLogin .authMobileMarkets .authMarketGrid { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding: 6px 0 10px; gap: 10px; }
+	#root .authPageLogin .authMobileMarkets .authMarketCard { flex: 0 0 170px; scroll-snap-align: start; animation: authReveal .6s .25s both; box-sizing: border-box; }
+	#root .authPageLogin .authMobileMarkets .authMarketGrid::after { content: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+	#root .authRoot:has(.authPageLogin) *, #root .authRoot:has(.authPageLogin) *::before, #root .authRoot:has(.authPageLogin) *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+	#root .authCardLogin .authSubmit:hover { transform: none !important; }
+}
+
+#root .tickerTape .tickerTapeTrack { animation: tickerTapeMove 52s linear infinite !important; }
+#root .tickerTape .tickerTapeToggle,
+#root .authPageLogin .authFlowToggle,
+#root .authPageLogin .authCoinScreen header button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	flex: 0 0 32px;
+	padding: 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: #b6c8bf;
+	cursor: pointer;
+}
+#root .tickerTape .tickerTapeToggle { height: 100%; border-left: 1px solid rgba(100, 227, 161, .16); }
+#root :is(.tickerTapeToggle, .authFlowToggle, .authCoinScreen header button) svg { width: 14px; height: 14px; }
+#root :is(.tickerTapeToggle, .authFlowToggle, .authCoinScreen header button):hover { color: #64e3a1; background: rgba(100, 227, 161, .08); }
+#root :is(.tickerTapeToggle, .authFlowToggle, .authCoinScreen header button):focus-visible { outline: 2px solid #64e3a1; outline-offset: -2px; }
+#root .authPageLogin .topMoversAuto header { display: flex; align-items: center; gap: 8px; }
+#root .authPageLogin .topMoversAuto header > span { margin-left: auto; }
+#root .authPageLogin .topMoversAuto .topMoversScroller { overflow: hidden; scroll-snap-type: none; }
+#root .authPageLogin .topMoversAuto .topMoversScroller { mask-image: linear-gradient(90deg, transparent, #000 2%, #000 96%, transparent); }
+#root .authPageLogin .topMoversAuto .topMoverChip {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 132px;
+	padding: 6px 12px;
+	border: 0;
+	border-right: 1px solid rgba(182, 200, 191, .1);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+#root .authPageLogin .topMoversAuto .topMoverChip b { font-weight: 600; }
+#root .authPageLogin .topMoversAuto .topMoverChip em { background: transparent; font-weight: 500; font-variant-numeric: tabular-nums; }
+#root .authPageLogin .topMoversAuto h2 svg { color: #9dc6b2; fill: currentColor; }
+#root .authRoot:has(.authPageLogin) .tickerTapeViewport { mask-image: linear-gradient(90deg, transparent, #000 2%, #000 98%, transparent); }
+#root .authRoot:has(.authPageLogin) .tickerTapeItem strong { font-weight: 500; font-variant-numeric: tabular-nums; }
+#root .authRoot:has(.authPageLogin) .tickerTapeToggle,
+#root .authPageLogin .authFlowToggle,
+#root .authPageLogin .authCoinScreen header button { color: #9fb6aa; }
+#root .authPageLogin .authMoversTrack { display: flex; width: max-content; animation: tickerTapeMove 40s linear infinite !important; }
+#root .authPageLogin .authMoversGroup { display: flex; flex-shrink: 0; gap: 0; padding-right: 0; }
+#root .authPageLogin .authCoinScreen {
+	padding: 18px 0;
+	border-top: 1px solid rgba(100, 227, 161, .2);
+	border-bottom: 1px solid rgba(100, 227, 161, .1);
+	background: linear-gradient(90deg, rgba(16, 185, 129, .035), transparent);
+}
+#root .authPageLogin .authCoinScreen header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 18px; }
+#root .authPageLogin .authCoinScreen header > div { display: flex; align-items: center; gap: 8px; }
+#root .authPageLogin .authCoinScreen h2 { font-size: 14px; font-weight: 600; line-height: 1.4; margin: 0; color: #ecf5f0; }
+#root .authPageLogin .authCoinScreen header small { color: #b6c8bf; font-size: 10px; font-weight: 500; }
+#root .authPageLogin .authCoinLive { width: 6px; height: 6px; border-radius: 50%; background: #b6c8bf; }
+#root .authPageLogin .authCoinLive.status-live { background: #64e3a1; }
+#root .authPageLogin .authCoinLive.status-offline { background: #ff9c9c; }
+#root .authPageLogin .authCoinViewport { overflow: hidden; width: 100%; mask-image: linear-gradient(90deg, transparent, #000 3%, #000 94%, transparent); }
+#root .authPageLogin .authCoinTrack { display: flex; width: max-content; animation: tickerTapeMove 85s linear infinite !important; }
+#root .authPageLogin .authCoinGroup { display: flex; flex-shrink: 0; gap: 24px; padding-right: 24px; }
+#root .authPageLogin .authCoinQuote { display: flex; align-items: center; gap: 10px; min-width: 210px; }
+#root .authPageLogin .authCoinAvatar { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: rgba(113, 174, 210, .13); color: #a6d1ea; flex-shrink: 0; }
+#root .authPageLogin .authCoinAvatar[data-symbol="BTCUSDT"] { background: rgba(255, 180, 74, .12); color: #ffd089; }
+#root .authPageLogin .authCoinAvatar[data-symbol="USDTTRY"] { background: rgba(100, 227, 161, .12); color: #64e3a1; }
+#root .authPageLogin .authCoinAvatar svg { width: 20px; height: 20px; }
+#root .authPageLogin .authCoinQuote b { display: block; font-size: 14px; font-weight: 700; color: #ecf5f0; }
+#root .authPageLogin .authCoinQuote small { display: block; font-size: 13px; color: #b6c8bf; margin-top: 3px; }
+#root .authPageLogin .authCoinNumbers { margin-left: auto; text-align: right; }
+#root .authPageLogin .authCoinNumbers strong { display: block; font-size: 14px; font-weight: 600; color: #ecf5f0; font-variant-numeric: tabular-nums; }
+#root .authPageLogin .authCoinNumbers > span { display: block; font-size: 13px; margin-top: 3px; }
+#root .authPageLogin .authCoinNumbers .isPositive { color: #64e3a1; }
+#root .authPageLogin .authCoinNumbers .isNegative { color: #ff9c9c; }
+#root .authPageLogin .authCoinPending { color: #b6c8bf; }
+@media (prefers-reduced-motion: reduce) {
+	#root .tickerTape .tickerTapeTrack { animation-duration: 104s !important; }
+	#root .authPageLogin .authMoversTrack { animation-duration: 80s !important; }
+	#root .authPageLogin .authCoinTrack { animation-duration: 170s !important; }
+}
+#root .tickerTape .tickerTapeTrack[data-paused="true"],
+#root .authPageLogin .authMoversTrack[data-paused="true"],
+#root .authPageLogin .authCoinTrack[data-paused="true"] { animation-play-state: paused !important; }
+
+@media (max-width: 1023px) {
+	#root .authRoot:has(.authPageLogin) {
+		background: radial-gradient(ellipse 110% 440px at 50% 0, rgba(52, 211, 153, .13), transparent 75%), linear-gradient(180deg, #0b1417 0, #080c10 65%, #05080b 100%) !important;
+	}
+	#root .authRoot > .authPage.authPageLogin {
+		padding: 16px 16px 12px !important;
+		gap: 12px !important;
+	}
+	#root .authPageLogin .authMobileIdentity img { width: 160px; }
+	#root .authPageLogin .authMobileIdentity p { margin-top: 6px; }
+	#root .authPageLogin .authCardLogin .authCardLead { margin-bottom: 12px !important; }
+	#root .authPageLogin .authCardLogin form { gap: 12px !important; }
+	#root .authPageLogin .authCardLogin .authSocial { margin-top: 10px !important; gap: 0 !important; }
+	#root .authPageLogin .authCardLogin .authSocial > span { margin-bottom: 10px; }
+	#root .authPageLogin .authCardLogin .authLinks { margin-top: 8px !important; }
+	#root .authRoot:has(.authPageLogin) > .authFooter {
+		padding: 10px 16px max(10px, env(safe-area-inset-bottom)) !important;
+		gap: 6px 12px;
+	}
+	#root .authRoot > .authPage.authPageLogin::before {
+		background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAADsSURBVEhLlY8BjsQwCAPz/0/3dFESTQeTai1RwNiEjud5njHGfzp51+bJuU/8DA5tYNDMutMf/qjDhQlcaCT/MOmrnK2/YWpP8fEI+cSleuV6XQouTLjsqUuSoZuRayJfmoyJN6yf39P8cLU1Sb+iNySuy+Y2yh946Ya5Lx1yfZ1G17cjCOjqMi9IS5PW9cxsOhFrPmatfZNLi5KQc6J7AFENXsgwl3TEq/OQ8DLX7SE2fIFmZ9cr6m9tXEyHs958+QMv9JyzLqTLA4la3l7OZ341ut4LXH/lFfWqrt+ca3P0vd3hevKee0Zs7g+SmqagZD330AAAAABJRU5ErkJggg==") repeat !important;
+		background-size: 24px 24px !important;
+		mask-image: linear-gradient(#000, transparent 90%);
+		opacity: .025 !important;
+		animation: none !important;
+	}
+	#root .authRoot > .authPage.authPageLogin > .authCardLogin {
+		padding: 20px 20px 0 !important;
+		overflow: hidden;
+		border-top-color: rgba(162, 245, 209, .4) !important;
+		background: linear-gradient(155deg, rgba(30, 50, 44, .72), rgba(12, 19, 23, .85) 60%) !important;
+		box-shadow: inset 0 1px 0 rgba(206, 255, 230, .1), 0 24px 64px rgba(0, 0, 0, .3), 0 0 36px rgba(52, 211, 153, .04) !important;
+	}
+	#root .authPageLogin .authCardLogin > .authMobileMarkets {
+		width: calc(100% + 40px);
+		margin: 12px -20px 0;
+	}
+	#root .authPageLogin .authCoinScreen {
+		display: flex;
+		align-items: center;
+		padding: 4px 0;
+		border-top: 1px solid rgba(100, 227, 161, .1);
+		border-bottom: 0;
+		background: transparent;
+	}
+	#root .authPageLogin .authCoinScreen header {
+		position: relative;
+		order: 1;
+		flex: 0 0 32px;
+		margin: 0 8px 0 0;
+	}
+	#root .authPageLogin .authCoinScreen header > div {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+	#root .authPageLogin .authCoinScreen h2 {
+		font-size: 13px;
+		color: #b6c8bf;
+	}
+	#root .authPageLogin .authCoinScreen header small {
+		padding: 0;
+		background: transparent;
+		color: #b6c8bf;
+	}
+	#root .authPageLogin .authCoinViewport {
+		min-width: 0;
+		flex: 1;
+		mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+	}
+	#root .authPageLogin .authCoinGroup {
+		gap: 0;
+		padding-right: 0;
+	}
+	#root .authPageLogin .authCoinQuote {
+		box-sizing: border-box;
+		min-width: 0;
+		width: auto;
+		flex: 0 0 auto;
+		padding: 8px 14px;
+		gap: 8px;
+		border: 0;
+	}
+	#root .authPageLogin .authCoinAvatar {
+		display: none;
+	}
+	#root .authPageLogin .authCoinAvatar svg { width: 16px; height: 16px; }
+	#root .authPageLogin .authCoinQuote b {
+		font-size: 13px;
+		font-weight: 600;
+	}
+	#root .authPageLogin .authCoinQuote small {
+		display: none;
+	}
+	#root .authPageLogin .authCoinNumbers { display: flex; align-items: center; gap: 8px; }
+	#root .authPageLogin .authCoinNumbers strong {
+		font-size: 13px;
+		line-height: 1.4;
+		font-weight: 500;
+		white-space: nowrap;
+	}
+	#root .authPageLogin .authCoinNumbers > span {
+		margin-top: 0;
+		font-weight: 500;
+		white-space: nowrap;
+	}
+}
+
+@media (max-width: 1023px) and (max-height: 740px) {
+	#root .authRoot > .authPage.authPageLogin:has(.authCardLogin) { padding: 8px 16px !important; gap: 8px !important; }
+	#root .authRoot > .authPage.authPageLogin > .authMobileIdentity img { width: 128px; }
+	#root .authPageLogin .authMobileIdentity p,
+	#root .authPageLogin .authCardLogin .authCardHead span,
+	#root .authPageLogin .authCardLogin .authCardLead { display: none; }
+	#root .authPageLogin .authCardLogin .authCardHead h2 { font-size: 20px !important; }
+	#root .authRoot > .authPage.authPageLogin > .authCardLogin { padding-top: 16px !important; }
+	#root .authRoot:has(.authPageLogin) > .authFooter { padding-block: 8px max(8px, env(safe-area-inset-bottom)) !important; }
+}
+@media (max-width: 1023px) and (max-height: 620px) {
+	#root .authRoot > .authPage.authPageLogin > .authMobileIdentity img { width: 96px; }
+	#root .authPageLogin .authCardLogin .authCardHead { display: none; }
+	#root .authRoot > .authPage.authPageLogin > .authCardLogin { padding: 12px 16px 0 !important; }
+	#root .authPageLogin .authCardLogin form { gap: 8px !important; }
+	#root .authPageLogin .authCardLogin .authSocial { margin-top: 6px !important; }
+	#root .authPageLogin .authCardLogin .authSocial > span { margin-bottom: 6px; }
+	#root .authPageLogin .authCardLogin .authLinks { margin-top: 4px !important; }
+	#root .authPageLogin .authCardLogin > .authMobileMarkets { width: calc(100% + 32px); margin: 8px -16px 0; }
+	#root .authPageLogin .authCoinScreen { padding-block: 2px; }
+	#root .authRoot:has(.authPageLogin) > .authFooter { padding-block: 6px max(6px, env(safe-area-inset-bottom)) !important; }
+}
+
+@media (min-width: 1024px) {
+	#root .authRoot:has(.authPageLogin) {
+		position: relative;
+		isolation: isolate;
+		background: radial-gradient(ellipse at 16% 35%, rgba(16, 185, 129, .1), transparent 55%), linear-gradient(135deg, #040b0a 0%, #071713 54%, #040909 100%) !important;
+	}
+	#root .authRoot:has(.authPageLogin)::before {
+		content: "";
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(rgba(137, 214, 178, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(137, 214, 178, .035) 1px, transparent 1px);
+		background-size: 40px 40px;
+		mask-image: linear-gradient(90deg, #000, transparent);
+		pointer-events: none;
+		z-index: -1;
+	}
+	#root .authRoot > .authPage.authPageLogin {
+		background: transparent !important;
+	}
+	#root .authRoot > .authPage.authPageLogin::before {
+		content: none !important;
+	}
+}

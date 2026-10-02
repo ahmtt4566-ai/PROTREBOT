@@ -802,17 +802,21 @@ async def v22_bootstrap(payload: BootstrapRequest, request: Request):
         host,
         web_owner_authenticated=bool(getattr(request.state, "web_owner_authenticated", False)),
     ):
-        raise HTTPException(403, "İlk yönetici yalnızca yerel uygulamadan veya doğrulanmış güvenli web oturumundan oluşturulabilir")
+        raise HTTPException(403, "İlk yönetici yalnızca yerel uygulamadan oluşturulabilir")
     async with rt["lock"]:
         state = rt["state"]
         previous_state = copy.deepcopy(state)
         email = normalize_email(payload.email)
         if "@" not in email:
             raise HTTPException(422, "Geçerli bir e-posta yazın")
+        if email != BOOTSTRAP_OWNER_EMAIL:
+            raise HTTPException(403, "Bu hesap için yönetici kurulumu yapılamaz")
         existing_user = next((item for item in state["users"] if item.get("email") == email), None)
         owner_exists = bool(state.get("owner_user_id"))
-        if owner_exists and email != BOOTSTRAP_OWNER_EMAIL:
+        if owner_exists:
             raise HTTPException(409, "İlk yönetici daha önce oluşturuldu")
+        if existing_user and not verify_password(payload.password, existing_user.get("password", {})):
+            raise HTTPException(401, "E-posta veya parola hatalı")
         if existing_user is None:
             user_id = uuid.uuid4().hex
             user = {
@@ -859,7 +863,7 @@ def _ensure_bootstrap_owner_privileges(state: dict[str, Any], user: dict[str, An
     Guards against the account silently losing OWNER/ELITE status after a state
     restore from non-durable storage, without ever bypassing the password check.
     """
-    if user.get("email") != BOOTSTRAP_OWNER_EMAIL:
+    if user.get("email") != BOOTSTRAP_OWNER_EMAIL or not state.get("owner_user_id") or state.get("owner_user_id") != user.get("id"):
         return
     user["role"] = "OWNER"
     user["active"] = True

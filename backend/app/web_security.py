@@ -81,13 +81,9 @@ def bearer_token(value: str | None) -> str:
 
 
 def bootstrap_access_allowed(client_host: str | None, *, web_owner_authenticated: bool) -> bool:
-    """Allow first-owner creation locally or behind the authenticated web gate.
-
-    A public deployment may bootstrap exactly once, but only after the global
-    owner preview token has already been verified by the API middleware.
-    """
+    """Allow first-owner creation only from the local application."""
     host = str(client_host or "").strip().lower()
-    return host in LOCAL_BOOTSTRAP_HOSTS or bool(web_owner_authenticated)
+    return host in LOCAL_BOOTSTRAP_HOSTS
 
 
 @dataclass(frozen=True)

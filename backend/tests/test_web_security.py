@@ -95,9 +95,9 @@ class WebSecurityTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.status_code, 401)
 
-    def test_first_owner_bootstrap_requires_local_or_verified_web_owner(self):
+    def test_first_owner_bootstrap_requires_local_connection(self):
         self.assertTrue(bootstrap_access_allowed("127.0.0.1", web_owner_authenticated=False))
-        self.assertTrue(bootstrap_access_allowed("10.0.0.12", web_owner_authenticated=True))
+        self.assertFalse(bootstrap_access_allowed("10.0.0.12", web_owner_authenticated=True))
         self.assertFalse(bootstrap_access_allowed("10.0.0.12", web_owner_authenticated=False))
 
     def test_helpers_normalize_inputs(self):

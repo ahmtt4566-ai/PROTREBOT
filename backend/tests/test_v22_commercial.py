@@ -40,7 +40,7 @@ from app.binance_demo import (  # noqa: E402
 )
 from app.exchange_connections import SaveCredentialsRequest  # noqa: E402
 from app.v21_demo import state_for as v21_state_for  # noqa: E402
-from app.v22_commercial import BootstrapRequest, access_snapshot, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_register, v22_verification_status  # noqa: E402
+from app.v22_commercial import BootstrapRequest, _ensure_bootstrap_owner_privileges, access_snapshot, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_register, v22_verification_status  # noqa: E402
 from app.main import database_health, database_health_status, health_check_redis, health_item, healthz, run_health_checks  # noqa: E402
 
 
@@ -78,16 +78,75 @@ class V22CommercialTests(unittest.TestCase):
             "auth_version": 1,
             "password": original_password,
         }
-        state = {"users": [owner], "owner_user_id": "old-owner", "licenses": [], "audit": []}
+        state = {"users": [owner], "owner_user_id": None, "licenses": [], "audit": []}
         application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"state": state, "secret": b"bootstrap-secret", "lock": asyncio.Lock()}))
         request = SimpleNamespace(app=application, client=SimpleNamespace(host="127.0.0.1"), state=SimpleNamespace(web_owner_authenticated=True))
-        payload = BootstrapRequest(display_name="Ignored Display Name", email=owner["email"], password="NewBootstrap!123", remember=True)
+        payload = BootstrapRequest(display_name="Ignored Display Name", email=owner["email"], password="ExistingStrong!123", remember=True)
         with patch("app.v22_commercial.save_state"), patch("app.v22_commercial.persist_v22_commercial", new=AsyncMock(return_value=True)), patch("app.v22_commercial.bootstrap_access_allowed", return_value=True):
             result = asyncio.run(v22_bootstrap(payload, request))
         self.assertEqual(result["user"]["role"], "OWNER")
         self.assertTrue(owner["active"])
         self.assertEqual(owner["password"], original_password)
         self.assertEqual(state["owner_user_id"], owner["id"])
+
+    def test_bootstrap_rejects_customer_email(self):
+        state = {"users": [], "owner_user_id": None, "licenses": [], "audit": []}
+        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"state": state, "secret": b"bootstrap-secret", "lock": asyncio.Lock()}))
+        request = SimpleNamespace(app=application, client=SimpleNamespace(host="127.0.0.1"), state=SimpleNamespace(web_owner_authenticated=False))
+        payload = BootstrapRequest(display_name="Customer", email="customer@example.com", password="CustomerStrong!123")
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(v22_bootstrap(payload, request))
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(state["users"], [])
+
+    def test_bootstrap_owner_email_alone_cannot_promote_customer_on_login(self):
+        for owner_id in (None, "another-owner"):
+            with self.subTest(owner_id=owner_id):
+                user = {"id": "customer", "email": "ahmtt4565@gmail.com", "role": "CUSTOMER", "active": True}
+                state = {"users": [user], "owner_user_id": owner_id, "licenses": []}
+                _ensure_bootstrap_owner_privileges(state, user)
+                self.assertEqual(user["role"], "CUSTOMER")
+                self.assertEqual(state["owner_user_id"], owner_id)
+                self.assertEqual(state["licenses"], [])
+
+    def test_bootstrap_designated_owner_keeps_privileges_on_login(self):
+        user = {"id": "existing-owner", "email": "ahmtt4565@gmail.com", "role": "OWNER", "active": True}
+        state = {"users": [user], "owner_user_id": user["id"], "licenses": []}
+        _ensure_bootstrap_owner_privileges(state, user)
+        self.assertEqual(user["role"], "OWNER")
+        self.assertEqual(state["licenses"][0]["user_id"], user["id"])
+
+    def test_bootstrap_rejects_remote_customer_even_with_owner_gate(self):
+        state = {"users": [], "owner_user_id": None, "licenses": [], "audit": []}
+        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"state": state, "secret": b"bootstrap-secret", "lock": asyncio.Lock()}))
+        request = SimpleNamespace(app=application, client=SimpleNamespace(host="10.0.0.12"), state=SimpleNamespace(web_owner_authenticated=True))
+        payload = BootstrapRequest(display_name="Admin", email="ahmtt4565@gmail.com", password="AdminStrong!123")
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(v22_bootstrap(payload, request))
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(state["users"], [])
+
+    def test_bootstrap_cannot_reopen_completed_setup(self):
+        state = {"users": [], "owner_user_id": "existing-owner", "licenses": [], "audit": []}
+        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"state": state, "secret": b"bootstrap-secret", "lock": asyncio.Lock()}))
+        request = SimpleNamespace(app=application, client=SimpleNamespace(host="127.0.0.1"), state=SimpleNamespace(web_owner_authenticated=False))
+        payload = BootstrapRequest(display_name="Admin", email="ahmtt4565@gmail.com", password="AdminStrong!123")
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(v22_bootstrap(payload, request))
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(state["users"], [])
+
+    def test_bootstrap_existing_account_requires_correct_password(self):
+        user = {"id": "existing-admin", "email": "ahmtt4565@gmail.com", "role": "CUSTOMER", "active": False, "password": hash_password("ExistingStrong!123")}
+        state = {"users": [user], "owner_user_id": None, "licenses": [], "audit": []}
+        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"state": state, "secret": b"bootstrap-secret", "lock": asyncio.Lock()}))
+        request = SimpleNamespace(app=application, client=SimpleNamespace(host="127.0.0.1"), state=SimpleNamespace(web_owner_authenticated=False))
+        payload = BootstrapRequest(display_name="Admin", email=user["email"], password="WrongStrong!123")
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(v22_bootstrap(payload, request))
+        self.assertEqual(caught.exception.status_code, 401)
+        self.assertEqual(user["role"], "CUSTOMER")
+        self.assertFalse(user["active"])
 
     def test_health_result_is_safe_and_standardized(self):
         result = health_item("Database", "ERROR", "Database connection failed.", 0.0)
