@@ -60,6 +60,31 @@ async function mockMember(page: Page, premium = false, initialRemaining = 87, ma
   return requests
 }
 
+for (const width of [1440, 768, 390, 320]) {
+  test(`Home logo is 40 percent larger and fits the header at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width, height: 900})
+    await mockMember(page)
+    await page.goto('/')
+    const logo = page.locator('.homeRoute .v26BrandLogo')
+    await expect(logo).toBeVisible()
+    const measurements = await logo.evaluate(element => {
+      const box = element.getBoundingClientRect()
+      const brand = element.parentElement!.getBoundingClientRect()
+      const actions = document.querySelector('.v26HeaderActions')!.getBoundingClientRect()
+      return {width: box.width, height: box.height, available: brand.width, right: box.right, actionsLeft: actions.left,
+        scrollWidth: document.documentElement.scrollWidth, viewport: window.innerWidth}
+    })
+    expect(measurements.width).toBeCloseTo(Math.min(180 * 1.4, measurements.available), 0)
+    expect(measurements.height).toBeCloseTo(47 * 1.4, 0)
+    expect(measurements.right).toBeLessThanOrEqual(measurements.actionsLeft)
+    expect(measurements.scrollWidth).toBeLessThanOrEqual(measurements.viewport)
+    await page.goto('/master-trade?tab=analiz')
+    const workspaceLogo = page.locator('.workspaceRoute .v26BrandLogo')
+    await expect(workspaceLogo).toHaveCSS('height', '47px')
+    await expect(workspaceLogo).toHaveCSS('flex-basis', '180px')
+  })
+}
+
 for (const width of [1440, 390]) {
   test(`Free Master Trade premium card and safe previews at ${width}px`, async ({page}, testInfo) => {
     await page.setViewportSize({width, height: 900})

@@ -2,6 +2,10 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+Ana sayfa başlık logosu 252 × 65,8 px hedef boyutuyla önceki boyuttan %40
+büyüktür; dar ekranlarda başlık kontrollerini örtmemek için kullanılabilir
+genişliğe sığar. Diğer çalışma ekranlarındaki logo boyutu değişmez.
+
 ## Master Trade / Canlı İşlem arayüzü
 
 `/master-trade?tab=canli` koyu/yeşil temada kompakt kartlar, yatay stepper,

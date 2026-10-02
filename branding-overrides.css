@@ -130,6 +130,13 @@
   height: 47px !important;
 }
 
+#root > main.v26App.homeRoute .v26BrandLogo {
+  flex-basis: 252px !important;
+  width: 252px !important;
+  max-width: 100%;
+  height: 65.8px !important;
+}
+
 #root > main.v26App .v26HeaderProfileSlot {
   display: flex;
   align-items: center;
