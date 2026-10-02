@@ -1,7 +1,7 @@
 import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useState } from 'react'
-import { Check, ChevronDown, LockKeyhole, Minus, X } from 'lucide-react'
+import { Activity, Cable, Check, ChevronDown, ListChecks, LockKeyhole, Minus, Power, Send, Settings2, ShieldCheck, Wallet, X } from 'lucide-react'
 
-type LayoutElement = ReactElement<{className?: string; children?: ReactNode; title?: string; 'aria-label'?: string}>
+type LayoutElement = ReactElement<{className?: string; children?: ReactNode; title?: string; 'aria-label'?: string; 'data-status'?: string}>
 type Tab = 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'
 const STEPS = ['Bağlan', 'Onayla', 'Arm', 'Çalıştır']
 
@@ -83,33 +83,66 @@ function collapseLogRows(children: ReactNode): ReactNode[] {
   })
 }
 
-function presentLogs(node: ReactNode, inActivity = false): ReactNode {
+function presentLogs(node: ReactNode, inActivity = false, livePresentation = false): ReactNode {
   if (!isValidElement(node)) return node
   const element = node as LayoutElement
   const className = element.props.className ?? ''
-  const titled = typeof element.props.children === 'string' && typeof element.type === 'string' && ['p','small','strong','b','em','span'].includes(element.type)
-    ? cloneElement(element, {title: element.props.title ?? element.props.children})
+  const text = element.props.children
+  const titled = typeof text === 'string' && typeof element.type === 'string' && ['p','small','strong','b','em','span'].includes(element.type)
+    ? cloneElement(element, {
+      title: element.props.title ?? text,
+      ...(livePresentation && /^(READY|CONNECTED|PASS|CLEAR|DISCONNECTED|NOT CONNECTED|BLOCKED|LOCKED|KİLİTLİ|PENDING|REQUIRED|UNKNOWN|WAITING|LONG|SHORT)$/.test(text) ? {'data-status': text} : {}),
+    })
     : element
   const activity = inActivity || className.split(' ').some(value => value === 'masterTradeLiveActivity' || value === 'masterTradeLiveActivityRail')
   if (activity && (element.type === 'ol' || className === 'masterTradeLiveActivityRailList')) {
     return cloneElement(element, {children: collapseLogRows(element.props.children)})
   }
+  if (livePresentation && element.type === 'b' && (text === '—' || text === '--')) {
+    return cloneElement(titled, {children: <MasterTradeValue>{text}</MasterTradeValue>})
+  }
   if (element.props.children === undefined) return titled
-  return cloneElement(titled, {children: Children.map(element.props.children, child => presentLogs(child, activity))})
+  return cloneElement(titled, {children: Children.map(element.props.children, child => presentLogs(child, activity, livePresentation))})
 }
 
-function cardTitle(card: LayoutElement): ReactNode {
+function cardText(card: LayoutElement, tags: string[]): ReactNode {
   const findHeading = (node: ReactNode): ReactNode => {
     for (const child of Children.toArray(node)) {
       if (!isValidElement(child)) continue
       const element = child as LayoutElement
-      if (element.type === 'h3') return element.props.children
+      if (typeof element.type === 'string' && tags.includes(element.type)) return element.props.children
       const nested = findHeading(element.props.children)
       if (nested) return nested
     }
     return null
   }
-  return findHeading(card.props.children) ?? card.props['aria-label']
+  return findHeading(card.props.children)
+}
+
+function cardTitle(card: LayoutElement): ReactNode {
+  return cardText(card, ['h3']) ?? card.props['aria-label']
+}
+
+function cardIcon(className: string) {
+  if (className.includes('Connection')) return Cable
+  if (className.includes('Confirmation') || className.includes('Safety')) return ShieldCheck
+  if (className.includes('Control')) return Power
+  if (className.includes('OrderGrid')) return Send
+  if (className.includes('Account')) return Wallet
+  if (className.includes('Setup')) return Settings2
+  if (className.includes('Operations') || className.includes('Signal') || className.includes('Activity')) return Activity
+  return ListChecks
+}
+
+function groupLiveInsights(slots: ReactNode[], cards: ReactNode[], tab: Tab): ReactNode[] {
+  if (tab !== 'canli') return slots
+  const findCard = (className: string) => cards.findIndex(card => isValidElement(card) && (card as LayoutElement).props.className?.split(' ').includes(className))
+  const scanner = findCard('masterTradeLiveOperations')
+  const signal = findCard('masterTradeLiveSignal')
+  if (scanner < 0 || signal < 0) return slots
+  return slots.flatMap((slot, index) => index === scanner
+    ? [<div className="masterTradeLiveInsightsStack" key="live-insights">{slot}{slots[signal]}</div>]
+    : index === signal ? [] : [slot])
 }
 
 export function MasterTradeLiveLayout({tab = 'canli', step, children}: {tab?: Tab; step: number; children: LayoutElement}) {
@@ -119,8 +152,8 @@ export function MasterTradeLiveLayout({tab = 'canli', step, children}: {tab?: Ta
   const progression = cards.find(card => isValidElement(card) && (card as LayoutElement).props.className === 'masterTradeLiveFlow') as LayoutElement | undefined
   const progressionStates = Children.toArray(progression?.props.children).filter(child => isValidElement(child) && child.type === 'span')
   const content = <>
-    <nav className="masterTradeStepper" aria-label={progression?.props['aria-label']} hidden={tab !== 'canli'}>{STEPS.map((label, index) => <button key={label} type="button" disabled={index > step} aria-current={activeStep === index ? 'step' : undefined} onClick={() => setSelectedStep(index)}><span className="masterTradeStepIndex">{index > step ? <LockKeyhole/> : index < step ? <Check/> : index + 1}</span><span><b>{label}</b><small>{progressionStates[index]}</small></span></button>)}</nav>
-    {cards.map(node => {
+    <nav className="masterTradeStepper" aria-label={progression?.props['aria-label']} hidden={tab !== 'canli'}>{STEPS.map((label, index) => <button key={label} type="button" disabled={index > step} data-complete={index < step || undefined} aria-current={activeStep === index ? 'step' : undefined} onClick={() => setSelectedStep(index)}><span className="masterTradeStepIndex">{index > step ? <LockKeyhole/> : index < step ? <Check/> : index + 1}</span><span><b>{label}</b><small>{progressionStates[index]}</small></span></button>)}</nav>
+    {groupLiveInsights(cards.map(node => {
       if (!isValidElement(node)) return node
       const card = node as LayoutElement
       const className = card.props.className ?? ''
@@ -137,12 +170,16 @@ export function MasterTradeLiveLayout({tab = 'canli', step, children}: {tab?: Ta
       const workflowStep = connection ? 0 : confirmations ? 1 : control ? (activeStep === 3 ? 3 : 2) : null
       const expanded = workflowStep === activeStep
       const locked = workflowStep !== null && workflowStep > step
-      const presented = presentLogs(card)
+      const presented = presentLogs(card, false, tab === 'canli')
+      const Icon = cardIcon(className)
+      const title = cardTitle(card)
+      const summaryText = cardText(card, ['p', 'small'])
+      const summary = <summary>{tab === 'canli' && <Icon aria-hidden="true"/>}<span className="masterTradeCardTitle" title={typeof title === 'string' ? title : undefined}>{title}</span>{tab === 'canli' && <small className="masterTradeCardSummary" title={typeof summaryText === 'string' ? summaryText : undefined}>{summaryText}</small>}{locked ? <LockKeyhole aria-hidden="true"/> : <ChevronDown aria-hidden="true"/>}</summary>
       const secondary = positions || className.includes('masterTradeLiveActivityRail') || tab === 'canli' && workflowStep === null && !className.includes('masterTradeLiveHeader') && !className.includes('masterTradeLiveAssistant')
       return <div className="masterTradeLiveSlot" key={card.key} hidden={!visible} data-flow-card={workflowStep ?? undefined} data-flow-expanded={workflowStep === null ? undefined : expanded}>
-        {workflowStep !== null && tab === 'canli' && !expanded ? <details className="masterTradeFlowCard" inert={locked} aria-disabled={locked || undefined}><summary><span>{cardTitle(card)}</span>{locked ? <LockKeyhole/> : <ChevronDown/>}</summary>{presented}</details> : secondary ? <details className="masterTradeFlowCard"><summary><span>{cardTitle(card)}</span><ChevronDown/></summary>{presented}</details> : presented}
+        {workflowStep !== null && tab === 'canli' && !expanded ? <details className="masterTradeFlowCard" inert={locked} aria-disabled={locked || undefined}>{summary}{presented}</details> : secondary ? <details className="masterTradeFlowCard">{summary}{presented}</details> : presented}
       </div>
-    })}
+    }), cards, tab)}
   </>
   return cloneElement(children, {children: content})
 }

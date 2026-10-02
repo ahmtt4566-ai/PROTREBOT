@@ -2,6 +2,22 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Master Trade / Canlı İşlem arayüzü
+
+`/master-trade?tab=canli` koyu/yeşil temada kompakt kartlar, yatay stepper,
+responsive metrik kutuları ve masaüstünde yan yana manuel emir/özet görünümü kullanır.
+Eksik metrikler skeleton ile, sinyal fiyatları yalnızca gösterimde iki ondalıkla sunulur;
+ham değerler tooltip'te korunur. Dar ekranlarda içerik tek kolona, metrikler iki kolona
+geçer. LOCKED, ARM, consent, backend doğrulamaları ve mevcut işlem koşulları değişmez.
+
+Doğrulama: kökte `npm run build`; `frontend` içinde
+`npx playwright test master-trade-live-ui.spec.ts master-trade-readonly.spec.ts --project=chromium`.
+UI testi gerçek emir/bağlantı işlemi yapmadan mock verilerle masaüstü, tablet ve mobil
+layout ölçülerini, kilitli butonları ve yerel form/toggle davranışlarını denetler.
+Ekran görüntüleri test çıktısına eklenir; isteğe bağlı `LIVE_UI_SCREENSHOTS` değişkeniyle
+ayrı bir çıktı klasörü, `LIVE_UI_PHASE` ile dosya adı öneki belirtilebilir.
+Bu pakette ayrı bir lint script'i veya lint yapılandırması bulunmaz.
+
 V28, V27 bulut operasyon ve kanıt altyapısını korur; Testnet ve gerçek Binance USD-M
 Futures API bağlantılarını doğrudan programın içine taşır. Render'a Binance anahtarı yazmak
 gerekmez. Yönetici panelindeki **Borsa Bağlantıları** sekmesinden API Key ve Secret Key
@@ -109,4 +125,3 @@ Yalnizca yerel Vite gelistirmesinde `/local-owner-setup` adresinden erisilir.
 Backend uzak baglantilari ve `PROTREBOT_BOOTSTRAP_OWNER_EMAIL` ile eslesmeyen
 hesaplari reddeder; yonetici atandiktan sonra kurulum tekrar acilamaz.
 Mevcut bir hesabin ilk yoneticiye atanmasi dogru parolasini gerektirir.
-

@@ -838,3 +838,211 @@
     & *, & *::before, & *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
 }
+
+/* Scoped specificity keeps legacy terminal overrides out of the live workspace. */
+html:has(.masterTradePage[data-layout-tab="canli"]) { scroll-padding-top: 124px; }
+
+#root > main.v26App.masterTradeRoute .masterTradePage.masterTrade[data-layout-tab="canli"] .masterTradeLiveUx {
+  --live-surface: rgba(255, 255, 255, .03);
+  --live-line: rgba(255, 255, 255, .08);
+  --live-muted: #95a79f;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+
+  & *, & *::before, & *::after { box-sizing: border-box; }
+  & :is(button, input, select, summary) { transition: background-color 150ms, border-color 150ms, color 150ms, opacity 150ms; }
+  & :is(button, input, select, summary):focus-visible { outline: 2px solid var(--live-green); outline-offset: 3px; }
+  & :is(button, input, select) { font-family: inherit; font-size: 14px; }
+  & button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+  & button:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+  & svg { width: 18px; height: 18px; flex-shrink: 0; }
+  & :is(h2, h3) { margin: 0; color: #f4f8f6; font-size: 18px; line-height: 1.4; }
+  & :is(p, small, em) { font-size: 12px; line-height: 1.5; }
+  & .masterTradeLiveKicker { color: var(--live-muted); font-size: 12px; letter-spacing: .04em; }
+  & :is(.masterTradeLiveSlot, .masterTradeLiveGrid) { min-width: 0; max-width: 100%; }
+  & .masterTradeLiveSlot { order: 5; width: 100%; }
+  & .masterTradeLiveInsightsStack { display: flex; flex-direction: column; gap: 16px; min-width: 0; order: 5; }
+  & .masterTradeLiveSlot:has(.masterTradeLiveHeader) { grid-column: 1 / -1; order: 1; }
+  & .masterTradeLiveSlot:has(.masterTradeLiveAssistant) { grid-column: 1 / -1; order: 2; }
+  & .masterTradeLiveSlot[data-flow-card="0"] { order: 3; }
+  & .masterTradeLiveSlot:is([data-flow-expanded="true"], :has(.masterTradeLiveAccountHud), :has(.liveUxOrderGrid)) { grid-column: 1 / -1; }
+  & .masterTradeLiveSlot:is([data-flow-card="1"], [data-flow-card="2"], [data-flow-card="3"]) { order: 4; }
+  & :is(.masterTradeLiveSection, .masterTradeLiveApiDrawer, .masterTradeLiveAccountHud, .masterTradeLiveHeader, .masterTradeLiveAssistant, .masterTradeFlowCard, .liveUxCard, .masterTradeLiveActivityRail) {
+    height: auto;
+    min-height: 0;
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid var(--live-line) !important;
+    border-radius: 12px;
+    background: var(--live-surface) !important;
+    box-shadow: none;
+  }
+  & .masterTradeFlowCard > :is(section, aside) { padding: 0; margin-top: 16px; border: 0 !important; background: transparent !important; }
+  & .masterTradeFlowCard > .liveUxGrid { margin-top: 16px; }
+  & .masterTradeFlowCard > summary { display: grid; grid-template-columns: 18px minmax(0, 1fr) minmax(0, 1fr) 18px; align-items: center; gap: 10px; list-style: none; }
+  & .masterTradeFlowCard > summary::-webkit-details-marker { display: none; }
+  & .masterTradeFlowCard > summary > :is(span, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0 !important; border-radius: 0; background: transparent !important; }
+  & .masterTradeFlowCard > summary > svg { color: var(--live-muted); }
+  & .masterTradeCardTitle { color: var(--live-ink); font-size: 16px; }
+  & .masterTradeCardSummary { color: var(--live-muted); }
+  & .masterTradeFlowCard[open] > summary > svg:last-child { transform: rotate(180deg); }
+  & .masterTradeStepper { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; order: 0; margin: 0; overflow-x: auto; }
+  & .masterTradeStepper button { position: relative; justify-content: start; gap: 12px; min-height: 64px; height: 64px; padding: 8px 16px; border: 0; border-radius: 0; background: transparent !important; text-align: left; }
+  & .masterTradeStepper button:not(:last-child)::after { content: ''; position: absolute; width: 24px; height: 1px; right: -12px; top: 32px; background: var(--live-line); }
+  & .masterTradeStepIndex { width: 30px; height: 30px; border: 1px solid var(--live-line) !important; border-radius: 50%; background: transparent; color: var(--live-muted); }
+  & .masterTradeStepper button[aria-current="step"] .masterTradeStepIndex { border: 2px solid var(--live-green) !important; color: var(--live-green); }
+  & .masterTradeStepper button[data-complete] .masterTradeStepIndex { border-color: var(--live-green) !important; color: var(--live-green); }
+  & .masterTradeStepper button > span:last-child { min-width: 0; }
+  & .masterTradeStepper button b { color: var(--live-ink); font-size: 14px; }
+  & .masterTradeStepper button[aria-current="step"] > span > b { color: #fff; }
+  & .masterTradeStepper small, & .masterTradeStepper small span { color: var(--live-muted); font-size: 12px; }
+  & .masterTradeStepper small > span { gap: 4px; white-space: nowrap; }
+  & .masterTradeStepper small b { color: inherit; font-size: inherit; }
+  & .masterTradeLiveHeader { grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
+  & .masterTradeLiveTitle h2 { margin: 4px 0; font-size: 18px; }
+  & .masterTradeLiveTitle p { color: var(--live-muted); }
+  & .masterTradeLiveHeadline { min-width: 0; gap: 6px 8px; justify-content: end; }
+  & .masterTradeLiveHeadline strong { font-size: 14px; padding: 4px 8px; border: 1px solid var(--live-line) !important; border-radius: 20px; background: transparent; }
+  & .masterTradeLiveHeadline small { font-size: 12px; letter-spacing: 0; }
+  & .masterTradeLiveChips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: start; gap: 8px; }
+  & .masterTradeLiveChips > span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--live-line) !important; border-radius: 20px; color: var(--live-muted); background: transparent; font-size: 12px; }
+  & [data-status] { background: transparent; }
+  & [data-status]:is([data-status="READY"], [data-status="CONNECTED"], [data-status="PASS"], [data-status="CLEAR"], [data-status="LONG"]) { color: var(--live-green); }
+  & [data-status]:is([data-status="BLOCKED"], [data-status="DISCONNECTED"], [data-status="NOT CONNECTED"], [data-status="SHORT"]) { color: var(--live-red); }
+  & [data-status]:is([data-status="LOCKED"], [data-status="KİLİTLİ"], [data-status="PENDING"], [data-status="REQUIRED"], [data-status="WAITING"]) { color: var(--live-amber); }
+  & .masterTradeLiveAssistant { display: flex; align-items: center; flex-direction: row; flex-wrap: wrap; gap: 16px; border-left: 3px solid var(--live-green) !important; }
+  & .masterTradeLiveAssistantCopy { display: flex; align-items: center; gap: 12px; flex: 1 1 340px; min-width: 0; }
+  & .masterTradeLiveAssistantCopy > svg { color: var(--live-green); }
+  & .masterTradeLiveAssistant strong { margin-top: 2px; font-size: 16px; }
+  & .masterTradeLiveAssistant small { margin-top: 4px; color: var(--live-muted); }
+  & .masterTradeLiveAssistantActions { flex-direction: row; flex-wrap: wrap; gap: 8px; width: auto; margin-left: auto; }
+  & :is(.masterTradeLivePrimary, .masterTradeLiveSaveButton, .liveUxFormActions .primary) { min-height: 44px; width: auto; padding: 10px 14px; border: 1px solid var(--live-green) !important; border-radius: 8px; background: #2a996b !important; color: #fff; font-size: 14px; letter-spacing: 0; }
+  & :is(.masterTradeLivePrimary, .masterTradeLiveSaveButton, .liveUxFormActions .primary):hover:not(:disabled) { background: #32aa79 !important; }
+  & :is(.masterTradeLivePrimary, .masterTradeLiveSaveButton):disabled { background: rgba(85, 215, 155, .1) !important; color: var(--live-muted); border-color: var(--live-line) !important; }
+  & :is(.masterTradeLiveAssistantActions .masterTradeLiveTextButton, .masterTradeLiveApiActions button:not(.masterTradeLiveSaveButton), .liveUxFormActions button:not(.primary), .masterTradeLiveSecondary) { min-height: 44px; padding: 10px 14px; border: 1px solid rgba(255, 255, 255, .18) !important; border-radius: 8px; background: transparent !important; color: var(--live-ink); font-size: 14px; letter-spacing: 0; }
+  & .masterTradeLiveSetup > header .masterTradeLiveTextButton { min-height: 32px; padding: 4px 0; border: 0; background: transparent !important; color: var(--live-muted); font-size: 12px; letter-spacing: 0; }
+  & :is(.masterTradeLiveSection, .masterTradeLiveAccountHud, .liveUxCard) > header { position: static; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 16px; padding: 0; }
+  & :is(.masterTradeLiveAccountHud, .liveUxCard) > header > div { display: block; min-width: 0; }
+  & :is(.masterTradeLiveAccountHud, .masterTradeLiveSection) > header > strong { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 4px 10px; border: 1px solid var(--live-line) !important; border-radius: 20px; background: transparent; font-size: 12px; }
+  & .masterTradeLiveAccountHud > header > strong { position: static; width: auto; min-height: 0; font-size: 12px; }
+  & .masterTradeLiveAccountHud > header > strong.blocked { color: var(--live-red); }
+  & .masterTradeLiveAccountHud > header > strong.ready { color: var(--live-green); }
+  & .masterTradeLiveAccountMetrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; padding: 0; }
+  & :is(.masterTradeLiveAccountMetrics, .masterTradeLiveSignalGrid, .masterTradeLiveOperations .masterTradeLiveControlMeta) > span { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 12px; border: 1px solid var(--live-line) !important; border-radius: 10px; background: rgba(255, 255, 255, .02); }
+  & :is(.masterTradeLiveAccountMetrics, .masterTradeLiveSignalGrid, .masterTradeLiveOperations .masterTradeLiveControlMeta) :is(small, em) { display: block; margin: 0; color: var(--live-muted); font-size: 12px; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  & :is(.masterTradeLiveAccountMetrics, .masterTradeLiveSignalGrid, .masterTradeLiveOperations .masterTradeLiveControlMeta) small { text-transform: uppercase; letter-spacing: .04em; }
+  & :is(.masterTradeLiveAccountMetrics, .masterTradeLiveSignalGrid, .masterTradeLiveOperations .masterTradeLiveControlMeta) b { display: block; margin: 0; font-size: 20px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  & .masterTradeLiveOperations .masterTradeLiveControlMeta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; background: transparent; }
+  & .masterTradeLiveWarningChip { display: inline-block; max-width: 100%; padding: 3px 8px; border: 1px solid rgba(237, 189, 103, .25) !important; border-radius: 20px; color: var(--live-amber); font-size: 12px; overflow-wrap: anywhere; }
+  & .masterTradeLiveSignalGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  & .masterTradeLiveSignalSymbol { align-items: center; }
+  & .masterTradeLiveSignalSymbol b { font-size: 20px; }
+  & .masterTradeLiveSignalSymbol span, & .liveUxSummaryLead > :is(strong, span) { padding: 3px 10px; border: 1px solid currentColor !important; border-radius: 20px; background: transparent; font-size: 12px; }
+  & .masterTradeLiveSignal > p { padding: 8px 0; color: var(--live-muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  & .masterTradeLiveApiGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  & :is(.masterTradeLiveApiGrid, .masterTradeLiveSetupGrid, .masterTradeLiveAdvanced, .liveUxForm) label { display: grid; align-content: start; gap: 6px; min-width: 0; color: var(--live-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  & :is(.masterTradeLiveApiGrid, .masterTradeLiveSetupGrid, .masterTradeLiveAdvanced, .liveUxForm) :is(input, select), & .masterTradeLiveSetupGrid strong { width: 100%; height: 44px; min-height: 44px; padding: 0 12px; border: 1px solid var(--live-line) !important; border-radius: 8px; background: rgba(0, 0, 0, .15); color: var(--live-ink); font-size: 14px; letter-spacing: 0; }
+  & .masterTradeLiveSetupGrid strong { display: flex; align-items: center; }
+  & .masterTradeLiveSecretField input { padding-right: 44px; }
+  & .masterTradeLiveSecretField button { top: 0; right: 0; width: 44px; height: 44px; }
+  & :is(.masterTradeLiveCheck, .masterTradeLivePolicyCheck) { display: flex; align-items: center; gap: 8px; width: auto; min-height: 24px; padding: 0; margin: 8px 0 0; border: 0; background: transparent; }
+  & :is(.masterTradeLiveCheck, .masterTradeLivePolicyCheck) input[type="checkbox"] { appearance: auto; flex: 0 0 16px; width: 16px !important; height: 16px !important; min-height: 16px !important; min-width: 16px; margin: 0; padding: 0; accent-color: var(--live-green); }
+  & :is(.masterTradeLiveCheck, .masterTradeLivePolicyCheck) span { color: var(--live-muted); font-size: 12px; line-height: 1.5; }
+  & .masterTradeLiveConnectionActionBar { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px; padding: 0; }
+  & .masterTradeLiveActionMeta { display: grid; grid-template-columns: auto auto; gap: 2px 8px; width: auto; padding: 8px 10px; border: 1px solid var(--live-line) !important; border-radius: 8px; background: transparent; }
+  & .masterTradeLiveActionMeta :is(span, b, small) { margin: 0; font-size: 12px; letter-spacing: 0; }
+  & .masterTradeLiveActionMeta small { grid-column: 1 / -1; }
+  & .masterTradeLiveActionMeta b { color: var(--live-ink); }
+  & .masterTradeLiveApiActions { display: flex; flex-wrap: wrap; min-width: 0; justify-content: end; gap: 8px; margin-left: auto; }
+  & .masterTradeLiveApiActions button { height: 44px; min-height: 44px; font-size: 14px; }
+  & .masterTradeLiveSecurityStrip { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; }
+  & .masterTradeLiveSecurityStrip span { display: inline-flex; gap: 6px; padding: 4px 8px; border: 1px solid var(--live-line) !important; border-radius: 20px; background: transparent; font-size: 12px; letter-spacing: 0; text-transform: none; }
+  & .masterTradeLiveApiMeta { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  & .masterTradeLiveApiMeta > span { min-width: 0; padding: 10px; border: 1px solid var(--live-line) !important; border-radius: 8px; font-size: 12px; letter-spacing: .04em; }
+  & .masterTradeLiveApiMeta b { font-size: 14px; letter-spacing: 0; }
+  & .liveUxOrderGrid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; gap: 16px; }
+  & .liveUxManual { position: relative; isolation: isolate; }
+  & .liveUxManual[data-locked]::after { content: ''; position: absolute; z-index: -1; inset: 0; border-radius: inherit; background: rgba(0, 0, 0, .1); pointer-events: none; }
+  & .liveUxManual > header > b { flex-shrink: 0; padding: 3px 8px; border: 1px solid var(--live-line) !important; border-radius: 20px; font-size: 12px; }
+  & .liveUxForm { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  & .masterTradeOrderField { grid-column: span 2; }
+  & .masterTradeOrderField:nth-child(5) { grid-column: 1 / -1; }
+  & .liveChoice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 6px; }
+  & .liveChoice > span { grid-column: 1 / -1; color: var(--live-muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+  & .liveChoice button { height: 44px; min-height: 44px; border: 1px solid var(--live-line) !important; border-radius: 8px; background: transparent !important; color: var(--live-muted); font-size: 14px; }
+  & .liveChoice button.selectedLong { border-color: var(--live-green) !important; color: var(--live-green); background: rgba(85, 215, 155, .08) !important; }
+  & .liveChoice button.selectedShort { border-color: var(--live-red) !important; color: var(--live-red); background: rgba(240, 124, 115, .08) !important; }
+  & .liveUxFormActions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; margin-top: 16px; }
+  & .liveUxSummary { position: sticky; top: 124px; }
+  & .liveUxSummary header > b { color: var(--live-muted); font-size: 12px; }
+  & .liveUxSummaryLead { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  & .liveUxSummary .liveUxMetrics { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+  & .liveUxSummary .liveUxMetrics > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 8px 0; border: 0; border-bottom: 1px solid var(--live-line) !important; border-radius: 0; background: transparent; }
+  & .liveUxSummary .liveUxMetrics small { color: var(--live-muted); font-size: 12px; }
+  & .liveUxSummary .liveUxMetrics b { min-width: 0; margin: 0; color: var(--live-ink); font-size: 14px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  & .liveUxSummary .liveUxMetrics b[data-status] { padding: 2px 8px; border: 1px solid currentColor !important; border-radius: 20px; }
+  & .liveUxSummary .liveUxMetrics b[data-status="READY"] { color: var(--live-green); }
+  & .liveUxSummary .liveUxMetrics b[data-status="BLOCKED"] { color: var(--live-red); }
+  & .masterTradeLiveSetupGrid, & .masterTradeLiveAdvanced { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  & .masterTradeLiveUnitField { position: relative; min-width: 0; }
+  & .masterTradeLiveUnitField input { padding-right: 68px; }
+  & .masterTradeLiveUnitField > span { position: absolute; top: 0; right: 12px; display: flex; align-items: center; height: 44px; color: var(--live-muted); font-size: 12px; pointer-events: none; }
+  & .masterTradeLiveMarkets { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 16px; }
+  & .masterTradeLiveMarkets > span { color: var(--live-muted); font-size: 12px; letter-spacing: .04em; }
+  & .masterTradeLiveMarketsScroll { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; max-height: none; overflow: visible; padding: 0; }
+  & .masterTradeLiveMarketsScroll button { flex: 0 0 auto; width: auto; min-height: 36px; padding: 6px 16px; border: 1px solid var(--live-line) !important; border-radius: 20px; background: transparent !important; color: var(--live-muted); font-size: 14px; }
+  & .masterTradeLiveMarketsScroll button.selected { border-color: var(--live-green) !important; color: var(--live-green); }
+  & .masterTradeLiveMarkets small { font-size: 12px; }
+  & .masterTradeLiveSetupFooter { flex-direction: row; align-items: center; gap: 12px; }
+  & .masterTradeLiveSetupFooter button { flex-shrink: 0; margin-left: auto; }
+  & :is(.masterTradeLiveSlot, .masterTradeFlowCard, input, select) { scroll-margin-top: 124px; }
+}
+
+@media (min-width: 1600px) {
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade[data-layout-tab="canli"] .masterTradeLiveSetupGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 768px) and (max-width: 1279px) {
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade[data-layout-tab="canli"] .masterTradeLiveUx {
+    & .masterTradeLiveOperations .masterTradeLiveControlMeta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    & .masterTradeLiveAssistantActions { flex-shrink: 1; }
+    & .liveUxSummary > header { flex-wrap: wrap; }
+  }
+}
+
+@media (max-width: 767px) {
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade[data-layout-tab="canli"] .masterTradeLiveUx {
+    grid-template-columns: minmax(0, 1fr);
+    & .masterTradeStepper { grid-template-columns: repeat(4, minmax(160px, 1fr)); }
+    & .masterTradeStepper button { padding: 8px 12px; }
+    & .masterTradeLiveHeader { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+    & .masterTradeLiveHeadline { align-self: start; }
+    & .masterTradeLiveHeadline small { grid-column: 1 / -1; max-width: 120px; text-align: right; }
+    & .masterTradeLiveTitle h2 { font-size: 16px; }
+    & .masterTradeLiveAssistantActions { width: 100%; }
+    & .masterTradeLiveAssistantActions button { flex: 1 1 auto; }
+    & :is(.masterTradeLiveAccountMetrics, .masterTradeLiveSignalGrid, .masterTradeLiveOperations .masterTradeLiveControlMeta, .masterTradeLiveApiMeta) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    & .masterTradeLiveAccountHud > header { flex-wrap: wrap; }
+    & .masterTradeLiveAccountHud > header > strong { margin-left: auto; }
+    & .masterTradeLiveConnectionActionBar { gap: 8px; }
+    & .masterTradeLiveActionMeta { flex: 1 1 130px; }
+    & .masterTradeLiveApiActions { flex: 1 1 100%; width: 100%; justify-content: end; }
+    & .masterTradeLiveApiActions button { flex: 1 1 140px; width: auto; padding: 8px; font-size: 12px; }
+    & .masterTradeLiveApiGrid { grid-template-columns: minmax(0, 1fr); }
+    & .liveUxOrderGrid { grid-template-columns: minmax(0, 1fr); }
+    & .liveUxForm { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    & .masterTradeOrderField { grid-column: auto; }
+    & .liveUxSummary { position: static; }
+    & .liveUxFormActions button { width: 100%; }
+    & .masterTradeFlowCard > summary { grid-template-columns: 18px minmax(0, 1fr) 18px; }
+    & .masterTradeCardSummary { grid-column: 2; grid-row: 2; }
+    & .masterTradeFlowCard > summary > svg:last-child { grid-column: 3; grid-row: 1 / 3; }
+    & .masterTradeLiveSetup > header { flex-wrap: wrap; }
+    & .masterTradeLiveSetupFooter { flex-wrap: wrap; }
+  }
+}
