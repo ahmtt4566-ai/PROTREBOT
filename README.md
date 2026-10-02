@@ -16,7 +16,61 @@ UI testi gerçek emir/bağlantı işlemi yapmadan mock verilerle masaüstü, tab
 layout ölçülerini, kilitli butonları ve yerel form/toggle davranışlarını denetler.
 Ekran görüntüleri test çıktısına eklenir; isteğe bağlı `LIVE_UI_SCREENSHOTS` değişkeniyle
 ayrı bir çıktı klasörü, `LIVE_UI_PHASE` ile dosya adı öneki belirtilebilir.
-Bu pakette ayrı bir lint script'i veya lint yapılandırması bulunmaz.
+Frontend lint: kökte `npm run lint`.
+Build, kredi/premium modüllerinin strict TypeScript kontrolünü de çalıştırır
+(`npm run typecheck:access` ile ayrı çalıştırılabilir).
+
+## Analyst kredileri ve Master Trade Premium
+
+Tüm korumalı API çağrıları aktif, doğrulanmış üyelik oturumu gerektirir; yönetici
+önizleme anahtarı tek başına üyelik yerine geçmez. Ücretsiz üyeler Master Trade'i
+salt-okunur görüntüler. İşlem/bağlantı yetkisi mevcut OWNER veya aktif abonelik
+kurallarından belirlenir; istemci plan bilgisi yetki vermez. Premium, mevcut
+LOCKED / ARM / consent ve risk kapılarını kaldırmaz.
+
+Sunucu ayarları: `ANALYST_DAILY_CREDITS=100`, `ANALYST_COST=1`,
+`CREDIT_WINDOW_HOURS=24`, `ANALYST_CACHE_MINUTES=15`.
+
+- `GET /api/analyst/credits`: `remaining`, `total`, `resetsAt`, `unlimited`.
+- `POST /api/analyst/consume`: `{symbol, timeframe, idempotency_key}`.
+  Yanıt aynı bütçe alanlarıyla birlikte `result`, `cached`, `cacheExpiresAt` döndürür.
+  Sembol USDT paritesidir; mevcut `1m/5m/15m/30m/1h/4h/1d` zaman dilimleri desteklenir.
+  Her yeni kullanıcı aksiyonunda yeni bir anahtar, aynı isteğin yeniden gönderiminde
+  aynı anahtar kullanılmalıdır.
+- İlk harcamada başlayan kullanıcıya özel 24 saatlik pencere dolunca bütçe sonraki
+  istekte yeniden 100 olur; kredi devretmez. Aynı kullanıcı/sembol/zaman dilimi
+  15 dakika içinde yeniden açılırsa kayıtlı sonuç ücretsiz döner.
+- Kredi yetersizliği: `429` + `remaining`/`resetsAt`. Dakikada 30 consume isteği
+  sınırı cache ve premium isteklerini de kapsar; rate-limit yanıtında `Retry-After`
+  bulunur. Geçersiz/engellenen çağrılar loglanır.
+- Analiz başarısızlığı kredi iadesiyle `502` döndürür. Harcama, cache ve idempotency
+  kaydı atomiktir; aynı anahtar çift harcama veya çift iade üretmez.
+- Premium için `remaining=null`, `unlimited=true`; kredi düşmez. Master Trade
+  kredi endpoint'lerine çağrı yapmaz ve sayaç göstermez.
+
+Üretimde PostgreSQL transaction ve kullanıcı satırı kilidi kullanılır.
+`PROTREBOT_DURABLE_AUTH_REQUIRED=true` iken PostgreSQL yoksa servis `503` ile kapalı
+kalır. Yerel geliştirmede `DATA_DIR/analyst_credits.sqlite3` kalıcı SQLite deposu
+kullanılır. Mevcut otomatik testler SQLite üzerinden çalışır; canlı PostgreSQL
+entegrasyonu ayrıca deployment ortamında doğrulanmalıdır.
+
+Premium olmayanın emir/arm/dry-run/bağlantı ve alternatif otomasyon başlangıç
+endpoint'leri `403 PREMIUM_REQUIRED` döndürür. Ücretsiz trading GET yanıtlarında
+yalnız izinli özet/piyasa alanları gönderilir; giriş/SL/TP, karar gerekçeleri,
+vakalar ve trigger detayları sunucuda kaldırılır. Arayüz kilitleri gerçek içeriği
+render etmez; yalnız örnek skeleton gösterir. İlk kilit tıklaması oturumda premium
+modalı (mobilde sheet), sonraki tıklamalar toast açar.
+
+Doğrulama:
+```powershell
+npm run build
+npm run lint
+$env:PYTHONPATH='backend'
+.\.venv\Scripts\python.exe -m pytest backend\tests\test_analyst_credits.py backend\tests\test_member_premium_api.py backend\tests\test_subscription.py -q
+.\.venv\Scripts\python.exe -m ruff check --select E9,F63,F7,F82 backend\app\analyst_credits.py backend\app\premium_access.py backend\app\main.py backend\app\v22_commercial.py backend\app\v25_execution.py backend\tests\test_analyst_credits.py backend\tests\test_member_premium_api.py
+Set-Location frontend
+npx playwright test member-premium.spec.ts master-trade-live-ui.spec.ts master-trade-readonly.spec.ts --project=chromium
+```
 
 V28, V27 bulut operasyon ve kanıt altyapısını korur; Testnet ve gerçek Binance USD-M
 Futures API bağlantılarını doğrudan programın içine taşır. Render'a Binance anahtarı yazmak

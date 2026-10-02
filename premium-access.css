@@ -1,0 +1,37 @@
+.premiumLocked { position: relative; min-height: 120px; display: grid; place-items: center; gap: 12px; padding: 16px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(255,255,255,.03); color: #e9f1f2; }
+.premiumPlaceholder { position: absolute; inset: 20px; display: grid; gap: 14px; align-content: center; filter: blur(5px); opacity: .4; pointer-events: none; }
+.premiumPlaceholder span { display: block; height: 12px; border-radius: 6px; background: rgba(255,255,255,.12); }
+.premiumPlaceholder span:nth-child(2) { width: 65%; }
+.premiumPlaceholder span:last-child { width: 80%; }
+.premiumLocked button { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 14px; border: 1px solid rgba(85,215,155,.3); border-radius: 12px; background: #111d17; color: #b7cdc0; font-size: 14px; }
+.premiumLocked button svg { width: 18px; height: 18px; flex-shrink: 0; }
+.premiumLockedCompact { display: inline-grid; min-height: 0; padding: 0; border: 0; background: transparent; }
+.memberAccessError { padding: 12px; color: #f07c73; }
+.premiumLocked button:not(:disabled) { cursor: pointer; }
+.premiumDialog { width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: #101916; color: #e9f1f2; overflow: auto; }
+.premiumDialog::backdrop { background: rgba(0,0,0,.68); backdrop-filter: blur(4px); }
+.premiumCard { position: relative; padding: 28px; animation: premiumEnter 150ms ease-out; }
+.premiumCardIcon { width: 36px; height: 36px; margin-bottom: 12px; color: #59d99b; }
+.premiumCard > small { display: block; color: #91ab9c; font-size: 12px; letter-spacing: .04em; }
+.premiumCard h2 { margin: 8px 0; font-size: 20px; }
+.premiumCard p { color: #a1b3a9; font-size: 14px; line-height: 1.6; }
+.premiumCard ul { display: grid; gap: 14px; margin: 20px 0; padding: 0; list-style: none; }
+.premiumCard li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.premiumCard li svg { width: 18px; height: 18px; flex-shrink: 0; color: #59d99b; }
+.premiumClose { position: absolute; top: 12px; right: 12px; }
+.premiumClose, .premiumToast button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: #a1b3a9; cursor: pointer; }
+.premiumCardActions { display: flex; gap: 10px; }
+.premiumPrimary, .premiumSecondary { flex: 1; display: grid; place-items: center; min-height: 44px; padding: 10px 14px; border: 1px solid #59d99b; border-radius: 12px; background: #59d99b; color: #07130c; text-decoration: none; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.premiumSecondary { border-color: rgba(255,255,255,.16); background: transparent; color: #d7e4dc; }
+.premiumToast { position: fixed; z-index: 10000; right: 20px; bottom: 20px; display: flex; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 32px)); padding: 12px; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; background: #101916; color: #d7e4dc; box-shadow: 0 8px 40px #0006; font-size: 14px; animation: premiumEnter 150ms ease-out; }
+.premiumToast > svg { flex-shrink: 0; width: 18px; color: #59d99b; }
+.premiumToast a { white-space: nowrap; color: #59d99b; }
+.premiumLocked button, .premiumCardActions > *, .premiumClose, .premiumToast a { transition: background 150ms, border-color 150ms; }
+.premiumLocked button:focus-visible, .premiumDialog :focus-visible, .premiumToast :focus-visible { outline: 2px solid #59d99b; outline-offset: 3px; }
+@keyframes premiumEnter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 767px) {
+  .premiumDialog { width: 100vw; max-width: 100vw; box-sizing: border-box; max-height: 85dvh; margin: auto 0 0; border-radius: 12px 12px 0 0; border-bottom: 0; }
+  .premiumCard { padding: 24px 20px max(24px, env(safe-area-inset-bottom)); }
+  .premiumToast { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) { .premiumCard, .premiumToast { animation: none; } .premiumLocked button, .premiumCardActions > *, .premiumClose, .premiumToast a { transition: none; } }

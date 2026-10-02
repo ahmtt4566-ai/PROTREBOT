@@ -5,6 +5,7 @@ import AppErrorBoundary from './AppErrorBoundary'
 import WebAccessGate from './WebAccessGate'
 import AuthGate from './AuthGate'
 import { installAuthorizedFetch } from './api'
+import { MemberAccessProvider } from '../../premium-access'
 import './style.css'
 import './binance-demo.css'
 import './execution-v25.css'
@@ -17,6 +18,6 @@ import './dark-dashboard.css'
 
 installAuthorizedFetch()
 const ownerPreview = import.meta.env.VITE_OWNER_PREVIEW === 'true'
-const application = <AuthGate><TestnetFirstApp/></AuthGate>
+const application = <AuthGate><MemberAccessProvider><TestnetFirstApp/></MemberAccessProvider></AuthGate>
 const gatedApplication = ownerPreview ? <WebAccessGate>{application}</WebAccessGate> : application
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary>{gatedApplication}</AppErrorBoundary></React.StrictMode>)

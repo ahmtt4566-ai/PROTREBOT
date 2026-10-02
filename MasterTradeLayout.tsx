@@ -1,5 +1,6 @@
 import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useState } from 'react'
 import { Activity, Cable, Check, ChevronDown, ListChecks, LockKeyhole, Minus, Power, Send, Settings2, ShieldCheck, Wallet, X } from 'lucide-react'
+import { PremiumWorkspace } from './premium-access'
 
 type LayoutElement = ReactElement<{className?: string; children?: ReactNode; title?: string; 'aria-label'?: string; 'data-status'?: string}>
 type Tab = 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'
@@ -181,5 +182,5 @@ export function MasterTradeLiveLayout({tab = 'canli', step, children}: {tab?: Ta
       </div>
     }), cards, tab)}
   </>
-  return cloneElement(children, {children: content})
+  return <PremiumWorkspace>{cloneElement(children, {children: content})}</PremiumWorkspace>
 }

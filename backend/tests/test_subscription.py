@@ -161,7 +161,10 @@ class SubscriptionCoreTests(unittest.TestCase):
     def test_client_supplied_access_flags_cannot_grant_backend_access(self):
         state = {"subscriptions": [], "licenses": []}
         user = {"id": "user-1", "role": "CUSTOMER", "canAccessMasterTrade": True, "isPremium": True, "plan": "MASTER_MODE"}
-        self.assertFalse(v22_commercial.access_snapshot(state, user)["canAccessMasterTrade"])
+        access = v22_commercial.access_snapshot(state, user)
+        self.assertTrue(access["canAccessMasterTrade"])
+        self.assertFalse(access["isPremium"])
+        self.assertFalse(access["canExecuteMasterTrade"])
 
     def test_unauthenticated_execution_request_is_denied(self):
         request = SimpleNamespace(state=SimpleNamespace(member=None, web_owner_authenticated=False))

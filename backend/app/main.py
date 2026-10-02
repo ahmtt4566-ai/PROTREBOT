@@ -22,6 +22,8 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field
 from .analysis import analyze
+from .analyst_credits import router as analyst_credits_router
+from .premium_access import public_projection, requires_premium
 from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .exchange_connections import (
     clear_vault_cache,
@@ -1274,14 +1276,19 @@ async def owner_preview_gate(request, call_next):
         and configured_owner
         and configured_owner == WEB_ACCESS_TOKEN
     )
-    if request.url.path.startswith("/api/") and request.method.upper() != "OPTIONS" and request.url.path not in MEMBER_PUBLIC_PATHS and not owner_access_authenticated:
+    protected_member_request = request.url.path.startswith("/api/") and request.method.upper() != "OPTIONS" and request.url.path not in MEMBER_PUBLIC_PATHS
+    if protected_member_request:
         try:
             request.state.member = authenticated_user(request)
         except HTTPException as exc:
             return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
-    if request.url.path.startswith("/api/") and request.method.upper() != "OPTIONS" and request.url.path not in MEMBER_PUBLIC_PATHS:
-        if owner_access_authenticated:
-            request.state.member = {"id": "WEB_OWNER", "role": "OWNER"}
+    if protected_member_request:
+        from .v22_commercial import access_snapshot
+        access = access_snapshot(request.app.state.v22_commercial["state"], request.state.member)
+        request.state.premium = access["isPremium"]
+        if requires_premium(request.url.path, request.method) and not request.state.premium:
+            logger.warning("Premium operation denied user_id=%s path=%s", request.state.member["id"], request.url.path)
+            return apply_cors_headers(request, JSONResponse({"detail": "Premium üyelik gerekli.", "code": "PREMIUM_REQUIRED"}, status_code=403))
         await hydrate_authenticated_user_state(request)
     request.state.web_owner_authenticated = bool(
         owner_access_authenticated
@@ -1311,6 +1318,14 @@ async def owner_preview_gate(request, call_next):
         tasks = pending.pop(user_id, []) if user_id and isinstance(pending, dict) else []
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+    if protected_member_request and request.method == "GET" and not request.state.premium and response.status_code == 200 and "application/json" in response.headers.get("content-type", "") and not request.url.path.startswith("/api/analyst/"):
+        chunks = [chunk async for chunk in response.body_iterator]
+        body = b"".join(chunk.encode() if isinstance(chunk, str) else chunk for chunk in chunks)
+        headers = {key: value for key, value in response.headers.items() if key not in {"content-length", "content-type", "content-encoding"}}
+        trading_payload = not request.url.path.startswith(("/api/v22/", "/api/v24/", "/api/v27/"))
+        response = JSONResponse(public_projection(json.loads(body), allowlist=trading_payload), status_code=response.status_code, headers=headers)
+    if request.url.path.startswith("/api/analyst/") and response.status_code in {401, 403, 409, 422, 429}:
+        logger.warning("Analyst request rejected path=%s status=%s", request.url.path, response.status_code)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Request-ID", request.state.request_id)
     response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -1325,6 +1340,18 @@ app.include_router(v24_commerce_router)
 app.include_router(v25_execution_router)
 app.include_router(v27_cloud_router)
 app.include_router(exchange_connections_router)
+app.include_router(analyst_credits_router)
+
+
+async def analyst_analysis(symbol: str, timeframe: str) -> dict:
+    snapshot = await analysis_universe(interval=timeframe, limit=100)
+    row = next((item for item in snapshot["results"] if item["symbol"] == symbol), None)
+    if row is None:
+        raise HTTPException(404, "Analyst sembolü güncel analiz evreninde bulunamadı")
+    return row
+
+
+app.state.analyst_analysis = analyst_analysis
 
 
 def monitoring_admin(request: Request) -> dict[str, Any]:
@@ -4562,6 +4589,16 @@ async def scanner_alerts():
     return {"alerts": app.state.paper.get("alerts", [])}
 
 
+class ScannerAlert(BaseModel):
+    symbol: str
+    signal: Literal["LONG", "SHORT", "ANY"] = "ANY"
+    score_min: float = Field(default=0, ge=0, le=100)
+    rsi_min: float = Field(default=0, ge=0, le=100)
+    volume_spike: bool = False
+    price_crosses_ema20: bool = False
+    mtf: Literal["ANY", "BULLISH_3", "BULLISH_4", "BEARISH_3", "BEARISH_4"] = "ANY"
+
+
 @app.post("/api/scanner-alerts")
 async def scanner_alert_create(alert: ScannerAlert):
     safe_symbol = "".join(char for char in alert.symbol.upper() if char.isalnum())
@@ -5560,16 +5597,6 @@ class PaperOrder(BaseModel):
     session_label: str | None = None
     session_mode: str | None = None
     session_confidence_bonus: int | None = Field(default=None, ge=0, le=20)
-
-
-class ScannerAlert(BaseModel):
-    symbol: str
-    signal: Literal["LONG", "SHORT", "ANY"] = "ANY"
-    score_min: float = Field(default=0, ge=0, le=100)
-    rsi_min: float = Field(default=0, ge=0, le=100)
-    volume_spike: bool = False
-    price_crosses_ema20: bool = False
-    mtf: Literal["ANY", "BULLISH_3", "BULLISH_4", "BEARISH_3", "BEARISH_4"] = "ANY"
 
 
 class PaperLimitOrder(BaseModel):

@@ -2,9 +2,11 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { BarChart3, Check, ChevronDown, ChevronUp, Filter, RefreshCw, Search, X } from 'lucide-react'
 import { API_BASE } from './api'
 import { analystCopy, marketCopy } from './ui-copy'
+import { AnalystCreditBadge, AnalystCreditsExhausted, useAnalystCredits } from './analyst-credit-ui'
+import { useMemberAccess } from './premium-access'
 
 type Direction = 'LONG'|'SHORT'|'BEKLE'
-type Row = {symbol:string;display:string;price:number;change:number;volume:number;volume_ratio:number;volume_change_pct:number;volatility_pct:number;rsi:number;ema20:number;ema50:number;ema200:number;trend:string;direction:Direction;confidence:number;smart_score:number;opportunity_score:number;final_decision_score:number;entry:number;stop_loss:number;tp1:number;tp2:number;tp3:number;support:number;resistance:number;risk_reward:number;risk_pct:number;potential_tp3_pct:number;mtf_direction:string;mtf_alignment:number;mtf_timeframes:{timeframe:string;direction:string;confidence:number}[];anomaly:{kind:string;label:string;strength:number}|null}
+type Row = {symbol:string;display:string;price:number;change:number;volume:number;volume_ratio:number;volume_change_pct:number;volatility_pct:number;rsi:number;ema20:number;ema50:number;ema200:number;trend:string;direction:Direction;confidence:number;smart_score:number;opportunity_score:number;final_decision_score:number;entry?:number;stop_loss?:number;tp1?:number;tp2?:number;tp3?:number;support?:number;resistance?:number;risk_reward?:number;risk_pct?:number;potential_tp3_pct?:number;mtf_direction:string;mtf_alignment:number;mtf_timeframes:{timeframe:string;direction:string;confidence:number}[];anomaly:{kind:string;label:string;strength:number}|null}
 type Consensus = {direction:string;alignment:number;timeframes:{timeframe:string;direction:string;confidence:number}[]}
 type SignalHistoryItem = {id:string;symbol:string;timestamp:string;signal:Direction;score:number;entry:number;stop:number;tp1:number;tp2:number;tp3:number;timeframe:string;mtf:string;risk_reward:number;status:string}
 type SignalPerformance = {available:boolean;message?:string;total_signals?:number;tp1_hit_rate?:number;tp2_hit_rate?:number;tp3_hit_rate?:number;stop_rate?:number;average_risk_reward?:number}
@@ -22,8 +24,13 @@ const filterCount = (filters:FilterState) => Object.entries(filters).filter(([ke
 function Metric({label,value,tone}:{label:string;value:ReactNode;tone?:string}) { return <span className={tone}><small>{label}</small><b>{value}</b></span> }
 
 export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{interval:string;onIntervalChange:(value:string)=>void;chart:(symbol:string,interval:string,showLevels:boolean,showEma:boolean)=>ReactNode}) {
+  const {premium, userId, openUpgrade} = useMemberAccess()
+  const credits = useAnalystCredits()
+  const [detail, setDetail] = useState<{userId: string | null; row: Row; timeframe: string; expiresAt: number; cached: boolean} | null>(null)
+  const [purchasing, setPurchasing] = useState(false)
+  const analysisController = useRef<AbortController | null>(null)
   const [rows,setRows] = useState<Row[]>([])
-  const [selected,setSelected] = useState('BTCUSDT')
+  const [selected,setSelectedSymbol] = useState('BTCUSDT')
   const [query,setQuery] = useState('')
   const [debouncedQuery,setDebouncedQuery] = useState('')
   const [filters,setFilters] = useState<FilterState>(emptyFilters)
@@ -48,7 +55,8 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const [paperBusy,setPaperBusy] = useState(false)
   const [historyExpanded,setHistoryExpanded] = useState(false)
   const [analystOpen,setAnalystOpen] = useState(false)
-  const [analystAnswer,setAnalystAnswer] = useState('')
+  const [storedAnalystAnswer,setAnalystAnswer] = useState('')
+  const [pendingAction, setPendingAction] = useState<{label: string; question: string; symbol: string; timeframe: string} | null>(null)
   const [analystSelection,setAnalystSelection] = useState('')
   const [analystMode,setAnalystMode] = useState<AnalystMode>('')
   const [analystLoading,setAnalystLoading] = useState(false)
@@ -73,7 +81,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
       if (controller.signal.aborted) return
       setAnalystSelection(''); setAnalystAnswer('')
       setRows(payload.results || []); setError(''); setScanMessage(`${payload.results?.length || 0} coin analiz edildi`)
-      if (payload.results?.length && !payload.results.some(row => row.symbol === selected)) setSelected(payload.results[0].symbol)
+      if (payload.results?.length && !payload.results.some(row => row.symbol === selected)) setSelectedSymbol(payload.results[0].symbol)
     } catch (reason) {
       if (timedOut) {
         setRows([]); setError('Market data request timed out. Please retry.'); setScanMessage('Zaman aşımı')
@@ -93,11 +101,19 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
     const trendMatch = filters.trend === 'ALL' || (filters.trend === 'BULLISH' && row.trend.includes('yükseliş')) || (filters.trend === 'BEARISH' && row.trend.includes('düşüş')) || (filters.trend === 'NEUTRAL' && row.trend === 'Karışık')
     const mtfMatch = filters.mtf === 'ANY' || (filters.mtf === 'BULLISH_3' && row.mtf_timeframes.filter(item => item.direction === 'LONG').length >= 3) || (filters.mtf === 'BULLISH_4' && row.mtf_timeframes.filter(item => item.direction === 'LONG').length === 4) || (filters.mtf === 'BEARISH_3' && row.mtf_timeframes.filter(item => item.direction === 'SHORT').length >= 3) || (filters.mtf === 'BEARISH_4' && row.mtf_timeframes.filter(item => item.direction === 'SHORT').length === 4)
     const volatilityMatch = filters.volatility === 'ANY' || (filters.volatility === 'LOW' && row.volatility_pct < 1) || (filters.volatility === 'NORMAL' && row.volatility_pct >= 1 && row.volatility_pct < 3) || (filters.volatility === 'HIGH' && row.volatility_pct >= 3)
-    return signalMatch && strengthMatch && trendMatch && mtfMatch && volatilityMatch && row.rsi >= filters.rsiMin && row.rsi <= filters.rsiMax && (filters.volume === 'ANY' || (filters.volume === 'INCREASING' && row.volume_ratio >= 1.05) || (filters.volume === 'STRONG' && row.volume_ratio >= 1.25)) && (!filters.ema20 || row.price > row.ema20) && (!filters.ema20_50 || row.ema20 > row.ema50) && (!filters.ema50_200 || row.ema50 > row.ema200) && row.risk_reward >= filters.minRR
+    return signalMatch && strengthMatch && trendMatch && mtfMatch && volatilityMatch && row.rsi >= filters.rsiMin && row.rsi <= filters.rsiMax && (filters.volume === 'ANY' || (filters.volume === 'INCREASING' && row.volume_ratio >= 1.05) || (filters.volume === 'STRONG' && row.volume_ratio >= 1.25)) && (!filters.ema20 || row.price > row.ema20) && (!filters.ema20_50 || row.ema20 > row.ema50) && (!filters.ema50_200 || row.ema50 > row.ema200) && (filters.minRR === 0 || row.risk_reward !== undefined && row.risk_reward >= filters.minRR)
   }
   const rankRows = (left:Row,right:Row) => right.final_decision_score - left.final_decision_score || right.confidence - left.confidence || right.smart_score - left.smart_score
-  const visible = useMemo(() => rows.filter(row => row.display.toUpperCase().includes(debouncedQuery) && matches(row)).sort((left,right) => sort === 'final_decision_score' ? rankRows(left,right) * (ascending ? -1 : 1) : ((left[sort] < right[sort] ? -1 : left[sort] > right[sort] ? 1 : 0) * (ascending ? 1 : -1))),[rows,debouncedQuery,filters,sort,ascending])
-  const active = rows.find(row => row.symbol === selected) || visible[0]
+  const visible = useMemo(() => rows.filter(row => row.display.toUpperCase().includes(debouncedQuery) && matches(row)).sort((left,right) => {
+    if (sort === 'final_decision_score') return rankRows(left,right) * (ascending ? -1 : 1)
+    const leftValue = left[sort], rightValue = right[sort]
+    if (leftValue === undefined || leftValue === null) return rightValue === undefined || rightValue === null ? 0 : 1
+    if (rightValue === undefined || rightValue === null) return -1
+    return (leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0) * (ascending ? 1 : -1)
+  }),[rows,debouncedQuery,filters,sort,ascending])
+  const authorizedDetail = !credits.exhausted && detail?.userId === userId && detail?.row.symbol === selected && detail.timeframe === interval && detail.expiresAt > credits.now ? detail : null
+  const active = authorizedDetail?.row || rows.find(row => row.symbol === selected) || visible[0]
+  const analystAnswer = premium || authorizedDetail ? storedAnalystAnswer : ''
   const activeSymbol = active?.symbol || ''
   const consensus = active ? {direction:active.mtf_direction,alignment:active.mtf_alignment,timeframes:active.mtf_timeframes} : null
   useEffect(() => {
@@ -105,8 +121,16 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
     setAnalystAnswer('')
   },[activeSymbol])
   useEffect(() => {
-    if (rows.length && analystLoading && analystTimer.current === null) setAnalystLoading(false)
-  },[rows.length,analystLoading])
+    if (rows.length && analystLoading && !purchasing && analystTimer.current === null) setAnalystLoading(false)
+  },[rows.length,analystLoading,purchasing])
+  useEffect(() => {
+    analysisController.current?.abort()
+    setDetail(null); setAnalystAnswer(''); setAnalystMode(''); setPendingAction(null); setPurchasing(false); setAnalystLoading(false)
+  }, [interval, userId])
+  useEffect(() => () => {
+    analysisController.current?.abort()
+    if (analystTimer.current !== null) window.clearTimeout(analystTimer.current)
+  }, [])
   useEffect(() => {
     if (!activeSymbol) return
     const controller = new AbortController()
@@ -141,7 +165,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const timeframeSummary = consensus ? `${consensus.timeframes.filter(item => item.direction === 'LONG').length}/${consensus.timeframes.length} bullish` : 'Ölçülüyor'
   const analystPrompts = useMemo(() => { const symbol = active?.symbol.replace(/USDT$/,'') || 'seçili coin'; return [`${symbol} neden hareket ediyor?`,`${symbol} trendi güçleniyor mu?`,`${symbol} desteği nerede?`,`${symbol} direnci nerede?`,`${symbol} momentumu nasıl?`,`${symbol} hacmi ne gösteriyor?`,`${symbol} riski nedir?`,`${symbol} neden ${active?.direction || 'LONG/SHORT'}?`] },[active?.direction,active?.symbol])
   const answerAnalyst = (question:string) => { if (!active) { setAnalystAnswer('Güncel piyasa verisiyle yanıt oluşturulamıyor.'); return }; const normalized = question.toLowerCase(); const volume = `${active.volume_ratio >= 1 ? '+' : ''}${fmt((active.volume_ratio - 1) * 100)}% ortalamaya göre`; const emaAligned = active.direction === 'LONG' ? active.ema20 > active.ema50 && active.ema50 > active.ema200 : active.direction === 'SHORT' ? active.ema20 < active.ema50 && active.ema50 < active.ema200 : false; let answer = `${active.display} şu anda ${active.direction}; Teknik Sinyal Skoru ${fmt(active.smart_score)}/100, yapı ${active.trend.toLowerCase()}, RSI ${fmt(active.rsi)}, MTF ${active.mtf_alignment} ve R/R ${fmt(active.risk_reward)}.`; if (normalized.includes('hareket')) answer = `${active.display}, ${active.direction} baskısıyla hareket ediyor: yapı ${active.trend.toLowerCase()}, RSI ${fmt(active.rsi)} ve hacim ${volume}.`; else if (normalized.includes('güçlen')) answer = `${active.display} trendi EMA yapısında ${emaAligned ? 'uyumlu' : 'tam uyumlu değil'}; MTF uyumu ${active.mtf_alignment} ve sinyal ${active.direction}.`; else if (normalized.includes('deste')) answer = `${active.display} desteği ${fmt(active.support)}, direnci ${fmt(active.resistance)} ve güncel fiyatı ${fmt(active.price)}.`; else if (normalized.includes('direnc')) answer = `${active.display} direnci ${fmt(active.resistance)}, desteği ${fmt(active.support)} ve güncel fiyatı ${fmt(active.price)}.`; else if (normalized.includes('risk')) answer = `${active.display} stop seviyesine göre ${fmt(active.risk_pct)}% model riski taşıyor; R/R ${fmt(active.risk_reward)} ve sinyal ${active.direction}.`; else if (normalized.includes('momentum')) answer = `${active.display} momentumu RSI ${fmt(active.rsi)} ile ${active.rsi >= 50 ? 'yukarı' : 'aşağı'} yönlü; güncel sinyal ${active.direction}.`; else if (normalized.includes('hacim')) answer = `${active.display} hacmi hareketi ${active.volume_ratio >= 1 ? 'doğruluyor' : 'doğrulamıyor'}: ${volume}.`; else if (normalized.includes('neden') && normalized.includes('long')) answer = `${active.display} LONG çünkü ${active.trend.toLowerCase()} yapı, ${active.mtf_alignment} MTF uyumu, RSI ${fmt(active.rsi)} ve R/R ${fmt(active.risk_reward)} sinyali destekliyor.`; else if (normalized.includes('neden') && normalized.includes('short')) answer = `${active.display} SHORT çünkü ${active.trend.toLowerCase()} yapı, ${active.mtf_alignment} MTF uyumu, RSI ${fmt(active.rsi)} ve R/R ${fmt(active.risk_reward)} sinyali destekliyor.`; setAnalystAnswer(answer) }
-  const runAnalyst = (label:string, question:string) => {
+  const renderAnalyst = (label:string, question:string) => {
     const mode:AnalystMode = label === 'Market Overview' ? 'market-overview' : label === 'Best LONG' ? 'best-long' : label === 'Best SHORT' ? 'best-short' : label === 'Why This Coin' ? 'why-coin' : ['Trend Analysis','Momentum','Volume Intelligence','EMA Structure','RSI / MACD','Support / Resistance','Volatility'].includes(label) ? 'technical' : ['Market Regime','Entry Analysis','Exit Analysis','Risk / R:R','Signal Confidence'].includes(label) ? 'decision' : 'prompt'
     const needsCoin = mode === 'technical' || mode === 'decision' || mode === 'why-coin' || mode === 'prompt'
     setAnalystSelection(label)
@@ -168,6 +192,39 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
       resultRef.current?.scrollIntoView({behavior:'smooth',block:'nearest'})
     }, 220)
   }
+  const requestAnalysis = async (symbol: string): Promise<Row | null> => {
+    analysisController.current?.abort()
+    const controller = new AbortController()
+    analysisController.current = controller
+    if (analystTimer.current !== null) { window.clearTimeout(analystTimer.current); analystTimer.current = null }
+    setPendingAction(null); setPurchasing(true); setAnalystLoading(true); setAnalystError(''); setAnalystAnswer('')
+    try {
+      const result = await credits.purchase<Row>(symbol, interval, controller.signal)
+      if (controller.signal.aborted) return null
+      if (result.result.symbol !== symbol) throw new Error('Analiz yanıtındaki sembol istekle eşleşmiyor.')
+      setDetail({userId, row: result.result, timeframe: interval, expiresAt: Date.parse(result.cacheExpiresAt), cached: result.cached})
+      return result.result
+    } catch (reason: unknown) {
+      if (!controller.signal.aborted) setAnalystError(reason instanceof Error ? reason.message : 'Analiz açılamadı.')
+      return null
+    } finally {
+      if (analysisController.current === controller) { setPurchasing(false); setAnalystLoading(false) }
+    }
+  }
+  const setSelected = (symbol: string) => { setSelectedSymbol(symbol); void requestAnalysis(symbol) }
+  const runAnalyst = async (label: string, question: string) => {
+    if (!active) { renderAnalyst(label, question); return }
+    const row = await requestAnalysis(active.symbol)
+    if (row) setPendingAction({label, question, symbol: row.symbol, timeframe: interval})
+  }
+  useEffect(() => {
+    if (!pendingAction) return
+    if (credits.exhausted) { setPendingAction(null); return }
+    if (authorizedDetail?.row.symbol === pendingAction.symbol && interval === pendingAction.timeframe) {
+      renderAnalyst(pendingAction.label, pendingAction.question)
+      setPendingAction(null)
+    }
+  }, [pendingAction, authorizedDetail?.row, credits.exhausted, interval])
   const selectAnalystCoin = (symbol:string) => {
     setSelected(symbol)
     setAnalystSelection('')
@@ -175,13 +232,13 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
     setAnalystError('')
     resultRef.current?.scrollIntoView({behavior:'smooth',block:'nearest'})
   }
-  const whySignal = active ? [{label:'Trend alignment',ok:active.direction === 'LONG' ? active.ema20 > active.ema50 && active.ema50 > active.ema200 : active.direction === 'SHORT' ? active.ema20 < active.ema50 && active.ema50 < active.ema200 : false},{label:'RSI confirmation',ok:active.direction === 'LONG' ? active.rsi > 50 : active.direction === 'SHORT' ? active.rsi < 50 : false},{label:'Multi-timeframe support',ok:active.mtf_direction === active.direction},{label:`Risk/Reward ${fmt(active.risk_reward)}`,ok:active.risk_reward >= 2}].filter(item => item.ok) : []
+  const whySignal = active ? [{label:'Trend alignment',ok:active.direction === 'LONG' ? active.ema20 > active.ema50 && active.ema50 > active.ema200 : active.direction === 'SHORT' ? active.ema20 < active.ema50 && active.ema50 < active.ema200 : false},{label:'RSI confirmation',ok:active.direction === 'LONG' ? active.rsi > 50 : active.direction === 'SHORT' ? active.rsi < 50 : false},{label:'Multi-timeframe support',ok:active.mtf_direction === active.direction},{label:`Risk/Reward ${fmt(active.risk_reward)}`,ok:active.risk_reward !== undefined && active.risk_reward >= 2}].filter(item => item.ok) : []
   const createAlert = async () => { try { const response = await fetch(`${API_BASE}/scanner-alerts`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...alertDraft,symbol:selected})}); if (!response.ok) throw new Error('Alarm oluşturulamadı'); const item = await response.json() as ScannerAlert; setAlerts(current => [item,...current]); setAlertOpen(false) } catch { setError('Alarm oluşturulamadı; tekrar deneyin.') } }
-  const openPaperTrade = async () => { if (!active) return; setPaperBusy(true); try { const direction = active.direction === 'SHORT' ? 'SHORT' : 'LONG'; const response = await fetch(`${API_BASE}/paper/open`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:active.symbol,direction,amount:100,stop_loss:active.stop_loss,take_profit:active.tp1,tp2:active.tp2,tp3:active.tp3,source:'MANUAL',signal_confidence:active.smart_score})}); if (!response.ok) throw new Error('Paper işlem açılamadı'); setPaperOpen(false); setAnalystAnswer('Paper position opened in the existing virtual wallet.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'Paper işlem açılamadı.') } finally { setPaperBusy(false) } }
+  const openPaperTrade = async () => { if (!premium) { openUpgrade('Paper işlem'); return }; if (!active) return; setPaperBusy(true); try { const direction = active.direction === 'SHORT' ? 'SHORT' : 'LONG'; const response = await fetch(`${API_BASE}/paper/open`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:active.symbol,direction,amount:100,stop_loss:active.stop_loss,take_profit:active.tp1,tp2:active.tp2,tp3:active.tp3,source:'MANUAL',signal_confidence:active.smart_score})}); if (!response.ok) throw new Error('Paper işlem açılamadı'); setPaperOpen(false); setAnalystAnswer('Paper position opened in the existing virtual wallet.') } catch (reason) { setError(reason instanceof Error ? reason.message : 'Paper işlem açılamadı.') } finally { setPaperBusy(false) } }
   const risingRows = useMemo(() => [...rows].sort((left,right) => right.change - left.change).slice(0,3),[rows])
   const fallingRows = useMemo(() => [...rows].sort((left,right) => left.change - right.change).slice(0,3),[rows])
   const marketDirection = summary.long > summary.short ? analystCopy.rising : summary.short > summary.long ? analystCopy.falling : analystCopy.balanced
-  const technicalRows = active ? [
+  const technicalRows: Array<[string,string]> = active ? [
     [analystCopy.trend, active.trend],
     [analystCopy.momentum, `RSI ${fmt(active.rsi)} · ${active.rsi >= 50 ? 'yukarı' : 'aşağı'} yönlü`],
     [analystCopy.volume, `${active.volume_ratio >= 1 ? '+' : ''}${fmt((active.volume_ratio - 1) * 100)}% ortalamaya göre`],
@@ -190,7 +247,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
     [analystCopy.supportResistance, `${fmt(active.support)} / ${fmt(active.resistance)}`],
     [analystCopy.volatility, `%${fmt(active.volatility_pct)}`],
   ] : []
-  const decisionRows = active ? [
+  const decisionRows: Array<[string,string]> = active ? [
     [analystCopy.regime, active.trend],
     [analystCopy.entry, fmt(active.entry)],
     [analystCopy.exit, `TP1 ${fmt(active.tp1)} · TP2 ${fmt(active.tp2)} · TP3 ${fmt(active.tp3)}`],
@@ -200,7 +257,7 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
   const resultRows = (items:Array<[string,string]>) => <div className="analystInsightRows">{items.map(([label,value]) => <div className="analystInsightRow" key={label}><span>{label}</span><b>{value}</b></div>)}</div>
   const resultOpportunityRows = (items:Row[], empty:string) => items.length ? <div className="analystOpportunityList">{items.map((row,index) => <div className="analystOpportunityRow" key={row.symbol}><span className="analystOpportunityRank">{index + 1}</span><div><strong>{row.display}</strong><small>{row.direction} · RSI {fmt(row.rsi)}</small></div><span><b>{fmt(row.smart_score)}</b><small>{analystCopy.score}</small></span><span><b>{fmt(row.price)}</b><small>{analystCopy.price}</small></span><span><b>{fmt(row.risk_reward)}</b><small>{analystCopy.riskReward}</small></span><button type="button" onClick={() => selectAnalystCoin(row.symbol)}>{analystCopy.detail}</button></div>)}</div> : <p className="analystEmpty">{empty}</p>
   const analystCompactSnapshot = active ? <div className="analystCompactSnapshot"><div><small>SIGNAL</small><b className={tone(active.direction)}>{active.direction}</b></div><div><small>CONFIDENCE</small><b>{fmt(active.confidence)}%</b></div><div><small>TREND</small><b>{active.trend}</b></div><div><small>MOMENTUM</small><b>RSI {fmt(active.rsi)}</b></div><div><small>MTF</small><b>{fmt(active.mtf_alignment)}</b></div><div><small>R/R</small><b>{fmt(active.risk_reward)}</b></div></div> : null
-  const renderAnalystResult = () => <section className={`analystResultWorkspace${selectorPulse ? ' selectorPulse' : ''}`} aria-live="polite" ref={resultRef}>
+  const renderAnalystResult = () => credits.exhausted && credits.budget ? <AnalystCreditsExhausted budget={credits.budget} now={credits.now}/> : <section className={`analystResultWorkspace${selectorPulse ? ' selectorPulse' : ''}`} aria-live="polite" ref={resultRef}>
     <header><div><span>{analystCopy.analysisResult}</span><h3>{analystCopy.resultTitle}</h3></div>{active && <strong className={tone(active.direction)}>{active.display}</strong>}</header>
     {analystCompactSnapshot}
     {analystLoading ? <div className="analystInlineLoading"><i/><span>{analystCopy.loading}</span></div> : error ? <div className="analystDataError" role="alert"><strong>{analystCopy.dataUnavailable}</strong><p>{error}</p><button type="button" onClick={() => void load()}>{analystCopy.retry}</button></div> : analystError ? <div className="analystSelectionError" role="status"><strong>{analystError}</strong><button type="button" onClick={() => { setSelectorPulse(true); window.setTimeout(() => setSelectorPulse(false),1200) }}>{analystCopy.selector}</button></div> : !analystMode ? <p className="analystEmpty">{analystCopy.resultEmpty}</p> : analystMode === 'market-overview' ? <><div className="analystOverviewLead"><strong>{marketDirection}</strong><span>{summary.long} LONG · {summary.short} SHORT · {summary.watch} BEKLE</span></div>{resultRows([[analystCopy.opportunities, `${summary.long} LONG`],[analystCopy.declining, `${summary.short} SHORT`],[analystCopy.marketTrend, marketDirection]])}<div className="analystMoverGrid"><div><strong>{analystCopy.highest}</strong>{risingRows.map(row => <button type="button" key={row.symbol} onClick={() => selectAnalystCoin(row.symbol)}><span>{row.display}</span><b>+{fmt(row.change)}%</b></button>)}</div><div><strong>{analystCopy.lowest}</strong>{fallingRows.map(row => <button type="button" key={row.symbol} onClick={() => selectAnalystCoin(row.symbol)}><span>{row.display}</span><b>{fmt(row.change)}%</b></button>)}</div></div></> : analystMode === 'best-long' ? resultOpportunityRows(topLong.slice(0,3), analystCopy.noLong) : analystMode === 'best-short' ? resultOpportunityRows(topShort.slice(0,3), analystCopy.noShort) : analystMode === 'technical' ? <>{<div className="analystSelectedHeading"><strong>{active?.display || analystCopy.selectCoin}</strong><span>{analystCopy.technical}</span></div>}{resultRows(technicalRows)}</> : analystMode === 'decision' ? <>{<div className="analystSelectedHeading"><strong>{active?.display || analystCopy.selectCoin}</strong><span>{analystCopy.decision}</span></div>}{resultRows(decisionRows)}</> : <>{active && <div className="analystSelectedHeading"><strong>{active.display}</strong><span>{analystCopy.signalReason}</span></div>}{analystAnswer && <p className="analystResponseText">{analystAnswer}</p>}{active && resultRows([[analystCopy.trend,active.trend],[analystCopy.signalConfidence,`%${fmt(active.confidence)}`],[analystCopy.riskReward,fmt(active.risk_reward)]])}</>}
@@ -215,10 +272,13 @@ export default function CoinAnalysisCenter({interval,onIntervalChange,chart}:{in
           <p>{analystCopy.description}</p>
         </div>
         <div className="analystHeaderControls">
+          <AnalystCreditBadge budget={credits.budget} now={credits.now}/>
+          {authorizedDetail?.cached && <small className="analystCached">Ücretsiz (son 15 dk)</small>}
           <div className="analystWorkspaceContext"><small>{analystCopy.selectedCoin}</small><strong>{active?.display || analystCopy.waiting}</strong></div>
           <label className="analystAutoScan"><input type="checkbox" checked={autoScan} onChange={event => setAutoScan(event.target.checked)}/><span><i className={loading ? 'scanDot' : autoScan ? 'liveDot' : 'idleDot'}/>{loading ? 'SCANNING' : autoScan ? 'AUTO SCAN' : 'PAUSED'}</span><small>{loading ? 'Market data updating' : autoScan ? `Every 60s · ${scanMessage}` : 'Manual scan only'}</small></label>
         </div>
       </header>
+      {credits.error && <div className="analystCreditError" role="alert"><span>{credits.error}</span><button type="button" onClick={() => void credits.refresh()}>Tekrar dene</button></div>}
       <div className="analystCommandGrid">
         <section className="analystCommandGroup analystQuickGroup">
           <header><span>01</span><div><strong>{analystCopy.groups.quick}</strong><small>Güncel piyasa görünümü</small></div></header>

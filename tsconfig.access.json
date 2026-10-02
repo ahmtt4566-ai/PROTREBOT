@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["CoinAnalysisCenter.tsx", "analyst-credit-ui.tsx", "premium-access.tsx"]
+}

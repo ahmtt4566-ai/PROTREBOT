@@ -1063,7 +1063,7 @@ def execution_owner(request: Request) -> dict[str, Any]:
     user = authenticated_user(request)
     if user.get("role") != "OWNER":
         subscription = subscription_for_user(request.app.state.v22_commercial["state"], user["id"])
-        if not subscription.get("master_trade_access"):
+        if not subscription.get("master_trade_access") and request.method != "GET":
             raise HTTPException(403, "Master Trade aboneliğiniz bu özelliğe erişim vermiyor")
     return user
 

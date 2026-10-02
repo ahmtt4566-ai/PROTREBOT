@@ -4,6 +4,7 @@ import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
+import { PremiumWorkspace, useMemberAccess } from './premium-access'
 
 type TradeSide = 'LONG' | 'SHORT'
 type TradeHistoryRow = {
@@ -133,6 +134,7 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
 }
 
 export default function MasterTrade({ onBack }: { onBack?: () => void }) {
+  const {premium} = useMemberAccess()
   const layoutTab = useSyncExternalStore(subscribeTab, readTab, () => 'analiz' as MasterTradeTab)
   const [history, setHistory] = useState<TradeHistoryRow[]>([])
   const [historySyncState, setHistorySyncState] = useState<TradeHistorySyncState>('READY')
@@ -371,6 +373,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   }, [accountRefreshNonce])
 
   useEffect(() => {
+    if (!premium) return
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       if (!(draft.entry > 0) || !(draft.stopLoss > 0) || !(draft.margin >= 5) || !(draft.leverage >= 1)) {
@@ -396,7 +399,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       }
     }, 250)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [analysis?.atr, draft.entry, draft.stopLoss, draft.margin, draft.leverage])
+  }, [premium, analysis?.atr, draft.entry, draft.stopLoss, draft.margin, draft.leverage])
 
   const riskPreview = useMemo(() => ({
     riskUsd: backendRiskPreview?.estimated_stop_loss_usdt ?? null,
@@ -628,6 +631,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const masterTradeOffline = !snapshot && !markets.length && !marketLoading
 
   return (
+    <PremiumWorkspace>
     <section className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}`} data-layout-tab={layoutTab}>
       <div className="masterTradeShell">
         <header className="masterTradeTerminalHeader">
@@ -759,10 +763,10 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                 <g className="chartGrid">{[...Array(7)].map((_, index) => <line key={`h-${index}`} x1="0" x2="760" y1={22 + index * 35} y2={22 + index * 35} />)}{[...Array(9)].map((_, index) => <line key={`v-${index}`} x1={index * 95} x2={index * 95} y1="0" y2="260" />)}</g>
                 {chartCandles.map((candle, index) => { const x = chartX(index); const bodyTop = chartY(Math.max(candle.open, candle.close)); const bodyBottom = chartY(Math.min(candle.open, candle.close)); const bodyHeight = Math.max(2, bodyBottom - bodyTop); const bullish = candle.close >= candle.open; const candleWidth = Math.max(2, Math.min(10, 700 / chartCandles.length)); return <g key={`${candle.time}-${index}`} className={bullish ? 'candle bullish' : 'candle bearish'}><line x1={x} x2={x} y1={chartY(candle.high)} y2={chartY(candle.low)} /><rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} /></g> })}
                 {showChartVolume && chartCandles.map((candle, index) => { const x = chartX(index); const height = candle.volume / volumeMax * 28; return <rect key={`vol-${candle.time}`} className={`chartVolume ${candle.close >= candle.open ? 'up' : 'down'}`} x={x - 2} y={273 - height} width="4" height={height} /> })}
-                <MasterTradeChartLabels lines={showChartLevels ? positionedLevelLines : []} currentPrice={snapshot?.currentPrice} toY={chartY} format={fmtMarketPrice}/>
+                <MasterTradeChartLabels lines={premium && showChartLevels ? positionedLevelLines : []} currentPrice={snapshot?.currentPrice} toY={chartY} format={fmtMarketPrice}/>
                 {chartHoverIndex !== null && <g className="chartCrosshair"><line x1={chartX(chartHoverIndex)} x2={chartX(chartHoverIndex)} y1="0" y2="260" /><circle cx={chartX(chartHoverIndex)} cy={chartY(chartCandles[chartHoverIndex].close)} r="3" /></g>}
               </svg>}
-              {!!chartCandles.length && <MasterTradeChartLabels lines={showChartLevels ? positionedLevelLines : []} currentPrice={snapshot?.currentPrice} toY={chartY} format={fmtMarketPrice} pills/>}
+              {!!chartCandles.length && <MasterTradeChartLabels lines={premium && showChartLevels ? positionedLevelLines : []} currentPrice={snapshot?.currentPrice} toY={chartY} format={fmtMarketPrice} pills/>}
               <div className="chartBadge">{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</div>
             </div>
 
@@ -1142,5 +1146,6 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
       )}
 
     </section>
+    </PremiumWorkspace>
   )
 }

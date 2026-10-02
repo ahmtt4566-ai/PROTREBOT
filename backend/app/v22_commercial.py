@@ -1090,10 +1090,13 @@ def subscription_for_user(state: dict[str, Any], user_id: str) -> dict[str, Any]
 def access_snapshot(state: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     subscription = subscription_for_user(state, user["id"])
     is_admin = user.get("role") == "OWNER"
+    premium = is_admin or bool(subscription.get("master_trade_access"))
     return {
         "isAdmin": is_admin,
-        "canAccessMasterTrade": is_admin or bool(subscription.get("master_trade_access")),
-        "entitlements": subscription.get("entitlements", {}),
+        "canAccessMasterTrade": True,
+        "isPremium": premium,
+        "canExecuteMasterTrade": premium,
+        "entitlements": {**subscription.get("entitlements", {}), "canExecuteMasterTrade": premium, "unlimitedAnalyst": premium},
     }
 
 

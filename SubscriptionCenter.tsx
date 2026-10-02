@@ -58,6 +58,7 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
     try {
       const current = await request<SubscriptionView>('/subscription/cancel', { method: 'POST', body: JSON.stringify({ immediate }) })
       setSubscription(current)
+      window.dispatchEvent(new Event('protrebot-access-refresh'))
       setNotice(immediate ? 'Immediate cancellation requested. Waiting for Stripe confirmation.' : 'Cancellation scheduled for the end of the current billing period.')
     } catch (exception) { setError(exception instanceof Error ? exception.message : 'The subscription could not be cancelled.') }
     finally { setBusy(false) }

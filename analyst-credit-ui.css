@@ -1,0 +1,24 @@
+.analystCreditBadge { display: grid; gap: 3px; padding: 8px 12px; border: 1px solid rgba(89,217,155,.24); border-radius: 12px; background: rgba(89,217,155,.06); color: #59d99b; font-variant-numeric: tabular-nums; }
+.analystCreditBadge strong { font-size: 14px; white-space: nowrap; }
+.analystCreditBadge small { color: #9eafa5; font-size: 12px; }
+.analystCreditBadge.creditLow { color: #eac65c; border-color: #eac65c55; background: #eac65c0a; }
+.analystCreditBadge.creditEmpty { color: #f07c73; border-color: #f07c7355; background: #f07c730a; }
+.analystCached { display: inline-block; flex-shrink: 0; align-self: center; padding: 5px 9px; border: 1px solid #59d99b33; border-radius: 12px; color: #a1b3a9; font-size: 12px; white-space: nowrap; }
+.analystCreditError { display: flex; align-items: center; gap: 12px; padding: 12px; color: #f07c73; }
+.analystCreditExhausted { position: relative; display: grid; place-items: center; min-height: 260px; padding: 20px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(255,255,255,.03); overflow: hidden; }
+.analystCreditPreview { position: absolute; inset: 28px; display: grid; gap: 20px; align-content: center; filter: blur(6px); opacity: .35; pointer-events: none; }
+.analystCreditPreview span { display: block; height: 20px; border-radius: 8px; background: rgba(255,255,255,.12); }
+.analystCreditPreview span:nth-child(2) { width: 65%; }
+.analystCreditEmptyCard { position: relative; width: min(100%, 420px); display: grid; gap: 12px; padding: 20px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: #101916; text-align: center; color: #e9f1f2; }
+.analystCreditEmptyCard > svg { width: 24px; height: 24px; margin: auto; color: #eac65c; }
+.analystCreditEmptyCard h3 { margin: 0; font-size: 16px; font-variant-numeric: tabular-nums; }
+.analystCreditEmptyCard p { margin: 0; font-size: 14px; line-height: 1.5; color: #9eafa5; }
+.analystCreditEmptyCard a:focus-visible, .analystCreditError button:focus-visible { outline: 2px solid #59d99b; outline-offset: 3px; }
+#root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystHeaderControls:has(> .analystCreditBadge) { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+@media (max-width: 767px) {
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystHeaderControls:has(> .analystCreditBadge) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystHeaderControls > .analystCreditBadge,
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystHeaderControls > .analystCached { grid-column: 1 / -1; box-sizing: border-box; }
+  #root > main.v26App.workspaceRoute:has(> .coinAnalysisCenter) .analystHeaderControls:has(> .analystCreditBadge) .analystAutoScan span { white-space: nowrap; }
+  .analystCreditEmptyCard { padding: 16px; }
+}

@@ -11,6 +11,7 @@ const commit = process.env.VITE_BUILD_COMMIT || (() => {
 const environment = { ...process.env, VITE_BUILD_COMMIT: commit }
 const commands = [
   [resolve('node_modules/typescript/bin/tsc'), ['-b']],
+  [resolve('node_modules/typescript/bin/tsc'), ['--noEmit', '-p', 'tsconfig.access.json']],
   [resolve('node_modules/vite/bin/vite.js'), ['build']],
 ]
 

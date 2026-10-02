@@ -16,3 +16,6 @@ frontend/dist/
 *.tsbuildinfo
 node_modules/
 .vercel
+**/test-results/
+**/playwright-report/
+**/analyst_credits.sqlite3*
