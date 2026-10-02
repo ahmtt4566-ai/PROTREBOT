@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { AlertTriangle, CheckCircle2, CircleDollarSign, Eye, EyeOff, KeyRound, LockKeyhole, Power, RefreshCw, Send, ShieldAlert, ShieldCheck, TriangleAlert, UnlockKeyhole, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
 import { liveCopy } from '../../ui-copy'
+import { MasterTradeLiveLayout } from '../../MasterTradeLayout'
 
 type LivePolicy = Record<string, unknown>
 type LiveStatus = {
@@ -47,7 +48,7 @@ type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MAR
 
 export type SharedLiveStatus = LiveStatus
 export type SharedConnectionStatus = ConnectionStatus
-type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
+type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; masterTradeTab?: 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
 
 const V25 = `${API_BASE}/v25`
 const CONNECTIONS = `${API_BASE}/exchange-connections`
@@ -84,7 +85,7 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
-export default function LiveTradingPanel({active, symbol, analysis, masterTrade, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
+export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
   const [localStatus, setLocalStatus] = useState<LiveStatus | null>(null)
   const [localConnections, setLocalConnections] = useState<ConnectionStatus | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
@@ -568,7 +569,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   )
 
   if (!active) return null
-  if (masterTrade) return <section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
+  if (masterTrade) return <MasterTradeLiveLayout tab={masterTradeTab} step={status?.live_auto_trade ? 3 : !configured || !connected ? 0 : !readinessReady ? 1 : !liveArmed ? 2 : 3}><section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
     <header className={`masterTradeLiveHeader ${liveState.toLowerCase()}`}>
       <div className="masterTradeLiveTitle"><span className="masterTradeLiveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE AUTO TRADE</h2><p>Binance Futures Mainnet · V25 backend control</p></div>
       <div className="masterTradeLiveHeadline"><span className="liveStateDot" /><strong>{liveState}</strong><small>{status?.live_auto_trade ? executionLocked ? 'SCANNER ACTIVE · LIVE ORDERS LOCKED' : 'AUTO TRADE IS RUNNING' : 'AUTO TRADE IS OFF'}</small></div>
@@ -662,7 +663,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       <small className="masterTradeLiveApiHint">Test verifies access only. Connect Account stores the encrypted credentials, activates the read-only account connection, and does not arm or place orders.</small>
     </section>
     {confirmationModal}
-  </section>
+  </section></MasterTradeLiveLayout>
   return <section className="liveTradingPanel liveTerminal liveUx" aria-label={liveCopy.ariaLabel}>
     <header className="liveUxHero"><div><span className="liveKicker">{liveCopy.eyebrow}</span><h2>{liveCopy.title}</h2><p>{liveCopy.description}</p></div><div className={`liveUxState ${liveState.toLowerCase()}`}><ShieldAlert/><strong>{liveState === 'READY' ? liveCopy.ready : liveState === 'UNKNOWN' ? liveCopy.unknown : liveCopy.blocked}</strong><small>AUTO TRADE · {status?.live_auto_trade ? 'AÇIK' : 'KAPALI'}</small></div></header>
     <div className="liveUxStatus" aria-label="Canlı durum şeridi">{statusItems.map(([label, value]) => <div key={label} className={`liveStatusItem ${value.toLowerCase()}`}><i/><span>{label}</span><b>{value}</b></div>)}</div>

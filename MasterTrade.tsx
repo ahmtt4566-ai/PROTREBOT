@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Gauge, XCircle } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Activity, BarChart3, Cable, Check, ChevronDown, Clock3, Crosshair, Gauge, History, ListChecks, LockKeyhole, ShieldX, UnlockKeyhole, Wallet, X, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
+import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
 
 type TradeSide = 'LONG' | 'SHORT'
 type TradeHistoryRow = {
@@ -51,10 +52,10 @@ const fmtNum = (value: number | null | undefined, decimals = 2) =>
   value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
 
 const fmtCompact = (value: number | null | undefined) =>
-  value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
+  value === undefined || value === null ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2, minimumFractionDigits: 2 })
 
 const fmtPnl = (value: number | null | undefined) =>
-  value === undefined || value === null || !Number.isFinite(value) ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 4, minimumFractionDigits: 4 })
+  value === undefined || value === null || !Number.isFinite(value) ? '—' : value.toLocaleString('tr-TR', { maximumFractionDigits: 2, minimumFractionDigits: 2 })
 
 const fmtDecisionNumber = (value: number | null | undefined, decimals = 0) =>
   value === null || value === undefined || !Number.isFinite(value) ? '--' : value.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
@@ -77,6 +78,27 @@ const fmtSignalAge = (seconds: number | null) => {
 }
 
 const MTF_INTERVALS = ['1m', '5m', '15m', '1h', '4h']
+const MASTER_TRADE_TABS = [
+  {id: 'analiz', label: 'Analiz', icon: BarChart3},
+  {id: 'canli', label: 'Canlı İşlem', icon: Activity},
+  {id: 'pozisyonlar', label: 'Pozisyonlar', icon: Wallet},
+  {id: 'baglanti', label: 'Bağlantı', icon: Cable},
+] as const
+type MasterTradeTab = typeof MASTER_TRADE_TABS[number]['id']
+const subscribeTab = (notify: () => void) => {
+  window.addEventListener('popstate', notify)
+  return () => window.removeEventListener('popstate', notify)
+}
+const readTab = (): MasterTradeTab => {
+  const requested = new URLSearchParams(window.location.search).get('tab')
+  return MASTER_TRADE_TABS.find(tab => tab.id === requested)?.id ?? 'analiz'
+}
+const navigateTab = (tab: MasterTradeTab) => {
+  const url = new URL(window.location.href)
+  url.searchParams.set('tab', tab)
+  window.history.pushState(window.history.state, '', url)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
 const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 15000) => {
   const controller = new AbortController()
   const parentAbort = () => controller.abort()
@@ -111,6 +133,7 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
 }
 
 export default function MasterTrade({ onBack }: { onBack?: () => void }) {
+  const layoutTab = useSyncExternalStore(subscribeTab, readTab, () => 'analiz' as MasterTradeTab)
   const [history, setHistory] = useState<TradeHistoryRow[]>([])
   const [historySyncState, setHistorySyncState] = useState<TradeHistorySyncState>('READY')
   const [accountSyncState, setAccountSyncState] = useState<AccountSyncState>('READY')
@@ -605,7 +628,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
   const masterTradeOffline = !snapshot && !markets.length && !marketLoading
 
   return (
-    <section className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}`}>
+    <section className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}`} data-layout-tab={layoutTab}>
       <div className="masterTradeShell">
         <header className="masterTradeTerminalHeader">
           <div className="masterTradeTerminalIdentity">
@@ -614,7 +637,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           </div>
           <span className="masterTradeTerminalMode">LIVE OPERATIONS · CONTROLLED</span>
         </header>
-        <div className="terminalStatusStrip" aria-label="Master Trade connection status">
+        <div className="terminalStatusStrip" aria-label="Master Trade connection status" hidden={layoutTab !== 'baglanti'}>
           <span className="terminalStatusItem online"><i /> CONNECTED</span>
           <span className="terminalStatusItem"><small>WS</small> --</span>
           <span className="terminalStatusItem"><small>LATENCY</small> --</span>
@@ -623,6 +646,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           <span className="terminalStatusItem online">LIVE ACCOUNT</span>
         </div>
 
+        <div className="masterTradeSticky">
         <section className={`masterTradeFocusPanel${masterTradeOffline ? ' offline' : ''}`} aria-label="Primary trade decision">
           <div className="masterTradeFocusIdentity">
             <span className="panelEyebrow">PRIMARY DECISION</span>
@@ -631,7 +655,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           </div>
           <div className="masterTradeFocusPrice">
             <small>MARKET PRICE</small>
-            <strong>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</strong>
+            <strong><MasterTradeValue>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</MasterTradeValue></strong>
           </div>
           <div className="masterTradeFocusDecision">
             <small>SIGNAL / STATUS</small>
@@ -639,16 +663,23 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
           </div>
           <div className="masterTradeFocusMetric">
             <small>CONFIDENCE</small>
-            <strong>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</strong>
+            <strong><MasterTradeValue>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</MasterTradeValue></strong>
           </div>
           <div className="masterTradeFocusMetric">
             <small>RISK / REWARD</small>
-            <strong>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</strong>
+            <strong><MasterTradeValue>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</MasterTradeValue></strong>
+          </div>
+          <div className="masterTradeFocusConnection">
+            <span className={liveStatus?.connected ? 'positive' : 'muted'}>{liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
+            <strong className={liveStatus?.real_trading_locked === false ? 'positive' : 'warning'}>{liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}{liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}</strong>
           </div>
           {masterTradeOffline && <p className="masterTradeFocusNotice">Market bağlantısı bekleniyor. İşlem kararı ve canlı metrikler veri gelene kadar pasif tutuluyor.</p>}
         </section>
 
-        <div className="masterTradeWorkspace">
+        <nav className="masterTradeTabs" aria-label="Master Trade" role="tablist">{MASTER_TRADE_TABS.map(({id,label,icon:Icon}) => <button key={id} type="button" id={`master-tab-${id}`} role="tab" aria-selected={layoutTab === id} aria-controls={`master-panel-${id}`} onClick={() => navigateTab(id)}><Icon aria-hidden="true"/><span>{label}</span></button>)}</nav>
+        </div>
+
+        <div className="masterTradeWorkspace" id="master-panel-analiz" role="tabpanel" aria-labelledby="master-tab-analiz" hidden={layoutTab !== 'analiz'}>
           <div className="masterTradeSafetyBanner" role="status">
             <strong>LIVE TRADING LOCKED</strong>
             <span>LIVE ACCOUNT SNAPSHOT · PERSISTENT HISTORY · RECOVERY CONTROLLED</span>
@@ -679,10 +710,18 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
                   </button>
                 ))}
               </>}
+            <details className="masterTradePanel scannerPanel compactPanel masterTradeScannerDetails">
+              <summary className="panelHeader">
+                <div><span className="panelEyebrow">MARKET SCANNER</span><h3>Top opportunities</h3></div>
+                <span className="livePill">LIVE</span>
+              </summary>
+              <div className="scannerList">{scannerCandidates.length ? scannerCandidates.map((candidate, index) => <button type="button" key={candidate.symbol} onClick={() => selectMarket(candidate.symbol)}><div className="scannerCandidateMeta"><strong>{candidate.symbol}</strong><div><span className="scannerScore">#{index + 1}</span><strong>{fmtDecisionNumber(candidate.final_decision_score)}<small> / 100 FINAL DECISION</small></strong></div></div><div className="scannerCandidateStats"><strong><MasterTradeValue>{candidate.price === undefined ? '--' : `$${fmtMarketPrice(candidate.price)}`}</MasterTradeValue></strong><small data-tone={masterTradeTone(candidate.direction)} title={`${candidate.direction} · Confidence ${fmtDecisionNumber(candidate.confidence)}%`}>{candidate.direction} · Confidence {fmtDecisionNumber(candidate.confidence)}%</small></div></button>) : <div className="emptyState">NO CURRENT OPPORTUNITY SNAPSHOT</div>}</div>
+            </details>
             </div>
           </aside>
 
           <main className="masterTradePanel chartPanel">
+            <div className="masterTradeChartHeader">
             <div className="panelHeader">
               <div>
                 <span className="panelEyebrow">MARKET</span>
@@ -693,106 +732,105 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="chartPriceSummary">
               <div>
                 <span className="chartSymbol">{draft.market}</span>
-                <strong>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</strong>
+                <strong><MasterTradeValue>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</MasterTradeValue></strong>
               </div>
               <span className={`delta ${selectedMarket && selectedMarket.change >= 0 ? 'positive' : 'negative'}`}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</span>
             </div>
 
             <div className="marketStatsStrip">
               <span><small>24H CHANGE</small><b className={selectedMarket && selectedMarket.change < 0 ? 'negative' : 'positive'}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</b></span>
-              <span><small>VOLUME</small><b>{selectedMarket?.volume ? fmtCompact(selectedMarket.volume) : '--'}</b></span>
-              <span><small>HIGH</small><b>{chartCandles.length ? fmtMarketPrice(Math.max(...chartCandles.map(candle => candle.high))) : '--'}</b></span>
-              <span><small>LOW</small><b>{chartCandles.length ? fmtMarketPrice(Math.min(...chartCandles.map(candle => candle.low))) : '--'}</b></span>
+              <span><small>VOLUME</small><b><MasterTradeValue>{selectedMarket?.volume ? fmtCompact(selectedMarket.volume) : '--'}</MasterTradeValue></b></span>
+              <span><small>HIGH</small><b><MasterTradeValue>{chartCandles.length ? fmtMarketPrice(Math.max(...chartCandles.map(candle => candle.high))) : '--'}</MasterTradeValue></b></span>
+              <span><small>LOW</small><b><MasterTradeValue>{chartCandles.length ? fmtMarketPrice(Math.min(...chartCandles.map(candle => candle.low))) : '--'}</MasterTradeValue></b></span>
               <span><small>DATA HEALTH</small><b className={dataHealth === 'LIVE' ? 'positive' : dataHealth === 'STALE' ? 'warning' : 'negative'}>{dataHealth}</b></span>
             </div>
+            </div>
+
+            <div className="decisionMtf"><div className="decisionSubheading"><h4>MULTI-TIMEFRAME MATRIX</h4><strong>{tradeDecision.mtfScore === null ? 'MTF BIAS: --' : `MTF CONFIRMATION: ${tradeDecision.mtfConfirmed} / ${tradeDecision.mtfTotal}`}</strong></div><div className="decisionMtfGrid">{MTF_INTERVALS.map(timeframe => { const row = tradeDecision.mtfRows.find(item => item.timeframe === timeframe); return <span key={timeframe} data-tone={masterTradeTone(row?.available ? row.direction : undefined)}><b>{timeframe}</b><em><MasterTradeValue>{row?.available ? row.direction : '--'}</MasterTradeValue></em><small><MasterTradeValue>{row?.trend || '--'}</MasterTradeValue></small></span> })}</div>{!tradeDecision.mtfRows.length && <p>DATA UNAVAILABLE</p>}</div>
 
             <div className="chartToolbar" aria-label="Market chart controls">
               <div className="chartControls">{['1m','5m','15m','1h','4h','1d'].map((range) => <button key={range} type="button" className={range === interval ? 'active' : ''} onClick={() => setInterval(range)}>{range.toUpperCase()}</button>)}</div>
-              <div className="chartViewControls"><button type="button" className={showChartLevels ? 'active' : ''} onClick={() => setShowChartLevels(value => !value)}>LEVELS</button><button type="button" className={showChartVolume ? 'active' : ''} onClick={() => setShowChartVolume(value => !value)}>VOLUME</button><span>{hoveredCandle ? new Date(hoveredCandle.time * (hoveredCandle.time < 1_000_000_000_000 ? 1000 : 1)).toLocaleString('en-GB') : 'OHLC / REAL MARKET DATA'}</span></div>
+              <div className="chartViewControls"><button type="button" className={showChartLevels ? 'active' : ''} onClick={() => setShowChartLevels(value => !value)}>LEVELS</button><button type="button" className={showChartVolume ? 'active' : ''} onClick={() => setShowChartVolume(value => !value)}>VOLUME</button></div>
             </div>
+            <span className="chartOhlcLabel">{hoveredCandle ? new Date(hoveredCandle.time * (hoveredCandle.time < 1_000_000_000_000 ? 1000 : 1)).toLocaleString('en-GB') : 'OHLC / REAL MARKET DATA'}</span>
 
             <div className="chartCanvas marketOhlcChart">
               {dataLoading && !chartCandles.length ? <div className="chartEmpty">LOADING SNAPSHOT</div> : !chartCandles.length ? <div className="chartEmpty">{dataError || 'DATA UNAVAILABLE'}</div> : <svg viewBox="0 0 760 300" preserveAspectRatio="none" aria-label={`${draft.market} ${interval} candlestick chart`} onMouseLeave={() => setChartHoverIndex(null)} onMouseMove={event => { const box = event.currentTarget.getBoundingClientRect(); const index = Math.round(((event.clientX - box.left) / box.width) * (chartCandles.length - 1)); setChartHoverIndex(Math.max(0, Math.min(chartCandles.length - 1, index))) }}>
                 <g className="chartGrid">{[...Array(7)].map((_, index) => <line key={`h-${index}`} x1="0" x2="760" y1={22 + index * 35} y2={22 + index * 35} />)}{[...Array(9)].map((_, index) => <line key={`v-${index}`} x1={index * 95} x2={index * 95} y1="0" y2="260" />)}</g>
-                {showChartLevels && positionedLevelLines.map(line => <g key={`${line.label}-${line.value}`} className={`chartLevel level-${line.tone}`}><line x1="0" x2="760" y1={chartY(line.value)} y2={chartY(line.value)} strokeDasharray={line.tone === 'trigger' ? '5 4' : '2 3'} /><rect x="668" y={line.labelY - 11} width="88" height="14" rx="2" /><text x="752" y={line.labelY - 1} textAnchor="end">{line.label} {fmtMarketPrice(line.value)}</text></g>)}
                 {chartCandles.map((candle, index) => { const x = chartX(index); const bodyTop = chartY(Math.max(candle.open, candle.close)); const bodyBottom = chartY(Math.min(candle.open, candle.close)); const bodyHeight = Math.max(2, bodyBottom - bodyTop); const bullish = candle.close >= candle.open; const candleWidth = Math.max(2, Math.min(10, 700 / chartCandles.length)); return <g key={`${candle.time}-${index}`} className={bullish ? 'candle bullish' : 'candle bearish'}><line x1={x} x2={x} y1={chartY(candle.high)} y2={chartY(candle.low)} /><rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} /></g> })}
                 {showChartVolume && chartCandles.map((candle, index) => { const x = chartX(index); const height = candle.volume / volumeMax * 28; return <rect key={`vol-${candle.time}`} className={`chartVolume ${candle.close >= candle.open ? 'up' : 'down'}`} x={x - 2} y={273 - height} width="4" height={height} /> })}
-                {snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined && <g className="currentPriceLine"><line x1="0" x2="760" y1={chartY(snapshot.currentPrice)} y2={chartY(snapshot.currentPrice)} /><rect x="674" y={chartY(snapshot.currentPrice) - 11} width="82" height="14" rx="2" /><text x="752" y={chartY(snapshot.currentPrice) - 1} textAnchor="end">{fmtMarketPrice(snapshot.currentPrice)}</text></g>}
+                <MasterTradeChartLabels lines={showChartLevels ? positionedLevelLines : []} currentPrice={snapshot?.currentPrice} toY={chartY} format={fmtMarketPrice}/>
                 {chartHoverIndex !== null && <g className="chartCrosshair"><line x1={chartX(chartHoverIndex)} x2={chartX(chartHoverIndex)} y1="0" y2="260" /><circle cx={chartX(chartHoverIndex)} cy={chartY(chartCandles[chartHoverIndex].close)} r="3" /></g>}
               </svg>}
+              {!!chartCandles.length && <MasterTradeChartLabels lines={showChartLevels ? positionedLevelLines : []} currentPrice={snapshot?.currentPrice} toY={chartY} format={fmtMarketPrice} pills/>}
               <div className="chartBadge">{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</div>
             </div>
 
             <div className="indicatorGrid">
-              <article><small>TREND</small><strong className="positive">{analysis?.trend || '--'}</strong></article>
-              <article><small>MOMENTUM</small><strong>{analysis?.momentum || '--'}</strong></article>
-              <article><small>RSI</small><strong>{fmtDecisionNumber(analysis?.rsi, 2)}</strong></article>
-              <article><small>MACD</small><strong className={analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}>{fmtSigned(analysis?.macd)}</strong></article>
-              <article><small>VOLUME</small><strong>{analysis?.volume_ratio ? `${fmtDecisionNumber(analysis.volume_ratio, 2)}x` : '--'}</strong></article>
-              <article><small>CONFIDENCE</small><strong className="positive">{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</strong></article>
-              <article><small>OPPORTUNITY</small><strong className="decisionAccent">{fmtDecisionNumber(tradeDecision.opportunityScore)}</strong></article>
+              <MasterTradeMetricTile label="TREND" value={analysis?.trend || '--'} tone={masterTradeTone(analysis?.trend)}/>
+              <MasterTradeMetricTile label="MOMENTUM" value={analysis?.momentum || '--'} tone={masterTradeTone(analysis?.momentum)}/>
+              <MasterTradeMetricTile label="RSI" value={fmtDecisionNumber(analysis?.rsi, 2)} status={analysis?.rsi === undefined ? 'DATA UNAVAILABLE' : analysis.rsi >= 70 ? 'OVERBOUGHT' : analysis.rsi <= 30 ? 'OVERSOLD' : 'HEALTHY RANGE'}><MasterTradeMetricVisual kind="rsi" value={analysis?.rsi}/></MasterTradeMetricTile>
+              <MasterTradeMetricTile label="MACD" value={fmtSigned(analysis?.macd)} tone={masterTradeTone(analysis?.macd)} status={analysis?.macd === undefined ? 'DATA UNAVAILABLE' : analysis.macd >= 0 ? 'BULLISH' : 'BEARISH'}><MasterTradeMetricVisual kind="macd" value={analysis?.macd}/></MasterTradeMetricTile>
+              <MasterTradeMetricTile label="VOLUME" value={analysis?.volume_ratio ? `${fmtDecisionNumber(analysis.volume_ratio, 2)}x` : '--'}><MasterTradeMetricVisual kind="volume" volumes={chartCandles.slice(-24).map(candle => candle.volume)}/></MasterTradeMetricTile>
+              <MasterTradeMetricTile label="CONFIDENCE" value={tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}><MasterTradeMetricVisual kind="confidence" value={tradeDecision.confidenceScore}/></MasterTradeMetricTile>
+              <MasterTradeMetricTile label="OPPORTUNITY" value={fmtDecisionNumber(tradeDecision.opportunityScore)}><MasterTradeMetricVisual kind="confidence" value={tradeDecision.opportunityScore}/></MasterTradeMetricTile>
             </div>
+          </main>
 
-            <div className="indicatorTerminalGrid">
-              <article><header><span>VOLUME</span><b>{analysis?.volume_ratio ? `${fmtDecisionNumber(analysis.volume_ratio, 2)}x` : '--'}</b></header><div className="volumeMeter">{chartCandles.slice(-24).map((candle, index) => <i key={`${candle.time}-${index}`} style={{ height: `${Math.max(8, candle.volume / volumeMax * 100)}%` }} className={candle.close >= candle.open ? 'up' : 'down'} />)}</div></article>
-              <article><header><span>RSI</span><b>{fmtDecisionNumber(analysis?.rsi, 2)}</b></header><div className="indicatorScale"><i /><em>30</em><em>50</em><em>70</em></div><small>{analysis?.rsi === undefined ? 'DATA UNAVAILABLE' : analysis.rsi >= 70 ? 'OVERBOUGHT' : analysis.rsi <= 30 ? 'OVERSOLD' : 'HEALTHY RANGE'}</small></article>
-              <article><header><span>MACD</span><b>{fmtSigned(analysis?.macd)}</b></header><div className={`macdPulse ${analysis?.macd && analysis.macd >= 0 ? 'positive' : 'negative'}`} /><small>{analysis?.macd === undefined ? 'DATA UNAVAILABLE' : analysis.macd >= 0 ? 'BULLISH' : 'BEARISH'}</small></article>
-            </div>
-            <div className="scoreMeters"><div><span>CONFIDENCE</span><b>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</b><i><em style={{ width: `${tradeDecision.confidenceScore ?? 0}%` }} /></i></div><div><span>OPPORTUNITY</span><b>{fmtDecisionNumber(tradeDecision.opportunityScore)}</b><i><em style={{ width: `${tradeDecision.opportunityScore ?? 0}%` }} /></i></div></div>
-
+          <aside className="masterTradeDecisionColumn">
             <section className={`tradeDecisionPanel decision-${tradeDecision.status.toLowerCase().replaceAll(' ', '-')}`} aria-label="Trade decision analysis">
+              <div className="masterTradeFinalCard">
               <header className="tradeDecisionHeader">
                 <div><span className="panelEyebrow">FINAL DECISION</span><h3>{tradeDecision.status}</h3><small>{draft.market} · {interval} · {tradeDecision.marketRegime}</small></div>
-                <div className="decisionScore"><strong>{fmtDecisionNumber(tradeDecision.opportunityScore)}</strong><span>/ 100<br />OPPORTUNITY</span></div>
+                <div className="decisionScore"><strong><MasterTradeValue>{fmtDecisionNumber(tradeDecision.opportunityScore)}</MasterTradeValue></strong><span>/ 100<br />OPPORTUNITY</span></div>
               </header>
               <div className="decisionMetricGrid">
-                <div><small>CONFIDENCE</small><strong>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</strong></div>
-                <div><small>DIRECTION</small><strong>{tradeDecision.direction}</strong></div>
-                <div><small>SIGNAL STRENGTH</small><strong>{tradeDecision.signalStrength || '--'}</strong></div>
-                <div><small>ENTRY QUALITY</small><strong>{tradeDecision.entryQuality || '--'}</strong></div>
-                <div><small>RISK / REWARD</small><strong>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</strong></div>
-                <div><small>SIGNAL</small><strong>{tradeDecision.freshness || '--'}</strong><em>Age {fmtSignalAge(tradeDecision.signalAgeSeconds)}</em></div>
+                <div><small>CONFIDENCE</small><strong><MasterTradeValue>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</MasterTradeValue></strong></div>
+                <div><small>DIRECTION</small><strong><MasterTradeValue>{tradeDecision.direction}</MasterTradeValue></strong></div>
+                <div><small>SIGNAL STRENGTH</small><strong><MasterTradeValue>{tradeDecision.signalStrength || '--'}</MasterTradeValue></strong></div>
+                <div><small>ENTRY QUALITY</small><strong><MasterTradeValue>{tradeDecision.entryQuality || '--'}</MasterTradeValue></strong></div>
+                <div><small>RISK / REWARD</small><strong><MasterTradeValue>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</MasterTradeValue></strong></div>
+                <div><small>SIGNAL</small><strong><MasterTradeValue>{tradeDecision.freshness || '--'}</MasterTradeValue></strong><em>Age {fmtSignalAge(tradeDecision.signalAgeSeconds)}</em></div>
+              </div>
               </div>
 
               <div className="decisionSectionGrid">
-                <div className="decisionList"><h4>WHY THIS DECISION</h4>{tradeDecision.reasons.length ? <ul>{tradeDecision.reasons.map(reason => <li key={reason}>+ {reason}</li>)}</ul> : <p>DATA UNAVAILABLE</p>}</div>
+                <details className="decisionList masterTradeAccordion"><summary><BarChart3 aria-hidden="true"/><h4 title="WHY THIS DECISION">WHY THIS DECISION</h4><span title={tradeDecision.reasons[0]}>{tradeDecision.reasons[0] || 'DATA UNAVAILABLE'}</span><ChevronDown aria-hidden="true"/></summary>{tradeDecision.reasons.length ? <ul>{tradeDecision.reasons.map(reason => <li key={reason}>+ {reason}</li>)}</ul> : <p>DATA UNAVAILABLE</p>}</details>
                 <div className="decisionList"><h4>RISK FLAGS</h4>{tradeDecision.riskFlags.length ? <ul className="riskList">{tradeDecision.riskFlags.map(flag => <li key={flag}>! {flag}</li>)}</ul> : <p className="positive">NO MAJOR RISK FLAGS</p>}</div>
               </div>
 
               {(tradeDecision.status === 'WAIT' || tradeDecision.status === 'WATCH' || tradeDecision.status === 'NO TRADE') && <div className="decisionSectionGrid decisionWaitGrid">
-                <div className="decisionList"><h4>WHY WAIT?</h4><ul>{tradeDecision.whyWait.length ? tradeDecision.whyWait.map(reason => <li key={reason}>- {reason}</li>) : <li>Confirmation still required</li>}</ul></div>
+                <details className="decisionList masterTradeAccordion"><summary><Clock3 aria-hidden="true"/><h4>WHY WAIT?</h4><span title={tradeDecision.whyWait[0]}>{tradeDecision.whyWait[0] || 'Confirmation still required'}</span><ChevronDown aria-hidden="true"/></summary><ul>{tradeDecision.whyWait.length ? tradeDecision.whyWait.map(reason => <li key={reason}>- {reason}</li>) : <li>Confirmation still required</li>}</ul></details>
                 <div className="decisionList"><h4>WHAT WE ARE WAITING FOR</h4><ul>{tradeDecision.waitingFor.length ? tradeDecision.waitingFor.map(reason => <li key={reason}>✓ {reason}</li>) : <li>Fresh market confirmation</li>}</ul><p>Trigger: --</p></div>
               </div>}
 
-              <div className="decisionSectionGrid">
-                <div className="decisionList"><h4>LONG CASE</h4><ul>{tradeDecision.longCase.map(item => <li key={item}>{item}</li>)}</ul></div>
-                <div className="decisionList"><h4>SHORT CASE</h4><ul>{tradeDecision.shortCase.map(item => <li key={item}>{item}</li>)}</ul></div>
+              <div className="decisionSectionGrid masterTradeCases">
+                <div className="decisionList"><h4>LONG CASE</h4><ul>{tradeDecision.longCase.map(item => <li key={item}>{item.includes('not ') ? <X aria-hidden="true" className="negative"/> : <Check aria-hidden="true" className="positive"/>}<span>{item}</span></li>)}</ul></div>
+                <div className="decisionList"><h4>SHORT CASE</h4><ul>{tradeDecision.shortCase.map(item => <li key={item}>{item.includes('not ') ? <X aria-hidden="true" className="negative"/> : <Check aria-hidden="true" className="positive"/>}<span>{item}</span></li>)}</ul></div>
               </div>
 
               <div className="decisionBreakdown"><h4>WHY THIS SCORE?</h4>{tradeDecision.breakdown ? <div className="decisionBreakdownGrid">{[['Analysis', tradeDecision.breakdown.analysis], ['Liquidity', tradeDecision.breakdown.liquidity], ['Volatility', tradeDecision.breakdown.volatility], ['MTF', tradeDecision.breakdown.mtf], ['Freshness', tradeDecision.breakdown.freshness], ['Risk/Reward', tradeDecision.breakdown.riskReward]].map(([label, value]) => <span key={label}><small>{label}</small><strong>{fmtDecisionNumber(value)}</strong></span>)}</div> : <p>DATA UNAVAILABLE</p>}</div>
 
-              <div className="decisionMtf"><div className="decisionSubheading"><h4>MULTI-TIMEFRAME MATRIX</h4><strong>{tradeDecision.mtfScore === null ? 'MTF BIAS: --' : `MTF CONFIRMATION: ${tradeDecision.mtfConfirmed} / ${tradeDecision.mtfTotal}`}</strong></div><div className="decisionMtfGrid">{tradeDecision.mtfRows.length ? tradeDecision.mtfRows.map(row => <span key={row.timeframe}><b>{row.timeframe}</b><em>{row.available ? row.direction : '--'}</em><small>{row.trend || '--'}</small></span>) : <span>DATA UNAVAILABLE</span>}</div></div>
               <div className="decisionAutoTrade"><span>AUTO TRADE</span><strong>SEPARATE SAFETY GATES</strong><small>Final Decision does not send orders or grant Auto Trade eligibility.</small></div>
 
               <section className={`triggerMonitor trigger-${triggerMonitor.lifecycle.toLowerCase()}`} aria-label="Trigger monitor">
                 <header className="triggerHeader"><div><h4>TRIGGER MONITOR</h4><strong>{triggerMonitor.lifecycle}</strong><small>{triggerMonitor.statusMessage}</small></div><span>{triggerMonitor.available ? 'LIVE SNAPSHOT' : 'DATA UNAVAILABLE'}</span></header>
                 <div className="triggerSummary"><div><small>CURRENT</small><strong>{triggerMonitor.currentPrice === null ? '--' : `$${fmtDecisionNumber(triggerMonitor.currentPrice, 6)}`}</strong></div><div><small>{triggerMonitor.direction === 'SHORT' ? 'SHORT TRIGGER BELOW' : 'LONG TRIGGER ABOVE'}</small><strong>{triggerMonitor.triggerPrice === null ? '--' : `$${fmtDecisionNumber(triggerMonitor.triggerPrice, 6)}`}</strong></div><div><small>DISTANCE</small><strong>{triggerMonitor.distancePct === null ? '--' : `${triggerMonitor.distancePct.toFixed(2)}%`}</strong><em>{triggerMonitor.waitingMessage}</em></div></div>
-                <div className="triggerConditions"><div className="decisionSubheading"><h4>TRIGGER CONDITIONS</h4><strong>{triggerMonitor.remainingConditions === null ? '--' : `${triggerMonitor.remainingConditions} CONDITIONS REMAINING`}</strong></div>{triggerMonitor.conditions.length ? <div className="triggerConditionGrid">{triggerMonitor.conditions.map(condition => <span key={condition.key} className={!condition.available ? 'unavailable' : condition.passed ? 'passed' : 'pending'}><b>{condition.passed ? '✓' : condition.available ? '✕' : '--'}</b><small>{condition.label}</small><em>{condition.detail}</em></span>)}</div> : <p className="triggerUnavailable">NO TRADE — waiting for a complete market snapshot.</p>}</div>
-                <div className="triggerDetailGrid"><div className="decisionList"><h4>INVALIDATION</h4><ul>{triggerMonitor.invalidation.map(item => <li key={item}>- {item}</li>)}</ul></div><div className="decisionList"><h4>DECISION TIMELINE</h4>{decisionTimeline.length ? <ul>{decisionTimeline.map(event => <li key={`${event.time}-${event.message}`}>{new Date(event.time).toLocaleTimeString('en-GB')} · {event.message}</li>)}</ul> : <p>NO RECENT ACTIVITY</p>}</div></div>
+                <details className="triggerConditions masterTradeAccordion"><summary><Crosshair aria-hidden="true"/><h4 title="TRIGGER CONDITIONS">TRIGGER CONDITIONS</h4><span>{triggerMonitor.remainingConditions === null ? '--' : `${triggerMonitor.remainingConditions} CONDITIONS REMAINING`}</span><ChevronDown aria-hidden="true"/></summary>{triggerMonitor.conditions.length ? <div className="triggerConditionGrid">{triggerMonitor.conditions.map(condition => <span key={condition.key} className={!condition.available ? 'unavailable' : condition.passed ? 'passed' : 'pending'}><b>{condition.passed ? '✓' : condition.available ? '✕' : '--'}</b><small>{condition.label}</small><em>{condition.detail}</em></span>)}</div> : <p className="triggerUnavailable">NO TRADE — waiting for a complete market snapshot.</p>}</details>
+                <div className="triggerDetailGrid"><details className="decisionList masterTradeAccordion"><summary><ShieldX aria-hidden="true"/><h4>INVALIDATION</h4><span title={triggerMonitor.invalidation[0]}>{triggerMonitor.invalidation[0] || '--'}</span><ChevronDown aria-hidden="true"/></summary><ul>{triggerMonitor.invalidation.map(item => <li key={item}>- {item}</li>)}</ul></details><details className="decisionList masterTradeAccordion"><summary><History aria-hidden="true"/><h4 title="DECISION TIMELINE">DECISION TIMELINE</h4><span title={decisionTimeline[0]?.message}>{decisionTimeline[0]?.message || 'NO RECENT ACTIVITY'}</span><ChevronDown aria-hidden="true"/></summary>{decisionTimeline.length ? <ul>{decisionTimeline.map(event => <li key={`${event.time}-${event.message}`}>{new Date(event.time).toLocaleTimeString('en-GB')} · {event.message}</li>)}</ul> : <p>NO RECENT ACTIVITY</p>}</details></div>
                 {triggerMonitor.entryPreview && <div className="triggerPreview"><h4>ENTRY PREVIEW</h4><div className="triggerPreviewGrid"><span><small>ENTRY</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.entry, 6)}</strong></span><span><small>SL</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.stopLoss, 6)}</strong></span><span><small>TP1 · 30%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp1, 6)}</strong></span><span><small>TP2 · 30%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp2, 6)}</strong></span><span><small>TP3 · 40%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp3, 6)}</strong></span><span><small>R / R</small><strong>1 : {fmtDecisionNumber(triggerMonitor.entryPreview.riskReward, 2)}</strong></span></div></div>}
-                <div className="preTradeCheck"><div className="decisionSubheading"><h4>PRE-TRADE CHECK · READ ONLY</h4><strong>NO ORDER SENT</strong></div><div className="preTradeCheckGrid">{triggerMonitor.preTradeChecks.map(check => <span key={check.label} className={`check-${check.status.toLowerCase()}`}><b>{check.status}</b><small>{check.label}</small><em>{check.detail}</em></span>)}</div></div>
+                <details className="preTradeCheck masterTradeAccordion"><summary><ListChecks aria-hidden="true"/><h4 title="PRE-TRADE CHECK · READ ONLY">PRE-TRADE CHECK · READ ONLY</h4><span>NO ORDER SENT</span><ChevronDown aria-hidden="true"/></summary><div className="preTradeCheckGrid">{triggerMonitor.preTradeChecks.map(check => <span key={check.label} className={`check-${check.status.toLowerCase()}`}><b>{check.status}</b><small>{check.label}</small><em>{check.detail}</em></span>)}</div></details>
               </section>
             </section>
-          </main>
 
-          <aside className="masterTradePanel marketAnalysisPanel">
-            <div className="panelHeader">
+          <details className="masterTradePanel marketAnalysisPanel">
+            <summary className="panelHeader">
               <div>
                 <span className="panelEyebrow">MARKET ANALYSIS</span>
                 <h3>{draft.market}</h3>
               </div>
               <span className="marketAnalysisState">{tradeDecision.status}</span>
-            </div>
+            </summary>
             <div className="marketAnalysisDecision">
               <span>MARKET REGIME</span>
               <strong>{tradeDecision.marketRegime || '--'}</strong>
@@ -817,14 +855,16 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
               <strong>{tradeDecision.status || '--'}</strong>
               <em>{tradeDecision.signalStrength || '--'}</em>
             </div>
+          </details>
           </aside>
 
         </div>
 
-        <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
+        <div className="masterTradeOperationsPanel" id={`master-panel-${layoutTab === 'analiz' ? 'operations' : layoutTab}`} role="tabpanel" aria-labelledby={`master-tab-${layoutTab}`} hidden={layoutTab === 'analiz'}>
+          <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade masterTradeTab={layoutTab} sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
 
-        <div className="masterTradeDataGrid">
-          <section className="masterTradePanel riskMonitorPanel">
+        <div className="masterTradeDataGrid" hidden={layoutTab === 'canli'}>
+          <section className="masterTradePanel riskMonitorPanel" hidden={layoutTab !== 'baglanti'}>
             <div className="panelHeader">
               <div>
                 <span className="panelEyebrow">RISK MONITOR</span>
@@ -838,7 +878,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <div className="riskMonitorFooter"><span>Open positions</span><strong>{account?.positions ? account.positions.length : '--'} / {account?.limits?.max_open_positions ?? '--'}</strong><span>Live trading</span><strong className="warning">CONTROLLED</strong></div>
           </section>
 
-          <section className="masterTradePanel positionsPanel widePanel">
+          <section className="masterTradePanel positionsPanel widePanel" hidden={layoutTab !== 'pozisyonlar'}>
             <div className="panelHeader">
               <div>
                 <span className="panelEyebrow">OPEN POSITIONS</span>
@@ -895,7 +935,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </div>
           </section>
 
-          <section className="masterTradePanel ordersPanel compactPanel">
+          <section className="masterTradePanel ordersPanel compactPanel" hidden={layoutTab !== 'pozisyonlar'}>
             <div className="panelHeader">
               <div>
                 <span className="panelEyebrow">ACTIVE ORDERS</span>
@@ -937,7 +977,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </div>
           </section>
 
-          <section className="masterTradePanel historyPanel widePanel">
+          <section className="masterTradePanel historyPanel widePanel" hidden={layoutTab !== 'pozisyonlar'}>
             <div className="panelHeader">
               <div>
                 <span className="panelEyebrow">TRADE HISTORY</span>
@@ -986,7 +1026,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </div>
           </section>
 
-          <section className="masterTradePanel performancePanel compactPanel">
+          <section className="masterTradePanel performancePanel compactPanel" hidden={layoutTab !== 'pozisyonlar'}>
             <div className="panelHeader">
               <div>
                 <span className="panelEyebrow">PERFORMANCE</span>
@@ -1015,18 +1055,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             </div>
           </section>
 
-          <section className="masterTradePanel scannerPanel compactPanel">
-            <div className="panelHeader">
-              <div>
-                <span className="panelEyebrow">MARKET SCANNER</span>
-                <h3>Top opportunities</h3>
-              </div>
-              <span className="livePill">LIVE</span>
-            </div>
-
-            <div className="scannerList">{scannerCandidates.length ? scannerCandidates.map((candidate, index) => <article key={candidate.symbol}><span className="scannerScore">#{index + 1}</span><div><strong>{candidate.symbol}</strong><small>{candidate.direction} · Confidence {fmtDecisionNumber(candidate.confidence)}%</small></div><strong>{fmtDecisionNumber(candidate.final_decision_score)}<small> / 100 FINAL DECISION</small></strong></article>) : <div className="emptyState">NO CURRENT OPPORTUNITY SNAPSHOT</div>}</div>
-          </section>
-
+        </div>
         </div>
       </div>
 
