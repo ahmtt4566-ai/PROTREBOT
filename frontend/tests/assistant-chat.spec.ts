@@ -23,7 +23,7 @@ test('Committed Analyst/Scanner/Master Trade navigation reacts without assistant
   await recordReactions(page)
   const state = await mockAssistant(page)
   await page.goto('/')
-  await expect(page.getByRole('button', {name: 'Kais AI'})).toBeVisible()
+  await expect(page.getByRole('button', {name: 'Kais AI', exact: true})).toBeVisible()
   for (const view of ['analyst', 'scanner', 'master-trade']) {
     const before = await page.evaluate(() => window.kaisReactionLog.length)
     await page.evaluate(view => window.dispatchEvent(new CustomEvent('protrebot-navigate', {detail: view})), view)
@@ -182,7 +182,7 @@ async function mockAssistant(page: Page): Promise<MockState> {
 
 async function openChat(page: Page) {
   await page.goto('/')
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   const dialog = page.getByRole('dialog', {name: 'Kais AI'})
   await expect(dialog.getByRole('textbox', {name: 'Kais AI mesajın'})).toBeEnabled()
   return dialog
@@ -223,10 +223,10 @@ for (const width of [1440, 390]) {
     await page.screenshot({path: join(testInfo.outputDir, `assistant-${width}.png`)})
     await page.keyboard.press('Escape')
     await expect(dialog).not.toBeVisible()
-    await expect(page.getByRole('button', {name: 'Kais AI'})).toBeFocused()
-    await page.getByRole('button', {name: 'Kais AI'}).click()
+    await expect(page.getByRole('button', {name: 'Kais AI', exact: true})).toBeFocused()
+    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
     await dialog.getByRole('button', {name: 'Kais AI sohbetini kapat'}).click()
-    await expect(page.getByRole('button', {name: 'Kais AI'})).toBeFocused()
+    await expect(page.getByRole('button', {name: 'Kais AI', exact: true})).toBeFocused()
   })
 }
 
@@ -270,7 +270,7 @@ test('Suggested question, typing state, plain text, copy exception and session h
   })
   expect(outsideProtected).toBe(true)
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   await expect(page.locator('.assistantMessage')).toHaveCount(2)
   await expect(page.locator('.assistantMessage.assistant')).toContainText('<img')
 })
@@ -310,7 +310,7 @@ test('Cancel and reload never approve; obsolete proof cannot execute', async ({p
   await dialog.getByRole('button', {name: 'BTC için analiz durumu ne?', exact: true}).click()
   await expect(dialog.getByRole('button', {name: 'Onayla'})).toBeVisible()
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   await expect(page.locator('.assistantMessage')).toContainText(['BTC', 'Vazgeçildi', 'BTC', 'Onay için analizi tekrar iste.'])
   await expect(page.getByRole('button', {name: 'Onayla'})).toHaveCount(0)
   expect(state.confirmations).toHaveLength(0)
@@ -394,7 +394,7 @@ test('Backend limits govern Unicode history truncation; secret input is neither 
   state.historyLimit = 0
   await dialog.getByRole('button', {name: 'Kais AI sohbetini kapat'}).click()
   const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/assistant/usage')
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   await (await refreshed).finished()
   await input.fill('Allowed question')
   await dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
@@ -408,7 +408,7 @@ test('EN labels, zero allowance fastpath and per-member history isolation', asyn
   state.chatBody = {reply: 'Your plan details.', language: 'en', sources: ['get_plans']}
   await page.goto('/')
   await page.evaluate(() => {document.documentElement.lang = 'en'})
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   const dialog = page.getByRole('dialog', {name: 'Kais AI'})
   await expect(dialog).toContainText('Daily messages remaining: 0/20')
   await expect(dialog.locator('.assistantHeader > .kaisEye')).toHaveAttribute('data-state', 'error')
@@ -417,7 +417,7 @@ test('EN labels, zero allowance fastpath and per-member history isolation', asyn
   expect(state.chats).toHaveLength(1)
   state.userId = 'different-member'
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   await expect(page.locator('.assistantMessage')).toHaveCount(0)
 })
 
@@ -452,7 +452,7 @@ for (const width of [1440, 390]) {
     expect(state.checkIns[0].body).toEqual({language: 'tr'})
     await page.reload()
     await expect(page.getByRole('status', {name: 'Okunmamış durum özeti'})).toHaveText('1')
-    await page.getByRole('button', {name: 'Kais AI'}).click()
+    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
     const dialog = page.getByRole('dialog', {name: 'Kais AI'})
     await expect(dialog.locator('.assistantMessage')).toHaveCount(1)
     await expect(dialog).toContainText(checkInMessage.reply)
@@ -460,7 +460,7 @@ for (const width of [1440, 390]) {
     await expect(page.locator('.assistantLauncher .kaisEye')).toHaveAttribute('data-unread', 'false')
     await expect(page.locator('.assistantLauncher .kaisEyeRingGlow')).toHaveCSS('animation-name', 'none')
     await page.reload()
-    await page.getByRole('button', {name: 'Kais AI'}).click()
+    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
     await expect(dialog.locator('.assistantMessage')).toHaveCount(1)
     await expect(page.locator('.assistantBadge')).toHaveCount(0)
     await dialog.getByRole('button', {name: 'Premium ne kadar?', exact: true}).click()
@@ -486,13 +486,13 @@ test('Opt-out is server-backed, survives reload, and does not share another memb
   const calls = state.checkIns.length
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   await expect(setting).toBeEnabled()
   await expect(setting).not.toBeChecked()
   expect(state.checkIns).toHaveLength(calls)
   state.userId = 'other-proactive-member'; state.proactiveEnabled = true; state.proactiveMessage = null
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   await expect(setting).toBeChecked()
   await expect(dialog.locator('.assistantMessage')).toHaveCount(0)
   await expect(page.locator('.assistantBadge')).toHaveCount(0)
@@ -538,7 +538,7 @@ test('EN proactive templates retain stale disclosure and use the page language w
     reply: '1 open positions. PnL: could not be verified.\nProtection could not be verified.\nData is stale or its freshness could not be verified.'}
   await page.goto('/')
   await page.evaluate(() => {document.documentElement.lang = 'en'})
-  await page.getByRole('button', {name: 'Kais AI'}).click()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   const dialog = page.getByRole('dialog', {name: 'Kais AI'})
   const setting = dialog.getByRole('checkbox', {name: /Status check-ins/})
   await expect(setting).toBeEnabled()
@@ -555,7 +555,7 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     const state = await mockAssistant(page)
     state.proactiveEnabled = true; state.proactiveMessage = checkInMessage
     await page.goto('/')
-    const launcher = page.getByRole('button', {name: 'Kais AI'})
+    const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
     await expect(launcher).toBeVisible()
     await expect(launcher.locator('.kaisEye')).toHaveCSS('width', '56px')
     await expect(launcher.locator('.kaisEye')).toHaveCSS('height', '56px')
@@ -672,7 +672,7 @@ test('Eye tracks coordinates, respects private focus and never reads or sends co
   await page.mouse.move(800, 400)
   await expect(eye.locator('[data-layer="eye-interior"]')).toHaveCSS('opacity', '0')
   await expect(gaze).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
-  await page.getByRole('button', {name: 'Kais AI'}).focus()
+  await page.getByRole('button', {name: 'Kais AI', exact: true}).focus()
   await expect(eye).toHaveAttribute('data-state', 'idle')
   await page.dispatchEvent('body', 'pointerdown', {clientX: 10, clientY: 500, pointerType: 'touch'})
   await expect.poll(() => eye.getAttribute('data-look-x')).not.toBe('0')
@@ -693,7 +693,7 @@ for (const width of [1440, 390]) {
     await page.goto('/')
     await page.getByRole('button', {name: /AYARLAR/}).click()
     const eye = page.locator('.assistantLauncher .kaisEye')
-    const launcher = page.getByRole('button', {name: 'Kais AI'})
+    const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
     for (const name of ['Demo API Key', 'Demo Secret Key', 'Live API Key', 'Live Secret Key']) {
       const field = page.getByLabel(name, {exact: true})
       await expect(field).toHaveAttribute('data-private', 'true')
@@ -719,7 +719,7 @@ for (const language of ['tr', 'en'] as const) {
     state.secretMinimum = 12
     await page.goto('/')
     await page.evaluate(value => {document.documentElement.lang = value}, language)
-    await page.getByRole('button', {name: 'Kais AI'}).click()
+    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
     const dialog = page.getByRole('dialog', {name: 'Kais AI'})
     const input = dialog.locator('#assistant-input')
     const eye = dialog.locator('.assistantHeader > .kaisEye')
@@ -799,7 +799,7 @@ test('Reduced motion and hidden tabs pause eye and typing animations', async ({p
 test('Keyboard opens Kais AI and navigation closes the panel without trade mutations', async ({page}) => {
   const state = await mockAssistant(page)
   await page.goto('/')
-  const launcher = page.getByRole('button', {name: 'Kais AI'})
+  const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
   await launcher.focus()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('dialog', {name: 'Kais AI'})).toBeVisible()
@@ -815,8 +815,8 @@ test('Master Trade header transfer preserves the session, pending approval and k
   const state = await mockAssistant(page)
   state.chatBody = {reply: 'Analiz için onay gerekiyor.', language: 'tr', needs_confirmation: approval}
   await page.goto('/master-trade')
-  const launcher = page.getByRole('button', {name: 'Kais AI'})
-  await expect(page.locator('.assistantMasterSlot').getByRole('button', {name: 'Kais AI'})).toBeVisible()
+  const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
+  await expect(page.locator('.assistantMasterSlot').getByRole('button', {name: 'Kais AI', exact: true})).toBeVisible()
   await launcher.click()
   const dialog = page.getByRole('dialog', {name: 'Kais AI'})
   await dialog.getByRole('button', {name: 'BTC için analiz durumu ne?', exact: true}).click()
@@ -845,7 +845,7 @@ for (const language of ['tr', 'en'] as const) {
     state.chatBody = {reply, language, sources: []}
     await page.goto('/')
     await page.evaluate(value => {document.documentElement.lang = value}, language)
-    const launcher = page.getByRole('button', {name: 'Kais AI'})
+    const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
     await expect(launcher).toHaveAttribute('aria-label', 'Kais AI')
     await launcher.click()
     const dialog = page.getByRole('dialog', {name: 'Kais AI'})

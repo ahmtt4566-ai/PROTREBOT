@@ -205,6 +205,12 @@ hafif turkuaz parlamayla gösterilir; sağ-alt floating yerleşimi veya ekrana
 göre küçültme yoktur. Erişilebilir adı her dilde `Kais AI` olur. İlk sekme
 oturumunda küçük etiket 5 saniye görünür; `sessionStorage` ile reload ve
 header değişimlerinde tekrarlanmaz. Kalıcı düğme yazısı yoktur.
+Gözün altındaki sabit karşılama balonu yalnız oturum açıkken yaklaşık 2 saniye
+sonra çıkar ve 8 saniye görünür. Kullanıcıya özel `protrebot-kais-greeting:<id>`
+localStorage anahtarında yerel tarih tutularak günde bir kez gösterilir; depolama
+engelliyse gösterilmez. Gizli sekmede süreler durur, reduced-motion animasyonu
+kapatır. X balonu kapatır; metin veya göz mevcut sohbeti açar. Balon LLM/API
+çağrısı yapmaz, sohbet açıkken gösterilmez ve sayfa odağını kendiliğinden almaz.
 Panel koyu yarı saydam cam yüzey/turkuaz vurgu, açık tema kontrast varyantı,
 36 px göz ve durum başlığı, tek satır kota/yoklama ayarı kullanır.
 Asistan balonunun solunda 24 px avatar, sağda turkuaz kullanıcı balonu vardır.
