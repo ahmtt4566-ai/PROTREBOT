@@ -141,7 +141,7 @@ function groupLiveInsights(slots: ReactNode[], cards: ReactNode[], tab: Tab): Re
   const scanner = findCard('masterTradeLiveOperations')
   const signal = findCard('masterTradeLiveSignal')
   if (scanner < 0 || signal < 0) return slots
-  return slots.flatMap((slot, index) => index === scanner
+  return slots.flatMap<ReactNode>((slot, index) => index === scanner
     ? [<div className="masterTradeLiveInsightsStack" key="live-insights">{slot}{slots[signal]}</div>]
     : index === signal ? [] : [slot])
 }

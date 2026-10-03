@@ -35,12 +35,13 @@ const summary = (candidates: Candidate[] = [candidate]) => ({
   },
 })
 
-const openScanner = async (page: Page, scannerSummary = summary(), scanBodies: Record<string, unknown>[] = [], scanResponse = scannerSummary, scanFailure = false) => {
+const openScanner = async (page: Page, scannerSummary = summary(), scanBodies: Record<string, unknown>[] = [], scanResponse = scannerSummary, scanFailure = false, scanHold?: Promise<void>) => {
   await page.route('**/api/**', async route => {
     const request = route.request()
     const url = request.url()
     if (url.includes('/v21/scanner/scan')) {
       if (request.method() === 'POST') scanBodies.push(request.postDataJSON() as Record<string, unknown>)
+      if (scanHold) await scanHold
       if (scanFailure) {
         await route.fulfill({status: 502, contentType: 'application/json', body: JSON.stringify({detail: 'Exchange scanner unavailable'})})
       } else {
@@ -174,17 +175,32 @@ test('shows the real controlled scan error and clears the previous result', asyn
   const scanBodies: Record<string, unknown>[] = []
   await openScanner(page, summary([eth]), scanBodies, summary([eth]), true)
   await page.getByRole('button', {name: 'SCAN MARKET'}).click()
-  await expect(page.getByRole('alert')).toContainText('Exchange scanner unavailable')
+  const alert = page.locator('.scannerError')
+  await expect(alert).toHaveAttribute('role', 'alert')
+  await expect(alert).toContainText('Exchange scanner unavailable')
   await expect(page.getByRole('heading', {name: 'NO SYMBOL SELECTED', exact: true})).toBeVisible()
   await expect(page.getByRole('row', {name: /ETHUSDT/})).toHaveCount(0)
 })
 
 test('does not issue duplicate requests during one scan', async ({page}) => {
   const scanBodies: Record<string, unknown>[] = []
-  await openScanner(page, summary(), scanBodies)
-  const scanButton = page.getByRole('button', {name: 'SCAN MARKET'})
-  await Promise.all([scanButton.click(), scanButton.click()])
+  let release: () => void = () => {}
+  const hold = new Promise<void>(resolve => {release = resolve})
+  await openScanner(page, summary(), scanBodies, summary(), false, hold)
+  const scanButton = page.locator('.scannerPrimaryAction')
+  try {
+    await scanButton.dblclick({delay: 25})
+    await expect.poll(() => scanBodies.length).toBe(1)
+    await expect(scanButton).toBeDisabled()
+    await expect(scanButton).toHaveText('SCANNING...')
+    await expect(page.getByRole('button', {name: 'SCANNING...', exact: true})).toHaveCount(2)
+  } finally {
+    release()
+  }
+  await expect(scanButton).toBeEnabled()
   await expect.poll(() => scanBodies.length).toBe(1)
+  await scanButton.click()
+  await expect.poll(() => scanBodies.length).toBe(2)
 })
 
 test('Scanner keeps execution controls isolated', async ({page}) => {

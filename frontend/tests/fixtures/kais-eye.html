@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>KaisEye static test fixture</title>
+    <style>
+      body { margin: 0; font: 14px sans-serif; }
+      section { padding: 16px; }
+      .eyeCases { display: grid; grid-template-columns: repeat(5, minmax(100px, 1fr)); gap: 12px; }
+      figure { display: grid; place-items: center; gap: 8px; margin: 0; padding: 12px; }
+      [data-theme="dark"] { background: #0d0f0c; color: #e8eadf; }
+      [data-theme="light"] { background: #f4faf9; color: #082f34; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./kais-eye.tsx"></script>
+  </body>
+</html>

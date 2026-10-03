@@ -88,7 +88,7 @@ Futures API bağlantılarını doğrudan programın içine taşır. Render'a Bin
 gerekmez. Yönetici panelindeki **Borsa Bağlantıları** sekmesinden API Key ve Secret Key
 test edilir, şifreli kaydedilir, aktifleştirilir, kapatılır veya silinir.
 
-## Müşteri Asistanı yapılandırması
+## Kais AI yapılandırması
 
 Asistan ayarlarının tek kaynağı `backend/app/assistant_config.py` içindeki
 `AssistantConfig` / `load_assistant_config()` yapısıdır. Ayarlar backend ortamından
@@ -195,9 +195,86 @@ Render anahtarı `sync: false` olarak tanımlar; anahtar değeri repoya veya fro
 İşlem, ARM, consent veya abonelik değiştirme işlevi asistana bağlanmaz.
 Analyst harcaması yalnız aşağıdaki ayrı açık onay endpoint'inden yapılabilir.
 Aktif `TestnetFirstApp.tsx`, ayrı `AssistantChat.tsx` / `assistant.css` bileşenini
-üyelik bağlamı altında kullanır. Sağ alttaki buton desktop yan panelini veya
+üyelik bağlamı altında kullanır. Kais AI başlık düğmesi desktop yan panelini veya
 mobil sheet'i native dialog olarak açar; Escape/kapatma odağı açan düğmeye döndürür.
-Premium dialog bileşeni değiştirilmez. Mobil composer `visualViewport`
+Başlık düğmesi mobilde de en az 44 × 44 px hedefle, diğer kontrollerin solunda
+kalır; mevcut menü/işlem düğmeleri küçültülmez. Okunmamış yoklama rozeti gözün
+üstünde gösterilir. Panel kendiliğinden açılmaz; çalışma alanı değişince kapanır.
+Launcher yalnız header içinde, 58 px yuvarlak dokunma hedefinde 56 px göz ve
+hafif turkuaz parlamayla gösterilir; sağ-alt floating yerleşimi veya ekrana
+göre küçültme yoktur. Erişilebilir adı her dilde `Kais AI` olur. İlk sekme
+oturumunda küçük etiket 5 saniye görünür; `sessionStorage` ile reload ve
+header değişimlerinde tekrarlanmaz. Kalıcı düğme yazısı yoktur.
+Panel koyu yarı saydam cam yüzey/turkuaz vurgu, açık tema kontrast varyantı,
+36 px göz ve durum başlığı, tek satır kota/yoklama ayarı kullanır.
+Asistan balonunun solunda 24 px avatar, sağda turkuaz kullanıcı balonu vardır.
+Öneriler sarılır; kontrollü textarea 48–120 px aralığında kendiliğinden büyür
+(dar klavye görünümünde 80 px ile sınırlanır). Typing noktaları yalnız
+transform/opacity ile nabız atar. Mobil sheet mevcut visualViewport'un
+tam yüksekliğini ve safe-area boşluklarını kullanır; input/gönder sabit
+alt bölümde kalır. Native dialog, onay, CopyProtection ve odak akışı korunur.
+Masaüstü Master Trade ortak başlığı gizlediği için aynı düğme, mevcut terminal
+başlığındaki boş slota portal ile taşınır; ikinci asistan oturumu oluşturulmaz.
+Kök `main.tsx` → `TestnetFirstApp.tsx` → `AssistantChat.tsx` aktif zincirdir;
+`frontend/src` altındaki aynı isimli eski uygulama bu tasarımın hedefi değildir.
+`KaisEye.tsx` bağımsız, şeffaf arka planlı katmanlı bir SVG'dir. Dış segmentli
+halka/balon kuyruğu, üst/alt kapak, göz akı, iris, bebeği, beyaz nabız çizgisi,
+yansıma ve durum göstergeleri ayrı SVG gruplarıdır. `useKaisEye.ts`, idle
+durumda 3–6 sn rastgele aralıkla 150 ms kırpma ve 30–60 sn aralıkla 500 ms
+kısa yana bakış uygular. Masaüstü mouse örnekleri rAF ile kare başına tek kez
+işlenir; iris/bebek 120 ms ease geçişle en fazla 3/2 SVG birimi kayar.
+Mobilde mouse takibi yoktur; dokunulan noktaya bakış 650 ms sonra merkeze döner.
+Hover/tıklama gözü açıp halkayı parlatır. Thinking durumunda halka döner/nabız
+çizgisi atar; unread halkayı nabızlandırır. Kapalı/hatalı/özel alan state'leri
+hareketsizdir; bütçe hatası error, kullanılamayan/sona eren oturum off gösterir.
+API: `size` (varsayılan 56), `state` (`idle`, `thinking`, `private`, `error`,
+`off`), `lookAt?: {x, y}` (-1..1 aralığına kırpılır), `unreadBadge?: boolean`.
+`lookAt` verilirse otomatik takip/yan bakış yerine kontrollü bakış kullanılır.
+`private` kapalı göz/kilit, `error` ve `off` sönük/yarı kapalı göz gösterir.
+56/36/24 px boyutlarında kullanılır; küçük boyutlarda ince detaylar sadeleşir.
+Renkler `tokens.css` içindeki `--kais-accent`, `--kais-glow`, `--kais-ink`,
+`--kais-highlight` değişkenleriyle ayarlanır. `role="img"` ve state'e göre
+sayfanın dilinde TR/EN etiketi vardır; standart `aria-label` prop'u yerelleştirilmiş etiketle
+override edilebilir. SVG tanımları her instance için benzersizdir.
+Göz bileşeni sayfa/form değeri okumaz, storage veya ağ çağrısı yapmaz.
+Yalnız pointer koordinatları, kendi SVG geometrisi ve odaktaki/masaüstünde
+üzerine gelinen alanın/atasının tam `data-private="true"` işareti kullanılır.
+`useKaisPrivacy.ts` tüm gözler için tek document focusin/focusout ve
+pointerover/pointerout dinleyici setini paylaşır. Odak veya hover gizli
+alandaysa göz kapanır; ikisi de ayrılınca 400 ms sonra açılır. Yeniden giriş
+beklemeyi iptal eder. Mobilde hover kullanılmaz. Kapak kapanışı/açılışı 150 ms
+transform geçişidir; halka opacity ile sönükleşir. Reduced-motion'da bunlar
+da statiktir. Marker değişimi ve hedef kaldırılması gözlenir; mutation
+içeriği ve hiçbir alanın değeri okunmaz.
+API Key/Secret ve tüm parola alanları (göster/gizle dahil) açıkça işaretlidir.
+Yeni parola alanlarına `data-private="true"` eklemek zorunludur:
+`kais/private-password` ESLint kuralı literal/koşullu password tiplerini
+denetler. Eski frontend uyumluluk kopyalarına yalnız bu metadata eklenmiştir;
+asistan davranışı aktif kök zincirdedir. Alan envanteri aktif import zincirini,
+input/textarea türünü, konumunu ve marker'ı AST ile listeler:
+`node tools\input-inventory.mjs --out <csv-dosyası>`.
+Tüm göz animasyonları yalnız transform/opacity kullanır. Reduced-motion veya
+gizli sekmede motion sınıfları, takip ve zamanlayıcılar kaldırılır; bakış merkezlenir.
+Gizli sekmede pointer/focus dinleyicileri çıkarılır; yalnız görünürlük ve hareket
+tercihi gözlemcileri yeniden etkinleştirme için kalır. Unmount hepsini temizler.
+Mevcut yazıyor göstergesinin animasyonu da gizli sekmede/reduced-motion'da durur.
+Yeni bağımlılık yoktur. Test-only örnek `frontend/tests/fixtures/kais-eye.html`,
+iki temada tüm state/boyutları gösterir; production girişine eklenmemiştir.
+Sayfa tepkileri `kais:react` adlı tek yönlü, istemci içi CustomEvent ile bağlanır.
+`kais-reactions.ts` yalnız `premium-open`/`navigation` için yayıncının kendi ref
+geometrisinden elde edilen viewport koordinatlarını, `error`/`unread` için yalnız
+türü iletir. Metin, alan değeri, DOM içeriği, kimlik veya olay hedefi taşınmaz;
+LLM/backend/ağ/storage çağrısı yoktur. Premium kartı açıldığında ve ana çalışma
+alanı/Master Trade/Demo sekmeleri değiştiğinde 650 ms bakış, açıkça `error`
+türündeki bildirimlerde 600 ms şaşırma, yeni okunmamış yoklamada 1200 ms halka
+nabzı kullanılır. Okunmamış rozetinin mevcut mesaj/okuma akışı korunur.
+60 saniye hareketsizlikte 600 ms yavaş kırpma, 3 dakikada yarı kapanma olur.
+Pointer/dokunma, klavye ve scroll yalnız olay oluşumu olarak sayılır; tuş veya
+içerik okunmadan göz uyanır. Private/error/off durumları tepkilere üstün gelir.
+Reduced-motion ve gizli sekmede tepkiler tamamen kapalıdır; bekleyen gezinme
+kareleri iptal edilir, görünürlük geri geldiğinde eski tepkiler oynatılmaz.
+Premium dialoguna yalnız açılıştan sonra geometrik olay yayımı eklenir;
+erişim, consent, ARM ve ticaret iş mantığı değişmez. Mobil composer `visualViewport`
 yükseklik/offset değişikliklerini izler; küçük görünümde öneriler gizlenerek
 klavye sırasında giriş alanına yer bırakılır.
 
@@ -211,8 +288,12 @@ sunucu doğrulaması ayrıca devam eder. Hata yanıtlarındaki isteğe bağlı
 
 Sohbet metni üyeye göre adlandırılmış `sessionStorage` kaydında, sunucuda değil
 tarayıcı sekmesinde tutulur. HTML çalıştırılmaz; yalnız satır sonları ve basit
-kalın metin render edilir. Giriş altında Secret uyarısı vardır; bilinen
-secret/credential desenleri istemcide de engellenir. Secret içeren geçmiş
+kalın metin render edilir. Kontrollü taslak mevcut `assistant_api.py`
+secret deseni ve sunucudan gelen minimum uzunlukla eşleşince sohbet alanı
+private işaretlenir ve altında TR/EN Secret uyarısı duyurulur. Bu yeni kontrol
+yalnız sunum içindir; taslağı incelemek ağ/storage yazımı yapmaz. Önceden var
+olan istemci gönderim/geçmiş kontrolü ve asıl backend engellemesi değişmez.
+Bilinen secret/credential desenleri istemcide de engellenir. Secret içeren geçmiş
 LLM'e gönderilmez. CopyProtection yalnız sohbet kapsayıcısı/seçimi için
 istisna tanır; diğer sayfalarda mevcut davranış devam eder.
 
@@ -226,9 +307,31 @@ korur. Canlı emir/ARM/consent/abonelik mutasyonları bu UI'ye bağlanmaz.
 
 UI doğrulama (frontend'in kendi Playwright kurulumunu kullanın):
 ```powershell
+node --test tools\eslint-private-fields.test.mjs
 Set-Location frontend
 npx playwright test assistant-chat.spec.ts --project chromium
+npx playwright test kais-eye.spec.ts --project chromium
 ```
+
+Son UI sözleşme kontrolleri: `node --test tools\eslint-private-fields.test.mjs tools\kais-ui-contracts.test.mjs`.
+Kök ve frontend Vite girişleri ortak bileşenler için `react`/`react-dom`
+dedupe kullanır; iki ayrı node_modules kopyası soğuk başlangıçta farklı hook
+dispatcher'ları oluşturamaz. Bu ayar da sözleşme testleriyle korunur.
+Live fixture'ları doğrulanmış yetkili kullanıcıyı taklit eder; premium ve
+consent/ARM kapıları üretimde değişmez. Scanner eşzamanlı tarama testi ilk mock
+yanıtını bekletir, işlem sırasında kontrollerin kilitli ve POST sayısının bir
+olduğunu, tamamlandıktan sonra yeni taramanın hâlâ mümkün olduğunu doğrular.
+Aktif `main.tsx` import zincirinin UI metinlerinde eski asistan adı ve göz
+bileşeni/hook'larında input değeri veya DOM içeriği erişimi AST ile denetlenir.
+Playwright 10 dakikalık sanal boşta kalmayı çalıştırır; sahip olunan listener,
+timer ve rAF sayılarının büyümediğini, gizli sekme/unmount temizliğini ve GC
+sonrası heap artışının 2 MiB'yi aşmadığını kontrol edip ölçümleri ekler.
+Bu bir gerçek-zamanlı uzun süreli heap/retainer incelemesinin yerine geçmez.
+Manuel ek kontrol: Chrome DevTools Memory'de GC sonrası başlangıç snapshot'ını
+alın, görünür sayfayı 10 gerçek dakika boşta bırakın, GC + ikinci snapshot alın.
+Göz/hook closure'ları ve detached SVG/input node'larında birikim olup olmadığını
+karşılaştırın; 5 aç/kapat veya mount/unmount turundan sonra tekrar ölçün.
+Sekmeyi gizleyip Performance kaydında göz animasyonlarının durduğunu doğrulayın.
 
 ### Asistan sözleşme ve isteğe bağlı gerçek sağlayıcı testleri
 
@@ -349,6 +452,12 @@ kimlik/onay/mutasyon argümanları reddedilir. Tüm sonuçlar
   araç verisiyle TR/EN şablon yanıtı üretir. Bu yanıtlar LLM/dakika/gün kotasından
   düşmez; API anahtarı eksik veya LLM bütçesi dolu olsa da çalışır.
   `ASSISTANT_ENABLED=false` tüm asistan yollarını kapatır.
+- Kais AI kimlik sorularına (`Sen kimsin?`, `Who are you?`) kısa TR/EN hızlı
+  yanıt verir: yapay zeka asistanıdır; plan, kredi, API bağlantısı ve platform
+  kullanımı hakkında yardım eder, işlem yapmaz. Bu kimlik yanıtı araç/model
+  çağırmaz ve kredi harcamaz. Ek talimat içeren mesajlar kimlik hızlı yoluna
+  alınmaz. Sistem promptu insan olduğunu iddia etmeyi ve altyapı şirketi/modeli
+  uydurmayı yasaklar; altyapı sorularında bilginin paylaşılamadığını belirtir.
 
 ### Paketlenmiş TR/EN bilgi tabanı
 

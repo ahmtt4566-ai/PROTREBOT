@@ -1,6 +1,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, Award, BarChart3, Bell, Calculator, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Crosshair, FlaskConical, Gauge, History, LayoutDashboard, LineChart, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, ScrollText, Search, Send, Settings2, ShieldAlert, ShieldCheck, Sparkles, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, X, Zap } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, loadDemoCredentials, saveDemoCredentials, userSessionToken } from './api'
+import {useKaisErrorReaction, useKaisWorkspaceReaction} from './useKaisPageReactions'
 
 const API = `${API_BASE}/binance-demo`
 const V21_API = `${API_BASE}/v21`
@@ -354,6 +355,9 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
   const initialScanInFlight = useRef(false)
   const v21RequestId = useRef(0)
   const lastNotificationId = useRef<string|null>(null)
+  const errorReactionNotice = useMemo(() => ({kind: messageKind}), [messageKind])
+  useKaisErrorReaction(errorReactionNotice)
+  useKaisWorkspaceReaction(`${tab}:${bottomTab}`, demoDeckRef, active)
 
   const refreshStatus = async () => {
     try {
@@ -1063,7 +1067,7 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
     {!isolatedRisk && <section className={`demoSetupCard ${bottomTab === 'connection' ? '' : 'demoTabHidden'}`}>
       <div><LockKeyhole/><span><b>Binance Demo / Testnet hesabın</b><p>Kendi hesabının API Key ve Secret Key değerlerini gir. Credential’lar kullanıcı hesabın için saklanır ve Demo/Testnet dışına çıkmaz.</p></span></div>
       <div className="demoConnectionState"><small>DEMO CONNECTION</small><b className={status?.connected ? 'demoProfit' : 'demoLoss'}>{status?.connected ? 'CONNECTED' : 'DISCONNECTED'}</b></div>
-      {editingCredentials && <div className="demoCredentialFields"><input aria-label="Demo API Key" value={demoCredentials.apiKey} onChange={event => setDemoCredentials(current => ({...current,apiKey:event.target.value}))} autoComplete="off" placeholder="Demo API Key"/><input aria-label="Demo Secret Key" type="password" value={demoCredentials.secretKey} onChange={event => setDemoCredentials(current => ({...current,secretKey:event.target.value}))} autoComplete="new-password" placeholder="Demo Secret Key"/></div>}
+      {editingCredentials && <div className="demoCredentialFields"><input data-private="true" aria-label="Demo API Key" value={demoCredentials.apiKey} onChange={event => setDemoCredentials(current => ({...current,apiKey:event.target.value}))} autoComplete="off" placeholder="Demo API Key"/><input data-private="true" aria-label="Demo Secret Key" type="password" value={demoCredentials.secretKey} onChange={event => setDemoCredentials(current => ({...current,secretKey:event.target.value}))} autoComplete="new-password" placeholder="Demo Secret Key"/></div>}
       <div className="demoCredentialActions"><button className="action-button" onClick={() => setEditingCredentials(current => !current)}><Settings2/> {editingCredentials ? 'KAPAT' : 'EDIT'}</button>{editingCredentials && <><button className="action-button" onClick={() => void saveDemoConnection()} disabled={busy || !demoCredentials.apiKey || !demoCredentials.secretKey}><Save/> KAYDET</button><button className="action-button" onClick={() => void testDemoConnection()} disabled={busy || !demoCredentials.apiKey || !demoCredentials.secretKey}><Radio/> TEST CONNECTION</button></>}</div>
     </section>}
 

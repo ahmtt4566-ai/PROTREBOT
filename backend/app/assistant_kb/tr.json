@@ -10,7 +10,7 @@
     "id": "secret-safety",
     "title": "API Secret güvenliği",
     "keywords": ["secret", "gizli", "anahtar", "parola", "token", "paylaş", "güvenlik"],
-    "content": "API Secret, parola ve oturum token'ını kimseyle, müşteri asistanıyla veya destek mesajıyla paylaşma. Secret yalnız ilgili bağlantı ekranındaki gizli alana girilir; şifreli sunucu kasasında saklanır ve geri görüntülenmez. Yanlışlıkla paylaştıysan borsada anahtarı iptal edip yenisini oluşturmanı öneririz. Secret tespiti desen tabanlıdır; tüm sızıntıları yakalama garantisi yoktur.",
+    "content": "API Secret, parola ve oturum token'ını kimseyle, Kais AI ile veya destek mesajıyla paylaşma. Secret yalnız ilgili bağlantı ekranındaki gizli alana girilir; şifreli sunucu kasasında saklanır ve geri görüntülenmez. Yanlışlıkla paylaştıysan borsada anahtarı iptal edip yenisini oluşturmanı öneririz. Secret tespiti desen tabanlıdır; tüm sızıntıları yakalama garantisi yoktur.",
     "code_sources": ["TestnetFirstApp.tsx", "backend/app/exchange_connections.py", "backend/app/assistant_api.py"]
   },
   {

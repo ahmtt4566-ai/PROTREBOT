@@ -10,7 +10,7 @@
     "id": "secret-safety",
     "title": "API Secret safety",
     "keywords": ["secret", "private", "key", "password", "token", "share", "security"],
-    "content": "Never share API Secrets, passwords or session tokens with anyone, the customer assistant or support messages. Enter a Secret only in the designated connection field; it is stored in the encrypted server vault and is not displayed back. If exposed, revoke the key at the exchange and create a replacement. Secret detection is pattern-based and cannot guarantee detection of every leak.",
+    "content": "Never share API Secrets, passwords or session tokens with anyone, Kais AI or support messages. Enter a Secret only in the designated connection field; it is stored in the encrypted server vault and is not displayed back. If exposed, revoke the key at the exchange and create a replacement. Secret detection is pattern-based and cannot guarantee detection of every leak.",
     "code_sources": ["TestnetFirstApp.tsx", "backend/app/exchange_connections.py", "backend/app/assistant_api.py"]
   },
   {

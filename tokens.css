@@ -10,6 +10,10 @@
   --short: #e9857e;
   --watch: #92998a;
   --focus: var(--accent);
+  --kais-accent: #23cbbd;
+  --kais-glow: #4bf6df;
+  --kais-ink: #082f34;
+  --kais-highlight: #f2ffff;
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --accent-hover: color-mix(in srgb, var(--accent) 20%, transparent);
   --long-soft: color-mix(in srgb, var(--long) 14%, transparent);

@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { LoaderCircle, MessageCircle, Send, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Send, Trash2, X } from 'lucide-react'
+import KaisEye, {type KaisEyeState} from './KaisEye'
+import {useAssistantMotion} from './useAssistantPresentation'
+import {useKaisPrivacy} from './useKaisPrivacy'
+import {emitKaisReaction} from './kais-reactions'
 import { API_BASE } from './api'
 import { useMemberAccess } from './premium-access'
 import { assistantCopy } from './ui-copy'
@@ -14,6 +18,15 @@ type Confirmation = {action: 'get_analysis'; symbol: string; timeframe: string; 
 type Message = {id: string; role: 'user' | 'assistant'; content: string; language: Language; proactive?: boolean; unread?: boolean; confirmation?: Confirmation; decision?: 'pending' | 'confirmed' | 'cancelled' | 'expired'}
 type Issue = {kind: 'network' | 'session' | 'limit' | 'budget' | 'unavailable' | 'invalid' | 'forbidden' | 'credits' | 'secretBlocked'; reply?: string; retry?: number; confirmation?: boolean; checkIn?: boolean}
 type StoredMessage = Pick<Message, 'id' | 'role' | 'content' | 'language' | 'proactive' | 'unread'>
+const launcherIntroKey = 'protrebot-kais-launcher-seen'
+
+function readLauncherIntro(): {show: boolean; problem: boolean} {
+  try { return {show: sessionStorage.getItem(launcherIntroKey) !== '1', problem: false} }
+  catch (error) {
+    if (!(error instanceof DOMException)) throw error
+    return {show: false, problem: true}
+  }
+}
 
 class AssistantFailure extends Error {
   constructor(readonly status: number, readonly code?: string, readonly reply?: string, readonly retry?: number) {
@@ -135,12 +148,16 @@ function PlainText({content}: {content: string}) {
     part.startsWith('**') && part.endsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong> : part)}</>
 }
 
-function AssistantSession({userId, pageContext, language}: {userId: string; pageContext: string; language: Language}) {
+function AssistantSession({userId, pageContext, language, launcherTarget}: {userId: string; pageContext: string; language: Language; launcherTarget?: HTMLElement | null}) {
   const copy = assistantCopy[language]
+  const motionPaused = useAssistantMotion()
+  const privateFocus = useKaisPrivacy()
   const historyKey = `protrebot-assistant-chat:${userId}`
   const [initial] = useState(() => readHistory(historyKey))
+  const [intro] = useState(readLauncherIntro)
+  const [showIntro, setShowIntro] = useState(intro.show)
   const [messages, setMessages] = useState<Message[]>(initial.messages)
-  const [storageProblem, setStorageProblem] = useState(initial.problem)
+  const [storageProblem, setStorageProblem] = useState(initial.problem || intro.problem)
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [usage, setUsage] = useState<Usage | null>(null)
@@ -155,6 +172,7 @@ function AssistantSession({userId, pageContext, language}: {userId: string; page
   const [lengthError, setLengthError] = useState(false)
   const [viewport, setViewport] = useState({height: window.visualViewport?.height ?? window.innerHeight, top: window.visualViewport?.offsetTop ?? 0})
   const dialog = useRef<HTMLDialogElement>(null)
+  const launcherRef = useRef<HTMLButtonElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const working = useRef(false)
@@ -164,6 +182,27 @@ function AssistantSession({userId, pageContext, language}: {userId: string; page
   const preferenceReadRequest = useRef<AbortController | null>(null)
   const preferenceWorking = useRef(false)
   const chatOpen = useRef(false)
+
+  useEffect(() => { setOpen(false) }, [pageContext])
+
+  useEffect(() => {
+    if (!intro.show) return
+    try { sessionStorage.setItem(launcherIntroKey, '1') }
+    catch (error) {
+      if (!(error instanceof DOMException)) throw error
+      setStorageProblem(true); setShowIntro(false)
+      return
+    }
+    const timer = window.setTimeout(() => setShowIntro(false), 5000)
+    return () => window.clearTimeout(timer)
+  }, [intro.show])
+
+  useLayoutEffect(() => {
+    const field = input.current
+    if (!open || !field) return
+    field.style.height = '0px'
+    field.style.height = `${Math.min(120, field.scrollHeight + 2)}px`
+  }, [draft, open, viewport])
 
   useEffect(() => {
     try {
@@ -255,6 +294,7 @@ function AssistantSession({userId, pageContext, language}: {userId: string; page
       window.removeEventListener('resize', updateViewport)
       element.close()
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
+      else launcherRef.current?.focus()
     }
   }, [open])
   useEffect(() => {
@@ -358,29 +398,49 @@ function AssistantSession({userId, pageContext, language}: {userId: string; page
   }
   const submit = (event: FormEvent) => { event.preventDefault(); void sendMessage(draft) }
   const displayedIssue = issue ?? usageIssue ?? proactiveIssue
+  // Presentation only: reuse the existing secret rule and server-supplied threshold.
+  const privateDraft = Boolean(usage && sensitive(draft, usage.limits))
+  const eyeState: KaisEyeState = privateFocus ? 'private' : expired || displayedIssue?.kind === 'unavailable' ? 'off'
+    : busy ? 'thinking' : displayedIssue || usage?.remaining === 0 ? 'error' : 'idle'
   const unread = messages.filter(message => message.proactive && message.unread).length
+  const previousUnread = useRef(unread)
+  useEffect(() => {
+    if (unread > previousUnread.current) emitKaisReaction({type: 'unread'})
+    previousUnread.current = unread
+  }, [unread])
+  const status = privateFocus ? copy.status.private : busy ? copy.status.thinking
+    : eyeState === 'off' || eyeState === 'error' ? copy.status.unavailable : copy.status.ready
   const style = {'--assistant-viewport-height': `${viewport.height}px`, '--assistant-viewport-top': `${viewport.top}px`} as CSSProperties
 
-  return createPortal(<>
-    <button type="button" className="assistantLauncher" aria-label={copy.open} aria-describedby={unread ? 'assistant-checkin-unread' : undefined} aria-haspopup="dialog" aria-expanded={open} onClick={openChat}><MessageCircle aria-hidden="true"/><span>{copy.title}</span>
+  const launcher = <button ref={launcherRef} type="button" className="assistantLauncher" aria-label={copy.open} data-motion-paused={motionPaused} aria-describedby={unread ? 'assistant-checkin-unread' : undefined} aria-haspopup="dialog" aria-expanded={open} onClick={openChat}><KaisEye size={56} state={eyeState} unreadBadge={unread > 0} aria-label={copy.eyeStates[eyeState]}/>
+      {showIntro && !open && !privateFocus && <span className="assistantIntro" aria-hidden="true">{copy.title}</span>}
       {unread > 0 && <span id="assistant-checkin-unread" className="assistantBadge" role="status" aria-label={copy.proactiveUnread}>{unread}</span>}
     </button>
-    {open && <dialog ref={dialog} className="assistantDialog" style={style} data-assistant-chat data-compact-viewport={viewport.height < 500 || undefined} aria-labelledby="assistant-title"
+  return <>
+    {launcherTarget === undefined ? launcher : launcherTarget && createPortal(launcher, launcherTarget)}
+    {open && createPortal(<dialog ref={dialog} className="assistantDialog" style={style} data-assistant-chat data-motion-paused={motionPaused} data-compact-viewport={viewport.height < 500 || undefined} aria-labelledby="assistant-title"
       onCancel={event => {event.preventDefault(); setOpen(false)}}
       onClick={event => {if (event.target === event.currentTarget) setOpen(false)}}>
       <div className="assistantLayout">
-        <header className="assistantHeader"><div><small><ShieldCheck aria-hidden="true"/>{copy.subtitle}</small><h2 id="assistant-title">{copy.title}</h2></div>
+        <header className="assistantHeader"><KaisEye size={36} state={eyeState} aria-label={copy.eyeStates[eyeState]}/><div><h2 id="assistant-title">{copy.title}</h2><small className="assistantState" role="status">{status}</small></div>
           <button type="button" aria-label={copy.clear} disabled={busy} onClick={() => {setMessages([]); setIssue(null)}}><Trash2 aria-hidden="true"/></button>
           <button type="button" autoFocus aria-label={copy.close} onClick={() => setOpen(false)}><X aria-hidden="true"/></button>
         </header>
-        <div className={`assistantUsage${usage?.remaining === 0 ? ' exhausted' : ''}`} role="status">{usage ? copy.usage(usage.remaining, usage.total) : expired ? copy.session : copy.loading}</div>
-        <label className="assistantPreference">
-          <input type="checkbox" checked={proactivePreferences?.enabled ?? false} disabled={!proactivePreferences || preferenceBusy || expired} onChange={event => void savePreference(event.target.checked)}/>
-          <span>{copy.proactiveSetting}<small>{preferenceBusy ? copy.proactiveSaving : copy.proactiveHint}</small></span>
-        </label>
+        <div className="assistantMeta">
+          <div className={`assistantUsage${usage?.remaining === 0 ? ' exhausted' : ''}`} role="status" title={usage ? copy.usage(usage.remaining, usage.total) : undefined}>{usage ? copy.usage(usage.remaining, usage.total) : expired ? copy.session : copy.loading}</div>
+          <label className="assistantPreference" title={copy.proactiveHint}>
+            <input type="checkbox" aria-label={copy.proactiveSetting} aria-describedby="assistant-checkin-hint" checked={proactivePreferences?.enabled ?? false} disabled={!proactivePreferences || preferenceBusy || expired} onChange={event => void savePreference(event.target.checked)}/>
+            <span>{copy.proactiveSetting}</span>
+          </label>
+          <span id="assistant-checkin-hint" className="assistantSrOnly" role="status">{preferenceBusy ? copy.proactiveSaving : copy.proactiveHint}</span>
+        </div>
+        <p className="assistantSubtitle">{copy.subtitle}</p>
         <div className="assistantMessages" ref={list} role="log" aria-live="polite" aria-relevant="additions" aria-busy={busy}>
-          {!messages.length && <p className="assistantEmpty">{copy.empty}</p>}
+          {!messages.length && <div className="assistantEmpty"><h3>{copy.welcome}</h3><p>{copy.empty}</p><small>{copy.eyePrivacy}</small></div>}
           {messages.map(message => <article key={message.id} className={`assistantMessage ${message.role}`} lang={message.language}>
+            {message.role === 'assistant' && <KaisEye size={24} state="idle" aria-label={copy.eyeStates.idle}/>}
+            <div className="assistantBubble">
+            <small className="assistantMessageRole">{message.role === 'assistant' ? copy.title : copy.you}</small>
             {message.proactive && <small className="assistantCheckinLabel">{copy.proactiveLabel}</small>}
             <div className="assistantText"><PlainText content={message.content}/></div>
             {message.confirmation && <div className="assistantConfirmation">
@@ -390,8 +450,9 @@ function AssistantSession({userId, pageContext, language}: {userId: string; page
                 <button type="button" disabled={busy} onClick={() => {decide(message.id, 'cancelled'); setIssue(null)}}>{copy.cancel}</button>
               </div> : <small>{message.decision === 'confirmed' ? copy.confirmed : message.decision === 'cancelled' ? copy.cancelled : copy.renewed}</small>}
             </div>}
+            </div>
           </article>)}
-          {busy && <p className="assistantTyping" role="status"><LoaderCircle aria-hidden="true"/>{copy.typing}</p>}
+          {busy && <p className="assistantTyping" role="status"><span className="assistantTypingDots" aria-hidden="true"><i/><i/><i/></span>{copy.typing}</p>}
         </div>
         {storageProblem && <p className="assistantNotice" role="status">{copy.storage}</p>}
         {displayedIssue && <div className="assistantError" role="alert">
@@ -409,19 +470,21 @@ function AssistantSession({userId, pageContext, language}: {userId: string; page
         </div>
         <form className="assistantComposer" onSubmit={submit}>
           <label className="assistantInputLabel" htmlFor="assistant-input">{copy.input}</label>
-          <div><textarea ref={input} id="assistant-input" rows={2} value={draft} placeholder={copy.placeholder} disabled={!usage || expired}
-            aria-describedby="assistant-secret assistant-length" onChange={event => {setDraft(event.target.value); setLengthError(false)}}
+          <div><textarea ref={input} id="assistant-input" rows={1} value={draft} placeholder={copy.placeholder} disabled={!usage || expired}
+            data-private={privateDraft ? 'true' : undefined}
+            aria-describedby={`${privateDraft ? 'assistant-secret-warning' : 'assistant-secret'} assistant-length`} onChange={event => {setDraft(event.target.value); setLengthError(false)}}
             onKeyDown={event => {if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {event.preventDefault(); void sendMessage(draft)}}}/>
             <button type="submit" className="assistantPrimary" disabled={busy || !usage || expired || !draft.trim()} aria-label={copy.send}><Send aria-hidden="true"/></button></div>
-          <footer><small id="assistant-secret">{copy.secret}</small><small id="assistant-length">{usage && `${Array.from(draft).length}/${usage.limits.max_input_chars}`}</small></footer>
+          <footer><small id="assistant-secret">{!privateDraft && copy.secret}</small><small id="assistant-length">{usage && `${Array.from(draft).length}/${usage.limits.max_input_chars}`}</small></footer>
+          {privateDraft && <p id="assistant-secret-warning" className="assistantError" role="status">{copy.secret}</p>}
           {lengthError && usage && <p className="assistantError" role="alert">{copy.tooLong(usage.limits.max_input_chars)}</p>}
         </form>
       </div>
-    </dialog>}
-  </>, document.body)
+    </dialog>, document.body)}
+  </>
 }
 
-export default function AssistantChat({pageContext}: {pageContext: string}) {
+export default function AssistantChat({pageContext, launcherTarget}: {pageContext: string; launcherTarget?: HTMLElement | null}) {
   const {ready, userId} = useMemberAccess()
   const [language, setLanguage] = useState<Language>(languageOfPage)
   useEffect(() => {
@@ -429,5 +492,5 @@ export default function AssistantChat({pageContext}: {pageContext: string}) {
     observer.observe(document.documentElement, {attributes: true, attributeFilter: ['lang']})
     return () => observer.disconnect()
   }, [])
-  return ready && userId ? <AssistantSession key={userId} userId={userId} pageContext={pageContext} language={language}/> : null
+  return ready && userId ? <AssistantSession key={userId} userId={userId} pageContext={pageContext} language={language} launcherTarget={launcherTarget}/> : null
 }

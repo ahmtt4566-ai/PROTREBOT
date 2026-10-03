@@ -63,7 +63,7 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
       <p>Bot paneli ve API uçları internete karşı kilitlidir. Bu ekran Binance anahtarı istemez.</p>
       <form onSubmit={submit}>
         <label htmlFor="owner-access">Yönetici erişim kodu</label>
-        <input id="owner-access" type="password" value={token} onChange={event => setToken(event.target.value)} autoComplete="current-password" placeholder="En az 24 karakter" disabled={status === 'CHECKING'}/>
+        <input data-private="true" id="owner-access" type="password" value={token} onChange={event => setToken(event.target.value)} autoComplete="current-password" placeholder="En az 24 karakter" disabled={status === 'CHECKING'}/>
         <button disabled={status === 'CHECKING'}>{status === 'CHECKING' ? 'DOĞRULANIYOR…' : 'GÜVENLİ PANELE GİR'}</button>
       </form>
       <em>{message}</em>

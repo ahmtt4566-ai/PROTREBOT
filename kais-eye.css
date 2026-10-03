@@ -1,0 +1,60 @@
+.kaisEye { display: inline-block; flex-shrink: 0; vertical-align: middle; color: var(--kais-accent, #23cbbd); overflow: visible; }
+.kaisEyeLightStop { stop-color: var(--kais-highlight, #f2ffff); }
+.kaisEyeAccentStop { stop-color: var(--kais-accent, #23cbbd); }
+.kaisEyeInkStop { stop-color: var(--kais-ink, #082f34); }
+.kaisEyeRing, .kaisEyeLids { stroke: var(--kais-accent, #23cbbd); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.kaisEyeRingGlow { stroke: var(--kais-glow, #4bf6df); stroke-width: 6; opacity: .2; }
+.kaisEyeRingSegments { stroke-width: 2.5; }
+.kaisEyeTail { stroke-width: 2.5; }
+.kaisEyeDetail { opacity: .45; stroke-width: .75; }
+.kaisEyeSclera { opacity: .8; }
+.kaisEyeIris { stroke: var(--kais-accent, #23cbbd); stroke-width: .75; }
+.kaisEyePupil { fill: var(--kais-ink, #082f34); }
+.kaisEyePulse { stroke: var(--kais-highlight, #f2ffff); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.kaisEyeReflection { stroke: var(--kais-highlight, #f2ffff); fill: var(--kais-highlight, #f2ffff); opacity: .9; }
+.kaisEyeThinking { fill: var(--kais-highlight, #f2ffff); stroke: var(--kais-ink, #082f34); stroke-width: .5; }
+.kaisEyePrivacy, .kaisEyeError { fill: var(--kais-ink, #082f34); stroke: var(--kais-accent, #23cbbd); stroke-width: 2; stroke-linecap: round; }
+.kaisEyeUnread { fill: var(--kais-accent, #23cbbd); stroke: var(--kais-highlight, #f2ffff); stroke-width: 1.5; }
+.kaisEye[data-state="private"] .kaisEyeOpening { transform: scaleY(.03); }
+.kaisEye[data-state="private"] .kaisEyeInterior { opacity: 0; }
+.kaisEye[data-state="private"] .kaisEyeRing { opacity: .4; }
+.kaisEye:is([data-state="error"], [data-state="off"]) :is(.kaisEyeRing, .kaisEyeLids, [data-layer="eye-interior"]) { opacity: .45; }
+.kaisEye:is([data-state="error"], [data-state="off"]) .kaisEyeRingGlow { visibility: hidden; }
+.kaisEye[data-detail="compact"] :is(.kaisEyeDetail, .kaisEyeReflection) { display: none; }
+.kaisEye[data-detail="medium"] .kaisEyeDetail { display: none; }
+.kaisEye[data-detail="compact"] .kaisEyeLids { stroke-width: 2.5; }
+.kaisEyeOpening, .kaisEyeInterior, .kaisEyeUpperLid, .kaisEyeLowerLid, .kaisEyePulse { transform-origin: 32px 30px; }
+.kaisEyeRotor { transform-origin: 32px 30px; }
+.kaisEyeMotion .kaisEyeGaze { transition: transform 120ms ease; }
+.kaisEyeTransitions .kaisEyeOpening { transition: transform 150ms ease; }
+.kaisEyeTransitions :is(.kaisEyeInterior, .kaisEyeRing) { transition: opacity 150ms ease; }
+.kaisEyeMotion .kaisEyeRingGlow { transition: opacity 120ms ease; }
+.kaisEyeEngaged .kaisEyeOpening { transform: scaleY(1.12); }
+.kaisEyeEngaged .kaisEyeRingGlow { opacity: .65; }
+.kaisEyeMotion.kaisEyeBlink :is(.kaisEyeInterior, .kaisEyeUpperLid, .kaisEyeLowerLid) { animation: kais-eye-blink 150ms ease-in-out; }
+.kaisEyeMotion.kaisEyeSlowBlink :is(.kaisEyeInterior, .kaisEyeUpperLid, .kaisEyeLowerLid) { animation: kais-eye-blink 600ms ease-in-out; }
+.kaisEyeMotion.kaisEyeDrowsy .kaisEyeOpening { transform: scaleY(.55); transition-duration: 600ms; }
+.kaisEyeMotion.kaisEyeSurprised .kaisEyeOpening { transform: scaleY(1.18); transition-duration: 150ms; }
+.kaisEyeMotion[data-state="thinking"] .kaisEyeRotor { animation: kais-eye-spin 5s linear infinite; }
+.kaisEyeMotion[data-state="thinking"] .kaisEyePulse { animation: kais-eye-heartbeat 1.2s ease-in-out infinite; }
+.kaisEyeMotion[data-unread="true"] .kaisEyeRingGlow { animation: kais-eye-unread 1.8s ease-in-out infinite; }
+.kaisEyeMotion.kaisEyeReactUnread[data-unread="true"] .kaisEyeRingGlow { animation: kais-eye-unread 1.2s ease-in-out; }
+@keyframes kais-eye-blink {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(.03); }
+}
+@keyframes kais-eye-spin { to { transform: rotate(360deg); } }
+@keyframes kais-eye-heartbeat {
+  0%, 45%, 100% { transform: scale(1); opacity: .8; }
+  15%, 30% { transform: scale(1.15); opacity: 1; }
+}
+@keyframes kais-eye-unread {
+  0%, 100% { opacity: .2; }
+  50% { opacity: .75; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kaisEye :is(.kaisEyeGaze, .kaisEyeOpening, .kaisEyeRing, .kaisEyeRingGlow, .kaisEyeInterior, .kaisEyeUpperLid, .kaisEyeLowerLid, .kaisEyeRotor, .kaisEyePulse) {
+    animation: none;
+    transition: none;
+  }
+}

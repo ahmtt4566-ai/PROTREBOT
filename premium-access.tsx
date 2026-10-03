@@ -2,6 +2,7 @@ import { Children, cloneElement, createContext, isValidElement, type ReactElemen
 import { createPortal } from 'react-dom'
 import { Check, LockKeyhole, X } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
+import {emitKaisTargetReaction} from './kais-reactions'
 import './premium-access.css'
 
 type MemberAccess = {premium: boolean; ready: boolean; userId: string | null; error: string; openUpgrade: (label: string) => void}
@@ -53,6 +54,7 @@ export function MemberAccessProvider({children}: {children: ReactNode}) {
     const previousFocus = document.activeElement
     const element = dialog.current
     element.showModal()
+    emitKaisTargetReaction('premium-open', element)
     return () => {
       element.close()
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()

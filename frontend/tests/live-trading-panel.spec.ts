@@ -40,7 +40,14 @@ const statusFixture = (state: LiveStatus) => ({
 })
 
 const openPanelWithStatus = async (page: Page, state: LiveStatus) => {
+  await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'live-state-ui-test-session'))
   await page.route('**/*', async route => {
+    const path = new URL(route.request().url()).pathname
+    const user = {id: 'live-state-ui-owner', role: 'OWNER', active: true, email_verified: true}
+    if (path === '/api/v22/session' || path === '/api/v22/profile') {
+      await route.fulfill({json: {user, access: {canAccessMasterTrade: true, isPremium: true}}})
+      return
+    }
     if (route.request().url().includes('/v25/status')) {
       await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(statusFixture(state))})
       return
@@ -80,8 +87,10 @@ test('shows ARMED before Auto Trade starts when the live lock is released', asyn
 test('shows OFF when Auto Trade is disabled and the live lock is closed', async ({page}) => {
   await openPanelWithStatus(page, {live_auto_trade: false, real_trading_locked: true, armed: false, readinessReady: false})
 
-  await expect(page.getByText('AUTO TRADE IS OFF', {exact: true})).toBeVisible()
-  await expect(page.getByText('OFF', {exact: true}).first()).toBeVisible()
+  const headline = page.locator('header.masterTradeLiveHeader')
+  await expect(headline.getByText('AUTO TRADE IS OFF', {exact: true})).toBeVisible()
+  await expect(headline.locator('.masterTradeLiveHeadline > strong')).toHaveText('LOCKED')
+  await expect(page.getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
 })
 
 test('keeps the consent action inactive while scoped authorization is valid', async ({page}) => {
@@ -103,4 +112,13 @@ test('shows policy acknowledgement unchecked until backend state is true', async
   await expect(page.getByRole('checkbox', {name: 'Acknowledge current risk policy'})).toBeVisible()
   await expect(page.getByRole('checkbox', {name: 'Acknowledge current risk policy'})).not.toBeChecked()
   await expect(page.getByText('POLICY ACKNOWLEDGEMENT', {exact: true})).toBeVisible()
+})
+
+test('shows backend-acknowledged policy checked and prevents acknowledging it again', async ({page}) => {
+  await openPanelWithStatus(page, {live_auto_trade: false, real_trading_locked: true, armed: false, readinessReady: false, policyAcknowledged: true})
+  const checkbox = page.getByRole('checkbox', {name: 'Acknowledge current risk policy'})
+  await expect(checkbox).toBeChecked()
+  await expect(checkbox).toBeDisabled()
+  await expect(page.getByRole('button', {name: 'POLICY ACKNOWLEDGED', exact: true})).toBeDisabled()
+  await expect(page.getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
 })

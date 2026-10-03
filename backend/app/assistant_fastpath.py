@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
+from .assistant_prompt import IDENTITY_REPLIES
 from .assistant_tools import AssistantTools
 
 Language = Literal["tr", "en"]
@@ -12,7 +13,7 @@ Language = Literal["tr", "en"]
 def detect_language(message: str) -> Language:
     words = set(re.findall(r"\w+", message.casefold()))
     turkish = {"merhaba", "selam", "nasil", "nasıl", "nedir", "neden", "ben", "bana", "icin", "kredi", "kredim", "krediler", "kredilerim", "hesap", "yardim", "planim", "aboneligim", "benim", "fiyat", "ucret", "deneme", "abonelik", "kalan", "ne",
-               "sistem", "yaz", "göster", "goster", "kaç", "kac", "var", "mı", "mi"}
+               "sistem", "yaz", "göster", "goster", "kaç", "kac", "var", "mı", "mi", "sen", "kimsin"}
     return "tr" if re.search("[çğıöşüÇĞİÖŞÜ]", message) or words & turkish else "en"
 
 
@@ -21,6 +22,8 @@ def intent(message: str) -> str | None:
     words = set(re.findall(r"\w+", normalized))
     if words & {"trade", "order", "execute", "arm", "consent", "emir", "islem", "bitcoin", "btc", "eth", "pricefeed"}:
         return None
+    if re.fullmatch(r"(?:sen kimsin|kimsin|adin ne|senin adin ne|who are you|what is your name)[?!.]*", normalized.strip()):
+        return "identity"
     if not words & {"price", "cost", "fee", "much", "fiyat", "ucret"} and ("planim" in words or "aboneligim" in words
         or ("my" in words and words & {"plan", "subscription", "access", "membership"})
         or ("benim" in words and words & {"plan", "abonelik"})):
@@ -40,6 +43,8 @@ async def answer(tools: AssistantTools, user_id: str, message: str, language: La
     name = intent(message)
     if name is None:
         return None
+    if name == "identity":
+        return {"reply": IDENTITY_REPLIES[language], "language": language, "sources": []}
     result = await tools.dispatch(user_id, name, {})
     data = result["data"]
     if name == "get_plans":

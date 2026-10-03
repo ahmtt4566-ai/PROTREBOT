@@ -400,6 +400,22 @@ class AssistantLlmTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first.tools, second.tools)
             self.assertNotIn("user_id", first.tools[0]["input_schema"].get("properties", {}))
 
+    def test_kais_ai_bilingual_identity_policy_never_invents_infrastructure_or_claims_to_be_human(self):
+        for language, phrases in (
+            ("tr", ("Adın Kais AI. Bu platformun yapay zeka asistanısın.",
+                    "İnsan olduğunu asla iddia etme", "Bu altyapı bilgisini paylaşamıyorum",
+                    "şirket veya model adı uydurma, tahmin etme")),
+            ("en", ("Your name is Kais AI. You are this platform's AI assistant.",
+                    "Never claim to be human", "I cannot share that infrastructure information",
+                    "or guess a company or model name")),
+        ):
+            with self.subTest(language=language):
+                prompt = system_prompt(language)
+                for phrase in phrases:
+                    self.assertIn(phrase, prompt)
+                self.assertNotIn("customer assistant", prompt)
+                self.assertNotIn("müşteri yardımcısısın", prompt)
+
     async def test_old_accounting_schema_upgrades_without_resetting_spend(self):
         old = Path(self.directory.name) / "old.sqlite3"
         with closing(sqlite3.connect(old)) as db, db:

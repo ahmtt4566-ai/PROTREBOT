@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefCallback } from 'react'
 import { Activity, BarChart3, Cable, Check, ChevronDown, Clock3, Crosshair, Gauge, History, ListChecks, LockKeyhole, ShieldX, UnlockKeyhole, Wallet, X, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
 import { PremiumWorkspace, useMemberAccess } from './premium-access'
+import {useKaisWorkspaceReaction} from './useKaisPageReactions'
 
 type TradeSide = 'LONG' | 'SHORT'
 type TradeHistoryRow = {
@@ -133,9 +134,11 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   return values.filter((item): item is MtfAnalysis => item !== null)
 }
 
-export default function MasterTrade({ onBack }: { onBack?: () => void }) {
+export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () => void; assistantSlotRef?: RefCallback<HTMLDivElement> }) {
   const {premium} = useMemberAccess()
   const layoutTab = useSyncExternalStore(subscribeTab, readTab, () => 'analiz' as MasterTradeTab)
+  const reactionArea = useRef<HTMLElement>(null)
+  useKaisWorkspaceReaction(layoutTab, reactionArea)
   const [history, setHistory] = useState<TradeHistoryRow[]>([])
   const [historySyncState, setHistorySyncState] = useState<TradeHistorySyncState>('READY')
   const [accountSyncState, setAccountSyncState] = useState<AccountSyncState>('READY')
@@ -632,7 +635,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
 
   return (
     <PremiumWorkspace>
-    <section className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}`} data-layout-tab={layoutTab}>
+    <section ref={reactionArea} className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}`} data-layout-tab={layoutTab}>
       <div className="masterTradeShell">
         <header className="masterTradeTerminalHeader">
           <div className="masterTradeTerminalIdentity">
@@ -640,6 +643,7 @@ export default function MasterTrade({ onBack }: { onBack?: () => void }) {
             <strong>MASTER TRADE</strong>
           </div>
           <span className="masterTradeTerminalMode">LIVE OPERATIONS · CONTROLLED</span>
+          {assistantSlotRef && <div className="assistantMasterSlot" ref={assistantSlotRef}/>}
         </header>
         <div className="terminalStatusStrip" aria-label="Master Trade connection status" hidden={layoutTab !== 'baglanti'}>
           <span className="terminalStatusItem online"><i /> CONNECTED</span>
