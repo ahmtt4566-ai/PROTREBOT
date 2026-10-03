@@ -1,5 +1,6 @@
 import {expect, test, type Page} from '@playwright/test'
 import {join} from 'node:path'
+import {demoHistory, demoReadFixtures} from './helpers/demo-api'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 test.setTimeout(60000)
@@ -39,6 +40,7 @@ async function mockMember(page: Page, premium = false, initialRemaining = 87, ma
       return
     }
     const fixtures: Record<string, unknown> = {
+      ...demoReadFixtures,
       '/api/assistant/proactive/preferences': {enabled: false, available: true, poll_interval_seconds: 60},
       '/api/v22/profile': {user, access: {canAccessMasterTrade: true, isPremium: premium}},
       '/api/v22/session': {user},
@@ -49,12 +51,11 @@ async function mockMember(page: Page, premium = false, initialRemaining = 87, ma
       '/api/exchange-connections/status': {vault: {ready: true}, connections: {LIVE: {configured: false, active: false}}},
       '/api/v25/history': {external_trades: [], external_income: []},
       '/api/v21/journal': {items: []},
-      '/api/v21/performance': {total_trades: 0, wins: 0, losses: 0, win_rate: 0, total_profit: 0, total_loss: 0, net_profit: 0, average_trade: 0, best_trade: 0, worst_trade: 0, profit_factor: null, average_win: null, average_loss: null, losing_streak: 0, max_drawdown: 0, history_quality: 'EMPTY'},
       '/api/scanner-alerts': {alerts: []},
     }
     const body = path.startsWith('/api/analysis/') ? marketRow
       : path.startsWith('/api/klines/') ? Array.from({length: 160}, (_, index) => ({time: 1790185500 + index * 900, open: 60000, high: 60100, low: 59900, close: 60000, volume: 1000}))
-      : fixtures[path] ?? {}
+      : fixtures[path] ?? (path.startsWith('/api/v21/history/') ? demoHistory : {})
     await route.fulfill({status: request.method() === 'GET' ? 200 : 403, json: body})
   })
   return requests

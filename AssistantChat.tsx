@@ -4,10 +4,11 @@ import { Send, Trash2, X } from 'lucide-react'
 import type {KaisEyeState} from './KaisEye'
 import KaisEye from './frontend/src/KaisEye'
 import KaisGreeting from './frontend/src/KaisGreeting'
+import {CHAT_CLEAR_EVENT, CHAT_READY_EVENT, clearKaisChatHistory, clearLegacyChatHistory, createKaisChatStorage, isLocalStorageChange} from './frontend/src/kais-chat-storage'
 import {useAssistantMotion} from './useAssistantPresentation'
 import {useKaisPrivacy} from './useKaisPrivacy'
 import {emitKaisReaction} from './kais-reactions'
-import { API_BASE } from './api'
+import { API_BASE, USER_SESSION_KEY } from './api'
 import { useMemberAccess } from './premium-access'
 import { assistantCopy } from './ui-copy'
 import './assistant.css'
@@ -17,9 +18,8 @@ type Limits = {max_input_chars: number; history_messages: number; history_messag
 type Usage = {remaining: number; total: number; resetsAt: string; limits: Limits}
 type ProactivePreferences = {enabled: boolean; available: boolean; poll_interval_seconds: number}
 type Confirmation = {action: 'get_analysis'; symbol: string; timeframe: string; cost: number; confirmation_token: string}
-type Message = {id: string; role: 'user' | 'assistant'; content: string; language: Language; proactive?: boolean; unread?: boolean; confirmation?: Confirmation; decision?: 'pending' | 'confirmed' | 'cancelled' | 'expired'}
+type Message = {id: string; role: 'user' | 'assistant'; content: string; language: Language; proactive?: boolean; unread?: boolean; confirmation?: Confirmation; decision?: 'pending' | 'confirmed' | 'cancelled' | 'expired'; pending?: boolean; failed?: boolean}
 type Issue = {kind: 'network' | 'session' | 'limit' | 'budget' | 'unavailable' | 'invalid' | 'forbidden' | 'credits' | 'secretBlocked'; reply?: string; retry?: number; confirmation?: boolean; checkIn?: boolean}
-type StoredMessage = Pick<Message, 'id' | 'role' | 'content' | 'language' | 'proactive' | 'unread'>
 const launcherIntroKey = 'protrebot-kais-launcher-seen'
 
 function readLauncherIntro(): {show: boolean; problem: boolean} {
@@ -41,29 +41,6 @@ const languageOfPage = (): Language => document.documentElement.lang.toLowerCase
 const truncate = (value: string, max: number) => Array.from(value).slice(0, max).join('')
 const integer = (value: unknown, minimum = 0): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
 const text = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
-
-function readHistory(key: string): {messages: Message[]; problem: boolean} {
-  try {
-    const saved = sessionStorage.getItem(key)
-    if (!saved) return {messages: [], problem: false}
-    const rows: unknown = JSON.parse(saved)
-    if (!Array.isArray(rows)) return {messages: [], problem: true}
-    const messages: Message[] = []
-    const ids = new Set<string>()
-    for (const row of rows) {
-      if (!object(row) || !text(row.id) || ids.has(row.id) || !text(row.content) ||
-          !['user', 'assistant'].includes(String(row.role)) || !['tr', 'en'].includes(String(row.language)) ||
-          (row.proactive !== undefined && typeof row.proactive !== 'boolean') || (row.unread !== undefined && typeof row.unread !== 'boolean')) return {messages: [], problem: true}
-      ids.add(row.id)
-      messages.push({id: row.id, role: row.role === 'user' ? 'user' : 'assistant', content: row.content, language: row.language === 'en' ? 'en' : 'tr',
-        ...(row.proactive === true ? {proactive: true, unread: row.unread === true} : {})})
-    }
-    return {messages, problem: false}
-  } catch (error) {
-    if (!(error instanceof SyntaxError || error instanceof DOMException)) throw error
-    return {messages: [], problem: true}
-  }
-}
 
 function sensitive(value: string, limits: Limits): boolean {
   return new RegExp(`(?:^|[^a-z])secret(?:[_ -]*key)?(?![a-z])|(?:^|[^a-z0-9])[a-z0-9]{${limits.secret_min_alphanumeric_chars},}(?![a-z0-9])|\\bsk-(?:ant-)?[a-z0-9_-]+|\\bbearer\\s+\\S+|\\b(?:password|parola|api[_ -]*key|token)\\s*[:=]\\s*\\S+`, 'i').test(value)
@@ -154,12 +131,15 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
   const copy = assistantCopy[language]
   const motionPaused = useAssistantMotion()
   const privateFocus = useKaisPrivacy()
-  const historyKey = `protrebot-assistant-chat:${userId}`
-  const [initial] = useState(() => readHistory(historyKey))
+  const [initial] = useState(() => {
+    clearLegacyChatHistory()
+    const storage = createKaisChatStorage(userId)
+    return {storage, messages: storage.read()}
+  })
   const [intro] = useState(readLauncherIntro)
   const [showIntro, setShowIntro] = useState(intro.show)
   const [messages, setMessages] = useState<Message[]>(initial.messages)
-  const [storageProblem, setStorageProblem] = useState(initial.problem || intro.problem)
+  const [storageProblem, setStorageProblem] = useState(intro.problem)
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [usage, setUsage] = useState<Usage | null>(null)
@@ -187,6 +167,7 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
   const preferenceReadRequest = useRef<AbortController | null>(null)
   const preferenceWorking = useRef(false)
   const chatOpen = useRef(false)
+  const syncedMessages = useRef<Message[]>(initial.messages)
 
   useEffect(() => { setOpen(false) }, [pageContext])
 
@@ -210,20 +191,42 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
   }, [draft, open, viewport])
 
   useEffect(() => {
-    try {
-      const saved: StoredMessage[] = messages.map(message => {
-        const labels = assistantCopy[message.language]
-        const notice = message.decision === 'pending' ? labels.renewed : message.decision === 'cancelled' ? labels.cancelled : message.decision === 'confirmed' ? labels.confirmed : message.decision === 'expired' ? labels.renewed : ''
-        return {id: message.id, role: message.role, language: message.language, content: message.content + (notice ? `\n\n${notice}` : ''),
-          ...(message.proactive ? {proactive: true, unread: message.unread === true} : {})}
-      })
-      if (expired) sessionStorage.removeItem(historyKey)
-      else sessionStorage.setItem(historyKey, JSON.stringify(saved))
-    } catch (error) {
-      if (!(error instanceof DOMException)) throw error
-      setStorageProblem(true)
+    if (expired) { initial.storage.clear(); initial.storage.stop(); return }
+    if (messages === syncedMessages.current) return
+    syncedMessages.current = messages
+    const saved = messages.map(message => {
+      const labels = assistantCopy[message.language]
+      const notice = message.decision === 'pending' ? labels.renewed : message.decision === 'cancelled' ? labels.cancelled : message.decision === 'confirmed' ? labels.confirmed : message.decision === 'expired' ? labels.renewed : ''
+      return {id: message.id, role: message.role, language: message.language, content: message.content + (notice ? `\n\n${notice}` : ''),
+        pending: message.pending, failed: message.failed,
+        ...(message.proactive ? {proactive: true, unread: message.unread === true} : {})}
+    })
+    initial.storage.write(saved, messages.flatMap(message => message.confirmation ? [message.confirmation.confirmation_token] : []))
+  }, [messages, initial, expired])
+
+  useEffect(() => {
+    const replaceHistory = () => {
+      activeRequest.current?.abort()
+      working.current = false; setBusy(false)
+      const loaded = initial.storage.read()
+      syncedMessages.current = loaded
+      setMessages(loaded)
     }
-  }, [messages, historyKey, expired])
+    const storageChanged = (event: StorageEvent) => {
+      if (!expired && initial.storage.matches(event)) replaceHistory()
+    }
+    const cleared = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return
+      const detail: unknown = event.detail
+      if (!object(detail) || (detail.userId !== undefined && detail.userId !== userId)) return
+      activeRequest.current?.abort()
+      initial.storage.stop()
+      working.current = false; setBusy(false); setExpired(true); setUsage(null); setMessages([]); setDraft('')
+    }
+    window.addEventListener('storage', storageChanged)
+    window.addEventListener(CHAT_CLEAR_EVENT, cleared)
+    return () => { window.removeEventListener('storage', storageChanged); window.removeEventListener(CHAT_CLEAR_EVENT, cleared) }
+  }, [initial, userId, expired])
 
   useEffect(() => () => { activeRequest.current?.abort(); usageRequest.current?.abort(); preferenceRequest.current?.abort() }, [])
   useEffect(() => {
@@ -387,20 +390,24 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
     if (sensitive(message, usage.limits)) { setIssue({kind: 'secretBlocked'}); return }
     working.current = true; setBusy(true); setIssue(null); setLengthError(false); setDraft('')
     // Confirmation proofs remain only in memory; no model request contains them.
-    const eligible = messages.filter(row => !row.proactive && !sensitive(row.content, usage.limits))
-    const history = (usage.limits.history_messages ? eligible.slice(-usage.limits.history_messages) : [])
+    const eligible = messages.filter(row => !row.proactive && !row.pending && !row.failed && row.content.trim() && !sensitive(row.content, usage.limits))
+    const history = (usage.limits.history_messages ? eligible.slice(-Math.min(12, usage.limits.history_messages)) : [])
       .map(row => ({role: row.role, content: truncate(row.content, usage.limits.history_message_max_chars)}))
+    const userMessageId = crypto.randomUUID()
     setMessages(previous => [...previous.map(row => row.decision === 'pending' ? {...row, decision: 'expired' as const} : row),
-      {id: crypto.randomUUID(), role: 'user', content: message, language}])
+      {id: userMessageId, role: 'user', content: message, language, pending: true}])
     const controller = new AbortController()
     activeRequest.current = controller
     try {
       const response = await request('chat', controller.signal, {message, history, page_context: truncate(pageContext, usage.limits.page_context_max_chars)})
       if (controller.signal.aborted) return
       if (!text(response.reply) || !['tr', 'en'].includes(String(response.language))) throw new AssistantFailure(502, 'invalid_response')
-      append(response.reply, response.language === 'en' ? 'en' : 'tr', parseConfirmation(response.needs_confirmation))
+      const confirmation = parseConfirmation(response.needs_confirmation)
+      setMessages(previous => previous.map(row => row.id === userMessageId ? {...row, pending: false} : row))
+      append(response.reply, response.language === 'en' ? 'en' : 'tr', confirmation)
     } catch (error) {
       if (controller.signal.aborted) return
+      setMessages(previous => previous.map(row => row.id === userMessageId ? {...row, pending: false, failed: true} : row))
       const next = issueFor(error)
       setIssue(next)
       if (next.kind === 'session') expire()
@@ -466,7 +473,10 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
       onClick={event => {if (event.target === event.currentTarget) setOpen(false)}}>
       <div className="assistantLayout">
         <header className="assistantHeader"><KaisEye size={36} state={eyeState}/><div><h2 id="assistant-title">{copy.title}</h2><small className="assistantState" role="status">{status}</small></div>
-          <button type="button" aria-label={copy.clear} disabled={busy} onClick={() => {setMessages([]); setIssue(null)}}><Trash2 aria-hidden="true"/></button>
+          <button type="button" aria-label={copy.clear} disabled={busy} onClick={() => {
+            const empty: Message[] = []
+            initial.storage.clear(); syncedMessages.current = empty; setMessages(empty); setIssue(null)
+          }}><Trash2 aria-hidden="true"/></button>
           <button type="button" aria-label={copy.close} onClick={() => setOpen(false)}><X aria-hidden="true"/></button>
         </header>
         <div className="assistantMeta">
@@ -529,11 +539,21 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
 
 export default function AssistantChat({pageContext, launcherTarget}: {pageContext: string; launcherTarget?: HTMLElement | null}) {
   const {ready, userId} = useMemberAccess()
+  const [historyEpoch, setHistoryEpoch] = useState(0)
   const [language, setLanguage] = useState<Language>(languageOfPage)
+  useEffect(() => {
+    const sessionChanged = (event: StorageEvent) => {
+      if (isLocalStorageChange(event, USER_SESSION_KEY) && (event.key === null || event.oldValue !== event.newValue)) clearKaisChatHistory()
+    }
+    const verified = () => setHistoryEpoch(previous => previous + 1)
+    window.addEventListener('storage', sessionChanged)
+    window.addEventListener(CHAT_READY_EVENT, verified)
+    return () => { window.removeEventListener('storage', sessionChanged); window.removeEventListener(CHAT_READY_EVENT, verified) }
+  }, [])
   useEffect(() => {
     const observer = new MutationObserver(() => setLanguage(languageOfPage()))
     observer.observe(document.documentElement, {attributes: true, attributeFilter: ['lang']})
     return () => observer.disconnect()
   }, [])
-  return ready && userId ? <AssistantSession key={userId} userId={userId} pageContext={pageContext} language={language} launcherTarget={launcherTarget}/> : null
+  return ready && userId ? <AssistantSession key={`${userId}:${historyEpoch}`} userId={userId} pageContext={pageContext} language={language} launcherTarget={launcherTarget}/> : null
 }

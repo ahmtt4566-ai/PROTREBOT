@@ -1,6 +1,7 @@
 import {expect, test, type Page} from '@playwright/test'
 import {join} from 'node:path'
 import type {KaisReaction} from '../../kais-reactions'
+import {approval, checkInMessage, mockAssistant, openChat} from './helpers/assistant-api'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 
@@ -90,104 +91,6 @@ test('New owned proactive check-in emits unread without extra polling or LLM cal
   expect(state.requests.filter(path => path.startsWith('POST '))).toEqual(['POST /api/assistant/proactive/check-in'])
 })
 
-type ApiCall = {path: string; body: Record<string, unknown>}
-type MockState = {
-  userId: string; remaining: number; chatStatus: number; chatBody: Record<string, unknown>;
-  confirmStatus: number; confirmations: ApiCall[]; chats: ApiCall[]; requests: string[];
-  network: boolean; hold: Promise<void> | null; historyLimit: number; confirmNetwork: boolean;
-  secretMinimum: number;
-  proactiveEnabled: boolean; proactiveMessage: Record<string, unknown> | null;
-  preferenceStatus: number; checkInStatus: number; preferenceSaves: ApiCall[]; checkIns: ApiCall[];
-}
-
-const approval = {action: 'get_analysis', symbol: 'BTCUSDT', timeframe: '1h', cost: 7, analysis_cost: 7, confirmation_token: 'signed-approval-ui-test'}
-const checkInMessage = {id: 'owned-status-check-in', reply: '1 açık pozisyon. PnL: 12,30.\nKoruma doğrulandı.\nVeri 4 saniye önce alındı.',
-  language: 'tr', sources: ['get_my_positions', 'get_protection_status'], fetched_at: '2026-10-03T00:00:00Z', stale: false}
-
-async function mockAssistant(page: Page): Promise<MockState> {
-  const state: MockState = {
-    userId: 'assistant-member', remaining: 19, chatStatus: 200,
-    chatBody: {reply: '**Plan**\nYanıt düz metindir.', language: 'tr', sources: ['get_plans']},
-    confirmStatus: 200, confirmations: [], chats: [], requests: [],     network: false, hold: null, historyLimit: 2, confirmNetwork: false, secretMinimum: 40,
-    proactiveEnabled: false, proactiveMessage: null, preferenceStatus: 200, checkInStatus: 200, preferenceSaves: [], checkIns: [],
-  }
-  await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'member-ui-test-session'))
-  await page.route('**/api/**', async route => {
-    const request = route.request()
-    const path = new URL(request.url()).pathname
-    state.requests.push(`${request.method()} ${path}`)
-    const user = {id: state.userId, role: 'CUSTOMER', active: true, email_verified: true}
-    if (path === '/api/assistant/proactive/preferences') {
-      if (request.method() === 'POST') {
-        const body = request.postDataJSON()
-        state.preferenceSaves.push({path, body})
-        if (state.preferenceStatus === 200) state.proactiveEnabled = body.enabled
-      }
-      await route.fulfill({status: request.method() === 'POST' ? state.preferenceStatus : 200,
-        json: {enabled: state.proactiveEnabled, available: true, poll_interval_seconds: 60}})
-      return
-    }
-    if (path === '/api/assistant/proactive/check-in') {
-      state.checkIns.push({path, body: request.postDataJSON()})
-      await route.fulfill({status: state.checkInStatus, json: {enabled: state.proactiveEnabled, available: true, poll_interval_seconds: 60,
-        message: state.proactiveEnabled ? state.proactiveMessage : null}})
-      return
-    }
-    if (path === '/api/assistant/usage') {
-      await route.fulfill({json: {remaining: state.remaining, total: 20, resetsAt: '2026-10-04T00:00:00Z', limits: {
-        max_input_chars: 80, history_messages: state.historyLimit, history_message_max_chars: 12, page_context_max_chars: 8, secret_min_alphanumeric_chars: state.secretMinimum,
-      }}})
-      return
-    }
-    if (path === '/api/assistant/chat') {
-      state.chats.push({path, body: request.postDataJSON()})
-      if (state.hold) await state.hold
-      if (state.network) { await route.abort('failed'); return }
-      await route.fulfill({status: state.chatStatus, json: state.chatBody, headers: state.chatStatus === 429 ? {'Retry-After': '45'} : {}})
-      return
-    }
-    if (path === '/api/assistant/analysis/confirm') {
-      state.confirmations.push({path, body: request.postDataJSON()})
-      if (state.confirmNetwork) { await route.abort('failed'); return }
-      await route.fulfill({status: state.confirmStatus, json: state.confirmStatus === 200 ? {
-        data: {symbol: 'BTCUSDT', timeframe: '1h', direction: 'LONG', final_decision_score: 72, confidence: 81, opportunity_score: 78, mtf_alignment: 90, data_age_seconds: 4,
-          entry: 987654.321, stop_loss: 123456.789},
-        fetched_at: '2026-10-03T00:00:00Z', stale: false, sources: ['get_analysis'],
-      } : {detail: 'Invalid confirmation'}})
-      return
-    }
-    const fixtures: Record<string, unknown> = {
-      '/api/v22/session': {user},
-      '/api/v22/profile': {user, access: {canAccessMasterTrade: true, isPremium: false}},
-      '/api/markets': [{symbol: 'BTCUSDT', display: 'BTC/USDT', price: 60000, change: 1, volume: 1000000}],
-      '/api/health': {status: 'ok'},
-      '/api/exchange-connections/status': {connections: {TESTNET: {configured: false, active: false}}, vault: {ready: true}},
-      '/api/notifications': {items: [], unread: 0},
-      '/api/v21/performance': {total_trades: 0, wins: 0, losses: 0, win_rate: 0, total_profit: 0, total_loss: 0, net_profit: 0,
-        average_trade: 0, best_trade: 0, worst_trade: 0, profit_factor: null, average_win: null, average_loss: null, losing_streak: 0,
-        max_drawdown: 0, history_quality: 'EMPTY'},
-      '/api/v25/status': {connected: false, real_trading_locked: true, execution_state: 'LOCKED', armed: false,
-        live_auto_trade: false, recovery_ready: true, credentials: {configured: false}, account: {}, events: [],
-        stream: {status: 'DISCONNECTED'}, readiness: {ready: false, gates: []}, policy: {allowed_symbols: ['BTCUSDT']}},
-    }
-    const payload = path.startsWith('/api/klines/') ? [] : path.startsWith('/api/analysis/')
-      ? {symbol: 'BTCUSDT', direction: 'BEKLE', confidence: 0, entry: 60000, stop_loss: 59000, tp1: 61000, tp2: 62000, tp3: 63000,
-        support: 59000, resistance: 61000, rsi: 50, adx: 20, volume_ratio: 1, trend: 'NEUTRAL', momentum: 'NEUTRAL',
-        explanation: 'UI fixture', series: {ema20: [], ema50: [], ema200: []}}
-      : fixtures[path] ?? {}
-    await route.fulfill({json: payload})
-  })
-  return state
-}
-
-async function openChat(page: Page) {
-  await page.goto('/')
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
-  const dialog = page.getByRole('dialog', {name: 'Kais AI'})
-  await expect(dialog.getByRole('textbox', {name: 'Kais AI mesajın'})).toBeEnabled()
-  return dialog
-}
-
 for (const width of [1440, 390]) {
   test(`Native assistant dialog opens, closes, returns focus and fits ${width}px`, async ({page}, testInfo) => {
     await page.setViewportSize({width, height: 844})
@@ -230,7 +133,7 @@ for (const width of [1440, 390]) {
   })
 }
 
-test('Suggested question, typing state, plain text, copy exception and session history', async ({page}) => {
+test('Suggested question, typing state, plain text, copy exception and persistent history', async ({page}) => {
   const state = await mockAssistant(page)
   let release: () => void = () => {}
   state.hold = new Promise<void>(resolve => {release = resolve})
@@ -282,7 +185,7 @@ test('Explicit approval posts only to confirmation endpoint, once, without persi
   await dialog.getByRole('button', {name: 'BTC için analiz durumu ne?', exact: true}).click()
   await expect(dialog).toContainText('7 kredi harcanacak')
   expect(state.confirmations).toHaveLength(0)
-  const stored = await page.evaluate(() => sessionStorage.getItem('protrebot-assistant-chat:assistant-member'))
+  const stored = await page.evaluate(() => localStorage.getItem('kais-chat:v1:assistant-member'))
   expect(stored).not.toContain(approval.confirmation_token)
   await dialog.getByRole('button', {name: 'Onayla', exact: true}).evaluate(element => {
     const button = element as HTMLButtonElement
@@ -333,19 +236,22 @@ test('Uncertain confirmation can be retried only by the user and reuses the same
   expect(state.chats).toHaveLength(1)
 })
 
-test('Unavailable session storage is reported while in-memory chat remains usable', async ({page}) => {
+test('Unavailable chat persistence only warns while in-memory chat remains usable', async ({page}) => {
+  const warnings: string[] = []
+  page.on('console', message => {if (message.type() === 'warning') warnings.push(message.text())})
   await mockAssistant(page)
   await page.addInitScript(() => {
     const original = Storage.prototype.setItem
     Storage.prototype.setItem = function(key, value) {
-      if (key.startsWith('protrebot-assistant-chat:')) throw new DOMException('Storage unavailable', 'QuotaExceededError')
+      if (key.startsWith('kais-chat:')) throw new DOMException('Storage unavailable', 'QuotaExceededError')
       return original.call(this, key, value)
     }
   })
   const dialog = await openChat(page)
-  await expect(dialog).toContainText('Sohbet geçmişi okunurken veya kaydedilirken sorun oluştu')
   await dialog.getByRole('button', {name: 'Premium ne kadar?', exact: true}).click()
   await expect(dialog.locator('.assistantMessage.assistant')).toContainText('Yanıt düz metindir')
+  await expect(dialog).not.toContainText('Sohbet geçmişi okunurken veya kaydedilirken sorun oluştu')
+  expect(warnings.some(warning => warning.includes('Kais AI chat persistence disabled'))).toBe(true)
 })
 
 for (const failure of ['limit', 'budget', 'network', 'session', 'unavailable'] as const) {
@@ -365,7 +271,7 @@ for (const failure of ['limit', 'budget', 'network', 'session', 'unavailable'] a
     if (failure === 'session') {
       await expect(alert.getByRole('link', {name: 'Giriş yap'})).toHaveAttribute('href', '/login')
       await expect(dialog.getByRole('textbox')).toBeDisabled()
-      expect(await page.evaluate(() => sessionStorage.getItem('protrebot-assistant-chat:assistant-member'))).toBeNull()
+      expect(await page.evaluate(() => localStorage.getItem('kais-chat:v1:assistant-member'))).toBeNull()
     }
   })
 }
@@ -386,7 +292,7 @@ test('Backend limits govern Unicode history truncation; secret input is neither 
   await dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
   await expect(dialog.getByRole('alert')).toContainText('Secret veya kimlik')
   expect(state.chats).toHaveLength(before)
-  expect(await page.evaluate(() => sessionStorage.getItem('protrebot-assistant-chat:assistant-member'))).not.toContain('X'.repeat(40))
+  expect(await page.evaluate(() => localStorage.getItem('kais-chat:v1:assistant-member'))).not.toContain('X'.repeat(40))
   await input.fill('ü'.repeat(81))
   await dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
   await expect(dialog).toContainText('Mesaj en fazla 80 karakter')
@@ -438,7 +344,7 @@ test('Mobile composer follows the visual viewport when the keyboard reduces its 
 })
 
 for (const width of [1440, 390]) {
-  test(`Proactive status is silent, unread, session-persistent and excluded from LLM history at ${width}px`, async ({page}) => {
+  test(`Proactive status is silent, unread, persistent and excluded from LLM history at ${width}px`, async ({page}) => {
     await page.setViewportSize({width, height: 844})
     const state = await mockAssistant(page)
     state.proactiveEnabled = true; state.proactiveMessage = checkInMessage
@@ -683,7 +589,7 @@ test('Eye tracks coordinates, respects private focus and never reads or sends co
   const requests = state.requests.filter(path => path.includes('/assistant/'))
   expect(requests.length).toBeGreaterThan(0)
   expect(requests.every(path => path === 'GET /api/assistant/proactive/preferences')).toBe(true)
-  expect(await page.evaluate(() => sessionStorage.getItem('protrebot-assistant-chat:assistant-member'))).not.toContain('PRIVATE CONTENT')
+  expect(await page.evaluate(() => localStorage.getItem('kais-chat:v1:assistant-member') ?? '')).not.toContain('PRIVATE CONTENT')
 })
 
 for (const width of [1440, 390]) {
@@ -754,7 +660,7 @@ for (const language of ['tr', 'en'] as const) {
     expect(state.chats).toEqual([])
     expect(state.confirmations).toEqual([])
     expect(state.requests.filter(path => path.startsWith('POST '))).toEqual([])
-    expect(await page.evaluate(() => sessionStorage.getItem('protrebot-assistant-chat:assistant-member'))).not.toContain('abc')
+    expect(await page.evaluate(() => localStorage.getItem('kais-chat:v1:assistant-member') ?? '')).not.toContain('abc')
   })
 }
 

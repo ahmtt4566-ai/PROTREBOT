@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Check, LockKeyhole, X } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import {emitKaisTargetReaction} from './kais-reactions'
+import {clearKaisChatHistory, resumeKaisChatHistory} from './frontend/src/kais-chat-storage'
 import './premium-access.css'
 
 type MemberAccess = {premium: boolean; ready: boolean; userId: string | null; error: string; openUpgrade: (label: string) => void}
@@ -23,15 +24,21 @@ export function MemberAccessProvider({children}: {children: ReactNode}) {
       controller.abort()
       controller = new AbortController()
       const requestController = controller
-      if (!userSessionToken()) {
+      const sessionToken = userSessionToken()
+      if (!sessionToken) {
+        clearKaisChatHistory()
         setAccess({premium: false, ready: true, userId: null, error: 'Üyelik oturumu gerekli.'})
         return
       }
       void fetch(`${API_BASE}/v22/profile`, {signal: requestController.signal})
         .then(async response => {
+          if (response.status === 401 && !requestController.signal.aborted && userSessionToken() === sessionToken) clearKaisChatHistory()
           const payload = await response.json() as {user?: {id?: string; role?: string}; access?: {isPremium?: boolean}; detail?: string}
           if (!response.ok || !payload.user?.id) throw new Error(payload.detail || 'Üyelik yetkisi doğrulanamadı.')
-          if (!requestController.signal.aborted) setAccess({premium: payload.access?.isPremium === true || payload.user.role === 'OWNER', ready: true, userId: payload.user.id, error: ''})
+          if (!requestController.signal.aborted) {
+            setAccess({premium: payload.access?.isPremium === true || payload.user.role === 'OWNER', ready: true, userId: payload.user.id, error: ''})
+            if (userSessionToken() === sessionToken) resumeKaisChatHistory(payload.user.id)
+          }
         })
         .catch((error: unknown) => {
           if (requestController.signal.aborted) return

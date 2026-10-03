@@ -1,3 +1,5 @@
+import {clearKaisChatHistory, clearLegacyChatHistory} from './frontend/src/kais-chat-storage'
+
 const TOKEN_KEY = 'protrebot.web.owner-access'
 export const USER_SESSION_KEY = 'protrebot-v25-session'
 
@@ -22,11 +24,17 @@ export function saveOwnerAccessToken(token: string): void {
 }
 
 export function clearOwnerAccessToken(): void {
+  clearKaisChatHistory()
+  clearLegacyChatHistory()
   sessionStorage.removeItem(TOKEN_KEY)
 }
 
 export function userSessionToken(): string {
-  return localStorage.getItem(USER_SESSION_KEY) || sessionStorage.getItem(USER_SESSION_KEY) || ''
+  try {
+    const remembered = localStorage.getItem(USER_SESSION_KEY)
+    if (remembered) return remembered
+  } catch (error) { console.warn('Browser session storage unavailable:', error instanceof Error ? error.name : 'StorageError') }
+  return sessionStorage.getItem(USER_SESSION_KEY) || ''
 }
 function userSessionId(token=userSessionToken()): string {
   try {
@@ -60,7 +68,10 @@ export function saveUserSessionToken(token: string, remember: boolean): void {
 }
 
 export function clearUserSessionToken(): void {
-  localStorage.removeItem(USER_SESSION_KEY)
+  clearKaisChatHistory()
+  clearLegacyChatHistory()
+  try { localStorage.removeItem(USER_SESSION_KEY) }
+  catch (error) { console.warn('Browser session storage unavailable:', error instanceof Error ? error.name : 'StorageError') }
   sessionStorage.removeItem(USER_SESSION_KEY)
 }
 

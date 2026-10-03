@@ -211,6 +211,33 @@ localStorage anahtarında yerel tarih tutularak günde bir kez gösterilir; depo
 engelliyse gösterilmez. Gizli sekmede süreler durur, reduced-motion animasyonu
 kapatır. X balonu kapatır; metin veya göz mevcut sohbeti açar. Balon LLM/API
 çağrısı yapmaz, sohbet açıkken gösterilmez ve sayfa odağını kendiliğinden almaz.
+Sohbet geçmişi yalnız tarayıcıda `kais-chat:v1:<encodeURIComponent(userId)>`
+localStorage kaydında `{version: 1, savedAt, messages}` olarak tutulur; sunucuya
+arşiv gönderilmez. Son 50 tamamlanmış mesaj, mesaj başına 4000 Unicode karakter
+saklanır; 30 günden eski/bozuk/uyumsuz kayıt silinir. Bekleyen/başarısız mesajlar
+ve onay nesneleri kaydedilmez. Depolama kopyasında Bearer/Basic, JWT, sk- ve
+api/secret/token/key/parola değerleri, 32+ karakterlik anahtar benzeri dizeler
+ve bilinen onay kanıtları `[MASKED]` yapılır; mevcut ekrandaki metin değişmez.
+Depolama hatası yalnız console uyarısı üretir, sohbet bellekte çalışmaya devam eder.
+Sıfırlama kaydı siler; ortak `clearUserSessionToken` çıkış/oturum temizliği tüm
+`kais-chat:*` kayıtlarını siler. Yeni doğrulanmış kullanıcı açılırken diğer
+kullanıcıların kayıtları temizlenir; eski sessionStorage arşivleri taşınmaz, silinir.
+Sekmeler native storage olayıyla son yazan kazanır şeklinde eşitlenir; uzaktan
+değişim bekleyen sohbet isteğini iptal eder. Model bağlamı sunucunun history_messages
+sınırıyla ve ayrıca en fazla 12 tamamlanmış, boş olmayan, proaktif olmayan mesajla
+sınırlıdır; örnek yapılandırmanın mevcut history_messages değeri 4'tür.
+Profil yenilemesinde token yokluğu veya 401 ve owner erişim temizliği sohbet
+arşivini de siler; auth kararları değişmez. Başka sekmedeki user-session anahtarı
+silinince/değişince sohbet durdurulur. Nesil koruması eski yazarların kayıtları
+yeniden oluşturmasını engeller; doğrulanmış profil sonrası yeni sohbet oturumu
+başlar. Asistanın kendi 401'i yalnız mevcut kullanıcı kaydını temizler.
+Üye bakım yoklamasının 401 fail-open davranışı aynen korunur. Playwright gerçek
+AuthGate tıklamaları için `auth-e2e` modunda 4175, gerçek owner kapısı için root
+production build preview 4176 kullanır; tam testlerden önce root build alınmalıdır.
+CI bu nedenle hem root hem frontend bağımlılıklarını kurar ve preview öncesinde
+root build alır. Ortak Demo/v21 UI fixture'ları durum limitlerini ve scanner,
+settings, stream, history/performance koleksiyonlarını sözleşmeye uygun sağlar;
+gerçek işlem veya ARM yanıtı üretmez.
 Panel koyu yarı saydam cam yüzey/turkuaz vurgu, açık tema kontrast varyantı,
 36 px göz ve durum başlığı, tek satır kota/yoklama ayarı kullanır.
 Asistan balonunun solunda 24 px avatar, sağda turkuaz kullanıcı balonu vardır.
