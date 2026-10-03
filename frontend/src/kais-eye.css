@@ -1,0 +1,47 @@
+.assistantLauncher:has(.kaisHeaderEye)::before { display: none; }
+#root > main.v26App :is(.v26HeaderActions, .assistantMasterSlot) .assistantLauncher:has(.kaisHeaderEye) {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.kaisHeaderEye {
+  --header-eye-accent: var(--green, var(--long));
+  --header-eye-light: color-mix(in srgb, var(--header-eye-accent) 55%, var(--kais-highlight));
+  --header-eye-dark: var(--app-bg-deep, var(--kais-ink));
+  --header-eye-ink: color-mix(in srgb, var(--header-eye-dark) 90%, var(--header-eye-accent));
+  color: var(--header-eye-accent);
+  overflow: hidden;
+  background: transparent;
+}
+.kaisHeaderEye .kaisEyeAccentStop { stop-color: var(--header-eye-accent); }
+.cyberEyeLightStop { stop-color: var(--header-eye-light); }
+.cyberEyeInkStop { stop-color: var(--header-eye-dark); }
+.cyberEyeScleraStop { stop-color: var(--header-eye-ink); }
+.kaisHeaderEye .kaisEyeSclera { opacity: 1; }
+.kaisHeaderEye :is(.kaisEyeOpening, .kaisEyeInterior, .kaisEyeUpperLid, .kaisEyeLowerLid, .kaisEyePulse, .kaisEyeRotor) {
+  transform-origin: 48px 48px;
+}
+.kaisHeaderEye .kaisEyeLids {
+  stroke: var(--header-eye-light);
+  stroke-width: 1.6;
+}
+.kaisHeaderEye .cyberEyeGlow { fill: none; stroke: var(--header-eye-accent); stroke-width: 4; opacity: .9; }
+.cyberEyeIrisGlow { fill: none; stroke: var(--header-eye-accent); stroke-width: 1.8; opacity: .9; }
+.cyberEyeCircuit { stroke: var(--header-eye-light); stroke-width: .95; fill: none; }
+.cyberEyeCircuit rect { fill: var(--header-eye-light); stroke: none; }
+.cyberEyePupil { fill: var(--header-eye-dark); }
+.kaisHeaderEye .cyberEyeReflection { fill: var(--header-eye-light); stroke: none; opacity: .95; }
+.kaisHeaderEye :is(.kaisEyePrivacy, .kaisEyeError) { fill: var(--header-eye-ink); stroke: var(--header-eye-accent); }
+.kaisHeaderEye .kaisEyeUnread { fill: var(--header-eye-accent); stroke: var(--text); }
+.kaisHeaderEye[data-state="private"] .cyberEyeGlow { opacity: .3; }
+.kaisHeaderEye.kaisEyeMotion.kaisEyeBlink :is(.kaisEyeInterior, .kaisEyeUpperLid, .kaisEyeLowerLid) {
+  animation-duration: 200ms;
+}
+.kaisHeaderEye.kaisEyeMotion.kaisEyeBlink .cyberEyeGlow { animation: kais-header-glow-blink 200ms ease-in-out; }
+@keyframes kais-header-glow-blink {
+  0%, 100% { opacity: .9; }
+  50% { opacity: .15; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kaisHeaderEye .cyberEyeGlow { animation: none !important; }
+}

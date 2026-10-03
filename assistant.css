@@ -34,9 +34,9 @@
   --assistant-line: rgb(171 219 225 / .16);
   --assistant-soft: rgb(171 219 225 / .06);
   position: fixed;
-  inset: 20px 20px 20px auto;
-  width: min(440px, calc(100vw - 40px));
-  height: calc(100dvh - 40px);
+  inset: var(--assistant-dialog-top, 12px) auto auto var(--assistant-dialog-left, 12px);
+  width: min(360px, calc(var(--assistant-viewport-width, 100vw) - 24px));
+  height: min(520px, var(--assistant-dialog-height, calc(100dvh - 24px)));
   max-width: none;
   max-height: none;
   margin: 0;
@@ -51,12 +51,15 @@
   box-shadow: 0 24px 80px #0008;
   font: 14px/1.5 var(--font-ui, sans-serif);
   font-variant-numeric: tabular-nums;
-  overflow: hidden;
+  overflow: visible;
+  transform-origin: var(--assistant-arrow-left, calc(100% - 32px)) var(--assistant-origin-y, 0%);
 }
 :root[data-theme="light"] .assistantDialog { --assistant-surface: rgb(244 251 252 / .96); --assistant-text: #102c34; --assistant-muted: #415d68; --assistant-line: rgb(24 72 84 / .18); --assistant-soft: rgb(24 72 84 / .05); color-scheme: light; }
 .assistantDialog::backdrop { background: #03111b80; }
-.assistantLayout { height: 100%; min-height: 0; display: flex; flex-direction: column; }
-.assistantDialog[open] .assistantLayout { animation: assistant-sheet-in 180ms ease-out; }
+.assistantDialog::before { content: ""; position: absolute; width: 12px; height: 12px; top: -7px; left: calc(var(--assistant-arrow-left, 32px) - 6px); transform: rotate(45deg); border-left: 1px solid var(--assistant-line); border-top: 1px solid var(--assistant-line); background: var(--assistant-surface); pointer-events: none; }
+.assistantDialog[data-side="above"]::before { top: auto; bottom: -7px; transform: rotate(225deg); }
+.assistantLayout { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: inherit; }
+.assistantDialog[open] { animation: assistant-popover-in 180ms ease-out; }
 .assistantHeader { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid var(--assistant-line); flex-shrink: 0; }
 .assistantHeader > .kaisEye { flex-shrink: 0; }
 .assistantHeader > div { flex: 1; min-width: 0; }
@@ -124,6 +127,8 @@ body.site-copy-protected [data-assistant-chat] * { user-select: text; -webkit-us
 .assistantLauncher[data-motion-paused="true"]::before { transition: none; }
 @keyframes assistant-pulse { 0%, 100% { transform: scale(.8); opacity: .5; } 50% { transform: scale(1.15); opacity: 1; } }
 @keyframes assistant-sheet-in { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes assistant-popover-in { from { transform: scale(.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.assistantDialog[data-motion-paused="true"] { animation: none; }
 .assistantDialog[data-compact-viewport] :is(.assistantSubtitle, .assistantSuggestions) { display: none; }
 .assistantDialog[data-compact-viewport] .assistantHeader { padding-block: 8px; }
 .assistantDialog[data-compact-viewport] .assistantMeta { padding-block: 6px; }
@@ -139,12 +144,14 @@ body.site-copy-protected [data-assistant-chat] * { user-select: text; -webkit-us
 }
 @media (max-width: 767px) {
   .assistantDialog {
-    inset: var(--assistant-viewport-top, 0px) 0 auto;
-    width: 100%;
-    height: var(--assistant-viewport-height, 100dvh);
+    inset: calc(var(--assistant-viewport-top, 0px) + var(--assistant-viewport-height, 100dvh) * .25) auto auto var(--assistant-viewport-left, 0px);
+    width: min(100%, var(--assistant-viewport-width, 100vw));
+    height: calc(var(--assistant-viewport-height, 100dvh) * .75);
     border-radius: 24px 24px 0 0;
     border-bottom: 0;
   }
+  .assistantDialog::before { display: none; }
+  .assistantDialog[open] { animation-name: assistant-sheet-in; transform-origin: bottom center; }
   .assistantHeader { padding: max(12px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 12px max(14px, env(safe-area-inset-left)); }
   .assistantHeader h2 { font-size: 17px; }
   .assistantComposer { padding-inline: max(14px, env(safe-area-inset-left)) max(14px, env(safe-area-inset-right)); }
@@ -152,5 +159,5 @@ body.site-copy-protected [data-assistant-chat] * { user-select: text; -webkit-us
 }
 @media (prefers-reduced-motion: reduce) {
   .assistantLauncher::before { transition: none; }
-  .assistantDialog :is(.assistantTypingDots i, .assistantLayout) { animation: none; }
+  .assistantDialog[open], .assistantDialog :is(.assistantTypingDots i, .assistantLayout) { animation: none; }
 }

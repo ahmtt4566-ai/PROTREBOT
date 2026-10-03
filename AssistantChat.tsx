@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Send, Trash2, X } from 'lucide-react'
-import KaisEye, {type KaisEyeState} from './KaisEye'
+import type {KaisEyeState} from './KaisEye'
+import KaisEye from './frontend/src/KaisEye'
 import {useAssistantMotion} from './useAssistantPresentation'
 import {useKaisPrivacy} from './useKaisPrivacy'
 import {emitKaisReaction} from './kais-reactions'
@@ -170,10 +171,13 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
   const [expired, setExpired] = useState(false)
   const [busy, setBusy] = useState(false)
   const [lengthError, setLengthError] = useState(false)
-  const [viewport, setViewport] = useState({height: window.visualViewport?.height ?? window.innerHeight, top: window.visualViewport?.offsetTop ?? 0})
+  const [viewport, setViewport] = useState({height: window.visualViewport?.height ?? window.innerHeight, top: window.visualViewport?.offsetTop ?? 0,
+    width: window.visualViewport?.width ?? window.innerWidth, left: window.visualViewport?.offsetLeft ?? 0})
+  const [placement, setPlacement] = useState({left: 12, top: 12, height: 520, arrowLeft: 24, above: false})
   const dialog = useRef<HTMLDialogElement>(null)
   const launcherRef = useRef<HTMLButtonElement>(null)
   const list = useRef<HTMLDivElement>(null)
+  const previousLastMessage = useRef(messages.at(-1)?.id)
   const input = useRef<HTMLTextAreaElement>(null)
   const working = useRef(false)
   const activeRequest = useRef<AbortController | null>(null)
@@ -278,28 +282,60 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
     void check()
     return () => { stopped = true; clearTimeout(timer); controller?.abort(); document.removeEventListener('visibilitychange', visible) }
   }, [expired, language, proactivePreferences?.enabled, proactivePreferences?.available, proactivePreferences?.poll_interval_seconds, proactiveReload])
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open || !dialog.current) return
     const previousFocus = document.activeElement
     const element = dialog.current
     element.showModal()
-    const updateViewport = () => setViewport({height: window.visualViewport?.height ?? window.innerHeight, top: window.visualViewport?.offsetTop ?? 0})
+    const updateViewport = () => {
+      const next = {height: window.visualViewport?.height ?? window.innerHeight, top: window.visualViewport?.offsetTop ?? 0,
+        width: window.visualViewport?.width ?? window.innerWidth, left: window.visualViewport?.offsetLeft ?? 0}
+      setViewport(previous => previous.height === next.height && previous.top === next.top &&
+        previous.width === next.width && previous.left === next.left ? previous : next)
+      const anchor = launcherRef.current?.getBoundingClientRect()
+      if (!anchor || next.width < 768) return
+      const gap = 12
+      const width = Math.min(360, Math.max(0, next.width - gap * 2))
+      const maximumHeight = Math.max(0, next.height - gap * 2)
+      const below = next.top + next.height - gap - anchor.bottom - gap
+      const above = anchor.top - gap - next.top - gap
+      const useAbove = below < Math.min(200, maximumHeight) && above > below
+      const available = useAbove ? above : below
+      const height = Math.min(520, maximumHeight, available >= Math.min(200, maximumHeight) ? available : maximumHeight)
+      const left = Math.max(next.left + gap, Math.min(anchor.right - width, next.left + next.width - gap - width))
+      const top = Math.max(next.top + gap, Math.min(useAbove ? anchor.top - gap - height : anchor.bottom + gap,
+        next.top + next.height - gap - height))
+      const arrowLeft = Math.max(Math.min(24, width / 2), Math.min(anchor.left + anchor.width / 2 - left, width - Math.min(24, width / 2)))
+      setPlacement(previous => previous.left === left && previous.top === top && previous.height === height &&
+        previous.arrowLeft === arrowLeft && previous.above === useAbove ? previous : {left, top, height, arrowLeft, above: useAbove})
+    }
     updateViewport()
     window.visualViewport?.addEventListener('resize', updateViewport)
     window.visualViewport?.addEventListener('scroll', updateViewport)
     window.addEventListener('resize', updateViewport)
+    window.addEventListener('scroll', updateViewport, {passive: true, capture: true})
     return () => {
       window.visualViewport?.removeEventListener('resize', updateViewport)
       window.visualViewport?.removeEventListener('scroll', updateViewport)
       window.removeEventListener('resize', updateViewport)
+      window.removeEventListener('scroll', updateViewport, true)
       element.close()
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
-      else launcherRef.current?.focus()
+      if (launcherRef.current?.isConnected) launcherRef.current.focus()
+      else if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
     }
   }, [open])
+  const composerEnabled = Boolean(usage) && !expired
   useEffect(() => {
-    if (open && list.current) list.current.scrollTop = list.current.scrollHeight
-  }, [messages, busy, open])
+    if (open && composerEnabled) input.current?.focus({preventScroll: true})
+  }, [open, composerEnabled])
+  useEffect(() => {
+    const lastMessage = messages.at(-1)?.id
+    const appended = lastMessage !== undefined && lastMessage !== previousLastMessage.current
+    previousLastMessage.current = lastMessage
+    if (!open || !list.current) return
+    if (!messages.length) list.current.scrollTop = 0
+    else if (appended) list.current.scrollTop = list.current.scrollHeight
+  }, [messages, open])
 
   const expire = () => { setExpired(true); setUsage(null); setMessages([]); setDraft('') }
   const refreshUsage = async () => {
@@ -410,21 +446,25 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
   }, [unread])
   const status = privateFocus ? copy.status.private : busy ? copy.status.thinking
     : eyeState === 'off' || eyeState === 'error' ? copy.status.unavailable : copy.status.ready
-  const style = {'--assistant-viewport-height': `${viewport.height}px`, '--assistant-viewport-top': `${viewport.top}px`} as CSSProperties
+  const style = {'--assistant-viewport-height': `${viewport.height}px`, '--assistant-viewport-top': `${viewport.top}px`,
+    '--assistant-viewport-width': `${viewport.width}px`, '--assistant-viewport-left': `${viewport.left}px`,
+    '--assistant-dialog-left': `${placement.left}px`, '--assistant-dialog-top': `${placement.top}px`,
+    '--assistant-dialog-height': `${placement.height}px`, '--assistant-arrow-left': `${placement.arrowLeft}px`,
+    '--assistant-origin-y': placement.above ? '100%' : '0%'} as CSSProperties
 
-  const launcher = <button ref={launcherRef} type="button" className="assistantLauncher" aria-label={copy.open} data-motion-paused={motionPaused} aria-describedby={unread ? 'assistant-checkin-unread' : undefined} aria-haspopup="dialog" aria-expanded={open} onClick={openChat}><KaisEye size={56} state={eyeState} unreadBadge={unread > 0} aria-label={copy.eyeStates[eyeState]}/>
+  const launcher = <button ref={launcherRef} type="button" className="assistantLauncher" aria-label={copy.open} data-motion-paused={motionPaused} aria-describedby={unread ? 'assistant-checkin-unread' : undefined} aria-haspopup="dialog" aria-expanded={open} onClick={openChat}><KaisEye size={56} state={eyeState} unreadBadge={unread > 0}/>
       {showIntro && !open && !privateFocus && <span className="assistantIntro" aria-hidden="true">{copy.title}</span>}
       {unread > 0 && <span id="assistant-checkin-unread" className="assistantBadge" role="status" aria-label={copy.proactiveUnread}>{unread}</span>}
     </button>
   return <>
     {launcherTarget === undefined ? launcher : launcherTarget && createPortal(launcher, launcherTarget)}
-    {open && createPortal(<dialog ref={dialog} className="assistantDialog" style={style} data-assistant-chat data-motion-paused={motionPaused} data-compact-viewport={viewport.height < 500 || undefined} aria-labelledby="assistant-title"
+    {open && createPortal(<dialog ref={dialog} className="assistantDialog" style={style} data-assistant-chat data-side={placement.above ? 'above' : 'below'} data-motion-paused={motionPaused} data-compact-viewport={viewport.height < 500 || undefined} role="dialog" aria-label={copy.title} aria-labelledby="assistant-title"
       onCancel={event => {event.preventDefault(); setOpen(false)}}
       onClick={event => {if (event.target === event.currentTarget) setOpen(false)}}>
       <div className="assistantLayout">
-        <header className="assistantHeader"><KaisEye size={36} state={eyeState} aria-label={copy.eyeStates[eyeState]}/><div><h2 id="assistant-title">{copy.title}</h2><small className="assistantState" role="status">{status}</small></div>
+        <header className="assistantHeader"><KaisEye size={36} state={eyeState}/><div><h2 id="assistant-title">{copy.title}</h2><small className="assistantState" role="status">{status}</small></div>
           <button type="button" aria-label={copy.clear} disabled={busy} onClick={() => {setMessages([]); setIssue(null)}}><Trash2 aria-hidden="true"/></button>
-          <button type="button" autoFocus aria-label={copy.close} onClick={() => setOpen(false)}><X aria-hidden="true"/></button>
+          <button type="button" aria-label={copy.close} onClick={() => setOpen(false)}><X aria-hidden="true"/></button>
         </header>
         <div className="assistantMeta">
           <div className={`assistantUsage${usage?.remaining === 0 ? ' exhausted' : ''}`} role="status" title={usage ? copy.usage(usage.remaining, usage.total) : undefined}>{usage ? copy.usage(usage.remaining, usage.total) : expired ? copy.session : copy.loading}</div>
@@ -438,7 +478,7 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
         <div className="assistantMessages" ref={list} role="log" aria-live="polite" aria-relevant="additions" aria-busy={busy}>
           {!messages.length && <div className="assistantEmpty"><h3>{copy.welcome}</h3><p>{copy.empty}</p><small>{copy.eyePrivacy}</small></div>}
           {messages.map(message => <article key={message.id} className={`assistantMessage ${message.role}`} lang={message.language}>
-            {message.role === 'assistant' && <KaisEye size={24} state="idle" aria-label={copy.eyeStates.idle}/>}
+            {message.role === 'assistant' && <KaisEye size={24} state="idle"/>}
             <div className="assistantBubble">
             <small className="assistantMessageRole">{message.role === 'assistant' ? copy.title : copy.you}</small>
             {message.proactive && <small className="assistantCheckinLabel">{copy.proactiveLabel}</small>}
@@ -470,7 +510,7 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
         </div>
         <form className="assistantComposer" onSubmit={submit}>
           <label className="assistantInputLabel" htmlFor="assistant-input">{copy.input}</label>
-          <div><textarea ref={input} id="assistant-input" rows={1} value={draft} placeholder={copy.placeholder} disabled={!usage || expired}
+          <div><textarea ref={input} id="assistant-input" autoFocus rows={1} value={draft} placeholder={copy.placeholder} disabled={!usage || expired}
             data-private={privateDraft ? 'true' : undefined}
             aria-describedby={`${privateDraft ? 'assistant-secret-warning' : 'assistant-secret'} assistant-length`} onChange={event => {setDraft(event.target.value); setLengthError(false)}}
             onKeyDown={event => {if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {event.preventDefault(); void sendMessage(draft)}}}/>
