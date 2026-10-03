@@ -964,7 +964,7 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
   const previewStop = numberValue(form.stop) || Number(analysis?.stop_loss || 0)
   const previewTp1 = numberValue(form.tp1) || Number(analysis?.tp1 || 0)
   const previewNotional = Number.isFinite(previewEntry) && previewEntry > 0 ? numberValue(form.margin) * previewLeverage : 0
-  const previewNotionalCap = status?.limits.max_notional_usdt ?? 200
+  const previewNotionalCap = status?.limits?.max_notional_usdt ?? 200
   const previewQuantity = previewEntry > 0 ? previewNotional / previewEntry : 0
   const previewRisk = previewEntry > 0 && previewStop > 0 ? Math.abs(previewEntry - previewStop) * previewQuantity : 0
   const previewAvailable = previewEntry > 0 && previewStop > 0 && previewTp1 > 0 && previewQuantity > 0
