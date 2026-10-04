@@ -66,6 +66,13 @@ def complete_reconciliation_snapshot(**overrides):
     return snapshot
 
 
+def shared_auth_pool():
+    return SimpleNamespace(fetchrow=AsyncMock(return_value={
+        "auth_version": 1,
+        "security": {"active": True, "email_verified": True, "role": "OWNER"},
+    }))
+
+
 class V25LiveGuardCoreTests(unittest.TestCase):
     def test_external_history_keeps_unmatched_binance_records_read_only(self):
         state = initial_state()
@@ -529,9 +536,12 @@ class V25LiveGuardCoreTests(unittest.TestCase):
     def test_background_credentials_fall_back_to_connected_live_session(self):
         state = initial_state()
         state["live_session_authorization"] = {
-            "session_id": "session-1", "user_id": "WEB_OWNER", "fingerprint": "fingerprint",
+            "session_id": "session-1", "user_id": "WEB_OWNER", "fingerprint": "fingerprint", "auth_version": 1,
+            "auth_expires_at_epoch": time.time() + 3600,
         }
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        application = SimpleNamespace(state=SimpleNamespace(
+            v25_execution=state, db_pool=shared_auth_pool(), v22_commercial={"state": {"users": []}},
+        ))
         credentials = ("api-key-123456", "secret-key-123456")
 
         with patch.object(v25_execution, "session_credentials_for_identity", new=AsyncMock(return_value=credentials)) as resolver, \
@@ -539,14 +549,20 @@ class V25LiveGuardCoreTests(unittest.TestCase):
             resolved = asyncio.run(v25_execution.auto_session_credentials(application, state))
 
         self.assertEqual(resolved, credentials)
-        resolver.assert_awaited_once_with(application, "session-1", "WEB_OWNER", "LIVE", "fingerprint", force_refresh=False)
+        resolver.assert_awaited_once_with(
+            application, "session-1", "WEB_OWNER", "LIVE", "fingerprint", force_refresh=False,
+            auth_version=1, auth_expires_at_epoch=state["live_session_authorization"]["auth_expires_at_epoch"],
+        )
 
     def test_background_credentials_keep_protected_position_monitoring_after_consent_expires(self):
         state = initial_state()
         state["live_session_authorization"] = {
-            "session_id": "session-1", "user_id": "WEB_OWNER", "fingerprint": "fingerprint",
+            "session_id": "session-1", "user_id": "WEB_OWNER", "fingerprint": "fingerprint", "auth_version": 1,
+            "auth_expires_at_epoch": time.time() + 3600,
         }
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        application = SimpleNamespace(state=SimpleNamespace(
+            v25_execution=state, db_pool=shared_auth_pool(), v22_commercial={"state": {"users": []}},
+        ))
         credentials = ("api-key-123456", "secret-key-123456")
 
         with patch.object(v25_execution, "session_credentials_for_identity", new=AsyncMock(return_value=credentials)), \
@@ -833,10 +849,12 @@ class V25LiveGuardCoreTests(unittest.TestCase):
     def test_consent_does_not_implicitly_acknowledge_current_policy(self):
         state = initial_state()
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
-        request = SimpleNamespace(app=application)
+        request = SimpleNamespace(
+            app=application, method="POST", headers={"x-protrebot-session": "owner-session"},
+            state=SimpleNamespace(member={"id": "owner", "role": "OWNER"}),
+        )
 
-        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
-            patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
+        with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
             patch.object(v25_execution, "persist_state"):
             asyncio.run(v25_execution.v25_web_consent(
                 request,
@@ -852,9 +870,13 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         state["auto"].update({"enabled": True, "session_until": now + v25_execution.LIVE_AUTO_SESSION_SECONDS})
         digest = policy_digest(state["policy"])
         state["policy_ack_digest"] = digest
-        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None)))
-        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
-            patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None)),
+            method="POST", headers={"x-protrebot-session": "owner-session"},
+            state=SimpleNamespace(member={"id": "owner", "role": "OWNER"}),
+        )
+        state["live_session_authorization"].update(user_id="owner", session_id=v25_execution.session_id(request))
+        with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
             patch.object(v25_execution, "persist_state"), \
             patch.object(v25_execution.time, "time", return_value=now):
             asyncio.run(v25_execution.v25_web_consent(
@@ -874,10 +896,13 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         state["armed_until"] = time.time() + 300
         state["real_trading_locked"] = False
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
-        request = SimpleNamespace(app=application)
+        request = SimpleNamespace(
+            app=application, method="PUT", headers={"x-protrebot-session": "owner-session"},
+            state=SimpleNamespace(member={"id": "owner", "role": "OWNER"}),
+        )
+        state["live_session_authorization"].update(user_id="owner", session_id=v25_execution.session_id(request))
 
-        with patch.object(v25_execution, "execution_owner", return_value={"id": "owner"}), \
-            patch.object(v25_execution, "consent_status", return_value={"active": True, "fingerprint": "fingerprint"}), \
+        with patch.object(v25_execution, "consent_status", return_value={"active": True, "fingerprint": "fingerprint"}), \
             patch.object(v25_execution, "persist_state"):
             asyncio.run(v25_execution.v25_policy(
                 request,
@@ -947,12 +972,19 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(result["reason"], "SESSION_CHANGED")
 
     def test_session_bound_credentials_do_not_fallback_to_another_session(self):
-        pool = SimpleNamespace(fetchrow=AsyncMock(return_value=None), fetch=AsyncMock())
-        application = SimpleNamespace(state=SimpleNamespace(db_pool=pool))
+        pool = SimpleNamespace(
+            fetchrow=AsyncMock(side_effect=lambda query, *args: {
+                "auth_version": 1, "security": {"active": True, "email_verified": True, "role": "OWNER"},
+            } if "commercial_auth_users" in query else None),
+            fetch=AsyncMock(return_value=[]),
+        )
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=pool, v22_commercial={"state": {"users": []}}))
         with patch.object(exchange_connections, "ensure_exchange_vault", new=AsyncMock(return_value=True)), \
             patch.object(exchange_connections, "ensure_schema", new=AsyncMock()):
             result = asyncio.run(exchange_connections.session_credentials_for_identity(
                 application, "missing-session", "user-a", "LIVE", "fingerprint-a",
+                auth_version=1,
+                auth_expires_at_epoch=time.time() + 3600,
             ))
         self.assertEqual(result, ("", ""))
         pool.fetch.assert_awaited_once_with(
@@ -2292,7 +2324,15 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("X-ProTreBot-Owner':ownerAccessToken()", ACTIVE_COMMERCIAL_SOURCE)
 
     def test_vercel_build_targets_current_render_api(self):
-        self.assertIn('"VITE_API_BASE": "https://protrebot-rkpt.onrender.com"', VERCEL_SOURCE)
+        config = json.loads(VERCEL_SOURCE)
+        self.assertEqual(config["env"]["VITE_API_BASE"], "/api")
+        self.assertEqual(config["rewrites"][0], {
+            "source": "/api/:path*",
+            "destination": "https://protrebot-rkpt.onrender.com/api/:path*",
+        })
+        self.assertEqual(config["rewrites"][-1], {
+            "source": "/(.*)", "destination": "/index.html",
+        })
         self.assertNotIn("tradebt8.onrender.com", VERCEL_SOURCE)
 
     def test_render_manifest_matches_production_service(self):
@@ -2324,6 +2364,8 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
                 "user_id": self.USER_ID,
                 "fingerprint": fingerprint,
                 "expires_at_epoch": expires_at,
+                "auth_version": 1,
+                "auth_expires_at_epoch": expires_at,
             },
         })
         state["auto"].update({"enabled": True, "session_until": expires_at})
@@ -2341,8 +2383,12 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
             "fingerprint": fingerprint,
             "trading_account_id": f"BINANCE:LIVE:FINGERPRINT:{fingerprint[:64]}",
             "policy_digest": policy_digest(state["policy"]),
+            "auth_version": 1,
+            "auth_expires_at_epoch": expires_at,
         }
-        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
+        application = SimpleNamespace(state=SimpleNamespace(
+            v25_execution=state, db_pool=shared_auth_pool(), v22_commercial={"state": {"users": []}},
+        ))
         return application, state, credentials
 
     def _resolve(self, application, result):

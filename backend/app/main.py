@@ -24,6 +24,10 @@ from pydantic import BaseModel, Field
 from .analysis import analyze
 from .analyst_credits import router as analyst_credits_router
 from .assistant_api import router as assistant_router, shutdown_assistant
+from .browser_security import (
+    OWNER_ACCESS_COOKIE, USER_SESSION_COOKIE, browser_request, clear_browser_cookie,
+    set_browser_cookie, validate_browser_request,
+)
 from .premium_access import public_projection, requires_premium
 from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .exchange_connections import (
@@ -47,6 +51,7 @@ from .binance_demo import (
 from .v21_demo import init_v21_demo, restore_v21_state_for_user, router as v21_demo_router, shutdown_v21_demo
 from .v22_commercial import (
     authenticated_user,
+    authenticated_user_async,
     ensure_commercial_schema,
     gmail_configured,
     init_v22_commercial,
@@ -1190,7 +1195,7 @@ async def lifespan(app: FastAPI):
     await app.state.http.aclose()
 
 
-app = FastAPI(title="ProTreBot Elite X API", version="28.0.0", lifespan=lifespan)
+app = FastAPI(title="ProTreBot Elite X API", version="28.0.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=WEB_CORS_ORIGINS,
@@ -1201,7 +1206,7 @@ app.add_middleware(
 )
 
 MEMBER_PUBLIC_PATHS = frozenset({
-    "/api/health", "/api/health/database", "/api/web/access/check", "/api/client-errors", "/api/v22/public", "/api/v22/bootstrap",
+    "/api/health", "/api/health/database", "/api/web/access/check", "/api/web/access/logout", "/api/client-errors", "/api/v22/public", "/api/v22/bootstrap",
     "/api/v22/auth/login", "/api/v22/auth/register", "/api/v22/auth/verify-email",
     "/api/v22/auth/verification-status", "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
 })
@@ -1249,6 +1254,12 @@ async def hydrate_authenticated_user_state(request: Request) -> None:
 
 
 def apply_cors_headers(request, response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
     origin = request.headers.get("origin")
     if is_allowed_cors_origin(origin, WEB_CORS_ORIGINS):
         response.headers["Access-Control-Allow-Origin"] = origin
@@ -1260,17 +1271,27 @@ def apply_cors_headers(request, response):
 @app.middleware("http")
 async def owner_preview_gate(request, call_next):
     request.state.request_id = request.headers.get("x-request-id", "").strip()[:100] or str(uuid.uuid4())
+    try:
+        validate_browser_request(request, WEB_CORS_ORIGINS)
+    except HTTPException as exc:
+        logger.warning("Browser request rejected path=%s reason=%s", request.url.path, exc.detail)
+        return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
+    owner_cookie = request.cookies.get(OWNER_ACCESS_COOKIE, "")
+    supplied_owner = request.headers.get("x-protrebot-owner") or owner_cookie
+    supplied_authorization = request.headers.get("authorization")
+    if not supplied_authorization and request.cookies.get(USER_SESSION_COOKIE):
+        supplied_authorization = "Bearer " + request.cookies[USER_SESSION_COOKIE]
     decision = evaluate_access(
         required=WEB_REQUIRE_AUTH,
         configured_token=WEB_ACCESS_TOKEN,
-        authorization=request.headers.get("authorization"),
-        owner_access=request.headers.get("x-protrebot-owner"),
+        authorization=supplied_authorization,
+        owner_access=supplied_owner,
         path=request.url.path,
         method=request.method,
     )
     if not decision.allowed:
         return apply_cors_headers(request, JSONResponse({"detail": decision.detail}, status_code=decision.status_code))
-    configured_owner = str(request.headers.get("x-protrebot-owner") or "").strip() or bearer_token(request.headers.get("authorization"))
+    configured_owner = str(supplied_owner or "").strip() or bearer_token(supplied_authorization)
     owner_access_authenticated = bool(
         WEB_REQUIRE_AUTH
         and request.method.upper() != "OPTIONS"
@@ -1281,9 +1302,12 @@ async def owner_preview_gate(request, call_next):
     protected_member_request = request.url.path.startswith("/api/") and request.method.upper() != "OPTIONS" and request.url.path not in MEMBER_PUBLIC_PATHS
     if protected_member_request:
         try:
-            request.state.member = authenticated_user(request)
+            request.state.member = await authenticated_user_async(request)
         except HTTPException as exc:
-            return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
+            response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+            if exc.status_code == 401 and request.cookies.get(USER_SESSION_COOKIE):
+                clear_browser_cookie(response, request, USER_SESSION_COOKIE)
+            return apply_cors_headers(request, response)
     if protected_member_request:
         from .v22_commercial import access_snapshot
         access = access_snapshot(request.app.state.v22_commercial["state"], request.state.member)
@@ -1295,7 +1319,7 @@ async def owner_preview_gate(request, call_next):
     request.state.web_owner_authenticated = bool(
         owner_access_authenticated
     )
-    paper_prefixes = ("/api/paper", "/api/v6", "/api/v7", "/api/v10", "/api/v11", "/api/v9/paper")
+    paper_prefixes = ("/api/paper", "/api/grid", "/api/v6", "/api/v7", "/api/v10", "/api/v11", "/api/v9/paper")
     if not PAPER_ENABLED and request.method.upper() in {"POST", "PUT", "DELETE", "PATCH"} and request.url.path.startswith(paper_prefixes):
         return apply_cors_headers(
             request,
@@ -1369,6 +1393,12 @@ async def client_error(request: Request, payload: dict[str, Any]):
     now = time.monotonic()
     client_key = request.client.host if request.client else "unknown"
     buckets = getattr(request.app.state, "client_error_buckets", {})
+    request.app.state.client_error_buckets = buckets
+    for key, stamps in list(buckets.items()):
+        if not any(now - stamp < 60 for stamp in stamps):
+            del buckets[key]
+    if client_key not in buckets and len(buckets) >= 4096:
+        raise HTTPException(429, "Client error reporting capacity exceeded")
     recent = [stamp for stamp in buckets.get(client_key, []) if now - stamp < 60]
     if len(recent) >= 30:
         raise HTTPException(429, "Too many client error reports")
@@ -1376,7 +1406,7 @@ async def client_error(request: Request, payload: dict[str, Any]):
     buckets[client_key] = recent
     event = build_error_event(
         source="frontend", kind=str(payload.get("kind") or "ClientError"),
-        message=str(payload.get("message") or "Unknown client error"), severity=str(payload.get("severity") or "ERROR"),
+        message=str(payload.get("message") or "Unknown client error"), severity="ERROR",
         service="frontend",
         route=str(payload.get("route") or request.headers.get("referer") or ""), method=str(payload.get("method") or ""),
         request_id=request.state.request_id, user_id=(getattr(request.state, "member", None) or {}).get("id"),
@@ -1536,14 +1566,24 @@ async def healthz():
 
 
 @app.get("/api/web/access/check")
-async def web_access_check():
+async def web_access_check(request: Request):
     """The owner gate middleware has already authenticated this request."""
-    return {
+    response = JSONResponse({
         "authorized": True,
         "mode": "OWNER_PREVIEW",
         "real_orders_enabled": False,
         "testnet_orders_available": True,
-    }
+    })
+    if browser_request(request) and WEB_REQUIRE_AUTH:
+        set_browser_cookie(response, request, OWNER_ACCESS_COOKIE, WEB_ACCESS_TOKEN, max_age=8 * 60 * 60)
+    return response
+
+
+@app.post("/api/web/access/logout")
+async def web_access_logout(request: Request):
+    response = JSONResponse({"authorized": False})
+    clear_browser_cookie(response, request, OWNER_ACCESS_COOKIE)
+    return response
 
 
 @app.get("/api/markets")
@@ -2573,8 +2613,9 @@ async def grid_lab_endpoint(
 
 
 @app.get("/api/grid/plans")
-async def saved_grid_plans():
-    plans = list(app.state.paper.get("grid_plans", []))
+async def saved_grid_plans(request: Request):
+    user_id = authenticated_user(request)["id"]
+    plans = owned_grid_plans(request.app.state.paper, user_id)
     return {
         "plans": plans[:GRID_PLAN_LIMIT], "active_count": sum(1 for item in plans if item.get("active")),
         "orders_enabled": False,
@@ -2583,27 +2624,37 @@ async def saved_grid_plans():
 
 
 @app.post("/api/grid/plan/save")
-async def save_grid_plan(request: GridPlanRequest):
-    plan = await smart_grid_plan(request.symbol, request.interval, request.capital)
+async def save_grid_plan(payload: GridPlanRequest, request: Request):
+    user_id = authenticated_user(request)["id"]
+    plan = await smart_grid_plan(payload.symbol, payload.interval, payload.capital)
     stored_plan = {key: value for key, value in plan.items() if key != "cached"}
     stored_plan.update({
-        "id": f"grid-{int(time.time() * 1000)}-{stored_plan['symbol']}",
+        "id": f"grid-{uuid.uuid4().hex}", "user_id": user_id,
         "saved_at": datetime.now(timezone.utc).isoformat(), "active": True,
         "status": "PAPER HAZIR" if stored_plan["paper_eligible"] else "İZLEME PLANI",
     })
-    paper = app.state.paper
+    paper = request.app.state.paper
     async with paper["lock"]:
         plans = paper.setdefault("grid_plans", [])
         for item in plans:
-            if item.get("symbol") == stored_plan["symbol"] and item.get("interval") == stored_plan["interval"]:
+            if item.get("user_id") == user_id and item.get("symbol") == stored_plan["symbol"] and item.get("interval") == stored_plan["interval"]:
                 item["active"] = False
         plans.insert(0, stored_plan)
-        del plans[GRID_PLAN_LIMIT:]
+        owner_count = 0
+        retained = []
+        for item in plans:
+            if item.get("user_id") == user_id:
+                owner_count += 1
+                if owner_count > GRID_PLAN_LIMIT:
+                    continue
+            retained.append(item)
+        plans[:] = retained
         add_paper_notification(
             paper, "V5 GRID PLANI",
             f"{stored_plan['symbol']} {stored_plan['mode']} kalıcı Paper hafızasına kaydedildi; emir gönderimi kapalı.",
+            user_id=user_id,
         )
-    asyncio.create_task(persist_paper_snapshot(app))
+    asyncio.create_task(persist_paper_snapshot(request.app))
     return {
         "message": "Grid planı Paper hafızasına kaydedildi. Gerçek/Testnet emirleri kapalı kalır.",
         "plan": stored_plan, "orders_enabled": False,
@@ -2611,17 +2662,18 @@ async def save_grid_plan(request: GridPlanRequest):
 
 
 @app.post("/api/grid/plan/clear/{plan_id}")
-async def clear_grid_plan(plan_id: str):
-    paper = app.state.paper
+async def clear_grid_plan(plan_id: str, request: Request):
+    user_id = authenticated_user(request)["id"]
+    paper = request.app.state.paper
     changed = False
     async with paper["lock"]:
         for item in paper.setdefault("grid_plans", []):
-            if item.get("id") == plan_id and item.get("active"):
+            if item.get("id") == plan_id and item.get("user_id") == user_id and item.get("active"):
                 item["active"] = False
                 changed = True
                 break
     if changed:
-        asyncio.create_task(persist_paper_snapshot(app))
+        asyncio.create_task(persist_paper_snapshot(request.app))
     return {
         "message": "Paper grid planı arşivlendi." if changed else "Aktif plan bulunamadı.",
         "orders_enabled": False,
@@ -5234,12 +5286,19 @@ async def session_intelligence_endpoint(symbol: str = "", regime: str = "", dire
     return session_intelligence(app.state.paper, symbol, regime, direction)
 
 
-def add_paper_notification(paper: dict, kind: str, message: str) -> None:
+def add_paper_notification(paper: dict, kind: str, message: str, *, user_id: str | None = None) -> None:
     notifications = paper.setdefault("notifications", [])
-    if notifications and notifications[0].get("kind") == kind and notifications[0].get("message") == message:
+    if notifications and notifications[0].get("kind") == kind and notifications[0].get("message") == message and notifications[0].get("user_id") == user_id:
         return
-    notifications.insert(0, {"kind": kind, "message": message, "created_at": datetime.now(timezone.utc).isoformat()})
-    del notifications[20:]
+    notifications.insert(0, {"kind": kind, "message": message, "created_at": datetime.now(timezone.utc).isoformat(), **({"user_id": user_id} if user_id else {})})
+    counts: dict[str | None, int] = {}
+    retained = []
+    for item in notifications:
+        owner = item.get("user_id")
+        counts[owner] = counts.get(owner, 0) + 1
+        if counts[owner] <= 20:
+            retained.append(item)
+    notifications[:] = retained
 
 
 def decision_time(value: str | None) -> datetime | None:
@@ -6471,7 +6530,19 @@ def paper_performance_payload(paper: dict) -> dict:
     }
 
 
-def daily_report_payload(paper: dict) -> dict:
+def owned_grid_plans(paper: dict, user_id: str | None) -> list[dict]:
+    return [item for item in paper.get("grid_plans", []) if user_id and item.get("user_id") == user_id]
+
+
+def owned_paper_notifications(paper: dict, user_id: str | None) -> list[dict]:
+    return [
+        item for item in paper.get("notifications", [])
+        if (item.get("user_id") == user_id and user_id)
+        or (not item.get("user_id") and item.get("kind") != "V5 GRID PLANI")
+    ]
+
+
+def daily_report_payload(paper: dict, user_id: str | None = None) -> dict:
     """Günlük Paper performansını ve uygulama içi uyarıları tek kartta toplar."""
     today = datetime.now(timezone.utc).date().isoformat()
     today_trades = [
@@ -6503,12 +6574,12 @@ def daily_report_payload(paper: dict) -> dict:
         "closed_trades": len(today_trades), "open_positions": sum(1 for item in paper["positions"] if item["status"] == "AÇIK"),
         "remaining_loss_budget": risk["remaining_loss_budget"], "shadow_records": len(shadow["events"]),
         "blackbox_records": blackbox["records"], "blackbox_status": blackbox["status"],
-        "active_grid_plans": sum(1 for item in paper.get("grid_plans", []) if item.get("active")),
-        "emergency_active": brake["active"], "notifications": paper.get("notifications", [])[:6],
+        "active_grid_plans": sum(1 for item in owned_grid_plans(paper, user_id) if item.get("active")),
+        "emergency_active": brake["active"], "notifications": owned_paper_notifications(paper, user_id)[:6],
     }
 
 
-def paper_payload() -> dict:
+def paper_payload(user_id: str | None = None) -> dict:
     paper = app.state.paper
     positions = paper["positions"]
     open_positions = [position for position in positions if position["status"] == "AÇIK"]
@@ -6527,9 +6598,9 @@ def paper_payload() -> dict:
         "risk": paper_risk_payload(paper), "performance": paper_performance_payload(paper),
         "shadow": shadow_payload(paper), "emergency_brake": emergency_brake_payload(paper),
         "blackbox": decision_blackbox_payload(paper),
-        "grid_plans": paper.get("grid_plans", [])[:GRID_PLAN_LIMIT],
+        "grid_plans": owned_grid_plans(paper, user_id)[:GRID_PLAN_LIMIT],
         "strategy_orchestrator": v7_orchestrator_payload(paper.get("strategy_orchestrator", empty_strategy_orchestrator_state())),
-        "notifications": paper.get("notifications", [])[:8],
+        "notifications": owned_paper_notifications(paper, user_id)[:8],
     }
 
 
@@ -6685,7 +6756,8 @@ async def v20_replay_endpoint(
 
 
 @app.get("/api/paper/account")
-async def paper_account():
+async def paper_account(request: Request):
+    user_id = authenticated_user(request)["id"]
     refresh_warning = None
     try:
         await refresh_paper_limit_orders()
@@ -6695,7 +6767,7 @@ async def paper_account():
         # okunabilsin. Bu uç nokta hiçbir zaman gerçek borsa emri üretmez.
         refresh_warning = f"Canlı Paper fiyatı geçici olarak yenilenemedi: {str(exc)[:120]}"
     try:
-        payload = paper_payload()
+        payload = paper_payload(user_id)
         if refresh_warning:
             payload["warning"] = refresh_warning
         return payload
@@ -6722,10 +6794,11 @@ async def paper_account():
 
 
 @app.get("/api/report/daily")
-async def daily_report():
+async def daily_report(request: Request):
+    user_id = authenticated_user(request)["id"]
     await refresh_paper_limit_orders()
     await refresh_paper_positions()
-    return daily_report_payload(app.state.paper)
+    return daily_report_payload(request.app.state.paper, user_id)
 
 
 @app.post("/api/shadow/toggle")

@@ -9,6 +9,8 @@ const KEY = chatStorageKey('assistant-member')
 const AUTH_URL = 'http://127.0.0.1:4175/'
 const OWNER_URL = 'http://127.0.0.1:4176/'
 const SESSION_KEY = 'protrebot-v25-session'
+const USER_COOKIE = 'protrebot_session'
+const COOKIE_HINT = 'cookie-session:assistant-member'
 const dialog = (page: Page) => page.getByRole('dialog', {name: 'Kais AI', exact: true})
 const seedRow = (id: number): StoredChatMessage => ({
   id: `seed-${id}`, role: id % 2 ? 'assistant' : 'user', language: 'tr', content: `Eski mesaj ${id}`,
@@ -18,7 +20,78 @@ async function setup(page: Page, remembered = false) {
   await page.clock.install({time: new Date(NOW)})
   await page.clock.pauseAt(new Date(NOW + 1000))
   await page.emulateMedia({reducedMotion: 'reduce'})
-  return mockAssistant(page, remembered)
+  if (remembered) {
+    await page.addInitScript(({key, hint}) => {
+      if (sessionStorage.getItem('assistant-remembered-test-seeded')) return
+      sessionStorage.setItem('assistant-remembered-test-seeded', '1')
+      if (!localStorage.getItem(key)) localStorage.setItem(key, hint)
+    }, {key: SESSION_KEY, hint: COOKIE_HINT})
+  }
+  const state = await mockAssistant(page, remembered)
+  await page.addInitScript(({remembered, key, hint}) => {
+    const storage = remembered ? localStorage : sessionStorage
+    if (storage.getItem(key) === 'member-ui-test-session') storage.setItem(key, hint)
+  }, {remembered, key: SESSION_KEY, hint: COOKIE_HINT})
+  await seedUserCookie(page)
+  await page.route('**/api/v22/auth/login', async route => {
+    const request = route.request()
+    state.requests.push(`${request.method()} /api/v22/auth/login`)
+    expect(request.headers()['x-requested-with']).toBe('XMLHttpRequest')
+    expect(request.headers()['authorization']).toBeUndefined()
+    state.profileStatus = 200
+    state.sessionStatus = 200
+    await route.fulfill({json: {token: `cookie-session:${state.userId}`, user: {
+      id: state.userId, role: 'CUSTOMER', active: true, email_verified: true,
+      email: 'member@example.test', display_name: 'UI Test Member',
+    }}, headers: {'Set-Cookie': `${USER_COOKIE}=mock-signed-user-session; HttpOnly; SameSite=Lax; Path=/api`}})
+  })
+  await page.route('**/api/v22/auth/logout', async route => {
+    state.requests.push('POST /api/v22/auth/logout')
+    await route.fulfill({json: {ok: true}, headers: {
+      'Set-Cookie': `${USER_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/api`,
+    }})
+  })
+  await page.route('**/api/web/access/logout', async route => {
+    state.requests.push('POST /api/web/access/logout')
+    await route.fulfill({json: {ok: true}, headers: {
+      'Set-Cookie': 'protrebot_owner=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/api',
+    }})
+  })
+  await page.route('**/api/web/access/check', async route => {
+    if (!route.request().headers()['cookie']?.includes('protrebot_owner=mock-owner-access-cookie') || state.ownerStatus === 401) {
+      state.requests.push('GET /api/web/access/check')
+      await route.fulfill({status: 401, json: {authorized: false}})
+      return
+    }
+    await route.fallback()
+  })
+  await page.route(/\/api\/v22\/(?:session|profile)(?:\?.*)?$/, async route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    const hasCookie = request.headers()['cookie']?.includes(`${USER_COOKIE}=mock-signed-user-session`) === true
+    const status = path.endsWith('/profile') ? state.profileStatus : state.sessionStatus
+    if (!hasCookie || status === 401) {
+      state.requests.push(`${request.method()} ${path}`)
+      await route.fulfill({status: 401, json: {detail: 'Not authenticated'}, headers: {
+        'Set-Cookie': `${USER_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/api`,
+      }})
+      return
+    }
+    expect(request.headers()['authorization']).toBeUndefined()
+    await route.fallback()
+  })
+  return state
+}
+
+async function seedUserCookie(page: Page) {
+  await page.context().addCookies([{
+    name: USER_COOKIE, value: 'mock-signed-user-session', domain: '127.0.0.1',
+    path: '/api', httpOnly: true, sameSite: 'Lax', secure: false,
+  }])
+}
+
+async function expectNoUserCookie(page: Page) {
+  expect((await page.context().cookies()).filter(cookie => cookie.name === USER_COOKIE)).toEqual([])
 }
 
 async function seed(page: Page, raw: string, extra?: string) {
@@ -61,10 +134,14 @@ async function chatKeys(page: Page) {
 }
 
 async function seedOwner(page: Page) {
+  await page.context().addCookies([{
+    name: 'protrebot_owner', value: 'mock-owner-access-cookie', domain: '127.0.0.1',
+    path: '/api', httpOnly: true, sameSite: 'Lax', secure: false,
+  }])
   await page.addInitScript(() => {
     if (sessionStorage.getItem('assistant-owner-test-seeded')) return
     sessionStorage.setItem('assistant-owner-test-seeded', '1')
-    sessionStorage.setItem('protrebot.web.owner-access', 'owner-ui-test-access-token-at-least-24')
+    sessionStorage.setItem('protrebot.web.owner-access', 'cookie-owner')
   })
 }
 
@@ -326,10 +403,13 @@ test('Real AuthGate logout button clears history and real login as another user 
   await expect(page.locator('.assistantMessage')).toHaveCount(0)
   expect(await chatKeys(page)).toEqual([])
   expect(state.requests).toContain('POST /api/v22/auth/logout')
+  await expectNoUserCookie(page)
   state.userId = 'signed-in-second-member'
   await page.getByLabel('E-posta', {exact: true}).fill('member@example.test')
   await page.getByLabel('Parola', {exact: true}).fill('UiLoginOnly123!')
   await page.getByRole('button', {name: 'GÜVENLİ GİRİŞ', exact: true}).click()
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key) || sessionStorage.getItem(key), SESSION_KEY)).toBe('cookie-session:signed-in-second-member')
+  expect(await page.evaluate(() => document.cookie)).not.toContain('mock-signed-user-session')
   await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   await expect(dialog(page).locator('.assistantEmpty')).toBeVisible()
   await expect(dialog(page).locator('.assistantMessage')).toHaveCount(0)
@@ -339,7 +419,7 @@ test('Real AuthGate logout button clears history and real login as another user 
   expect(await stored(page)).toBeNull()
 })
 
-test('Profile refresh 401 wipes all chat keys and memory without clearing the auth token; verified access resumes', async ({page}) => {
+test('Profile refresh 401 wipes chat and signed cookie, retaining only a harmless hint until verified access resumes', async ({page}) => {
   const state = await setup(page)
   await openChat(page)
   await send(page, 'Profil kontrolü öncesi sohbet')
@@ -349,8 +429,12 @@ test('Profile refresh 401 wipes all chat keys and memory without clearing the au
   await expect(page.getByRole('button', {name: 'Kais AI', exact: true})).toHaveCount(0)
   await expect(page.locator('.assistantMessage')).toHaveCount(0)
   expect(await chatKeys(page)).toEqual([])
-  expect(await page.evaluate(key => sessionStorage.getItem(key), SESSION_KEY)).toBe('member-ui-test-session')
-  state.profileStatus = 200; state.userId = 'profile-verified-member'
+  expect(await page.evaluate(key => sessionStorage.getItem(key), SESSION_KEY)).toBe(COOKIE_HINT)
+  await expectNoUserCookie(page)
+  state.profileStatus = 200
+  expect(await page.evaluate(async () => (await fetch('/api/v22/profile')).status)).toBe(401)
+  state.userId = 'profile-verified-member'
+  await seedUserCookie(page)
   await page.evaluate(() => window.dispatchEvent(new Event('protrebot-access-refresh')))
   await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   await expect(dialog(page).locator('.assistantEmpty')).toBeVisible()
@@ -376,11 +460,14 @@ test('Missing token on access refresh wipes all chat history and removes in-memo
 test('Real logout in one tab stops the receiving tab, and later submit or reload cannot resurrect history', async ({page, context}) => {
   const state = await setup(page, true)
   await openAt(page, AUTH_URL)
-  await send(page, 'İki sekmeli çıkış öncesi')
   const peer = await context.newPage()
   try {
     const peerState = await setup(peer, true)
     await openAt(peer, AUTH_URL)
+    await page.evaluate(() => window.dispatchEvent(new Event('protrebot-access-refresh')))
+    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+    await expect(dialog(page).getByRole('textbox')).toBeEnabled()
+    await send(page, 'İki sekmeli çıkış öncesi')
     await expect(dialog(peer).locator('.assistantMessage')).toHaveCount(2)
     await dialog(peer).getByRole('textbox').fill('Çıkıştan sonra kaydedilmemeli')
     await page.keyboard.press('Escape')
@@ -412,7 +499,7 @@ test('Changing the shared token stops the receiving tab until the new user is ve
     const peerState = await setup(peer, true)
     await openChat(peer)
     peerState.userId = 'token-replacement-member'
-    await page.evaluate(key => localStorage.setItem(key, 'replacement-ui-test-session'), SESSION_KEY)
+    await page.evaluate(key => localStorage.setItem(key, 'cookie-session:token-replacement-member'), SESSION_KEY)
     await expect(dialog(peer).getByRole('textbox')).toBeDisabled()
     await expect(dialog(peer).locator('.assistantMessage')).toHaveCount(0)
     expect(await chatKeys(peer)).toEqual([])
@@ -426,17 +513,24 @@ test('Changing the shared token stops the receiving tab until the new user is ve
   } finally { await peer.close() }
 })
 
-test('Production WebAccessGate logout button clears chat and keeps its existing reload and owner-lock behavior', async ({page}) => {
+test('Production WebAccessGate logout hides its badge for members and clears chat and owner cookie when explicitly available', async ({page}) => {
   await setup(page)
   await seedOwner(page)
   await openAt(page, OWNER_URL)
   await send(page, 'Owner çıkışı öncesi sohbet')
   await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', {name: 'Güvenli oturum · Çıkış', exact: true})).toHaveCount(0)
+  await page.evaluate(key => {
+    sessionStorage.removeItem(key)
+    localStorage.removeItem(key)
+    window.dispatchEvent(new Event('protrebot-session-changed'))
+  }, SESSION_KEY)
   await page.getByRole('button', {name: 'Güvenli oturum · Çıkış', exact: true}).click()
   await expect(page.getByRole('heading', {name: 'Yönetici erişimi', exact: true})).toBeVisible()
   expect(await chatKeys(page)).toEqual([])
   expect(await page.evaluate(() => sessionStorage.getItem('protrebot.web.owner-access'))).toBeNull()
-  expect(await page.evaluate(key => sessionStorage.getItem(key), SESSION_KEY)).toBe('member-ui-test-session')
+  expect((await page.context().cookies()).filter(cookie => cookie.name === 'protrebot_owner')).toEqual([])
+  expect((await page.context().cookies()).find(cookie => cookie.name === USER_COOKIE)?.httpOnly).toBe(true)
 })
 
 test('Production owner-access verification failure clears owner token and all chat history', async ({page}) => {
@@ -451,17 +545,18 @@ test('Production owner-access verification failure clears owner token and all ch
   expect(await page.evaluate(() => sessionStorage.getItem('protrebot.web.owner-access'))).toBeNull()
 })
 
-test('Member maintenance polling 401 remains fail-open and does not clear valid chat or auth state', async ({page}) => {
+test('Member maintenance polling 401 clears private chat and session without redundant logout', async ({page}) => {
   const state = await setup(page, true)
   await openAt(page, AUTH_URL)
   await send(page, 'Bakım yoklaması öncesi')
-  const saved = await stored(page)
   state.sessionStatus = 401
   await page.clock.runFor(45000)
   await expect.poll(() => state.requests.filter(path => path === 'GET /api/v22/session').length).toBeGreaterThan(1)
-  await expect(dialog(page).getByRole('textbox')).toBeEnabled()
-  await expect(dialog(page).locator('.assistantMessage')).toHaveCount(2)
-  expect(await stored(page)).toBe(saved)
-  expect(await page.evaluate(key => localStorage.getItem(key), SESSION_KEY)).toBe('member-ui-test-session')
+  await expect(page.getByRole('heading', {name: 'Hesabınıza giriş yapın', exact: true})).toBeVisible()
+  await expect(page.getByRole('button', {name: 'Kais AI', exact: true})).toHaveCount(0)
+  await expect(page.locator('.assistantMessage')).toHaveCount(0)
+  expect(await chatKeys(page)).toEqual([])
+  expect(await page.evaluate(key => [localStorage.getItem(key), sessionStorage.getItem(key)], SESSION_KEY)).toEqual([null, null])
+  await expectNoUserCookie(page)
   expect(state.requests).not.toContain('POST /api/v22/auth/logout')
 })

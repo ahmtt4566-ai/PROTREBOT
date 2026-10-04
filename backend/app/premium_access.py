@@ -67,6 +67,8 @@ def requires_premium(path: str, method: str) -> bool:
         return False
     if path.startswith(("/api/v25/", "/api/exchange-connections/")):
         return True
+    if path.startswith("/api/grid/plan/clear/"):
+        return True
     if path in {
         "/api/binance-demo/connect", "/api/binance-demo/arm", "/api/binance-demo/order",
         "/api/binance-demo/order/test", "/api/v21/auto/start", "/api/v21/scanner/scan",

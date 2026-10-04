@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom'
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { Activity, ArrowRight, BarChart3, Bitcoin, CircleDollarSign, Coins, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, LogOut, Mail, MailCheck, Pause, Play, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
-import { API_BASE, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
+import { API_BASE, COOKIE_SESSION_PREFIX, USER_SESSION_KEY, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import AdminPanel from './AdminPanel'
 import { AUTH_PANEL_MARKETS, LIVE_MARKET_CONFIG } from './live-market-config'
 import TickerTape from './TickerTape'
@@ -68,15 +68,19 @@ function detail(payload:unknown):string {
   return 'İşlem tamamlanamadı. Bilgilerinizi kontrol edip tekrar deneyin.'
 }
 
+class AuthRequestError extends Error {
+  constructor(message:string, readonly status:number) { super(message) }
+}
+
 async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
   const headers = new Headers(options.headers)
   if (options.body) headers.set('Content-Type','application/json')
   const response = await fetch(`${API_BASE}/v22${path}`, {...options, headers})
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
-    if (response.status === 409) throw new Error('Bu e-posta adresiyle zaten bir hesap bulunuyor.')
-    if (response.status >= 500) throw new Error('Sunucuda geçici bir sorun oluştu. Lütfen biraz sonra tekrar deneyin.')
-    throw new Error(detail(payload))
+    if (response.status === 409) throw new AuthRequestError('Bu e-posta adresiyle zaten bir hesap bulunuyor.', response.status)
+    if (response.status >= 500) throw new AuthRequestError('Sunucuda geçici bir sorun oluştu. Lütfen biraz sonra tekrar deneyin.', response.status)
+    throw new AuthRequestError(detail(payload), response.status)
   }
   return payload as T
 }
@@ -111,7 +115,7 @@ function MaintenanceScreen({mode}:{mode:string}) {
   </main>
 }
 
-function ProfileSettings({token,user,onLogout}:{token:string;user:User;onLogout:()=>void}) {
+function ProfileSettings({token,user,onLogout,onSessionEnded}:{token:string;user:User;onLogout:()=>void;onSessionEnded:()=>void}) {
   const [data,setData] = useState<ProfileData|null>(null)
   const [name,setName] = useState(user.display_name)
   const [passwords,setPasswords] = useState({current_password:'',new_password:''})
@@ -120,9 +124,9 @@ function ProfileSettings({token,user,onLogout}:{token:string;user:User;onLogout:
   const call = async <T,>(path:string,options:RequestInit = {}):Promise<T> => { const headers = new Headers(options.headers); headers.set('Authorization',`Bearer ${token}`); if (options.body) headers.set('Content-Type','application/json'); const response = await fetch(`${API_BASE}/v22${path}`,{...options,headers}); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(detail(payload)); return payload as T }
   useEffect(() => { void call<ProfileData>('/profile').then(value => {setData(value);setName(value.profile?.full_name || value.user.display_name)}).catch(error => setNotice(error instanceof Error ? error.message : 'Profil yüklenemedi.')) },[])
   const saveProfile = async () => { setBusy(true); try { await call('/profile',{method:'PATCH',body:JSON.stringify({display_name:name,preferences:data?.profile?.preferences || {}})}); setNotice('Profil güncellendi.') } catch (error) {setNotice(error instanceof Error ? error.message : 'Profil güncellenemedi.')} finally {setBusy(false)} }
-  const changePassword = async () => { setBusy(true); try { await call('/auth/change-password',{method:'POST',body:JSON.stringify(passwords)}); setPasswords({current_password:'',new_password:''}); setNotice('Parola güncellendi. Güvenlik için tekrar giriş yapın.'); setTimeout(onLogout,700) } catch (error) {setNotice(error instanceof Error ? error.message : 'Parola güncellenemedi.')} finally {setBusy(false)} }
-  const deleteAccount = async () => { if (!window.confirm('Hesabınız kapatılacak ve tüm oturumlarınız sonlandırılacak. Devam edilsin mi?')) return; setBusy(true); try { await call('/profile',{method:'DELETE'}); onLogout() } catch (error) {setNotice(error instanceof Error ? error.message : 'Hesap kapatılamadı.')} finally {setBusy(false)} }
-  return <main className="profilePage"><header className="profileHeader"><div><span>ACCOUNT / SETTINGS</span><h1>Profile &amp; Settings</h1><p>Kimlik, güvenlik ve üyelik durumunuzu yönetin.</p></div><button onClick={onLogout}><LogOut/> Çıkış</button></header>{notice && <p className="profileNotice">{notice}</p>}<div className="profileGrid"><section className="profileCard"><span>PROFILE</span><h2>Personal details</h2><label>Full name<input value={name} onChange={event => setName(event.target.value)}/></label><label>Email<input value={user.email} readOnly/></label><div className="profileVerified"><MailCheck/> {user.email_verified === false ? 'Email verification required' : 'Email verified'}</div><button disabled={busy} onClick={() => void saveProfile()}>SAVE PROFILE</button></section><section className="profileCard"><span>SECURITY</span><h2>Change password</h2><label>Current password<input data-private="true" type="password" value={passwords.current_password} onChange={event => setPasswords({...passwords,current_password:event.target.value})}/></label><label>New password<input data-private="true" type="password" value={passwords.new_password} onChange={event => setPasswords({...passwords,new_password:event.target.value})}/></label><button disabled={busy} onClick={() => void changePassword()}>UPDATE PASSWORD</button><p className="profileMuted">Session: signed bearer token · {user.role === 'OWNER' ? 'Admin' : 'Member'}</p></section><section className="profileCard"><span>SUBSCRIPTION</span><h2>Current membership</h2><div className="profileFacts"><b>Plan <strong>{data?.subscription?.plan || 'FREE'}</strong></b><b>Status <strong>{data?.subscription?.status || 'inactive'}</strong></b><b>Started <strong>{data?.subscription?.currentPeriodStart ? new Date(data.subscription.currentPeriodStart).toLocaleDateString('tr-TR') : '—'}</strong></b><b>Expires <strong>{data?.subscription?.currentPeriodEnd ? new Date(data.subscription.currentPeriodEnd).toLocaleDateString('tr-TR') : '—'}</strong></b></div></section><section className="profileCard profileDanger"><span>ACCOUNT</span><h2>Close account</h2><p>Hesap kapatıldığında oturumlar geçersiz kılınır ve erişim durdurulur.</p><button disabled={busy || user.role === 'OWNER'} onClick={() => void deleteAccount()}>DELETE ACCOUNT</button></section></div></main>
+  const changePassword = async () => { setBusy(true); try { await call('/auth/change-password',{method:'POST',body:JSON.stringify(passwords)}); setPasswords({current_password:'',new_password:''}); setNotice('Parola güncellendi. Güvenlik için tekrar giriş yapın.'); setTimeout(onSessionEnded,700) } catch (error) {setNotice(error instanceof Error ? error.message : 'Parola güncellenemedi.')} finally {setBusy(false)} }
+  const deleteAccount = async () => { if (!window.confirm('Hesabınız ve kişisel verileriniz kalıcı olarak silinecek, tüm oturumlarınız sonlandırılacak. Finansal ve denetim kayıtları kimliğinizden ayrılarak saklanacak. Devam edilsin mi?')) return; setBusy(true); try { await call('/profile',{method:'DELETE'}); onSessionEnded() } catch (error) {setNotice(error instanceof Error ? error.message : 'Hesap silinemedi.')} finally {setBusy(false)} }
+  return <main className="profilePage"><header className="profileHeader"><div><span>ACCOUNT / SETTINGS</span><h1>Profile &amp; Settings</h1><p>Kimlik, güvenlik ve üyelik durumunuzu yönetin.</p></div><button onClick={onLogout}><LogOut/> Çıkış</button></header>{notice && <p className="profileNotice">{notice}</p>}<div className="profileGrid"><section className="profileCard"><span>PROFILE</span><h2>Personal details</h2><label>Full name<input value={name} onChange={event => setName(event.target.value)}/></label><label>Email<input value={user.email} readOnly/></label><div className="profileVerified"><MailCheck/> {user.email_verified === false ? 'Email verification required' : 'Email verified'}</div><button disabled={busy} onClick={() => void saveProfile()}>SAVE PROFILE</button></section><section className="profileCard"><span>SECURITY</span><h2>Change password</h2><label>Current password<input data-private="true" type="password" value={passwords.current_password} onChange={event => setPasswords({...passwords,current_password:event.target.value})}/></label><label>New password<input data-private="true" type="password" value={passwords.new_password} onChange={event => setPasswords({...passwords,new_password:event.target.value})}/></label><button disabled={busy} onClick={() => void changePassword()}>UPDATE PASSWORD</button><p className="profileMuted">Session: HttpOnly cookie · {user.role === 'OWNER' ? 'Admin' : 'Member'}</p></section><section className="profileCard"><span>SUBSCRIPTION</span><h2>Current membership</h2><div className="profileFacts"><b>Plan <strong>{data?.subscription?.plan || 'FREE'}</strong></b><b>Status <strong>{data?.subscription?.status || 'inactive'}</strong></b><b>Started <strong>{data?.subscription?.currentPeriodStart ? new Date(data.subscription.currentPeriodStart).toLocaleDateString('tr-TR') : '—'}</strong></b><b>Expires <strong>{data?.subscription?.currentPeriodEnd ? new Date(data.subscription.currentPeriodEnd).toLocaleDateString('tr-TR') : '—'}</strong></b></div></section><section className="profileCard profileDanger"><span>ACCOUNT</span><h2>Delete account</h2><p>Kişisel verileriniz ve anahtarlarınız silinir; finansal/denetim kayıtları kimliğinizden ayrılarak saklanır. Borsadaki açık pozisyonlar ve emirler kapanmaz.</p><button disabled={busy || user.role === 'OWNER'} onClick={() => void deleteAccount()}>DELETE ACCOUNT</button></section></div></main>
 }
 
 export default function AuthGate({children}:{children:ReactNode}) {
@@ -153,6 +157,8 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const autoVerificationStarted = useRef(false)
   const [autoVerifying,setAutoVerifying] = useState(false)
   const sessionRoleRef = useRef<string|null>(null)
+  const sessionMaintenanceRef = useRef<string|null>(null)
+  const [expiredMemberMaintenance,setExpiredMemberMaintenance] = useState<string|null>(null)
   const [memberMenuOpen,setMemberMenuOpen] = useState(false)
   const memberTriggerRef = useRef<HTMLButtonElement>(null)
   const memberMenuRef = useRef<HTMLDivElement>(null)
@@ -226,22 +232,23 @@ export default function AuthGate({children}:{children:ReactNode}) {
   },[memberMenuOpen])
 
   const loadSession = async (value:string) => {
-    if (!value) { setBusy(false); setSessionLoading(false); return }
     try {
-      const current = await request<Session>('/session',{headers:{Authorization:`Bearer ${value}`}})
+      const current = await request<Session>('/session', value ? {headers:{Authorization:`Bearer ${value}`}} : {})
+      const marker = `${COOKIE_SESSION_PREFIX}${current.user.id}`
+      saveUserSessionToken(marker, Boolean(localStorage.getItem(USER_SESSION_KEY)))
+      setToken(marker)
       setSession(current); setMessage('')
-    } catch {
-      clearUserSessionToken(); setToken(''); setSession(null); setMessage('Oturum açmak için devam edin.')
+    } catch (error) {
+      clearUserSessionToken(); setToken(''); setSession(null)
+      setMessage(error instanceof Error ? error.message : 'Oturum açmak için devam edin.')
     } finally { setBusy(false); setSessionLoading(false) }
   }
 
   useEffect(() => { void loadSession(token) }, [])
 
-  useEffect(() => { sessionRoleRef.current = session?.user.role ?? null }, [session])
+  useEffect(() => { sessionRoleRef.current = session?.user.role ?? null; sessionMaintenanceRef.current = session?.maintenance?.mode ?? null }, [session])
 
-  // Fail-open: on error or while the tab is hidden, keep the last known maintenance mode.
-  // A genuinely expired token (401) sends an admin back to /login, but a member
-  // stays on the maintenance screen with the last known mode (never force-logged-out).
+  // An expired member can keep the maintenance screen, but never the private session.
   useEffect(() => {
     if (!token) return
     const pollMaintenance = async () => {
@@ -249,13 +256,17 @@ export default function AuthGate({children}:{children:ReactNode}) {
       try {
         const response = await fetch(`${API_BASE}/v22/session`,{headers:{Authorization:`Bearer ${token}`}})
         if (response.status === 401) {
-          if (sessionRoleRef.current === 'OWNER') { clearUserSessionToken(); setToken(''); setSession(null) }
+          const mode = sessionMaintenanceRef.current
+          if (sessionRoleRef.current !== 'OWNER' && (mode === 'MAINTENANCE' || mode === 'EMERGENCY')) setExpiredMemberMaintenance(mode)
+          finishSession()
           return
         }
-        if (!response.ok) return
+        if (!response.ok) { console.warn('Session refresh failed:', response.status); return }
         const current = await response.json() as Session
         setSession(previous => previous ? {...previous,maintenance:current.maintenance} : previous)
-      } catch { /* fail-open: keep last known maintenance state */ }
+      } catch (error) {
+        console.warn('Session refresh failed:', error instanceof Error ? error.name : 'SessionRefreshError')
+      }
     }
     const timer = window.setInterval(() => void pollMaintenance(),45000)
     return () => window.clearInterval(timer)
@@ -328,6 +339,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
     try {
       if (mode === 'login') {
         const result = await request<{token:string;user:User}>('/auth/login',{method:'POST',body:JSON.stringify({...login,remember})})
+        setLogin({email:'',password:''})
         if (result.user.role !== 'OWNER' && result.user.email_verified === false) {
           setEmail(result.user.email); setResetToken(''); setMode('verify'); setMessage('Önce e-posta adresinizi doğrulayın. Doğrulama kodunu e-postanızdan alın.')
         } else {
@@ -337,9 +349,11 @@ export default function AuthGate({children}:{children:ReactNode}) {
         if (!ownerSetupAvailable) throw new Error('Yerel yönetici kurulumu kullanılamıyor.')
         const result = await request<{token:string;user:User}>('/bootstrap',{method:'POST',body:JSON.stringify({...register,remember})})
         saveUserSessionToken(result.token,remember); setMemberMenuOpen(false); setToken(result.token); setSession({user:result.user}); setOwnerSetupAvailable(false)
+        setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
       } else if (mode === 'register') {
         const result = await request<{verification_status_token?:string;message:string}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
         setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setVerificationNotice(true); setMode('verify'); setMessage(result.message)
+        setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
       } else if (mode === 'forgot') {
         const result = await request<{development_reset_token?:string;message:string}>('/auth/forgot-password',{method:'POST',body:JSON.stringify({email})})
         if (result.development_reset_token) setResetToken(result.development_reset_token)
@@ -355,17 +369,38 @@ export default function AuthGate({children}:{children:ReactNode}) {
     finally { setBusy(false) }
   }
 
+  const finishSession = () => {
+    clearDemoCredentials(token)
+    setLogin({email:'',password:''}); setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
+    setEmail(''); setResetToken(''); setResetPassword({password:'',confirm_password:''})
+    setVerificationLinkToken(''); setVerificationStatusToken(''); setVerificationInput('')
+    clearUserSessionToken(); setMemberMenuOpen(false); setToken(''); setSession(null); setMode('login'); setMessage('Oturum sonlandırıldı.')
+  }
   const logout = async () => {
     const sessionToken = token
+    let vaultProblem = ''
     if (sessionToken) {
-      try { await fetch(`${API_BASE}/exchange-connections/session`,{method:'DELETE',headers:{Authorization:`Bearer ${sessionToken}`}}) } catch {}
+      try {
+        const response = await fetch(`${API_BASE}/exchange-connections/session`,{method:'DELETE',headers:{Authorization:`Bearer ${sessionToken}`}})
+        if (!response.ok) vaultProblem = 'Borsa oturumunun temizlenmesi doğrulanamadı.'
+      } catch (error) {
+        vaultProblem = 'Borsa oturumunun temizlenmesi doğrulanamadı.'
+        console.warn('Exchange session logout failed:', error instanceof Error ? error.name : 'LogoutError')
+      }
     }
     clearDemoCredentials(sessionToken)
-    try { if (token) await request('/auth/logout',{method:'POST',headers:{Authorization:`Bearer ${token}`}}) } catch { /* local logout still clears the session */ }
-    clearUserSessionToken(); setMemberMenuOpen(false); setToken(''); setSession(null); setMode('login'); setMessage('Oturum kapatıldı.')
+    try { if (token) await request('/auth/logout',{method:'POST',headers:{Authorization:`Bearer ${token}`}}) }
+    catch (error) {
+      if (error instanceof AuthRequestError && error.status === 401) { finishSession(); return }
+      setMessage(error instanceof Error ? error.message : 'Sunucu oturumu kapatılamadı; yeniden deneyin.')
+      console.warn('Server logout failed:', error instanceof Error ? error.message : 'LogoutError')
+      return
+    }
+    finishSession(); setMessage(vaultProblem || 'Oturum kapatıldı.')
   }
 
   if (PLAYWRIGHT_TEST_MODE_AUTO_ACCESS) return <>{children}</>
+  if (!session && expiredMemberMaintenance) return <MaintenanceScreen mode={expiredMemberMaintenance}/>
   if (sessionLoading && !session) return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>GÜVENLİ OTURUM</b><span>Hesap durumu kontrol ediliyor…</span></div></main>
   if (autoVerifying) return <main className="authLoading"><div className="authLoader"><MailCheck/><b>E-POSTA DOĞRULANIYOR</b><span>E-posta doğrulanıyor...</span></div></main>
   if (!session) {
@@ -404,10 +439,11 @@ export default function AuthGate({children}:{children:ReactNode}) {
   }
 
   const path = window.location.pathname
+  const sessionNotice = message ? createPortal(<p className="profileNotice" role="alert" style={{position:'fixed',bottom:12,left:12,right:12,zIndex:10000}}>{message}</p>,document.body) : null
   if (['/login','/register','/forgot-password','/reset-password','/verify-email'].includes(path)) { history.replaceState(null,'','/dashboard') }
   if (path.startsWith('/admin') && session.user.role !== 'OWNER') return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>403 · ERİŞİM YOK</b><span>Bu alan yalnızca yönetici hesaplarına açıktır.</span><button onClick={() => {history.replaceState(null,'','/dashboard'); location.reload()}}>Dashboard'a dön</button></div></main>
-  if (path.startsWith('/admin')) return <><div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>ADMIN</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><AdminPanel token={token} onBack={() => {history.replaceState(null,'','/dashboard');location.reload()}}/></>
-  if (path.startsWith('/settings')) return <><div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>{session.user.role === 'OWNER' ? 'ADMIN' : 'MEMBER'}</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><ProfileSettings token={token} user={session.user} onLogout={() => void logout()}/></>
+  if (path.startsWith('/admin')) return <>{sessionNotice}<div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>ADMIN</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><AdminPanel token={token} onBack={() => {history.replaceState(null,'','/dashboard');location.reload()}}/></>
+  if (path.startsWith('/settings')) return <>{sessionNotice}<div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>{session.user.role === 'OWNER' ? 'ADMIN' : 'MEMBER'}</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><ProfileSettings token={token} user={session.user} onLogout={() => void logout()} onSessionEnded={finishSession}/></>
   const maintenanceMode = session.maintenance?.mode
   if (session.user.role !== 'OWNER' && (maintenanceMode === 'MAINTENANCE' || maintenanceMode === 'EMERGENCY')) {
     return <MaintenanceScreen mode={maintenanceMode as string}/>
@@ -415,5 +451,5 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const memberMenu = memberMenuOpen ? createPortal(<div ref={memberMenuRef} className="authMemberMenu authMemberPortalMenu" role="menu" style={{top:memberMenuPosition.top,left:memberMenuPosition.left}}><div className="authMemberMenuHead"><small>SECURE ACCOUNT</small><strong>{session.user.email}</strong></div>{session.user.role === 'OWNER' && <button type="button" role="menuitem" onClick={() => {setMemberMenuOpen(false);location.assign('/admin')}}><ShieldCheck/><span><b>Admin Dashboard</b><small>Control center</small></span></button>}<button type="button" role="menuitem" onClick={() => {setMemberMenuOpen(false);location.assign('/settings')}}><UserRound/><span><b>Profile &amp; Settings</b><small>Identity and security</small></span></button><button className="authMemberLogout" type="button" role="menuitem" onClick={() => void logout()}><LogOut/><span><b>Çıkış</b><small>End secure session</small></span></button></div>,document.body) : null
   const profileControl = <div className="authSessionBar"><button ref={memberTriggerRef} className="authMemberTrigger" type="button" aria-label="Profil menüsünü aç" aria-expanded={memberMenuOpen} aria-haspopup="menu" onClick={() => setMemberMenuOpen(value => !value)}><svg className="authProfileGlyph" viewBox="3.5 3.8 17 17.9" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><circle cx="12" cy="8" r="3.15"/><path d="M4.7 20.1c.55-3.55 3.35-5.55 7.3-5.55s6.75 2 7.3 5.55c.05.32-.2.6-.52.6H5.22c-.32 0-.57-.28-.52-.6Z"/></svg></button></div>
   const adminMaintenanceBanner = session.user.role === 'OWNER' && (maintenanceMode === 'MAINTENANCE' || maintenanceMode === 'EMERGENCY') ? <div className="authAdminMaintenanceBar" role="status"><span>{maintenanceMode === 'EMERGENCY' ? 'Acil durum modu aktif.' : 'Bakım modu aktif.'} Üyeler bakım ekranını görüyor.</span><button type="button" onClick={() => location.assign('/admin')}>Admin Panel</button></div> : null
-  return <>{adminMaintenanceBanner}{profileHeaderSlot ? createPortal(profileControl,profileHeaderSlot) : profileControl}{memberMenu}{children}</>
+  return <>{sessionNotice}{adminMaintenanceBanner}{profileHeaderSlot ? createPortal(profileControl,profileHeaderSlot) : profileControl}{memberMenu}{children}</>
 }

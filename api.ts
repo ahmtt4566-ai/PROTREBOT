@@ -3,40 +3,53 @@ import {clearKaisChatHistory, clearLegacyChatHistory} from './frontend/src/kais-
 const TOKEN_KEY = 'protrebot.web.owner-access'
 export const USER_SESSION_KEY = 'protrebot-v25-session'
 
-function normalizedApiBase(value: string | undefined): string {
-  const base = (value || 'http://127.0.0.1:8000').trim().replace(/\/+$/, '')
-  return base.endsWith('/api') ? base : `${base}/api`
-}
-
-const configuredApiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL
-export const API_BASE = import.meta.env.DEV && !configuredApiBase?.trim() ? '/api' : normalizedApiBase(configuredApiBase)
+export const API_BASE = '/api'
+export const COOKIE_SESSION_PREFIX = 'cookie-session:'
+const OWNER_COOKIE_MARKER = 'cookie-owner'
+const TEST_SESSION_STORAGE = import.meta.env.MODE === 'test'
 
 const originalFetch = window.fetch.bind(window)
 let installed = false
 let errorMonitoringInstalled = false
 
 export function ownerAccessToken(): string {
-  return sessionStorage.getItem(TOKEN_KEY) || ''
+  const value = sessionStorage.getItem(TOKEN_KEY) || ''
+  if (value && value !== OWNER_COOKIE_MARKER && !TEST_SESSION_STORAGE) {
+    sessionStorage.removeItem(TOKEN_KEY)
+    return ''
+  }
+  return value
 }
 
 export function saveOwnerAccessToken(token: string): void {
-  sessionStorage.setItem(TOKEN_KEY, token.trim())
+  sessionStorage.setItem(TOKEN_KEY, token.trim() ? OWNER_COOKIE_MARKER : '')
 }
 
-export function clearOwnerAccessToken(): void {
+export async function clearOwnerAccessToken(): Promise<void> {
   clearKaisChatHistory()
   clearLegacyChatHistory()
   sessionStorage.removeItem(TOKEN_KEY)
+  const response = await originalFetch(`${API_BASE}/web/access/logout`, {
+    method: 'POST', credentials: 'include', headers: {'X-Requested-With': 'XMLHttpRequest'},
+  })
+  if (!response.ok) throw new Error('Yönetici oturumu sunucuda kapatılamadı.')
 }
 
 export function userSessionToken(): string {
   try {
     const remembered = localStorage.getItem(USER_SESSION_KEY)
-    if (remembered) return remembered
+    if (remembered?.startsWith(COOKIE_SESSION_PREFIX) || (remembered && TEST_SESSION_STORAGE)) return remembered
+    if (remembered) localStorage.removeItem(USER_SESSION_KEY)
   } catch (error) { console.warn('Browser session storage unavailable:', error instanceof Error ? error.name : 'StorageError') }
-  return sessionStorage.getItem(USER_SESSION_KEY) || ''
+  const value = sessionStorage.getItem(USER_SESSION_KEY) || ''
+  if (value && !value.startsWith(COOKIE_SESSION_PREFIX) && !TEST_SESSION_STORAGE) {
+    sessionStorage.removeItem(USER_SESSION_KEY)
+    return ''
+  }
+  return value
 }
 function userSessionId(token=userSessionToken()): string {
+  if (token.startsWith(COOKIE_SESSION_PREFIX)) return token.slice(COOKIE_SESSION_PREFIX.length)
   try {
     const encoded = token.split('.')[0]
     const payload = JSON.parse(atob(encoded.replace(/-/g,'+').replace(/_/g,'/') + '='.repeat((4 - encoded.length % 4) % 4)))
@@ -62,9 +75,13 @@ export function clearDemoCredentials(_token=userSessionToken()): void {
 }
 
 export function saveUserSessionToken(token: string, remember: boolean): void {
+  if (token.trim() && !token.startsWith(COOKIE_SESSION_PREFIX) && !TEST_SESSION_STORAGE) {
+    throw new Error('Sunucu güvenli tarayıcı oturumu oluşturmadı. Yeniden giriş yapın.')
+  }
   localStorage.removeItem(USER_SESSION_KEY)
   sessionStorage.removeItem(USER_SESSION_KEY)
   if (token.trim()) (remember ? localStorage : sessionStorage).setItem(USER_SESSION_KEY, token.trim())
+  window.dispatchEvent(new Event('protrebot-session-changed'))
 }
 
 export function clearUserSessionToken(): void {
@@ -73,6 +90,7 @@ export function clearUserSessionToken(): void {
   try { localStorage.removeItem(USER_SESSION_KEY) }
   catch (error) { console.warn('Browser session storage unavailable:', error instanceof Error ? error.name : 'StorageError') }
   sessionStorage.removeItem(USER_SESSION_KEY)
+  window.dispatchEvent(new Event('protrebot-session-changed'))
 }
 
 export const DEMO_CONNECTION_MODE = 'TESTNET' as const
@@ -114,28 +132,38 @@ export function installAuthorizedFetch(): void {
   window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
     const headers = new Headers(input instanceof Request ? input.headers : undefined)
     new Headers(init.headers).forEach((value, key) => headers.set(key, value))
+    const apiRequest = apiRequestPath(input) !== null
+    if (apiRequest) {
+      headers.set('X-Requested-With', 'XMLHttpRequest')
+      if (headers.get('Authorization')?.startsWith(`Bearer ${COOKIE_SESSION_PREFIX}`)) headers.delete('Authorization')
+      if (headers.get('X-ProTreBot-Session')?.startsWith(COOKIE_SESSION_PREFIX)) headers.delete('X-ProTreBot-Session')
+      if (headers.get('X-ProTreBot-Owner') === OWNER_COOKIE_MARKER) headers.delete('X-ProTreBot-Owner')
+    }
     const token = ownerAccessToken()
-    if (token && isOwnerProtectedApiRequest(input) && !headers.has('X-ProTreBot-Owner')) {
+    if (token && token !== OWNER_COOKIE_MARKER && isOwnerProtectedApiRequest(input) && !headers.has('X-ProTreBot-Owner')) {
       headers.set('X-ProTreBot-Owner', token)
     }
-    const userToken = userSessionToken()
+    const sessionHint = userSessionToken()
+    const userToken = sessionHint.startsWith(COOKIE_SESSION_PREFIX) ? '' : sessionHint
     if (userToken && apiRequestPath(input) && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${userToken}`)
     }
     if (userToken && apiRequestPath(input) && !headers.has('X-ProTreBot-Session')) {
       headers.set('X-ProTreBot-Session', userToken)
     }
-    return originalFetch(input, {...init, headers})
+    return originalFetch(input, {...init, headers, ...(apiRequest ? {credentials: 'include'} : {})})
   }
 }
 
 export function reportClientError(error: unknown, context: Record<string, unknown> = {}): void {
   const value = error instanceof Error ? error : new Error(String(error))
   void originalFetch(`${API_BASE}/client-errors`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
+    method: 'POST', credentials: 'include', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
     body: JSON.stringify({kind:value.name || 'ClientError', message:value.message, stack:value.stack, route:window.location.pathname, context}),
     keepalive: true,
-  }).catch(() => undefined)
+  }).then(response => {
+    if (!response.ok) console.warn('Client error report rejected:', response.status)
+  }).catch(error => console.warn('Client error report failed:', error instanceof Error ? error.name : 'ReportError'))
 }
 
 export function installErrorMonitoring(): void {
@@ -147,7 +175,8 @@ export function installErrorMonitoring(): void {
 
 export async function verifyOwnerAccess(token: string): Promise<{authorized: boolean}> {
   const response = await originalFetch(`${API_BASE}/web/access/check`, {
-    headers: {'X-ProTreBot-Owner': token.trim()},
+    credentials: 'include',
+    headers: {'X-Requested-With': 'XMLHttpRequest', ...(token.trim() && token !== OWNER_COOKIE_MARKER ? {'X-ProTreBot-Owner': token.trim()} : {})},
   })
   const payload = await response.json().catch(() => null) as {authorized?: boolean;detail?: string}|null
   if (!response.ok || !payload?.authorized) {

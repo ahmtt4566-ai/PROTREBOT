@@ -1,10 +1,12 @@
+import asyncio
 import unittest
 import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app import v22_commercial, v25_execution
+from app.commercial_core import issue_token
 from app.subscription_core import (
     MASTER_MODE_PRICE,
     PLAN_CATALOG,
@@ -173,8 +175,22 @@ class SubscriptionCoreTests(unittest.TestCase):
                 v25_execution.execution_owner(request)
 
     def test_owner_execution_bypass_is_explicit_and_preserved(self):
-        request = SimpleNamespace(state=SimpleNamespace(member={"id": "owner", "role": "OWNER"}, web_owner_authenticated=False))
+        secret = b"offline-owner-subscription-signing-key"
+        user = {"id": "owner", "role": "OWNER", "active": True, "email_verified": True, "auth_version": 1}
+        pool = SimpleNamespace(fetchrow=AsyncMock(return_value={
+            "auth_version": 1, "security": {"active": True, "role": "OWNER", "email_verified": True},
+        }))
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(
+                v25_execution=v25_execution.initial_state(), db_pool=pool,
+                v22_commercial={"secret": secret, "state": {"users": [user]}},
+            )),
+            method="GET", headers={"x-protrebot-session": issue_token("owner", "OWNER", secret, token_version=1)},
+            state=SimpleNamespace(web_owner_authenticated=False),
+        )
+        request.state.member = asyncio.run(v22_commercial.authenticated_user_async(request))
         self.assertEqual(v25_execution.execution_owner(request)["role"], "OWNER")
+        pool.fetchrow.assert_awaited_once()
 
     def test_every_v25_route_requires_execution_owner(self):
         with open(v25_execution.__file__, encoding="utf-8") as source_file:

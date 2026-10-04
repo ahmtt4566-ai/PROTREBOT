@@ -38,6 +38,7 @@ from .binance_demo import (
     DemoOrderRequest,
     account_snapshot,
     armed,
+    bind_demo_grant,
     can_mutate_lifecycle,
     credentials_configured,
     close_symbol_position,
@@ -644,8 +645,17 @@ def client_for(request_or_application: Any) -> BinanceDemoClient:
                 "Demo API bağlantısı aktif değil. Programdaki Borsa Bağlantıları bölümünden Testnet anahtarını kaydedip aktifleştirin.",
                 http_status=412,
             )
-        return BinanceDemoClient(application.state.http, api_key, secret_key)
+        from .binance_demo import bind_demo_private_authority
 
+        client = BinanceDemoClient(application.state.http, api_key, secret_key)
+        user = request_or_application.state.member
+        from .v25_execution import authenticated_live_expiry
+
+        return bind_demo_private_authority(client, application, state_for(request_or_application), str(user["id"]), user.get("auth_version"), authenticated_live_expiry(request_or_application))
+
+    from .web_security import env_flag
+    if env_flag("PROTREBOT_DURABLE_AUTH_REQUIRED"):
+        raise BinanceDemoError("A verified owner session is required for Demo access.", http_status=412)
     api_key, secret_key = load_demo_credentials()
     return BinanceDemoClient(application.state.http, api_key, secret_key)
 
@@ -2620,6 +2630,7 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
         _set_rejection(state, "POSITION_MODE", "Demo hesabı One-way / Tek Yön modunda olmalı.")
         persist_state(state)
         raise HTTPException(409, "Demo hesabı One-way / Tek Yön modunda olmalı.")
+    bind_demo_grant(request, state)
     state["auto"].update({
         "enabled": True,
         "status": "ON",

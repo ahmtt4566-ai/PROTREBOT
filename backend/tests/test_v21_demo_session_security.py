@@ -131,12 +131,18 @@ class DemoSessionSecurityTests(unittest.TestCase):
             state=SimpleNamespace(member={"id": "user-1", "role": "OWNER"}),
         )
 
-        result = asyncio.run(v21_auto_start(request, AutoStartRequest(confirmation="DEMO OTOMATİK")))
+        request.state.member["auth_version"] = 1
+        expiry = time.time() + 3600
+        with patch("app.v25_execution.authenticated_live_expiry", return_value=expiry):
+            result = asyncio.run(v21_auto_start(request, AutoStartRequest(confirmation="DEMO OTOMATİK")))
 
         self.assertTrue(configured_mock.called)
         self.assertIs(configured_mock.call_args.args[0], request)
         self.assertTrue(result["auto"]["enabled"])
         self.assertEqual(result["auto"]["status"], "ON")
+        grant = request.app.state._v21_demo_user_state["user-1"]
+        self.assertEqual(grant["_auth_version"], 1)
+        self.assertEqual(grant["_auth_expires_at"], expiry)
 
     @patch("app.v21_demo.persist_state")
     @patch("app.v21_demo.account_snapshot", new_callable=AsyncMock)

@@ -526,7 +526,7 @@ class V21ScannerDashboardTests(unittest.TestCase):
         state = v21_demo.initial_state()
         state["settings"]["scan_seconds"] = 30
         app = SimpleNamespace(state=SimpleNamespace(v21_demo=state, binance_demo={}, http=object()))
-        request = SimpleNamespace(app=app)
+        request = SimpleNamespace(app=app, state=SimpleNamespace())
 
         async def fake_scan(_client, _occupied, _settings):
             return [{

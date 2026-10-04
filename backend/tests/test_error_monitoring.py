@@ -72,9 +72,10 @@ def test_critical_telegram_alert_uses_masked_message():
     assert "LEAKED_SECRET" not in text
 
 
-def test_auth_failure_events_do_not_contain_password_token_or_header_values():
+def test_auth_failure_events_do_not_contain_password_token_or_header_values(monkeypatch):
+    monkeypatch.setattr("app.v22_commercial.DURABLE_AUTH_REQUIRED", False)
     request = SimpleNamespace(
-        app=SimpleNamespace(),
+        app=SimpleNamespace(state=SimpleNamespace(db_pool=None)),
         state=SimpleNamespace(request_id="request-1"),
         url=SimpleNamespace(path="/api/v22/private"),
         method="GET",

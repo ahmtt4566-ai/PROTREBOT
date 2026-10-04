@@ -2,6 +2,70 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Güvenlik ve tarayıcı oturumları
+
+Tarayıcı üyelik oturumu ve yönetici erişimi `HttpOnly`, `SameSite=Lax`,
+üretimde `Secure`, host-only `/api` çerezleriyle taşınır. Frontend depolarında
+yalnızca gizli olmayan kullanıcı/oturum göstergesi bulunur; eski bearer
+kayıtları kaldırılır ve yeniden giriş gerekir. Native istemcilerin imzalı
+bearer desteği korunur. Frontend ile backend bu değişiklik için birlikte
+yayınlanmalıdır; bu çalışma kendiliğinden deploy/commit/push yapmaz.
+
+Üretim frontend'i aynı-origin `/api` kullanır. Vercel API rewrite'ı SPA
+fallback'inden önce backend'e yönlendirir; iki Vite geliştirme sunucusu da
+yerel backend proxy'si kullanır. Çerezli durum değiştiren isteklerde
+`X-Requested-With: XMLHttpRequest` ve izinli `Origin` zorunludur.
+Üretim/custom domain `PROTREBOT_CORS_ORIGINS` listesinde açıkça tanımlanmalıdır.
+Vercel CSP inline script/eval'i engeller; dinamik React stilleri için yalnızca
+`style-src` içinde inline stil izni bulunur. Güvenlik başlıkları yapılandırma
+üzerinden tanımlıdır; canlı edge ayarları ayrıca doğrulanmalıdır.
+Eski mutlak `VITE_API_BASE`/`VITE_API_URL` ayarları tarayıcı taşımasını değiştirmez;
+başka bir backend gerekiyorsa aynı-origin proxy hedefi değiştirilmelidir.
+
+Aktif LIVE kontrolü kullanıcı/oturum/hesap sahibine bağlıdır; başka bir premium
+üye veya OWNER aynı kontrolü devralamaz. Yeni bir oturuma geçiş açık yeniden
+bağlama/onay gerektirir. LIVE anahtar kabulünde Binance API izinleri okunur;
+para çekme izni açık veya doğrulanamayan anahtar reddedilir. Testnet'in para
+çekme desteği bulunmadığı ayrıca belirtilir; eski LIVE kasa kayıtları tekrar
+doğrulanmalıdır.
+
+Üyelik iptali ve parola/rol değişiklikleri her korunan istekte ortak auth
+kaydından doğrulanır. Arka plan LIVE/Demo yetkileri ilk doğrulanmış oturumun
+sürümüne ve imzalı bitiş zamanına bağlıdır; yeni bir status isteği eski yetkiyi
+yenilemez. Demo ARM ve otomasyon başlangıcı açık yetki verir; yeniden başlatma
+eski yetkiyi geri yüklemez. Depolama veya silme metadata senkronizasyonu
+doğrulanamazsa özel borsa işlemleri kapatılır, mevcut borsa koruma emirleri
+iptal edilmez. Parolalar yeni scrypt maliyetiyle saklanır; uyumlu eski kayıtlar
+başarılı girişte yükseltilir.
+
+`PROTREBOT_DURABLE_AUTH_REQUIRED=true` olduğunda asistan muhasebesi PostgreSQL
+olmaksızın SQLite'a düşmez. Grid planları üyeye özeldir; sahipliği bilinmeyen
+eski planlar başka üyeye atanmaz. Paper kapısı grid mutasyonlarını da kapsar.
+API docs/redoc/OpenAPI HTTP uçları kayıtlı değildir.
+
+Hesap silme kişisel verileri, sohbet/kota bağlantılarını ve yerel anahtar
+kasasını kaldırır; finansal/işlem/denetim kayıtları kimlikten ayrılarak saklanır.
+Eski snapshot'ların silinen kişiyi geri getirmemesi için ortak silme işaretleri
+ve auth sürümleri uygulanır. Finansal kayıtların takma kimlikle saklanması,
+geri döndürülemez anonimlik veya yasal uyumluluk garantisi değildir.
+Bu işlem borsadaki açık pozisyonları veya emirleri kapatmaz; anahtar kaldırılınca
+yerel takip durur. Borsa pozisyonları ve sağlayıcı yedeklerinin saklama/silme
+politikası ayrıca yönetilmelidir; dış yedeklerin silindiği iddia edilmez.
+
+Yerel Docker PostgreSQL başlatılmadan önce ayrı, güçlü bir `POSTGRES_PASSWORD`
+ortam değişkeni verilmelidir; kaynak kodda varsayılan parola yoktur.
+CI action referansları commit SHA ile sabittir ve yalnızca `contents: read`
+izni kullanır. Python doğrudan bağımlılıkları sabittir; platformlar arası
+transitif kilit/CVE doğrulaması ayrıca gereklidir.
+
+Üretim yayını öncesinde çalışan worker/yazıcılar durdurularak
+`backend/migrations/20261004_001_commercial_auth_erasure.sql` elle uygulanmalıdır
+(`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/20261004_001_commercial_auth_erasure.sql`).
+Bu DDL yerel PostgreSQL/Docker bulunmadığı için gerçek PostgreSQL üzerinde
+doğrulanmamıştır. İsteğe bağlı store tabloları daha sonra oluşturulursa koşullu
+trigger kurulumu için aynı migration tekrar uygulanır; runtime bootstrap ve
+canonical auth/silme senkronizasyonu yine gereklidir.
+
 Ana sayfa başlık logosu 252 × 65,8 px hedef boyutuyla önceki boyuttan %40
 büyüktür; dar ekranlarda başlık kontrollerini örtmemek için kullanılabilir
 genişliğe sığar. Diğer çalışma ekranlarındaki logo boyutu değişmez.
@@ -171,10 +235,12 @@ Render anahtarı `sync: false` olarak tanımlar; anahtar değeri repoya veya fro
   çağrılar kesilir. Bu bir ön rezervasyonla garanti edilen mutlak harcama tavanı değildir.
 - Sayaçlar, aylık toplam ve yalnız metadata içeren çağrı kayıtları PostgreSQL'de
   `assistant_usage`, `assistant_monthly_spend`, `assistant_calls` tablolarında;
-  DB pool yoksa mevcut `DATA_DIR` altında `assistant_usage.sqlite3` içinde tutulur.
+  Yalnız `PROTREBOT_DURABLE_AUTH_REQUIRED=false` olan yerel/legacy ortamda,
+  DB pool yoksa mevcut `DATA_DIR` altında `assistant_usage.sqlite3` kullanılabilir.
   Cache token sütunları eski şemaya mevcut bakiye/kayıtlar korunarak eklenir;
   bu şema güncellemesi backend'ler arasında veri taşıma anlamına gelmez.
-  Üretimde PostgreSQL veya kalıcı `DATA_DIR` diski gerekir. Backend değiştirmek
+  `PROTREBOT_DURABLE_AUTH_REQUIRED=true` ile üretimde PostgreSQL zorunludur;
+  ilk bağlantıda da SQLite'a geçilmez. Backend değiştirmek
   mevcut kayıtların taşınmasını gerektirir; otomatik migration yapılmaz.
 - Aylık satır kilidi (PostgreSQL `FOR UPDATE`, SQLite `BEGIN IMMEDIATE`) sağlayıcı
   her bir üretim çağrısı boyunca tutulur; maliyet araç çalıştırılmadan ve sonraki

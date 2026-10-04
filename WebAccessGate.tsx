@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
 import { LockKeyhole, ShieldCheck } from 'lucide-react'
-import { clearOwnerAccessToken, ownerAccessToken, saveOwnerAccessToken, verifyOwnerAccess } from './api'
+import { clearOwnerAccessToken, ownerAccessToken, saveOwnerAccessToken, userSessionToken, verifyOwnerAccess } from './api'
+import './web-access.css'
 
 
 const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
@@ -11,18 +12,22 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
   const [token,setToken] = useState(ownerAccessToken())
   const [status,setStatus] = useState<'CHECKING'|'LOCKED'|'OPEN'>(ACCESS_REQUIRED ? 'CHECKING' : 'OPEN')
   const [message,setMessage] = useState('Güvenli yönetici oturumu doğrulanıyor…')
+  const [memberSession,setMemberSession] = useState(Boolean(userSessionToken()))
+
+  useEffect(() => {
+    const refresh = () => setMemberSession(Boolean(userSessionToken()))
+    window.addEventListener('protrebot-session-changed',refresh)
+    window.addEventListener('storage',refresh)
+    return () => { window.removeEventListener('protrebot-session-changed',refresh); window.removeEventListener('storage',refresh) }
+  },[])
 
   useEffect(() => {
     if (!ACCESS_REQUIRED) return
-    if (!token) {
-      setStatus('LOCKED')
-      setMessage('Render üzerinde belirlediğin yönetici erişim kodunu yaz.')
-      return
-    }
     verifyOwnerAccess(token)
-      .then(() => setStatus('OPEN'))
-      .catch(error => {
-        clearOwnerAccessToken()
+      .then(() => { setStatus('OPEN'); setMessage('') })
+      .catch(async error => {
+        try { await clearOwnerAccessToken() }
+        catch (logoutError) { console.warn('Owner cookie logout failed:', logoutError instanceof Error ? logoutError.message : 'LogoutError') }
         setToken('')
         setStatus('LOCKED')
         setMessage(error instanceof Error ? error.message : 'Erişim doğrulanamadı.')
@@ -40,9 +45,12 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
     try {
       await verifyOwnerAccess(token)
       saveOwnerAccessToken(token)
+      setToken(ownerAccessToken())
       setStatus('OPEN')
+      setMessage('')
     } catch (error) {
-      clearOwnerAccessToken()
+      try { await clearOwnerAccessToken() }
+      catch (logoutError) { console.warn('Owner cookie logout failed:', logoutError instanceof Error ? logoutError.message : 'LogoutError') }
       setStatus('LOCKED')
       setMessage(error instanceof Error ? error.message : 'Erişim doğrulanamadı.')
     }
@@ -50,7 +58,8 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
 
   if (status === 'OPEN') {
     return <>
-      {ACCESS_REQUIRED && <button className="webSessionBadge" onClick={() => {clearOwnerAccessToken();location.reload()}}><ShieldCheck size={15}/> Güvenli oturum · Çıkış</button>}
+      {ACCESS_REQUIRED && !memberSession && <button className="webSessionBadge" onClick={() => { void clearOwnerAccessToken().then(() => location.reload()).catch(error => setMessage(error instanceof Error ? error.message : 'Oturum kapatılamadı.')) }}><ShieldCheck size={15}/> Güvenli oturum · Çıkış</button>}
+      {message && message !== 'Güvenli yönetici oturumu doğrulanıyor…' && <p role="alert">{message}</p>}
       {children}
     </>
   }

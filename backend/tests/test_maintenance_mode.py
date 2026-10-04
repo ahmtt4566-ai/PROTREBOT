@@ -118,7 +118,13 @@ class MaintenanceWiringTests(unittest.TestCase):
     def test_maintenance_screen_only_blocks_non_owner_and_is_fail_open(self):
         auth_source = (Path(__file__).parents[2] / "AuthGate.tsx").read_text(encoding="utf-8")
         self.assertIn("session.user.role !== 'OWNER' && (maintenanceMode === 'MAINTENANCE' || maintenanceMode === 'EMERGENCY')", auth_source)
-        self.assertIn("catch { /* fail-open: keep last known maintenance state */ }", auth_source)
+        poll = auth_source.split("const pollMaintenance = async () => {", 1)[1].split("const timer = window.setInterval", 1)[0]
+        failure = poll.split("} catch (error) {", 1)[1]
+        self.assertIn("console.warn('Session refresh failed:'", failure)
+        self.assertNotIn("finishSession()", failure)
+        self.assertNotIn("setSession(", failure)
+        self.assertIn("if (response.status === 401)", poll)
+        self.assertIn("finishSession()", poll)
         self.assertIn("if (document.visibilityState === 'hidden') return", auth_source)
 
 

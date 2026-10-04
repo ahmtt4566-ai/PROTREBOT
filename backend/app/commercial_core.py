@@ -23,7 +23,9 @@ V23_VERSION = "25.0.0"
 # korunuyor. Kullanıcıya görünen birleşik ürün sürümü artık V24'tür.
 V22_VERSION = V23_VERSION
 TOKEN_ALGORITHM = "HMAC-SHA256"
-PASSWORD_ALGORITHM = "SCRYPT-N16384-R8-P1"
+PASSWORD_ALGORITHM = "SCRYPT-N131072-R8-P1"
+LEGACY_PASSWORD_ALGORITHM = "SCRYPT-N16384-R8-P1"
+SCRYPT_MAXMEM = 256 * 1024 * 1024
 
 
 PLAN_CATALOG: dict[str, dict[str, Any]] = {
@@ -81,15 +83,20 @@ def hash_password(password: str, *, salt: bytes | None = None) -> dict[str, str]
     if len(password) < 10:
         raise ValueError("Parola en az 10 karakter olmalıdır")
     salt = salt or secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**17, r=8, p=1, dklen=32, maxmem=SCRYPT_MAXMEM)
     return {"algorithm": PASSWORD_ALGORITHM, "salt": _b64encode(salt), "digest": _b64encode(digest)}
 
 
 def verify_password(password: str, record: dict[str, str]) -> bool:
     try:
-        if record.get("algorithm") != PASSWORD_ALGORITHM:
+        algorithm = record.get("algorithm")
+        if algorithm not in {PASSWORD_ALGORITHM, LEGACY_PASSWORD_ALGORITHM}:
             return False
-        actual = hash_password(password, salt=_b64decode(record["salt"]))["digest"]
+        actual = _b64encode(hashlib.scrypt(
+            password.encode("utf-8"), salt=_b64decode(record["salt"]),
+            n=2**17 if algorithm == PASSWORD_ALGORITHM else 2**14,
+            r=8, p=1, dklen=32, maxmem=SCRYPT_MAXMEM,
+        ))
         return hmac.compare_digest(actual, record["digest"])
     except (KeyError, TypeError, ValueError):
         return False
@@ -259,6 +266,7 @@ def default_commercial_state() -> dict[str, Any]:
         "subscriptions": [],
         "auth_tokens": [],
         "stripe_event_ids": [],
+        "stripe_checkout_sessions": [],
         "licenses": [],
         "pairing_codes": [],
         "agents": [],

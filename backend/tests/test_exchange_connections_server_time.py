@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,8 +25,15 @@ class FakeBinanceHttp:
         self.paths = []
 
     async def get(self, url, headers=None):
-        path = url.split("https://fapi.binance.com", 1)[-1].split("?", 1)[0]
+        path = httpx.URL(url).path
         self.paths.append(path)
+        if path == "/sapi/v1/account/apiRestrictions":
+            assert httpx.URL(url).host == "api.binance.com"
+            assert headers.get("X-MBX-APIKEY")
+            assert "signature=" in url
+            return httpx.Response(
+                200, json={"enableWithdrawals": False}, request=httpx.Request("GET", url),
+            )
         if path == "/fapi/v1/time":
             if self.time_error:
                 raise self.time_error
@@ -69,7 +77,8 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         http = FakeBinanceHttp()
         result = asyncio.run(exchange_connections.test_binance_credentials(http, "LIVE", "api-key-safe", "secret-safe"))
         self.assertEqual(result["active_positions"], 0)
-        self.assertEqual(http.paths, ["/fapi/v1/time", "/fapi/v3/account", "/fapi/v1/positionSide/dual"])
+        self.assertEqual(http.paths, ["/fapi/v1/time", "/sapi/v1/account/apiRestrictions", "/fapi/v3/account", "/fapi/v1/positionSide/dual"])
+        self.assertEqual(result["api_permissions"], {"withdrawal_check": "VERIFIED", "enableWithdrawals": False})
 
     def test_fresh_cache_and_concurrent_requests_share_one_server_time_call(self):
         http = FakeBinanceHttp()
@@ -166,8 +175,9 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         )
         request = SimpleNamespace(
             app=application,
+            method="POST",
             headers={"authorization": "Bearer server-time-test-token"},
-            state=SimpleNamespace(member={"id": "owner-server-time", "role": "OWNER"}),
+            state=SimpleNamespace(member={"id": "owner-server-time", "role": "OWNER", "auth_version": 1}),
         )
         return request
 
@@ -263,11 +273,10 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         request = self._request()
         request.app.state.v25_execution = v25_execution.initial_state()
         request.app.state.v25_execution["lock"] = asyncio.Lock()
-        account = {"tested_at": "2026-09-22T12:00:00+00:00", "wallet_balance": 100.0, "available_balance": 90.0, "orders_created": False}
+        request.app.state.http = FakeBinanceHttp()
         snapshot = {"wallet_balance": 100.0, "available_balance": 90.0, "positions": [], "open_orders": [], "hedge_mode": False}
         client = SimpleNamespace(time_offset_ms=0)
-        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(return_value=account)), \
-               patch("app.exchange_connections.encrypt_credentials", return_value=b"encrypted-test-payload"), \
+        with patch("app.exchange_connections.encrypt_credentials", return_value=b"encrypted-test-payload"), \
              patch.object(v25_execution, "client_for", return_value=client), \
              patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=snapshot)), \
                patch.object(v25_execution, "submit_entry", new=AsyncMock()) as submit_entry, \
@@ -282,6 +291,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertEqual(request.app.state.v25_execution["snapshot"], snapshot)
         self.assertTrue(v25_execution.public_status(request.app, request)["connected"])
         self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+        self.assertEqual(request.app.state.http.paths.count("/sapi/v1/account/apiRestrictions"), 2)
         submit_entry.assert_not_awaited()
 
     def test_background_resolves_single_owner_fingerprint_match_after_session_rotation(self):
@@ -289,7 +299,9 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         fingerprint = exchange_connections.key_fingerprint(api_key)
 
         class Pool:
-            async def fetchrow(self, *_args):
+            async def fetchrow(self, query, *_args):
+                if "commercial_auth_users" in query:
+                    return {"auth_version": 1, "security": {"active": True, "email_verified": True}}
                 return None
 
             async def fetch(self, *_args):
@@ -300,6 +312,9 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
                     "encrypted_payload": b"encrypted",
                     "fingerprint": fingerprint,
                     "active": True,
+                    "account_summary": {
+                        "api_permissions": {"withdrawal_check": "VERIFIED", "enableWithdrawals": False},
+                    },
                 }]
 
             async def execute(self, *_args):
@@ -309,10 +324,13 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         application = SimpleNamespace(state=SimpleNamespace(
             db_pool=pool,
             exchange_vault={"ready": True, "pool_id": id(pool)},
+            v22_commercial={"state": {"users": []}},
         ))
         with patch.object(exchange_connections, "decrypt_credentials", return_value=(api_key, "secret-key-123456")):
             credentials = asyncio.run(exchange_connections.session_credentials_for_identity(
                 application, "expired-session", "owner-a", "LIVE", fingerprint,
+                auth_version=1,
+                auth_expires_at_epoch=time.time() + 3600,
             ))
 
         self.assertEqual(credentials, (api_key, "secret-key-123456"))

@@ -19,3 +19,14 @@ node_modules/
 **/test-results/
 **/playwright-report/
 **/analyst_credits.sqlite3*
+**/assistant_usage.sqlite3*
+*.pem
+*.key
+*.p12
+*.pfx
+credentials
+credentials.*
+credentials-*.json
+service-account*.json
+service_account*.json
+*-service-account.json

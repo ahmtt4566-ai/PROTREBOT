@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import copy
 import email
 import logging
 import os
@@ -41,6 +42,7 @@ from app.binance_demo import (  # noqa: E402
 from app.exchange_connections import SaveCredentialsRequest  # noqa: E402
 from app.v21_demo import state_for as v21_state_for  # noqa: E402
 from app.v22_commercial import BootstrapRequest, _ensure_bootstrap_owner_privileges, access_snapshot, gmail_failure_log, send_auth_email, sync_v22_storage, v22_admin_link_trading_account, v22_admin_trading_accounts, v22_admin_unlink_trading_account, v22_bootstrap, v22_register, v22_verification_status  # noqa: E402
+from app.v22_commercial import auth_security, authenticated_user_async  # noqa: E402
 from app.main import database_health, database_health_status, health_check_redis, health_item, healthz, run_health_checks  # noqa: E402
 
 
@@ -51,6 +53,53 @@ AGENT_SOURCE = (BACKEND / "v22_agent.py").read_text(encoding="utf-8")
 FRONTEND_SOURCE = (ROOT / "frontend" / "src" / "CommercialHub.tsx").read_text(encoding="utf-8")
 LOCAL_STORAGE_SOURCE = (BACKEND / "app" / "local_storage.py").read_text(encoding="utf-8")
 GITIGNORE_SOURCE = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+
+class OfflineCanonicalPool:
+    def __init__(self, users=(), delegate=None):
+        self.users = {
+            user["id"]: {"auth_version": user.get("auth_version", 1), "security": auth_security(user)}
+            for user in users
+        }
+        self.delegate = delegate
+        self.attempts = {}
+
+    async def execute(self, query, *args):
+        if self.delegate is not None:
+            return await self.delegate.execute(query, *args)
+        return "OK"
+
+    async def fetchrow(self, query, *args):
+        if "SELECT auth_version, security FROM commercial_auth_users" in query:
+            return copy.deepcopy(self.users.get(args[0]))
+        if "commercial_auth_limits" in query:
+            self.attempts[args[0]] = self.attempts.get(args[0], 0) + 1
+            return {"attempts": self.attempts[args[0]]}
+        if self.delegate is not None:
+            return await self.delegate.fetchrow(query, *args)
+        return None
+
+    async def fetch(self, query, *args):
+        if "commercial_erased_users" in query:
+            return []
+        if self.delegate is not None:
+            return await self.delegate.fetch(query, *args)
+        return []
+
+
+def offline_request(application, token=None):
+    return SimpleNamespace(
+        app=application, state=SimpleNamespace(), client=SimpleNamespace(host="127.0.0.1"),
+        headers={"authorization": f"Bearer {token}"} if token else {}, cookies={},
+        url=SimpleNamespace(path="/offline", scheme="http", hostname="localhost"),
+        method="POST",
+    )
+
+
+def authoritative_request(application, token):
+    request = offline_request(application, token)
+    request.state.member = asyncio.run(authenticated_user_async(request))
+    return request
 
 
 class V22CommercialTests(unittest.TestCase):
@@ -79,8 +128,9 @@ class V22CommercialTests(unittest.TestCase):
             "password": original_password,
         }
         state = {"users": [owner], "owner_user_id": None, "licenses": [], "audit": []}
-        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"state": state, "secret": b"bootstrap-secret", "lock": asyncio.Lock()}))
-        request = SimpleNamespace(app=application, client=SimpleNamespace(host="127.0.0.1"), state=SimpleNamespace(web_owner_authenticated=True))
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool([owner]), v22_commercial={"state": state, "secret": b"bootstrap-secret", "lock": asyncio.Lock()}))
+        request = offline_request(application)
+        request.state.web_owner_authenticated = True
         payload = BootstrapRequest(display_name="Ignored Display Name", email=owner["email"], password="ExistingStrong!123", remember=True)
         with patch("app.v22_commercial.save_state"), patch("app.v22_commercial.persist_v22_commercial", new=AsyncMock(return_value=True)), patch("app.v22_commercial.bootstrap_access_allowed", return_value=True):
             result = asyncio.run(v22_bootstrap(payload, request))
@@ -271,7 +321,10 @@ class V22CommercialTests(unittest.TestCase):
         self.assertIn('raise HTTPException(409, "OWNER hesabının rolü düşürülemez")', source)
         self.assertIn('"PASSWORD_RESET_REQUESTED"', source)
         self.assertIn('"SESSIONS_REVOKED"', source)
-        self.assertIn('"USER_PERMANENTLY_DELETED"', source)
+        self.assertIn("return await erase_user_account(request, user)", source)
+        erasure_source = (BACKEND / "app" / "account_erasure.py").read_text(encoding="utf-8")
+        self.assertIn('"ACCOUNT_ERASED"', erasure_source)
+        self.assertIn("actor=ERASED, subject=ERASED", erasure_source)
 
     def test_exchange_credentials_are_session_scoped_and_cleared_on_logout(self):
         exchange_source = (BACKEND / "app" / "exchange_connections.py").read_text(encoding="utf-8")
@@ -434,11 +487,11 @@ class V22CommercialTests(unittest.TestCase):
                 return [row]
 
         application = SimpleNamespace(state=SimpleNamespace(
-            db_pool=Pool(),
+            db_pool=OfflineCanonicalPool([owner], Pool()),
             v22_commercial={"secret": secret, "state": {"users": [owner]}},
         ))
         token = issue_token(owner["id"], owner["role"], secret, now=int(time.time()), ttl_seconds=3_600)
-        request = SimpleNamespace(app=application, headers={"authorization": f"Bearer {token}"})
+        request = authoritative_request(application, token)
         response = asyncio.run(v22_admin_trading_accounts(owner["id"], request))
         account = response["accounts"][0]
         self.assertEqual(account["provider"], "BINANCE")
@@ -471,9 +524,9 @@ class V22CommercialTests(unittest.TestCase):
                 return None
 
         pool = Pool()
-        application = SimpleNamespace(state=SimpleNamespace(db_pool=pool, v22_commercial={"secret": secret, "state": {"users": [owner]}}))
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool([owner], pool), v22_commercial={"secret": secret, "state": {"users": [owner]}}))
         token = issue_token(owner["id"], owner["role"], secret, now=int(time.time()), ttl_seconds=3_600)
-        request = SimpleNamespace(app=application, headers={"authorization": f"Bearer {token}"})
+        request = authoritative_request(application, token)
         linked = asyncio.run(v22_admin_link_trading_account("owner-link-test", SimpleNamespace(provider="BINANCE", environment="TESTNET", account_reference="  safe   ref  "), request))
         self.assertEqual(linked["account"]["status"], "UNASSIGNED")
         self.assertEqual(linked["account"]["account_reference"], "safe ref")
@@ -493,9 +546,9 @@ class V22CommercialTests(unittest.TestCase):
             async def fetchrow(self, query, *args):
                 raise Exception("duplicate key value violates unique constraint")
 
-        application = SimpleNamespace(state=SimpleNamespace(db_pool=Pool(), v22_commercial={"secret": secret, "state": {"users": [owner]}}))
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool([owner], Pool()), v22_commercial={"secret": secret, "state": {"users": [owner]}}))
         token = issue_token(owner["id"], owner["role"], secret, now=int(time.time()), ttl_seconds=3_600)
-        request = SimpleNamespace(app=application, headers={"authorization": f"Bearer {token}"})
+        request = authoritative_request(application, token)
         with self.assertRaisesRegex(HTTPException, "mapping zaten mevcut"):
             asyncio.run(v22_admin_link_trading_account("owner-validation-test", SimpleNamespace(provider="BINANCE", environment="TESTNET", account_reference="safe-ref"), request))
         from app.v22_commercial import TradingAccountLinkRequest
@@ -526,16 +579,16 @@ class V22CommercialTests(unittest.TestCase):
         secret = b"verification-status-test-secret-long-enough"
         user = {"id": "user-1", "role": "CUSTOMER", "email_verified": False}
         token = issue_token(user["id"], user["role"], secret, kind="EMAIL_STATUS", now=int(time.time()), ttl_seconds=3_600)
-        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"secret": secret, "state": {"users": [user]}}))
-        request = SimpleNamespace(app=application)
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool([user]), v22_commercial={"secret": secret, "state": {"users": [user]}}))
+        request = offline_request(application)
         self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": False})
         user["email_verified"] = True
         self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": True})
 
     def test_durable_registration_requires_a_stable_session_secret(self):
         state = default_commercial_state()
-        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"secret": b"temporary", "state": state, "lock": asyncio.Lock()}))
-        request = SimpleNamespace(app=application)
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool(), v22_commercial={"secret": b"temporary", "state": state, "lock": asyncio.Lock()}))
+        request = offline_request(application)
         payload = SimpleNamespace(terms_accepted=True, password="StrongPassword!123", confirm_password="StrongPassword!123", email="user@example.com", display_name="Test User")
         with patch("app.v22_commercial.DURABLE_AUTH_REQUIRED", True), patch.dict(os.environ, {"PROTREBOT_SESSION_SECRET": "", "PROTREBOT_WEB_ACCESS_TOKEN": ""}), patch("app.v22_commercial.gmail_configured", return_value=True):
             with self.assertRaisesRegex(HTTPException, "oturum anahtarı"):
@@ -544,8 +597,8 @@ class V22CommercialTests(unittest.TestCase):
 
     def test_durable_registration_rolls_back_when_database_persistence_fails(self):
         state = default_commercial_state()
-        application = SimpleNamespace(state=SimpleNamespace(v22_commercial={"secret": b"stable-test-secret", "state": state, "lock": asyncio.Lock()}))
-        request = SimpleNamespace(app=application)
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool(), v22_commercial={"secret": b"stable-test-secret", "state": state, "lock": asyncio.Lock()}))
+        request = offline_request(application)
         payload = SimpleNamespace(terms_accepted=True, password="StrongPassword!123", confirm_password="StrongPassword!123", email="user@example.com", display_name="Test User")
         persist = AsyncMock(return_value=False)
         with patch("app.v22_commercial.DURABLE_AUTH_REQUIRED", True), patch.dict(os.environ, {"PROTREBOT_SESSION_SECRET": "stable-test-session-secret-long-enough", "PROTREBOT_WEB_ACCESS_TOKEN": ""}), patch("app.v22_commercial.gmail_configured", return_value=True), patch("app.v22_commercial.persist_v22_commercial", new=persist), patch("app.v22_commercial.save_state"), patch("app.v22_commercial.send_auth_email") as send_email:
@@ -631,7 +684,7 @@ class V22CommercialTests(unittest.TestCase):
 
         application = SimpleNamespace()
         application.state = SimpleNamespace(
-            db_pool=SnapshotPool(),
+            db_pool=OfflineCanonicalPool(restored_state["users"], SnapshotPool()),
             v22_commercial={
                 "state": default_commercial_state(),
                 "storage_lock": asyncio.Lock(),

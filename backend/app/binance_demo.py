@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -24,8 +25,10 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from enum import Enum
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 from urllib.parse import urlencode
+from .web_security import env_flag
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -795,6 +798,7 @@ def round_tick(value: Decimal, tick: Decimal) -> Decimal:
 
 class BinanceDemoClient:
     def __init__(self, http: httpx.AsyncClient, api_key: str, secret_key: str, *, public_only: bool = False) -> None:
+        self.private_authority: Callable[[], Awaitable[None]] | None = None
         if (not api_key or not secret_key) and not public_only:
             raise BinanceDemoError(
                 "Demo API bağlantısı aktif değil. Programdaki Borsa Bağlantıları bölümünden Testnet anahtarını kaydedip aktifleştirin.",
@@ -844,7 +848,11 @@ class BinanceDemoClient:
         if (method, path) not in PRIVATE_PATHS:
             raise BinanceDemoError("İzin verilmeyen özel Demo API işlemi.", http_status=500)
         for attempt in range(2 if method == "GET" else 1):
+            if self.private_authority is not None:
+                await self.private_authority()
             await self.sync_clock(force=attempt == 1)
+            if self.private_authority is not None:
+                await self.private_authority()
             payload = dict(params or {})
             payload["timestamp"] = int(time.time() * 1000) + self.time_offset_ms
             payload["recvWindow"] = 60000
@@ -974,11 +982,64 @@ def client_for(request: Request) -> BinanceDemoClient:
                 "Demo API bağlantısı aktif değil. Programdaki Borsa Bağlantıları bölümünden Testnet anahtarını kaydedip aktifleştirin.",
                 http_status=412,
             )
-        return BinanceDemoClient(request.app.state.http, api_key, secret_key)
+        client = BinanceDemoClient(request.app.state.http, api_key, secret_key)
+        user = request.state.member
+        from .v25_execution import authenticated_live_expiry
 
+        return bind_demo_private_authority(client, request.app, state_for(request), str(user["id"]), user.get("auth_version"), authenticated_live_expiry(request))
+
+    if env_flag("PROTREBOT_DURABLE_AUTH_REQUIRED"):
+        raise BinanceDemoError("A verified owner session is required for Demo access.", http_status=412)
     if not api_key or not secret_key:
         api_key, secret_key = load_demo_credentials()
     return BinanceDemoClient(request.app.state.http, api_key, secret_key)
+
+
+def bind_demo_private_authority(
+    client: BinanceDemoClient, application: Any, state: dict[str, Any], user_id: str, captured_version: object,
+    captured_expiry: object,
+) -> BinanceDemoClient:
+    async def validate_private_authority() -> None:
+        from .v22_commercial import validate_authoritative_session
+
+        if not isinstance(captured_version, int) or isinstance(captured_version, bool) or captured_version < 1:
+            state["armed_until"] = None
+            raise BinanceDemoError("Demo authorization must be renewed.", http_status=412)
+        if (
+            not isinstance(captured_expiry, (int, float)) or isinstance(captured_expiry, bool)
+            or not math.isfinite(captured_expiry) or captured_expiry <= time.time()
+        ):
+            state["armed_until"] = None
+            raise BinanceDemoError("Demo session authorization has expired.", http_status=401)
+        try:
+            await validate_authoritative_session(application, user_id, captured_version)
+        except HTTPException as exc:
+            state["armed_until"] = None
+            raise BinanceDemoError("Demo session authority is no longer available.", http_status=exc.status_code) from exc
+
+    client.private_authority = validate_private_authority
+    return client
+
+
+def bind_demo_grant(request: Request, state: dict[str, Any]) -> None:
+    user = getattr(request.state, "member", None) or getattr(request.state, "user", None)
+    if not user:
+        if env_flag("PROTREBOT_DURABLE_AUTH_REQUIRED"):
+            raise HTTPException(401, "A verified owner session is required for Demo authorization.")
+        return
+    from .v25_execution import authenticated_live_expiry
+
+    expiry = authenticated_live_expiry(request)
+    version = user.get("auth_version")
+    if (
+        not isinstance(version, int) or isinstance(version, bool) or version < 1
+        or not isinstance(expiry, (int, float)) or isinstance(expiry, bool)
+        or not math.isfinite(expiry) or expiry <= time.time()
+    ):
+        state["armed_until"] = None
+        raise HTTPException(401, "Demo authorization must be renewed.")
+    state["_auth_version"] = version
+    state["_auth_expires_at"] = expiry
 
 
 def client_for_state(application: Any, state: dict[str, Any]) -> BinanceDemoClient:
@@ -1004,7 +1065,10 @@ def client_for_state(application: Any, state: dict[str, Any]) -> BinanceDemoClie
             raise BinanceDemoError("Kullanıcı Demo API credential bağlamı okunamadı.", http_status=412) from exc
         if not api_key or not secret_key:
             raise BinanceDemoError("Kullanıcı Demo API credential bağlamı eksik.", http_status=412)
-        return BinanceDemoClient(application.state.http, api_key, secret_key)
+        client = BinanceDemoClient(application.state.http, api_key, secret_key)
+        return bind_demo_private_authority(client, application, state, user_id, state.get("_auth_version"), state.get("_auth_expires_at"))
+    if env_flag("PROTREBOT_DURABLE_AUTH_REQUIRED"):
+        raise BinanceDemoError("A verified owner session is required for background Demo access.", http_status=412)
     api_key, secret_key = load_demo_credentials()
     return BinanceDemoClient(application.state.http, api_key, secret_key)
 
@@ -3749,7 +3813,8 @@ async def demo_arm(request: Request, body: ArmRequest) -> dict[str, Any]:
         raise safe_exchange_error(exc) from exc
     if snapshot["hedge_mode"]:
         raise HTTPException(409, "Binance Demo hesabında Pozisyon Modu 'Tek Yön / One-way' olmalı.")
-    state["armed_until"] = time.time() + ARM_SECONDS
+    bind_demo_grant(request, state)
+    state["armed_until"] = min(time.time() + ARM_SECONDS, state.get("_auth_expires_at", float("inf")))
     state["connected"] = True
     state["last_checked"] = utc_now()
     add_event(state, "DEMO EMİR KİLİDİ AÇILDI", "Yalnızca Binance Futures Demo emirleri 10 dakika için açıldı.")

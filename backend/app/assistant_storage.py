@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -71,6 +72,8 @@ class AssistantStore:
     @asynccontextmanager
     async def connection(self, timeout: int) -> AsyncGenerator[CreditTransaction, None]:
         pool = getattr(self.application.state, "db_pool", None)
+        if pool is None and str(os.getenv("PROTREBOT_DURABLE_AUTH_REQUIRED", "")).strip().lower() in {"true", "1", "yes", "on"}:
+            raise AssistantStorageError("Assistant durable storage is unavailable")
         kind = "postgres" if pool is not None else "sqlite"
         if self.storage_kind is not None and self.storage_kind != kind:
             raise AssistantStorageError("Assistant storage changed; accounting migration is required")

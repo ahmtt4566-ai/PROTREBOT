@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: protrebot
       POSTGRES_USER: protrebot
-      POSTGRES_PASSWORD: protrebot_local_change_me
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your local environment}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:

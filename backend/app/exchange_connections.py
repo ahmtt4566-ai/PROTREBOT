@@ -6,6 +6,15 @@ PostgreSQL.  Public responses contain metadata and account summaries, never
 API or secret key material.  Activating a connection does not arm an order
 channel; V25's independent consent, evidence, policy and time-limited locks
 remain authoritative for real orders.
+
+LIVE keys require a signed Spot SAPI withdrawal-restrictions check on save
+and activation. Legacy LIVE rows without that proof cannot supply active
+credentials until reactivated. Futures Testnet has no withdrawal capability;
+its permission status is explicitly not applicable, not reported as verified.
+Background LIVE cache reads require the captured session auth_version to match
+the shared active-user security row; missing or unavailable proof never falls
+back to worker-local user state. Grants also require the original signed USER
+expiry and fail closed while commercial security metadata synchronization fails.
 """
 
 from __future__ import annotations
@@ -16,8 +25,10 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import time
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any, Literal
 from urllib.parse import urlencode
@@ -199,7 +210,7 @@ def vault_managed(mode: str) -> bool:
 def cached_credentials(mode: str, *, active_only: bool = True) -> tuple[str, str]:
     normalized = normalize_mode(mode)
     meta = _META.get(normalized, {})
-    if active_only and not bool(meta.get("active")):
+    if active_only and (not bool(meta.get("active")) or not withdrawal_permissions_safe(normalized, meta.get("account"))):
         return "", ""
     return _CACHE.get(normalized, ("", ""))
 
@@ -259,6 +270,16 @@ def session_id(request: Request) -> str:
     session_header = str(headers.get("x-protrebot-session") or "").strip()
     authorization = str(headers.get("authorization") or "").strip()
     identity = session_header or authorization
+    credential = identity[7:].strip() if identity.lower().startswith("bearer ") else identity
+    if not session_header and authorization.casefold() == "bearer":
+        identity = ""
+    if not identity or credential.casefold().startswith("cookie-session:"):
+        from .v22_commercial import request_session_token
+
+        # A public browser marker identifies no session; bind to the signed cookie.
+        identity = request_session_token(request)
+        if identity.casefold().startswith("cookie-session:"):
+            return ""
     return hashlib.sha256(identity.encode("utf-8")).hexdigest() if identity else ""
 
 
@@ -276,7 +297,7 @@ def _require_member(request: Request) -> dict[str, Any]:
 def session_credentials(request: Request, mode: str, *, active_only: bool = True) -> tuple[str, str]:
     key = (session_id(request), normalize_mode(mode))
     meta = _SESSION_META.get(key, {})
-    if active_only and not meta.get("active"):
+    if active_only and (not meta.get("active") or not withdrawal_permissions_safe(key[1], meta.get("account"))):
         return "", ""
     return _SESSION_CACHE.get(key, ("", ""))
 
@@ -289,6 +310,21 @@ def session_account_identity(request: Request, mode: str, fingerprint: str = "")
     meta = _SESSION_META.get((session_id(request), normalize_mode(mode)), {})
     return account_identity(meta.get("account"), mode, fingerprint or str(meta.get("fingerprint") or ""))
 
+
+async def authoritative_user_version_active(application: Any, user_id: str, auth_version: int | None) -> bool:
+    """Background tasks cannot use middleware's worker-local USER proof."""
+    pool = getattr(application.state, "db_pool", None)
+    if not user_id or type(auth_version) is not int or auth_version < 1 or pool is None:
+        return False
+    try:
+        from .v22_commercial import authoritative_user_version_active as validate_background_user
+
+        return await validate_background_user(application, user_id, auth_version)
+    except Exception:
+        logger.warning("Background LIVE shared session authority unavailable")
+        return False
+
+
 async def session_credentials_for_identity(
     application: Any,
     session_value: str,
@@ -297,16 +333,28 @@ async def session_credentials_for_identity(
     fingerprint: str,
     *,
     force_refresh: bool = False,
+    auth_version: int | None = None,
+    auth_expires_at_epoch: float | None = None,
 ) -> tuple[str, str]:
     """Resolve an active encrypted session vault row without a request object."""
     normalized = normalize_mode(mode)
     if not session_value or not user_id or not fingerprint:
         return "", ""
+    if normalized == "LIVE":
+        if (
+            not isinstance(auth_expires_at_epoch, (int, float))
+            or not math.isfinite(auth_expires_at_epoch)
+            or auth_expires_at_epoch <= time.time()
+            or not await authoritative_user_version_active(application, user_id, auth_version)
+        ):
+            clear_session_vault_for_user_cache(application, user_id)
+            return "", ""
     key = (session_value, normalized)
     meta = _SESSION_META.get(key, {})
     cached = _SESSION_CACHE.get(key, ("", ""))
     if not force_refresh and (
         meta.get("active")
+        and withdrawal_permissions_safe(normalized, meta.get("account"))
         and str(meta.get("user_id") or "") == user_id
         and normalize_fingerprint(key_fingerprint(cached[0])) == normalize_fingerprint(fingerprint)
         and cached[1]
@@ -320,7 +368,7 @@ async def session_credentials_for_identity(
     await ensure_schema(pool)
     row = await pool.fetchrow(
         """
-        SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active
+        SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active, account_summary
         FROM protrebot_exchange_session_vault
         WHERE session_id = $1 AND user_id = $2 AND mode = $3 AND active = TRUE
         """,
@@ -331,7 +379,7 @@ async def session_credentials_for_identity(
         # live monitor. Recover only one active record for the same owner and key fingerprint.
         rows = await pool.fetch(
             """
-            SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active
+            SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active, account_summary
             FROM protrebot_exchange_session_vault
             WHERE user_id = $1 AND mode = $2 AND active = TRUE AND fingerprint = $3
             ORDER BY updated_at DESC
@@ -348,6 +396,9 @@ async def session_credentials_for_identity(
             fingerprint,
             str(row.get("fingerprint") or "") if row else "",
         )
+        return "", ""
+    if not withdrawal_permissions_safe(normalized, _row_meta(row).get("account")):
+        logger.warning("LIVE credential resolution failed: withdrawal_permissions_unverified")
         return "", ""
     try:
         credentials = decrypt_credentials(bytes(row["encrypted_payload"]), mode=normalized)
@@ -419,14 +470,15 @@ def _row_meta(row: Any) -> dict[str, Any]:
             summary = None
     tested_at = row.get("last_test_at") if hasattr(row, "get") else None
     updated_at = row.get("updated_at") if hasattr(row, "get") else None
+    permission_safe = withdrawal_permissions_safe(str(row.get("mode") or "LIVE"), summary)
     return {
         "user_id": str(row.get("user_id") or "").strip(),
         "configured": True,
-        "active": bool(row.get("active")),
+        "active": bool(row.get("active")) and permission_safe,
         "fingerprint": str(row.get("fingerprint") or ""),
         "last_test_ok": bool(row.get("last_test_ok")),
         "last_test_at": tested_at.isoformat() if hasattr(tested_at, "isoformat") else tested_at,
-        "last_error": str(row.get("last_error") or "")[:240] or None,
+        "last_error": (str(row.get("last_error") or "")[:240] or None) if permission_safe else "Para çekme izni doğrulanmadı; bağlantıyı yeniden aktifleştirin.",
         "account": summary if isinstance(summary, dict) else None,
         "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") else updated_at,
     }
@@ -619,6 +671,17 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
         return offset
 
 
+def withdrawal_permissions_safe(mode: str, account: Any) -> bool:
+    if normalize_mode(mode) == "TESTNET":
+        return True
+    permissions = account.get("api_permissions") if isinstance(account, dict) else None
+    return bool(
+        isinstance(permissions, dict)
+        and permissions.get("withdrawal_check") == "VERIFIED"
+        and permissions.get("enableWithdrawals") is False
+    )
+
+
 async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: str, secret_key: str) -> dict[str, Any]:
     normalized = normalize_mode(mode)
     validate_key_pair(api_key, secret_key)
@@ -630,6 +693,20 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
     offset = await _server_time_offset(http, normalized)
     logger.info("LIVE_CONNECTION_TEST SERVER_TIME_DONE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     timestamp = int(time.time() * 1000) + offset
+    if normalized == "LIVE":
+        # API restrictions are a signed Spot SAPI endpoint, not a Futures endpoint.
+        restrictions = await _signed_get(
+            http, "https://api.binance.com", "/sapi/v1/account/apiRestrictions",
+            api_key, secret_key, timestamp,
+        )
+        if not isinstance(restrictions, dict) or type(restrictions.get("enableWithdrawals")) is not bool:
+            raise VaultError("Binance para çekme izni doğrulanamadı; canlı anahtar reddedildi.")
+        if restrictions["enableWithdrawals"]:
+            raise VaultError("Para çekme izni açık Binance anahtarı kabul edilmez.")
+        api_permissions = {"withdrawal_check": "VERIFIED", "enableWithdrawals": False}
+    else:
+        # Futures Testnet has no withdrawals and does not implement the SAPI check.
+        api_permissions = {"withdrawal_check": "NOT_APPLICABLE_TESTNET", "enableWithdrawals": None}
     logger.info("LIVE_CONNECTION_TEST ACCOUNT_VERIFY_START mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     account = await _signed_get(http, host, "/fapi/v3/account", api_key, secret_key, timestamp)
     position_mode = await _signed_get(http, host, "/fapi/v1/positionSide/dual", api_key, secret_key, timestamp)
@@ -653,6 +730,7 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
         "clock_offset_ms": offset,
         "tested_at": now_iso(),
         "orders_created": False,
+        "api_permissions": api_permissions,
     }
     logger.info("LIVE_CONNECTION_TEST TEST_RESPONSE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     return result
@@ -720,18 +798,60 @@ def public_status(application: Any) -> dict[str, Any]:
     }
 
 
-def _lock_runtime(application: Any, mode: str) -> None:
+def _lock_live_controller(state: dict[str, Any]) -> None:
+    state["armed_until"] = 0.0
+    state["connected"] = False
+    state["auto"]["enabled"] = False
+    state["auto"]["session_until"] = 0.0
+    state["real_trading_locked"] = True
+    state["live_auto_trade"] = False
+    state["auto_authorization"] = {"session_id": "", "user_id": "", "fingerprint": "", "expires_at_epoch": 0.0}
+    state["web_consent"] = {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None}
+
+
+def clear_session_vault_for_user_cache(
+    application: Any, user_id: str, session_ids: Iterable[str] = (),
+) -> None:
+    """Offline account-erasure hook; session_ids are already-hashed vault IDs."""
+    user_id = str(user_id or "")
+    if not user_id:
+        return
+    known_sessions = {str(value) for value in session_ids if value}
+    for key in set(_SESSION_CACHE) | set(_SESSION_META):
+        owner = str(_SESSION_META.get(key, {}).get("user_id") or "")
+        if owner == user_id or (key[0] in known_sessions and not owner):
+            _SESSION_CACHE.pop(key, None)
+            _SESSION_META.pop(key, None)
+    state = getattr(application.state, "v25_execution", None)
+    if not isinstance(state, dict):
+        return
+    authorization = state.get("live_session_authorization") or {}
+    owner = str(authorization.get("user_id") or "")
+    if owner == user_id or (
+        not owner and any(
+            str((state.get(key) or {}).get("user_id") or "") == user_id
+            for key in ("auto_authorization", "web_consent")
+        )
+    ):
+        _lock_live_controller(state)
+
+
+def _lock_runtime(application: Any, mode: str, request: Request) -> None:
     if mode == "TESTNET" and hasattr(application.state, "binance_demo"):
         state = application.state.binance_demo
         state["armed_until"] = 0
         state["connected"] = False
     if mode == "LIVE" and hasattr(application.state, "v25_execution"):
         state = application.state.v25_execution
-        state["armed_until"] = 0.0
-        state["connected"] = False
-        state["auto"]["enabled"] = False
-        state["auto"]["session_until"] = 0.0
-        state["web_consent"] = {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None}
+        from .v25_execution import current_user_id
+
+        authorization = state.get("live_session_authorization") or {}
+        if (
+            authorization.get("session_id") != session_id(request)
+            or authorization.get("user_id") != current_user_id(request)
+        ):
+            return
+        _lock_live_controller(state)
 
 
 async def _require_ready(application: Any) -> Any:
@@ -832,7 +952,7 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
         "account": account,
         "updated_at": now_iso(),
     }
-    _lock_runtime(request.app, mode)
+    _lock_runtime(request.app, mode, request)
     return {**session_public_status(request.app, request), "message": "Anahtarlar bu oturum için güvenli kasaya kaydedildi ve otomasyon için hazır."}
 
 
@@ -857,7 +977,7 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
         )
         public_error = _rate_limit_public_message(exc) if isinstance(exc, BinanceServerTimeRejected) else str(exc)[:240]
         _SESSION_META[(session_id(request), mode)].update({"active": False, "last_test_ok": False, "last_test_at": now_iso(), "last_error": public_error})
-        _lock_runtime(request.app, mode)
+        _lock_runtime(request.app, mode, request)
         raise _exchange_test_http_exception(exc) from exc
     sid = session_id(request)
     await pool.execute(
@@ -891,7 +1011,7 @@ async def exchange_connection_deactivate(request: Request, body: ConnectionActio
     if (sid, mode) in _SESSION_META:
         _SESSION_META[(sid, mode)]["active"] = False
         _SESSION_META[(sid, mode)]["updated_at"] = now_iso()
-    _lock_runtime(request.app, mode)
+    _lock_runtime(request.app, mode, request)
     return {**session_public_status(request.app, request), "message": "Bağlantı kapatıldı; yeni emir yetkileri sıfırlandı."}
 
 
@@ -921,7 +1041,7 @@ async def exchange_connection_delete(request: Request, body: ConnectionActionReq
     await pool.execute("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1 AND mode = $2", sid, mode)
     _SESSION_CACHE.pop((sid, mode), None)
     _SESSION_META.pop((sid, mode), None)
-    _lock_runtime(request.app, mode)
+    _lock_runtime(request.app, mode, request)
     return {**session_public_status(request.app, request), "message": "Şifreli anahtar kaydı bu oturum için silindi."}
 
 
@@ -934,7 +1054,7 @@ async def exchange_connection_clear_session(request: Request) -> dict[str, Any]:
     for mode in HOSTS:
         _SESSION_CACHE.pop((sid, mode), None)
         _SESSION_META.pop((sid, mode), None)
-        _lock_runtime(request.app, mode)
+        _lock_runtime(request.app, mode, request)
     return {"ok": True, "message": "Oturum borsa bağlantıları temizlendi."}
 
 
@@ -946,5 +1066,4 @@ async def clear_session_vault_for_request(request: Request) -> None:
     for mode in HOSTS:
         _SESSION_CACHE.pop((sid, mode), None)
         _SESSION_META.pop((sid, mode), None)
-        _lock_runtime(request.app, mode)
-
+        _lock_runtime(request.app, mode, request)
