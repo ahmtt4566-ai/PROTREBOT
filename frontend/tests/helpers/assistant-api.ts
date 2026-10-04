@@ -1,5 +1,5 @@
 import {expect, type Page} from '@playwright/test'
-import {demoHistory, demoReadFixtures} from './demo-api'
+import {demoAccount, demoHistory, demoReadFixtures, demoSummary} from './demo-api'
 
 type ApiCall = {path: string; body: Record<string, unknown>}
 type MockState = {
@@ -102,6 +102,15 @@ export async function mockAssistant(page: Page, remembered = false): Promise<Moc
       '/api/health': {status: 'ok'},
       '/api/exchange-connections/status': {connections: {TESTNET: {configured: false, active: false}}, vault: {ready: true}},
       '/api/notifications': {items: [], unread: 0},
+      '/api/v27/operations': {
+        version: 'V27', generated_at: '2026-10-03T00:00:00Z',
+        deployment: {tier: 'TEST', always_on: false, database: 'FIXTURE', uptime_seconds: 0},
+        testnet: {configured: false, connected: false, armed: false, stream: demoSummary.stream,
+          auto: demoSummary.auto, account: demoAccount, daily: {entries: 0}},
+        evidence: {status: 'EMPTY', persistent: false, restored: false, count: 0,
+          events: [], certificate: demoSummary.certificate},
+        safety: {testnet_only: true, real_trading_locked: true, auto_resumes_after_restart: false, profit_guaranteed: false},
+      },
       '/api/v25/status': {connected: false, real_trading_locked: true, execution_state: 'LOCKED', armed: false,
         live_auto_trade: false, recovery_ready: true, credentials: {configured: false}, account: {}, events: [],
         stream: {status: 'DISCONNECTED'}, readiness: {ready: false, gates: []}, policy: {allowed_symbols: ['BTCUSDT']}},

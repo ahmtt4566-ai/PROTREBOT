@@ -322,15 +322,21 @@ düğmede görünen soru değiştirilmeden sohbet isteğinin `message` alanına 
 Asistan yanıtları yerel panoya kopyalanabilir; kopyalama hatası açıkça gösterilir.
 Karakter sayacı giriş limitinin %80'ine ulaşınca görünür.
 Kontrollü textarea 48–120 px aralığında kendiliğinden büyür
-(dar klavye görünümünde 80 px ile sınırlanır). Typing noktaları yalnız
+(dar klavye görünümünde panel yüksekliğine göre 48–80 px ile sınırlanır). Typing noktaları yalnız
 transform/opacity ile nabız atar. Mobil sheet mevcut visualViewport'un
 %75'ini ve safe-area boşluklarını kullanır; input/gönder sabit
-alt bölümde kalır. Native dialog, onay, CopyProtection ve odak akışı korunur.
+alt bölümde kalır. Panel yüksekliği dvh/visualViewport ve safe-area ile sınırlıdır;
+iç yerleşim bu sınıra bağlıdır. Kısa görünümde işlem yapmama rozeti gizlenerek
+başlık ve yazı alanına yer ayrılır. Native dialog, onay, CopyProtection ve odak akışı korunur.
 Kısa viewport ve açık klavyede başlık/yazı alanı kaydırılmaz; aradaki kullanım,
 mesajlar ve öneriler tek kaydırılabilir bölgededir. Panel yüksekliği dinamik
 viewport ve safe-area sınırlarıyla kısıtlanır.
-Panel ve karşılama balonu, başlık düzeni değişince yalnız kendi düğmelerinin
-geometrisini yeniden ölçer; içerik veya alan değeri okunmaz.
+Panel ve karşılama balonu, başlık düzeni değişince düğme/başlık
+geometrisini yeniden ölçer; içerik veya alan değeri okunmaz. Karşılama balonu
+başlık ve görünür başlık düğmelerinin ölçülen en alt kenarına göre 12 px
+boşlukla yerleşir; dar ekranda sarılan başlık kontrollerini de örtmez.
+ResizeObserver, resize/scroll ve başlık geçişleri konumu günceller; Master Trade
+başlığı yüklenirken geçici slot kaybı günlük karşılama süresini sonlandırmaz.
 Masaüstü Master Trade ortak başlığı gizlediği için aynı düğme, mevcut terminal
 başlığındaki boş slota portal ile taşınır; ikinci asistan oturumu oluşturulmaz.
 Kök `main.tsx` → `TestnetFirstApp.tsx` → `AssistantChat.tsx` aktif zincirdir;

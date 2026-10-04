@@ -115,7 +115,14 @@ for (const width of [1440, 768, 390, 320]) {
     expect(anchor).not.toBeNull(); expect(greeting).not.toBeNull()
     expect(greeting!.x).toBeGreaterThanOrEqual(12)
     expect(greeting!.x + greeting!.width).toBeLessThanOrEqual(width - 12)
-    expect(greeting!.y).toBeCloseTo(anchor!.y + anchor!.height + 12, 1)
+    const headerBottom = await launcher.evaluate(element => {
+      const header = element.closest('header')!
+      return Math.max(header.getBoundingClientRect().bottom, ...Array.from(
+        header.querySelectorAll<HTMLElement>('button, a, input, [role="button"]'))
+        .filter(control => control.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}))
+        .map(control => control.getBoundingClientRect().bottom))
+    })
+    expect(greeting!.y).toBeCloseTo(headerBottom + 12, 1)
     const greetingArrow = await bubble.evaluate(element => Number.parseFloat(getComputedStyle(element).getPropertyValue('--kais-greeting-arrow')))
     expect(greeting!.x + greetingArrow).toBeCloseTo(anchor!.x + anchor!.width / 2, 1)
     await launcher.click()

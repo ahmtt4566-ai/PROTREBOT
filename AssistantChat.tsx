@@ -497,7 +497,7 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
     </button>
   return <>
     {launcherTarget === undefined ? launcher : launcherTarget && createPortal(launcher, launcherTarget)}
-    <KaisGreeting userId={userId} enabled={!expired && launcherTarget !== null && eyeState !== 'off' && eyeState !== 'error'}
+    <KaisGreeting userId={userId} enabled={!expired && eyeState !== 'off' && eyeState !== 'error'}
       chatOpen={open} anchorRef={launcherRef} anchorHost={launcherTarget} motionPaused={motionPaused} onOpen={openChat}/>
     {open && createPortal(<dialog ref={dialog} className="assistantDialog" style={style} data-assistant-chat data-side={placement.above ? 'above' : 'below'} data-motion-paused={motionPaused} data-compact-viewport={viewport.height < 500 || undefined} role="dialog" aria-label={copy.title} aria-labelledby="assistant-title"
       onCancel={event => {event.preventDefault(); if (settingsOpen) {setSettingsOpen(false); settingsButton.current?.focus()} else setOpen(false)}}

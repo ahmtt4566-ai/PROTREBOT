@@ -92,9 +92,14 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
   useLayoutEffect(() => {
     if (!shown || !bubbleRef.current) return
     const element = bubbleRef.current
+    let frame: number | undefined
     const update = () => {
-      const anchor = anchorRef.current?.getBoundingClientRect()
-      if (!anchor) return
+      const button = anchorRef.current
+      const anchor = button?.getBoundingClientRect()
+      if (!anchor) {
+        setPlacement(previous => previous.fits ? {...previous, fits: false} : previous)
+        return
+      }
       const viewport = window.visualViewport
       const viewLeft = viewport?.offsetLeft ?? 0
       const viewTop = viewport?.offsetTop ?? 0
@@ -103,24 +108,42 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
       const width = Math.min(MAX_WIDTH, Math.max(0, viewWidth - GAP * 2))
       element.style.width = `${width}px`
       const left = Math.max(viewLeft + GAP, Math.min(anchor.right - width, viewLeft + viewWidth - GAP - width))
-      const top = anchor.bottom + GAP
+      const header = button?.closest('header')
+      const controls = Array.from(header?.querySelectorAll<HTMLElement>('button, a, input, [role="button"]') ?? [])
+        .filter(control => control.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}))
+      const bottom = Math.max(anchor.bottom, header?.getBoundingClientRect().bottom ?? anchor.bottom,
+        ...controls.map(control => control.getBoundingClientRect().bottom))
+      const top = bottom + GAP
       const arrow = Math.max(GAP, Math.min(anchor.left + anchor.width / 2 - left, width - GAP))
       const fits = anchor.width > 0 && anchor.height > 0 && width > 0 &&
         top >= viewTop + GAP && top + element.offsetHeight <= viewTop + viewHeight - GAP
       setPlacement(previous => previous.left === left && previous.top === top && previous.width === width &&
         previous.arrow === arrow && previous.fits === fits ? previous : {left, top, width, arrow, fits})
     }
+    const trackLayout = () => {
+      update()
+      frame = requestAnimationFrame(trackLayout)
+    }
     update()
+    frame = requestAnimationFrame(trackLayout)
     const anchorLayout = new ResizeObserver(update)
     for (let host: HTMLElement | null = anchorRef.current; host; host = host.parentElement) anchorLayout.observe(host)
+    for (const control of anchorRef.current?.closest('header')?.querySelectorAll('button, a, input, [role="button"]') ?? []) anchorLayout.observe(control)
     window.addEventListener('resize', update)
     window.addEventListener('scroll', update, {passive: true, capture: true})
+    document.addEventListener('transitionrun', update, true)
+    document.addEventListener('transitionend', update, true)
+    document.addEventListener('transitioncancel', update, true)
     window.visualViewport?.addEventListener('resize', update)
     window.visualViewport?.addEventListener('scroll', update)
     return () => {
       anchorLayout.disconnect()
+      if (frame !== undefined) cancelAnimationFrame(frame)
       window.removeEventListener('resize', update)
       window.removeEventListener('scroll', update, true)
+      document.removeEventListener('transitionrun', update, true)
+      document.removeEventListener('transitionend', update, true)
+      document.removeEventListener('transitioncancel', update, true)
       window.visualViewport?.removeEventListener('resize', update)
       window.visualViewport?.removeEventListener('scroll', update)
     }

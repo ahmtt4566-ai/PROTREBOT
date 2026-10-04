@@ -1,4 +1,5 @@
 import {expect, test, type Page} from '@playwright/test'
+import {mockAssistant} from './helpers/assistant-api'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 
@@ -172,6 +173,55 @@ test('Reduced motion removes animation but still shows greeting', async ({page})
   await page.emulateMedia({reducedMotion: 'reduce'})
   await expect(bubble(page)).toHaveCSS('animation-name', 'none')
 })
+
+const greetingViews = {
+  dashboard: '', trading: 'İşlem Masası', analyst: 'Analyst', scanner: 'Scanner',
+  'master-trade': 'Master Trade', live: 'Gerçek Futures Hazırlık Merkezi',
+  risk: 'Risk Kasası', performance: 'Performance', ops: 'Bulut Operasyon ve Kanıt Merkezi',
+  setup: 'Sunucu ve Anahtar Kapıları', pricing: 'Plans & Pricing', billing: 'Billing & Subscription',
+}
+
+for (const width of [320, 360, 390, 768, 1440]) {
+  for (const [view, title] of Object.entries(greetingViews)) {
+  test(`Greeting clears the entire header by 8px in ${view} at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width, height: 844})
+    await installClock(page)
+    await page.emulateMedia({reducedMotion: 'reduce'})
+    await mockAssistant(page)
+    await page.goto('/')
+    const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
+    await expect(launcher).toBeVisible()
+      await page.evaluate(target => window.dispatchEvent(new CustomEvent('protrebot-navigate', {detail: target})), view)
+      if (view === 'dashboard') await expect(page.locator('#dashboard-title')).toBeVisible()
+      else await expect(page.locator('.v26ModeBar h1')).toHaveText(title)
+      await expect.poll(async () => {
+        await page.clock.runFor(100)
+        return launcher.isVisible()
+      }).toBe(true)
+      await page.evaluate(() => document.fonts.ready)
+      await page.evaluate(() => window.scrollTo({top: 0, left: 0, behavior: 'instant'}))
+      await page.clock.runFor(2000)
+      await expect.poll(() => launcher.evaluate(element =>
+        element.closest('header')!.getAnimations({subtree: true}).every(animation =>
+          !(animation instanceof CSSTransition) || animation.playState !== 'running'))).toBe(true)
+      await expect(bubble(page)).toBeVisible()
+      const geometry = await launcher.evaluate(element => {
+        const header = element.closest('header')!
+        return {
+          bottom: header.getBoundingClientRect().bottom,
+          controls: Array.from(header.querySelectorAll<HTMLElement>('button, a, input, [role="button"]'))
+            .filter(control => control.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}))
+            .map(control => control.getBoundingClientRect().bottom),
+        }
+      })
+      const box = (await bubble(page).boundingBox())!
+      expect(box.y, view).toBeGreaterThanOrEqual(geometry.bottom + 8)
+      for (const bottom of geometry.controls) expect(box.y, view).toBeGreaterThanOrEqual(bottom + 8)
+      expect(box.x, view).toBeGreaterThanOrEqual(12)
+      expect(box.x + box.width, view).toBeLessThanOrEqual(width - 12)
+  })
+  }
+}
 
 test('Hidden tab pauses both waiting delay and visible lifetime', async ({page}) => {
   await prepare(page)

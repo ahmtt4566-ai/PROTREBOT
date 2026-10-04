@@ -28,6 +28,7 @@
   #root > main.v26App .masterTradeTerminalHeader:has(.assistantMasterSlot:not(:empty)) { grid-template-columns: auto minmax(0, 1fr) auto; }
 }
 .assistantDialog {
+  --assistant-panel-height: min(600px, var(--assistant-dialog-height, calc(100dvh - 24px)));
   --assistant-surface: #0c1820;
   --assistant-text: #eef9fa;
   --assistant-muted: #adc0c8;
@@ -37,7 +38,7 @@
   box-sizing: border-box;
   inset: var(--assistant-dialog-top, 12px) auto auto var(--assistant-dialog-left, 12px);
   width: min(400px, calc(var(--assistant-viewport-width, 100vw) - 24px));
-  height: min(600px, var(--assistant-dialog-height, calc(100dvh - 24px)));
+  height: var(--assistant-panel-height);
   max-width: none;
   max-height: calc(min(100dvh, var(--assistant-viewport-height, 100dvh)) - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
   margin: 0;
@@ -59,7 +60,7 @@
 .assistantDialog::backdrop { background: #03111b80; }
 .assistantDialog::before { content: ""; position: absolute; width: 12px; height: 12px; top: -7px; left: calc(var(--assistant-arrow-left, 32px) - 6px); transform: rotate(45deg); border-left: 1px solid var(--assistant-line); border-top: 1px solid var(--assistant-line); background: var(--assistant-surface); pointer-events: none; }
 .assistantDialog[data-side="above"]::before { top: auto; bottom: -7px; transform: rotate(225deg); }
-.assistantLayout { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: inherit; }
+.assistantLayout { position: absolute; inset: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: inherit; }
 .assistantDialog[open] { animation: assistant-popover-in 180ms ease-out; }
 .assistantHeader { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid var(--assistant-line); flex-shrink: 0; }
 .assistantHeader > .kaisEye { flex-shrink: 0; }
@@ -148,10 +149,11 @@ body.site-copy-protected [data-assistant-chat] * { user-select: text; -webkit-us
 .assistantDialog[data-compact-viewport] .assistantSuggestions { display: none; }
 .assistantDialog[data-compact-viewport] .assistantHeader { padding-block: 8px; }
 .assistantDialog[data-compact-viewport] .assistantMeta { padding-block: 6px; }
+.assistantDialog[data-compact-viewport] .assistantSubtitle { display: none; }
 .assistantDialog[data-compact-viewport] .assistantNotice { max-height: 32px; overflow: auto; }
 .assistantDialog[data-compact-viewport] .assistantError { max-height: 15%; }
 .assistantDialog[data-compact-viewport] .assistantComposer { padding-top: 8px; }
-.assistantDialog[data-compact-viewport] textarea { max-height: 80px; }
+.assistantDialog[data-compact-viewport] textarea { max-height: clamp(48px, calc(var(--assistant-panel-height) - 160px), 80px); }
 @media (max-width: 1023px) {
   #root > main.v26App > .v26Header.v26HomeHeader .v26HeaderActions { flex-shrink: 0; }
 }
@@ -160,9 +162,10 @@ body.site-copy-protected [data-assistant-chat] * { user-select: text; -webkit-us
 }
 @media (max-width: 767px) {
   .assistantDialog {
+    --assistant-panel-height: calc(var(--assistant-viewport-height, 100dvh) * .75);
     inset: calc(var(--assistant-viewport-top, 0px) + var(--assistant-viewport-height, 100dvh) * .25) auto auto var(--assistant-viewport-left, 0px);
     width: min(100%, var(--assistant-viewport-width, 100vw));
-    height: calc(var(--assistant-viewport-height, 100dvh) * .75);
+    height: var(--assistant-panel-height);
     border-radius: 24px 24px 0 0;
     border-bottom: 0;
   }
