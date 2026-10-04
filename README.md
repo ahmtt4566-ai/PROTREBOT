@@ -99,6 +99,20 @@ and hashed handles/browser bindings, not Google access/refresh tokens. Existing
 session keys must remain stable across workers. No provider dashboard changes
 or real Google-account login are claimed by offline tests.
 
+## Public policy pages and canonical domain
+
+The canonical production host is `https://kaistrade.com`. The same Vercel
+frontend project also binds `www.kaistrade.com` with its own TLS certificate
+and a path-preserving HTTP 308 redirect to the canonical host.
+
+`/privacy`, `/terms`, and `/risk` (including trailing-slash variants) render
+without user or owner authentication in both frontend entry points. They reuse
+the existing Trust Center paragraphs from `compliance-content.ts`; the signed-in
+modal uses the same source. All other routes retain their existing access gates.
+Login badges use neutral feature descriptions, not unverified encryption, 2FA,
+or round-the-clock support promises. Publishing these local changes requires a
+separate release; they do not clear a Google Safe Browsing warning automatically.
+
 ## Güvenlik ve tarayıcı oturumları
 
 Tarayıcı üyelik oturumu ve yönetici erişimi `HttpOnly`, `SameSite=Lax`,

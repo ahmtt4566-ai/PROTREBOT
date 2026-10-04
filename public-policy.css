@@ -1,0 +1,48 @@
+.publicPolicyPage {
+  box-sizing: border-box;
+  width: min(100%, 860px);
+  margin: 0 auto;
+  padding: clamp(20px, 5vw, 48px);
+  color: #e2e8f0;
+}
+
+.publicPolicyPage header img {
+  width: min(220px, 100%);
+  height: auto;
+}
+
+.publicPolicyPage nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 28px 0;
+}
+
+.publicPolicyPage a {
+  color: #93c5fd;
+}
+
+.publicPolicyPage a[aria-current="page"] {
+  color: #e2e8f0;
+  font-weight: 700;
+}
+
+.publicPolicyPage article {
+  padding: clamp(16px, 4vw, 32px);
+  border: 1px solid #334155;
+  border-radius: 16px;
+  background: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.publicPolicyPage h1 {
+  font-size: clamp(24px, 5vw, 36px);
+}
+
+.publicPolicyPage p {
+  margin: 0;
+}
+
+.publicPolicyPage footer {
+  margin-top: 24px;
+}

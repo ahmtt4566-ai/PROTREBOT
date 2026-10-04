@@ -4,6 +4,8 @@ import TestnetFirstApp from './TestnetFirstApp'
 import AppErrorBoundary from './AppErrorBoundary'
 import WebAccessGate from './WebAccessGate'
 import AuthGate from './AuthGate'
+import PublicPolicyPage from './PublicPolicyPage'
+import { publicPolicyForPath } from './compliance-content'
 import CopyProtection from './CopyProtection'
 import BackToTop from './BackToTop'
 import { MemberAccessProvider } from './premium-access'
@@ -22,4 +24,8 @@ import './back-to-top.css'
 
 installAuthorizedFetch()
 installErrorMonitoring()
-ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><CopyProtection/><BackToTop/><AppErrorBoundary><WebAccessGate><AuthGate><MemberAccessProvider><TestnetFirstApp/></MemberAccessProvider></AuthGate></WebAccessGate></AppErrorBoundary></React.StrictMode>)
+const publicPolicy = publicPolicyForPath(window.location.pathname)
+const application = publicPolicy
+  ? <PublicPolicyPage policy={publicPolicy}/>
+  : <><CopyProtection/><BackToTop/><WebAccessGate><AuthGate><MemberAccessProvider><TestnetFirstApp/></MemberAccessProvider></AuthGate></WebAccessGate></>
+ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary>{application}</AppErrorBoundary></React.StrictMode>)

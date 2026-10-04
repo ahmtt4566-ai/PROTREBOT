@@ -49,7 +49,7 @@ function AuthIntroPanel({data,status,movers,premium = false}:{data:LiveTickerDat
     <AuthMarketCards data={data} status={status}/>
     <TopMovers movers={movers} autoScroll={premium}/>
     {premium && <div className="authFeatureList"><span><Zap/> Hızlı işlem</span><span><BarChart3/> Gelişmiş analiz</span><span><ShieldCheck/> Güvenli altyapı</span></div>}
-    <div className="authTrustBadges"><span><ShieldCheck/> 256-bit şifreleme</span><span><KeyRound/> 2 adımlı doğrulama</span><span><Activity/> 7/24 destek</span></div>
+    <div className="authTrustBadges"><span><ShieldCheck/> Hesap yönetimi</span><span><KeyRound/> E-posta ile giriş</span><span><Activity/> Risk bilgilendirmesi</span></div>
     <div className="authCandlePattern" aria-hidden="true"><i/><i/><i/><i/><i/><i/><i/><i/></div>
   </section>
 }

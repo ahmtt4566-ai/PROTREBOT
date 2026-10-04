@@ -6,6 +6,7 @@ import BackButton from './BackButton'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 import ScannerCenter from './ScannerCenter'
 import AssistantChat from './AssistantChat'
+import ComplianceContent from './ComplianceContent'
 import {useKaisErrorReaction, useKaisWorkspaceReaction} from './useKaisPageReactions'
 
 function BinanceDemoLoadRecovery() {
@@ -916,21 +917,7 @@ export default function TestnetFirstApp() {
         <nav style={{display:'flex',gap:'0.5rem',flexWrap:'wrap',marginBottom:'1rem'}}>
           {(['risk','privacy','terms','support'] as const).map(tab => <button key={tab} type="button" onClick={() => setComplianceTab(tab)} style={{padding:'0.55rem 0.8rem',borderRadius:'999px',border: complianceTab === tab ? '1px solid rgba(96,165,250,0.7)' : '1px solid rgba(148,163,184,0.2)',background: complianceTab === tab ? 'rgba(59,130,246,0.12)' : 'transparent',color: complianceTab === tab ? '#dbeafe' : '#cbd5e1',fontWeight:700,textTransform:'capitalize',cursor:'pointer'}}>{tab}</button>)}
         </nav>
-        {complianceTab === 'risk' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
-          <p>This is a research and demo-first operating workspace. It is not a guarantee of profit and it does not promise financial returns.</p>
-          <p>Market data, signal quality, order logic, and execution status can change rapidly. The platform uses fail-closed security gates by default. Live orders are never activated automatically and only proceed after explicit validation and safety checks.</p>
-          <p>Users must understand that market exposure carries risk, including potential loss of capital. This platform is designed for education, simulation, risk review, and controlled testnet workflows unless a separate live trading authorization is explicitly completed.</p>
-        </div>}
-        {complianceTab === 'privacy' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
-          <p>We do not store raw exchange secrets in browser storage. API keys and credentials are handled through the secure backend vault or server-side environment when available.</p>
-          <p>Diagnostic and operational metadata may be retained for monitoring, integrity, and support purposes. Sensitive values are minimized and access is restricted to authorized operational workflows.</p>
-          <p>Users remain responsible for safeguarding their own credentials and for reviewing any legal privacy obligations applicable to their region and use case.</p>
-        </div>}
-        {complianceTab === 'terms' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
-          <p>Use of this platform is governed by the applicable service agreement, risk acknowledgment, and product terms provided by the operator. The software is provided as a workflow and analytics environment.</p>
-          <p>Testnet or demo features are not a substitute for regulated financial advice or live market execution. Users must confirm that their use case complies with local rules and account restrictions.</p>
-          <p>Any live trading activation requires separate authorization, security validation, and explicit user acknowledgment of the associated execution risk.</p>
-        </div>}
+        {complianceTab !== 'support' && <ComplianceContent policy={complianceTab}/>}
         {complianceTab === 'support' && <div style={{display:'grid',gap:'0.8rem',color:'#e2e8f0',lineHeight:1.6}}>
           <p>Support channels should be used for access issues, credentials, billing questions, onboarding, and operational troubleshooting.</p>
           <p>Use the in-app support workflow or your authorized operational contact channel. No public placeholder support email is used on the customer-facing surface.</p>
