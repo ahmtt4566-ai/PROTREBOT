@@ -200,8 +200,13 @@ mobil sheet'i native dialog olarak açar; Escape/kapatma odağı açan düğmeye
 Başlık düğmesi mobilde de en az 44 × 44 px hedefle, diğer kontrollerin solunda
 kalır; mevcut menü/işlem düğmeleri küçültülmez. Okunmamış yoklama rozeti gözün
 üstünde gösterilir. Panel kendiliğinden açılmaz; çalışma alanı değişince kapanır.
-Launcher yalnız header içinde, 58 px yuvarlak dokunma hedefinde 56 px göz ve
-hafif turkuaz parlamayla gösterilir; sağ-alt floating yerleşimi veya ekrana
+Launcher yalnız header içinde, çalışma alanlarında 58 px yuvarlak dokunma
+hedefinde 56 px göz ve hafif turkuaz parlamayla gösterilir. Ana sayfada göz
+67,2 px, hedef 69,6 px olur; logo ve yenile/bildirim/profil simgeleri de gerçek
+boyutlarıyla %20 büyüktür. Diğer dokunma hedefleri en az 44 px kalır.
+320/390 px ekranlarda logonun yalnız boş raster kenarları kırpılır; görünür
+logo küçültülmez, header yüksekliği ve çevrimiçi göstergesi değişmez.
+Sağ-alt floating yerleşimi veya ekrana
 göre küçültme yoktur. Erişilebilir adı her dilde `Kais AI` olur. İlk sekme
 oturumunda küçük etiket 5 saniye görünür; `sessionStorage` ile reload ve
 header değişimlerinde tekrarlanmaz. Kalıcı düğme yazısı yoktur.

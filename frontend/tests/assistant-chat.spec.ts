@@ -463,8 +463,8 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     await page.goto('/')
     const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
     await expect(launcher).toBeVisible()
-    await expect(launcher.locator('.kaisEye')).toHaveCSS('width', '56px')
-    await expect(launcher.locator('.kaisEye')).toHaveCSS('height', '56px')
+    await expect(launcher.locator('.kaisEye')).toHaveCSS('width', '67.1875px')
+    await expect(launcher.locator('.kaisEye')).toHaveCSS('height', '67.1875px')
     await expect(launcher.locator('.assistantBadge')).toHaveText('1')
     for (const view of ['dashboard', 'master-trade', 'live', 'trading', 'scanner']) {
       await page.evaluate(target => window.dispatchEvent(new CustomEvent('protrebot-navigate', {detail: target})), view)

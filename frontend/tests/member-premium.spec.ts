@@ -62,7 +62,7 @@ async function mockMember(page: Page, premium = false, initialRemaining = 87, ma
 }
 
 for (const width of [1440, 768, 390, 320]) {
-  test(`Home logo is 40 percent larger and fits the header at ${width}px`, async ({page}) => {
+  test(`Home logo grows another 20 percent and fits the header at ${width}px`, async ({page}) => {
     await page.setViewportSize({width, height: 900})
     await mockMember(page)
     await page.goto('/')
@@ -75,8 +75,8 @@ for (const width of [1440, 768, 390, 320]) {
       return {width: box.width, height: box.height, available: brand.width, right: box.right, actionsLeft: actions.left,
         scrollWidth: document.documentElement.scrollWidth, viewport: window.innerWidth}
     })
-    expect(measurements.width).toBeCloseTo(Math.min(180 * 1.4, measurements.available), 0)
-    expect(measurements.height).toBeCloseTo(47 * 1.4, 0)
+    expect(measurements.width).toBeCloseTo(Math.min(180 * 1.4 * 1.2, measurements.available), 0)
+    expect(measurements.height).toBeCloseTo(47 * 1.4 * 1.2, 0)
     expect(measurements.right).toBeLessThanOrEqual(measurements.actionsLeft)
     expect(measurements.scrollWidth).toBeLessThanOrEqual(measurements.viewport)
     await page.goto('/master-trade?tab=analiz')

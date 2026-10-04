@@ -131,10 +131,10 @@
 }
 
 #root > main.v26App.homeRoute .v26BrandLogo {
-  flex-basis: 252px !important;
-  width: 252px !important;
+  flex-basis: var(--home-header-logo-width, 252px) !important;
+  width: var(--home-header-logo-width, 252px) !important;
   max-width: 100%;
-  height: 65.8px !important;
+  height: var(--home-header-logo-height, 65.8px) !important;
 }
 
 #root > main.v26App .v26HeaderProfileSlot {
@@ -148,4 +148,119 @@
   position: static !important;
   inset: auto !important;
   z-index: 1 !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader {
+  --home-header-logo-width: 302.4px;
+  --home-header-logo-height: 78.96px;
+  --home-header-logo-image-height: auto;
+  --home-header-icon-size: 20.4px;
+  --home-header-profile-size: 21.6px;
+  --home-header-control-size: 44px;
+  --home-header-profile-target: 44px;
+  --home-header-profile-shell: 44px;
+  --home-header-eye-size: 67.2px;
+  --home-header-eye-target: 69.6px;
+  --home-header-actions-gap: 7.2px;
+  align-items: center;
+  padding-block: 5.42px !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .v26BrandLogo {
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  overflow: hidden;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .v26BrandLogo img {
+  width: var(--home-header-logo-width) !important;
+  max-width: none !important;
+  height: var(--home-header-logo-image-height) !important;
+  object-fit: contain;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .v26HeaderActions {
+  gap: var(--home-header-actions-gap) !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader :is(.v26Refresh, .v26NotificationButton, .v26Notifications) {
+  flex: 0 0 var(--home-header-control-size) !important;
+  width: var(--home-header-control-size) !important;
+  min-width: var(--home-header-control-size) !important;
+  height: var(--home-header-control-size) !important;
+  min-height: var(--home-header-control-size) !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader :is(.v26Refresh, .v26NotificationButton) > svg {
+  width: var(--home-header-icon-size) !important;
+  height: var(--home-header-icon-size) !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .v26NotificationButton {
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .v26HeaderProfileSlot,
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .v26HeaderProfileSlot > .authSessionBar {
+  flex: 0 0 var(--home-header-profile-shell) !important;
+  width: var(--home-header-profile-shell) !important;
+  min-width: var(--home-header-profile-shell) !important;
+  height: var(--home-header-profile-shell) !important;
+  min-height: var(--home-header-profile-shell) !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .authMemberTrigger {
+  flex: 0 0 var(--home-header-profile-target) !important;
+  width: var(--home-header-profile-target) !important;
+  min-width: var(--home-header-profile-target) !important;
+  height: var(--home-header-profile-target) !important;
+  min-height: var(--home-header-profile-target) !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .authProfileGlyph {
+  flex: 0 0 var(--home-header-profile-size) !important;
+  width: var(--home-header-profile-size) !important;
+  height: var(--home-header-profile-size) !important;
+}
+
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .assistantLauncher {
+  flex: 0 0 var(--home-header-eye-target) !important;
+  width: var(--home-header-eye-target) !important;
+  min-width: var(--home-header-eye-target) !important;
+  height: var(--home-header-eye-target) !important;
+  min-height: var(--home-header-eye-target) !important;
+}
+
+/* Override only the launcher's inline SVG size, not panel or message avatars. */
+#root > main.v26App.homeRoute > .v26Header.v26HomeHeader .assistantLauncher > .kaisHeaderEye {
+  width: var(--home-header-eye-size) !important;
+  height: var(--home-header-eye-size) !important;
+}
+
+@media (min-width: 701px) and (max-width: 1023px) {
+  #root > main.v26App.homeRoute > .v26Header.v26HomeHeader {
+    --home-header-control-size: 48px;
+    --home-header-profile-size: 30px;
+    --home-header-profile-target: 54px;
+    --home-header-profile-shell: 56px;
+    padding-block: 3.42px !important;
+  }
+}
+
+@media (max-width: 700px) {
+  #root > main.v26App.homeRoute > .v26Header.v26HomeHeader {
+    --home-header-actions-gap: 9.6px;
+    padding-block: calc(env(safe-area-inset-top, 0px) + 1.42px) 1.42px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #root > main.v26App.homeRoute > .v26Header.v26HomeHeader {
+    --home-header-logo-width: min(302.4px, calc(120vw - 252px));
+    --home-header-logo-image-height: 78.96px;
+    width: calc(100% + 20px) !important;
+    margin-inline: -10px !important;
+    padding-inline: 0 !important;
+    gap: 9.6px !important;
+  }
 }
