@@ -41,7 +41,8 @@ async function send(page: Page, content: string) {
   await panel.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
   await expect(panel.locator('.assistantMessage.assistant')).toHaveCount(before + 1)
   await expect(panel.locator('.assistantTyping')).toHaveCount(0)
-  await expect(panel.getByRole('button', {name: 'Premium ne kadar?', exact: true})).toBeEnabled()
+  await expect(panel.getByRole('textbox', {name: 'Kais AI mesajın', exact: true})).toBeEnabled()
+  await expect(panel.locator('.assistantSuggestions')).toHaveCount(0)
 }
 
 async function openAt(page: Page, url: string) {

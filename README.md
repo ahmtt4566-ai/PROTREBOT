@@ -243,14 +243,28 @@ CI bu nedenle hem root hem frontend bağımlılıklarını kurar ve preview önc
 root build alır. Ortak Demo/v21 UI fixture'ları durum limitlerini ve scanner,
 settings, stream, history/performance koleksiyonlarını sözleşmeye uygun sağlar;
 gerçek işlem veya ARM yanıtı üretmez.
-Panel koyu yarı saydam cam yüzey/turkuaz vurgu, açık tema kontrast varyantı,
-36 px göz ve durum başlığı, tek satır kota/yoklama ayarı kullanır.
+Panel masaüstünde viewport'a sığan 400×600 px koyu cam yüzey, 14 px blur ve
+desteklenmeyen tarayıcılarda opak koyu fallback kullanır. Başlıkta 36 px göz,
+çevrimiçi noktası, temizle/kapat ve yoklama kutusunu içeren "⋯" ayarı vardır.
+Kullanım bilgisi ince kalan mesaj çubuğuyla gösterilir; işlem yapmama rozeti korunur.
 Asistan balonunun solunda 24 px avatar, sağda turkuaz kullanıcı balonu vardır.
-Öneriler sarılır; kontrollü textarea 48–120 px aralığında kendiliğinden büyür
+Hazır sorular dört seçenektir: "Premium üyelik ne kadar?",
+"Günlük kullanım limitim ne kadar?", "API anahtarlarımı nasıl girerim?" ve
+"BTC için analiz durumu ne?". İngilizce arayüz karşılıklarını kullanır;
+düğmede görünen soru değiştirilmeden sohbet isteğinin `message` alanına gider.
+Öneriler tek satırda yatay kaydırılır ve ilk mesajdan sonra gizlenir.
+Asistan yanıtları yerel panoya kopyalanabilir; kopyalama hatası açıkça gösterilir.
+Karakter sayacı giriş limitinin %80'ine ulaşınca görünür.
+Kontrollü textarea 48–120 px aralığında kendiliğinden büyür
 (dar klavye görünümünde 80 px ile sınırlanır). Typing noktaları yalnız
 transform/opacity ile nabız atar. Mobil sheet mevcut visualViewport'un
-tam yüksekliğini ve safe-area boşluklarını kullanır; input/gönder sabit
+%75'ini ve safe-area boşluklarını kullanır; input/gönder sabit
 alt bölümde kalır. Native dialog, onay, CopyProtection ve odak akışı korunur.
+Kısa viewport ve açık klavyede başlık/yazı alanı kaydırılmaz; aradaki kullanım,
+mesajlar ve öneriler tek kaydırılabilir bölgededir. Panel yüksekliği dinamik
+viewport ve safe-area sınırlarıyla kısıtlanır.
+Panel ve karşılama balonu, başlık düzeni değişince yalnız kendi düğmelerinin
+geometrisini yeniden ölçer; içerik veya alan değeri okunmaz.
 Masaüstü Master Trade ortak başlığı gizlediği için aynı düğme, mevcut terminal
 başlığındaki boş slota portal ile taşınır; ikinci asistan oturumu oluşturulmaz.
 Kök `main.tsx` → `TestnetFirstApp.tsx` → `AssistantChat.tsx` aktif zincirdir;

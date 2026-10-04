@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Send, Trash2, X } from 'lucide-react'
+import { Check, Copy, LockKeyhole, MoreHorizontal, Send, Trash2, X } from 'lucide-react'
 import type {KaisEyeState} from './KaisEye'
 import KaisEye from './frontend/src/KaisEye'
 import KaisGreeting from './frontend/src/KaisGreeting'
@@ -14,6 +14,32 @@ import { assistantCopy } from './ui-copy'
 import './assistant.css'
 
 type Language = 'tr' | 'en'
+
+function ReplyCopy({content, language}: {content: string; language: Language}) {
+  const copy = assistantCopy[language]
+  const [result, setResult] = useState<'copied' | 'failed' | null>(null)
+  const copyReply = async () => {
+    if (!navigator.clipboard?.writeText) {
+      console.warn('Kais AI reply copy unavailable')
+      setResult('failed')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(content)
+      setResult('copied')
+    } catch (error) {
+      if (!(error instanceof DOMException)) throw error
+      console.warn('Kais AI reply copy failed', error.name)
+      setResult('failed')
+    }
+  }
+  return <div className="assistantCopyRow">
+    <button type="button" className="assistantCopy" aria-label={copy.copyReply} title={copy.copyReply} onClick={() => void copyReply()}>
+      {result === 'copied' ? <Check aria-hidden="true"/> : <Copy aria-hidden="true"/>}
+    </button>
+    {result && <small role="status">{result === 'copied' ? copy.copied : copy.copyFailed}</small>}
+  </div>
+}
 type Limits = {max_input_chars: number; history_messages: number; history_message_max_chars: number; page_context_max_chars: number; secret_min_alphanumeric_chars: number}
 type Usage = {remaining: number; total: number; resetsAt: string; limits: Limits}
 type ProactivePreferences = {enabled: boolean; available: boolean; poll_interval_seconds: number}
@@ -154,7 +180,9 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
   const [lengthError, setLengthError] = useState(false)
   const [viewport, setViewport] = useState({height: window.visualViewport?.height ?? window.innerHeight, top: window.visualViewport?.offsetTop ?? 0,
     width: window.visualViewport?.width ?? window.innerWidth, left: window.visualViewport?.offsetLeft ?? 0})
-  const [placement, setPlacement] = useState({left: 12, top: 12, height: 520, arrowLeft: 24, above: false})
+  const [placement, setPlacement] = useState({left: 12, top: 12, height: 600, arrowLeft: 24, above: false})
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsButton = useRef<HTMLButtonElement>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const launcherRef = useRef<HTMLButtonElement>(null)
   const list = useRef<HTMLDivElement>(null)
@@ -299,13 +327,13 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
       const anchor = launcherRef.current?.getBoundingClientRect()
       if (!anchor || next.width < 768) return
       const gap = 12
-      const width = Math.min(360, Math.max(0, next.width - gap * 2))
+      const width = Math.min(400, Math.max(0, next.width - gap * 2))
       const maximumHeight = Math.max(0, next.height - gap * 2)
       const below = next.top + next.height - gap - anchor.bottom - gap
       const above = anchor.top - gap - next.top - gap
       const useAbove = below < Math.min(200, maximumHeight) && above > below
       const available = useAbove ? above : below
-      const height = Math.min(520, maximumHeight, available >= Math.min(200, maximumHeight) ? available : maximumHeight)
+      const height = Math.min(600, maximumHeight, available >= Math.min(200, maximumHeight) ? available : maximumHeight)
       const left = Math.max(next.left + gap, Math.min(anchor.right - width, next.left + next.width - gap - width))
       const top = Math.max(next.top + gap, Math.min(useAbove ? anchor.top - gap - height : anchor.bottom + gap,
         next.top + next.height - gap - height))
@@ -314,11 +342,14 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
         previous.arrowLeft === arrowLeft && previous.above === useAbove ? previous : {left, top, height, arrowLeft, above: useAbove})
     }
     updateViewport()
+    const anchorLayout = new ResizeObserver(updateViewport)
+    for (let host: HTMLElement | null = launcherRef.current; host; host = host.parentElement) anchorLayout.observe(host)
     window.visualViewport?.addEventListener('resize', updateViewport)
     window.visualViewport?.addEventListener('scroll', updateViewport)
     window.addEventListener('resize', updateViewport)
     window.addEventListener('scroll', updateViewport, {passive: true, capture: true})
     return () => {
+      anchorLayout.disconnect()
       window.visualViewport?.removeEventListener('resize', updateViewport)
       window.visualViewport?.removeEventListener('scroll', updateViewport)
       window.removeEventListener('resize', updateViewport)
@@ -357,7 +388,7 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
       if (next.kind === 'session') expire()
     }
   }
-  const openChat = () => { setOpen(true); void refreshUsage() }
+  const openChat = () => { setSettingsOpen(false); setOpen(true); void refreshUsage() }
   const savePreference = async (enabled: boolean) => {
     if (preferenceWorking.current || expired) return
     preferenceReadRequest.current?.abort()
@@ -469,26 +500,33 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
     <KaisGreeting userId={userId} enabled={!expired && launcherTarget !== null && eyeState !== 'off' && eyeState !== 'error'}
       chatOpen={open} anchorRef={launcherRef} anchorHost={launcherTarget} motionPaused={motionPaused} onOpen={openChat}/>
     {open && createPortal(<dialog ref={dialog} className="assistantDialog" style={style} data-assistant-chat data-side={placement.above ? 'above' : 'below'} data-motion-paused={motionPaused} data-compact-viewport={viewport.height < 500 || undefined} role="dialog" aria-label={copy.title} aria-labelledby="assistant-title"
-      onCancel={event => {event.preventDefault(); setOpen(false)}}
+      onCancel={event => {event.preventDefault(); if (settingsOpen) {setSettingsOpen(false); settingsButton.current?.focus()} else setOpen(false)}}
       onClick={event => {if (event.target === event.currentTarget) setOpen(false)}}>
       <div className="assistantLayout">
-        <header className="assistantHeader"><KaisEye size={36} state={eyeState}/><div><h2 id="assistant-title">{copy.title}</h2><small className="assistantState" role="status">{status}</small></div>
+        <header className="assistantHeader"><KaisEye size={36} state={eyeState}/><div><h2 id="assistant-title">{copy.title}</h2><small className="assistantState" role="status" data-state={eyeState}>{status}</small></div>
+          <div className="assistantSettings">
+            <button ref={settingsButton} type="button" aria-label={copy.settings} aria-expanded={settingsOpen} aria-controls="assistant-settings" onClick={() => setSettingsOpen(previous => !previous)}><MoreHorizontal aria-hidden="true"/></button>
+            {settingsOpen && <div id="assistant-settings" className="assistantSettingsMenu" role="group" aria-label={copy.settings}>
+              <label className="assistantPreference" title={copy.proactiveHint}>
+                <input type="checkbox" aria-label={copy.proactiveSetting} aria-describedby="assistant-checkin-hint" checked={proactivePreferences?.enabled ?? false} disabled={!proactivePreferences || preferenceBusy || expired} onChange={event => void savePreference(event.target.checked)}/>
+                <span>{copy.proactiveSetting}</span>
+              </label>
+              <small id="assistant-checkin-hint" role="status">{preferenceBusy ? copy.proactiveSaving : copy.proactiveHint}</small>
+            </div>}
+          </div>
           <button type="button" aria-label={copy.clear} disabled={busy} onClick={() => {
             const empty: Message[] = []
             initial.storage.clear(); syncedMessages.current = empty; setMessages(empty); setIssue(null)
           }}><Trash2 aria-hidden="true"/></button>
           <button type="button" aria-label={copy.close} onClick={() => setOpen(false)}><X aria-hidden="true"/></button>
         </header>
+        <div className="assistantMessages" ref={list} role="log" aria-live="polite" aria-relevant="additions" aria-busy={busy}>
         <div className="assistantMeta">
           <div className={`assistantUsage${usage?.remaining === 0 ? ' exhausted' : ''}`} role="status" title={usage ? copy.usage(usage.remaining, usage.total) : undefined}>{usage ? copy.usage(usage.remaining, usage.total) : expired ? copy.session : copy.loading}</div>
-          <label className="assistantPreference" title={copy.proactiveHint}>
-            <input type="checkbox" aria-label={copy.proactiveSetting} aria-describedby="assistant-checkin-hint" checked={proactivePreferences?.enabled ?? false} disabled={!proactivePreferences || preferenceBusy || expired} onChange={event => void savePreference(event.target.checked)}/>
-            <span>{copy.proactiveSetting}</span>
-          </label>
-          <span id="assistant-checkin-hint" className="assistantSrOnly" role="status">{preferenceBusy ? copy.proactiveSaving : copy.proactiveHint}</span>
+          {usage && <progress className="assistantUsageProgress" aria-label={copy.usageProgress} max={Math.max(1, usage.total)} value={usage.remaining}/>}
         </div>
         <p className="assistantSubtitle">{copy.subtitle}</p>
-        <div className="assistantMessages" ref={list} role="log" aria-live="polite" aria-relevant="additions" aria-busy={busy}>
+        <div className="assistantMessageList">
           {!messages.length && <div className="assistantEmpty"><h3>{copy.welcome}</h3><p>{copy.empty}</p><small>{copy.eyePrivacy}</small></div>}
           {messages.map(message => <article key={message.id} className={`assistantMessage ${message.role}`} lang={message.language}>
             {message.role === 'assistant' && <KaisEye size={24} state="idle"/>}
@@ -503,6 +541,7 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
                 <button type="button" disabled={busy} onClick={() => {decide(message.id, 'cancelled'); setIssue(null)}}>{copy.cancel}</button>
               </div> : <small>{message.decision === 'confirmed' ? copy.confirmed : message.decision === 'cancelled' ? copy.cancelled : copy.renewed}</small>}
             </div>}
+            {message.role === 'assistant' && <ReplyCopy content={message.content} language={message.language}/>}
             </div>
           </article>)}
           {busy && <p className="assistantTyping" role="status"><span className="assistantTypingDots" aria-hidden="true"><i/><i/><i/></span>{copy.typing}</p>}
@@ -518,8 +557,9 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
             ? <button type="button" disabled={preferenceBusy} onClick={() => setProactiveReload(previous => previous + 1)}>{copy.retry}</button>
             : usageIssue && !issue && <button type="button" onClick={() => void refreshUsage()}>{copy.retry}</button>}
         </div>}
-        <div className="assistantSuggestions" aria-label={language === 'tr' ? 'Hazır sorular' : 'Suggested questions'}>
+        {!messages.length && <div className="assistantSuggestions" aria-label={language === 'tr' ? 'Hazır sorular' : 'Suggested questions'}>
           {copy.questions.map(question => <button key={question} type="button" disabled={busy || !usage || expired} onClick={() => void sendMessage(question)}>{question}</button>)}
+        </div>}
         </div>
         <form className="assistantComposer" onSubmit={submit}>
           <label className="assistantInputLabel" htmlFor="assistant-input">{copy.input}</label>
@@ -528,7 +568,7 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
             aria-describedby={`${privateDraft ? 'assistant-secret-warning' : 'assistant-secret'} assistant-length`} onChange={event => {setDraft(event.target.value); setLengthError(false)}}
             onKeyDown={event => {if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {event.preventDefault(); void sendMessage(draft)}}}/>
             <button type="submit" className="assistantPrimary" disabled={busy || !usage || expired || !draft.trim()} aria-label={copy.send}><Send aria-hidden="true"/></button></div>
-          <footer><small id="assistant-secret">{!privateDraft && copy.secret}</small><small id="assistant-length">{usage && `${Array.from(draft).length}/${usage.limits.max_input_chars}`}</small></footer>
+          <footer><small id="assistant-secret">{!privateDraft && <><LockKeyhole aria-hidden="true"/>{copy.secret}</>}</small><small id="assistant-length" hidden={!usage || Array.from(draft).length < Math.ceil(usage.limits.max_input_chars * .8)}>{usage && `${Array.from(draft).length}/${usage.limits.max_input_chars}`}</small></footer>
           {privateDraft && <p id="assistant-secret-warning" className="assistantError" role="status">{copy.secret}</p>}
           {lengthError && usage && <p className="assistantError" role="alert">{copy.tooLong(usage.limits.max_input_chars)}</p>}
         </form>

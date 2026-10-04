@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test'
+import {expect, test, type Page} from '@playwright/test'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 test.setTimeout(60000)
@@ -58,10 +58,10 @@ const status = {
   ],
 }
 
-test('Master Trade keeps account state read-only and locked', async ({page}) => {
+async function prepareReadOnly(page: Page) {
   const mutations: string[] = []
   await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'readonly-test-session'))
-  await page.route('**/*', async route => {
+  await page.route('**/api/**', async route => {
     const request = route.request()
     const url = request.url()
     if (url.includes('/api/v25/risk/preview')) {
@@ -71,10 +71,6 @@ test('Master Trade keeps account state read-only and locked', async ({page}) => 
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method()) && url.includes('/api/')) {
       mutations.push(`${request.method()} ${url}`)
       await route.fulfill({status: 405, contentType: 'application/json', body: JSON.stringify({detail: 'Read-only smoke test'})})
-      return
-    }
-    if (!url.includes('/api/')) {
-      await route.continue()
       return
     }
     if (url.includes('/api/v22/profile') || url.includes('/api/v22/session')) {
@@ -117,6 +113,11 @@ test('Master Trade keeps account state read-only and locked', async ({page}) => 
   })
 
   await page.goto('/master-trade')
+  return mutations
+}
+
+test('Master Trade keeps account state read-only and locked', async ({page}) => {
+  const mutations = await prepareReadOnly(page)
   await expect(page.getByRole('tab', {name: 'Analiz', exact: true})).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('.masterTradeAccordion[open]')).toHaveCount(0)
   await page.locator('.watchlistItem').filter({hasText: 'ETHUSDT'}).click()
@@ -134,6 +135,13 @@ test('Master Trade keeps account state read-only and locked', async ({page}) => 
   await page.goBack()
   await expect(page.getByRole('tab', {name: 'Canlı İşlem', exact: true})).toHaveAttribute('aria-selected', 'true')
   await expect(marginInput).toHaveValue('25')
+  expect(mutations).toEqual([])
+})
+
+test('Master Trade positions and connections preserve the read-only account snapshot', async ({page}) => {
+  const mutations = await prepareReadOnly(page)
+  await page.locator('.watchlistItem').filter({hasText: 'ETHUSDT'}).click()
+  await expect(page.locator('.chartPanel h3')).toHaveText('ETHUSDT')
   await page.getByRole('tab', {name: 'Pozisyonlar', exact: true}).click()
   await expect(page.locator('.masterTradeLiveAccountTable')).toHaveCount(0)
   await expect(page.locator('.positionsPanel').getByText('MUBARAKUSDT', {exact: true})).toBeVisible()
@@ -143,6 +151,13 @@ test('Master Trade keeps account state read-only and locked', async ({page}) => 
   await expect(page.getByRole('heading', {name: 'Connect your trading account'})).toBeVisible()
   await expect(page.locator('.masterTradeLiveActivity .masterTradeLogCount')).toHaveText('×2')
   expect(await page.locator('.masterTradeLiveActivity ol').evaluate(element => getComputedStyle(element).height)).toBe('200px')
+  expect(mutations).toEqual([])
+})
+
+test('Master Trade responsive geometry stays read-only at desktop, tablet and mobile sizes', async ({page}) => {
+  const mutations = await prepareReadOnly(page)
+  await page.locator('.watchlistItem').filter({hasText: 'ETHUSDT'}).click()
+  await expect(page.locator('.chartPanel h3')).toHaveText('ETHUSDT')
   await page.getByRole('tab', {name: 'Analiz', exact: true}).click()
   await page.setViewportSize({width: 1440, height: 900})
   await expect(page.locator('.masterTradeMetricTile')).toHaveCount(7)

@@ -116,8 +116,8 @@ for (const width of [1440, 390]) {
     } else {
       const anchor = await page.getByRole('button', {name: 'Kais AI', exact: true}).boundingBox()
       expect(anchor).not.toBeNull()
-      expect(box!.width).toBeCloseTo(360, 0)
-      expect(box!.height).toBeLessThanOrEqual(520)
+      expect(box!.width).toBeCloseTo(400, 0)
+      expect(box!.height).toBeLessThanOrEqual(600)
       expect(box!.x + box!.width).toBeCloseTo(anchor!.x + anchor!.width, 0)
       expect(box!.y).toBeGreaterThanOrEqual(anchor!.y + anchor!.height)
       const arrow = await dialog.evaluate(element => Number.parseFloat(getComputedStyle(element).getPropertyValue('--assistant-arrow-left')))
@@ -139,9 +139,9 @@ test('Suggested question, typing state, plain text, copy exception and persisten
   state.hold = new Promise<void>(resolve => {release = resolve})
   state.chatBody = {reply: '**Plan**\n<img src=x onerror="window.assistantInjected=true">', language: 'tr', sources: ['get_plans']}
   const dialog = await openChat(page)
-  await dialog.getByRole('button', {name: 'Premium ne kadar?', exact: true}).click()
-  await expect(dialog).toContainText('Düşünüyor...')
-  await expect(dialog.getByRole('button', {name: 'Kredim ne kadar?', exact: true})).toBeDisabled()
+  await dialog.getByRole('button', {name: 'Premium üyelik ne kadar?', exact: true}).click()
+  await expect(dialog.locator('.assistantTyping')).toContainText('Yazıyor...')
+  await expect(dialog.locator('.assistantSuggestions')).toHaveCount(0)
   release()
   await expect(dialog.locator('.assistantTyping')).toHaveCount(0)
   await expect(dialog.locator('.assistantMessage.assistant strong')).toHaveText('Plan')
@@ -151,7 +151,7 @@ test('Suggested question, typing state, plain text, copy exception and persisten
   await expect(dialog.locator('.assistantMessage.assistant img')).toHaveCount(0)
   expect(await page.evaluate(() => Object.prototype.hasOwnProperty.call(window, 'assistantInjected'))).toBe(false)
   expect(state.chats).toHaveLength(1)
-  expect(state.chats[0].body).toEqual({message: 'Premium ne kadar?', history: [], page_context: 'dashboar'})
+  expect(state.chats[0].body).toEqual({message: 'Premium üyelik ne kadar?', history: [], page_context: 'dashboar'})
   const copy = await dialog.locator('.assistantText').last().evaluate(element => {
     const range = document.createRange()
     range.selectNodeContents(element)
@@ -210,7 +210,8 @@ test('Cancel and reload never approve; obsolete proof cannot execute', async ({p
   await dialog.getByRole('button', {name: 'Vazgeç', exact: true}).click()
   await expect(dialog).toContainText('Vazgeçildi')
   expect(state.confirmations).toHaveLength(0)
-  await dialog.getByRole('button', {name: 'BTC için analiz durumu ne?', exact: true}).click()
+  await dialog.getByRole('textbox', {name: 'Kais AI mesajın', exact: true}).fill('BTC için analiz durumu ne?')
+  await dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
   await expect(dialog.getByRole('button', {name: 'Onayla'})).toBeVisible()
   await page.reload()
   await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
@@ -248,7 +249,7 @@ test('Unavailable chat persistence only warns while in-memory chat remains usabl
     }
   })
   const dialog = await openChat(page)
-  await dialog.getByRole('button', {name: 'Premium ne kadar?', exact: true}).click()
+  await dialog.getByRole('button', {name: 'Premium üyelik ne kadar?', exact: true}).click()
   await expect(dialog.locator('.assistantMessage.assistant')).toContainText('Yanıt düz metindir')
   await expect(dialog).not.toContainText('Sohbet geçmişi okunurken veya kaydedilirken sorun oluştu')
   expect(warnings.some(warning => warning.includes('Kais AI chat persistence disabled'))).toBe(true)
@@ -261,7 +262,7 @@ for (const failure of ['limit', 'budget', 'network', 'session', 'unavailable'] a
     state.chatBody = {reply: failure === 'limit' ? '45 saniye sonra tekrar dene.' : undefined, error_code: failure === 'budget' ? 'budget' : 'daily', detail: 'PRIVATE INTERNAL ERROR'}
     state.network = failure === 'network'
     const dialog = await openChat(page)
-    await dialog.getByRole('button', {name: 'Kredim ne kadar?', exact: true}).click()
+    await dialog.getByRole('button', {name: 'Günlük kullanım limitim ne kadar?', exact: true}).click()
     const alert = dialog.getByRole('alert')
     await expect(alert).toContainText(failure === 'limit' ? 'Mesaj limitine' : failure === 'budget' ? 'bütçe nedeniyle' : failure === 'network' ? 'Ağ bağlantısı'
       : failure === 'session' ? 'Oturumun sona ermiş' : 'Asistan şu an kullanılamıyor')
@@ -284,7 +285,7 @@ test('Backend limits govern Unicode history truncation; secret input is neither 
   for (const value of ['A sufficiently long first question', 'A second question', 'A third question']) {
     await input.fill(value); await dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
     await expect(dialog.locator('.assistantMessage.assistant')).toHaveCount(state.chats.length)
-    await expect(dialog.getByRole('button', {name: 'Premium ne kadar?', exact: true})).toBeEnabled()
+    await expect(dialog.locator('.assistantTyping')).toHaveCount(0)
   }
   expect(state.chats[2].body.history).toEqual([{role: 'user', content: 'A second que'}, {role: 'assistant', content: 'Long assista'}])
   const before = state.chats.length
@@ -369,7 +370,8 @@ for (const width of [1440, 390]) {
     await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
     await expect(dialog.locator('.assistantMessage')).toHaveCount(1)
     await expect(page.locator('.assistantBadge')).toHaveCount(0)
-    await dialog.getByRole('button', {name: 'Premium ne kadar?', exact: true}).click()
+    await dialog.getByRole('textbox', {name: 'Kais AI mesajın'}).fill('Premium üyelik ne kadar?')
+    await dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
     await expect.poll(() => state.chats.length).toBe(1)
     expect(state.chats[0].body.history).toEqual([])
     expect(state.requests.filter(value => value.startsWith('POST '))).toEqual([
@@ -384,6 +386,7 @@ test('Opt-out is server-backed, survives reload, and does not share another memb
   state.proactiveEnabled = true; state.proactiveMessage = checkInMessage
   const dialog = await openChat(page)
   await expect(dialog).toContainText(checkInMessage.reply)
+  await dialog.getByRole('button', {name: 'Kais AI ayarları', exact: true}).click()
   const setting = dialog.getByRole('checkbox', {name: /Durum yoklamaları/})
   await setting.click()
   await expect(setting).not.toBeChecked()
@@ -393,12 +396,14 @@ test('Opt-out is server-backed, survives reload, and does not share another memb
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
   await page.reload()
   await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await dialog.getByRole('button', {name: 'Kais AI ayarları', exact: true}).click()
   await expect(setting).toBeEnabled()
   await expect(setting).not.toBeChecked()
   expect(state.checkIns).toHaveLength(calls)
   state.userId = 'other-proactive-member'; state.proactiveEnabled = true; state.proactiveMessage = null
   await page.reload()
   await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await dialog.getByRole('button', {name: 'Kais AI ayarları', exact: true}).click()
   await expect(setting).toBeChecked()
   await expect(dialog.locator('.assistantMessage')).toHaveCount(0)
   await expect(page.locator('.assistantBadge')).toHaveCount(0)
@@ -410,6 +415,7 @@ test('Failed preference save leaves the verified setting unchanged and surfaces 
   const state = await mockAssistant(page)
   state.proactiveEnabled = true; state.preferenceStatus = 503
   const dialog = await openChat(page)
+  await dialog.getByRole('button', {name: 'Kais AI ayarları', exact: true}).click()
   const setting = dialog.getByRole('checkbox', {name: /Durum yoklamaları/})
   await expect(setting).toBeEnabled()
   await setting.click()
@@ -446,6 +452,7 @@ test('EN proactive templates retain stale disclosure and use the page language w
   await page.evaluate(() => {document.documentElement.lang = 'en'})
   await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
   const dialog = page.getByRole('dialog', {name: 'Kais AI'})
+  await dialog.getByRole('button', {name: 'Kais AI settings', exact: true}).click()
   const setting = dialog.getByRole('checkbox', {name: /Status check-ins/})
   await expect(setting).toBeEnabled()
   await setting.click()
@@ -466,11 +473,19 @@ for (const width of [320, 390, 768, 1024, 1440]) {
     await expect(launcher.locator('.kaisEye')).toHaveCSS('width', '67.1875px')
     await expect(launcher.locator('.kaisEye')).toHaveCSS('height', '67.1875px')
     await expect(launcher.locator('.assistantBadge')).toHaveText('1')
-    for (const view of ['dashboard', 'master-trade', 'live', 'trading', 'scanner']) {
+    for (const view of ['dashboard', 'master-trade', 'live', 'trading', 'scanner'] as const) {
       await page.evaluate(target => window.dispatchEvent(new CustomEvent('protrebot-navigate', {detail: target})), view)
+      if (view === 'dashboard') await expect(page.locator('#dashboard-title')).toBeVisible()
+      else await expect(page.locator('.v26ModeBar h1')).toHaveText({
+        'master-trade': 'Master Trade', live: 'Gerçek Futures Hazırlık Merkezi', trading: 'İşlem Masası', scanner: 'Scanner',
+      }[view])
+      await page.evaluate(() => document.fonts.ready)
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
       await expect(launcher).toBeVisible()
       await expect(page.locator('.assistantDialog')).toHaveCount(0)
       const geometry = await launcher.evaluate(element => {
+        // Demo scrolls its active tab on mount; measure each workspace header at a fixed scroll origin.
+        window.scrollTo({top: 0, left: 0, behavior: 'instant'})
         const box = element.getBoundingClientRect()
         const header = element.closest('header')!.getBoundingClientRect()
         const controls = Array.from(document.querySelectorAll<HTMLElement>('button, input[type="checkbox"], [role="button"], a'))
@@ -482,8 +497,9 @@ for (const width of [320, 390, 768, 1024, 1440]) {
           })
         return {left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height,
           headerTop: header.top, headerBottom: header.bottom, position: getComputedStyle(element).position,
-          inHeader: Boolean(element.closest('.v26Header, .masterTradeTerminalHeader')), controls}
+          inHeader: Boolean(element.closest('.v26Header, .masterTradeTerminalHeader')), scrollY: window.scrollY, controls}
       })
+      expect(geometry.scrollY).toBe(0)
       expect(geometry.width).toBeGreaterThanOrEqual(44)
       expect(geometry.height).toBeGreaterThanOrEqual(44)
       expect(geometry.left).toBeGreaterThanOrEqual(0)
@@ -497,7 +513,8 @@ for (const width of [320, 390, 768, 1024, 1440]) {
       await expect(launcher).toHaveCSS('background-image', 'none')
       for (const control of geometry.controls) {
         expect(geometry.right <= control.left || geometry.left >= control.right ||
-          geometry.bottom <= control.top || geometry.top >= control.bottom, `${view}: ${control.name}`).toBe(true)
+          geometry.bottom <= control.top || geometry.top >= control.bottom,
+          `${view}: ${control.name}; scrollY=${geometry.scrollY}; eye=${JSON.stringify([geometry.left, geometry.top, geometry.right, geometry.bottom])}; control=${JSON.stringify([control.left, control.top, control.right, control.bottom])}`).toBe(true)
       }
     }
     expect(state.chats).toHaveLength(0)
@@ -669,7 +686,7 @@ test('Reduced motion and hidden tabs pause eye and typing animations', async ({p
   let release: () => void = () => {}
   state.hold = new Promise<void>(resolve => {release = resolve})
   const dialog = await openChat(page)
-  await dialog.getByRole('button', {name: 'Premium ne kadar?', exact: true}).click()
+  await dialog.getByRole('button', {name: 'Premium üyelik ne kadar?', exact: true}).click()
   await expect(dialog.locator('.assistantTyping')).toBeVisible()
   const eye = dialog.locator('.kaisEye')
   const lid = eye.locator('.kaisEyeLids')
@@ -803,6 +820,7 @@ test('Composer grows and shrinks without manual resizing, counts characters, sen
   await expect.poll(async () => (await input.boundingBox())!.height).toBeGreaterThan(initial)
   expect((await input.boundingBox())!.height).toBeLessThanOrEqual(120)
   await expect(input).toHaveCSS('resize', 'none')
+  await expect(dialog.locator('#assistant-length')).toBeHidden()
   await expect(dialog.locator('#assistant-length')).toHaveText(`${Array.from(multiline).length}/80`)
   expect(state.chats).toHaveLength(0)
   await dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
@@ -818,7 +836,7 @@ test('Composer grows and shrinks without manual resizing, counts characters, sen
 
 for (const width of [1440, 390]) {
   for (const theme of ['dark', 'light'] as const) {
-    test(`Modern header launcher and glass panel screenshots, chip wrapping and contrast at ${width}px (${theme})`, async ({page}, testInfo) => {
+    test(`Modern header launcher and glass panel screenshots, suggestion dismissal and contrast at ${width}px (${theme})`, async ({page}, testInfo) => {
       await page.setViewportSize({width, height: 844})
       await page.emulateMedia({reducedMotion: 'reduce'})
       const state = await mockAssistant(page)
@@ -832,7 +850,7 @@ for (const width of [1440, 390]) {
       await page.screenshot({path: join(testInfo.outputDir, `kais-header-closed-${theme}-${width}.png`)})
       await launcher.click()
       const dialog = page.getByRole('dialog', {name: 'Kais AI'})
-      await expect(dialog.locator('.assistantState')).toHaveText('Hazır')
+      await expect(dialog.locator('.assistantState')).toHaveText('Çevrimiçi')
       await dialog.getByRole('textbox').fill('Platform rehberi')
       await dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true}).click()
       await expect(dialog.locator('.assistantMessage.assistant')).toBeVisible()
@@ -842,7 +860,7 @@ for (const width of [1440, 390]) {
         const user = element.querySelector('.assistantMessage.user')!.getBoundingClientRect()
         const avatar = element.querySelector('.assistantMessage.assistant > .kaisEye')!.getBoundingClientRect()
         const bubble = element.querySelector('.assistantMessage.assistant .assistantBubble')!.getBoundingClientRect()
-        const chips = element.querySelector('.assistantSuggestions')!
+        const chips = element.querySelector('.assistantSuggestions')
         const colors = getComputedStyle(element)
         const values = (color: string) => {
           const parts = color.match(/[\d.]+/g)?.map(Number)
@@ -863,8 +881,8 @@ for (const width of [1440, 390]) {
         }
         return {
           avatarWidth: avatar.width, avatarRight: avatar.right, assistantLeft: bubble.left, userRight: user.right,
-          messageRight: messages.getBoundingClientRect().right, chipWrap: getComputedStyle(chips).flexWrap,
-          chipOverflow: chips.scrollWidth > chips.clientWidth, horizontalOverflow: element.scrollWidth > element.clientWidth,
+          messageRight: messages.getBoundingClientRect().right, suggestionsPresent: chips !== null,
+          horizontalOverflow: element.scrollWidth > element.clientWidth,
           textContrast: ratio(colors.color), mutedContrast: ratio(getComputedStyle(element.querySelector('.assistantState')!).color),
           backgroundImage: colors.backgroundImage, blur: colors.backdropFilter,
         }
@@ -872,13 +890,12 @@ for (const width of [1440, 390]) {
       expect(layout.avatarWidth).toBe(24)
       expect(layout.avatarRight).toBeLessThanOrEqual(layout.assistantLeft)
       expect(layout.userRight).toBeLessThanOrEqual(layout.messageRight)
-      expect(layout.chipWrap).toBe('wrap')
-      expect(layout.chipOverflow).toBe(false)
+      expect(layout.suggestionsPresent).toBe(false)
       expect(layout.horizontalOverflow).toBe(false)
       expect(layout.textContrast).toBeGreaterThanOrEqual(4.5)
       expect(layout.mutedContrast).toBeGreaterThanOrEqual(4.5)
       expect(layout.backgroundImage).toBe('none')
-      expect(layout.blur).toBe('blur(20px)')
+      expect(layout.blur).toBe('blur(14px)')
       await page.screenshot({path: join(testInfo.outputDir, `kais-panel-open-${theme}-${width}.png`)})
       expect(state.chats).toHaveLength(1)
       expect(state.confirmations).toHaveLength(0)

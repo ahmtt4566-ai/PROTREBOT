@@ -111,11 +111,14 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
         previous.arrow === arrow && previous.fits === fits ? previous : {left, top, width, arrow, fits})
     }
     update()
+    const anchorLayout = new ResizeObserver(update)
+    for (let host: HTMLElement | null = anchorRef.current; host; host = host.parentElement) anchorLayout.observe(host)
     window.addEventListener('resize', update)
     window.addEventListener('scroll', update, {passive: true, capture: true})
     window.visualViewport?.addEventListener('resize', update)
     window.visualViewport?.addEventListener('scroll', update)
     return () => {
+      anchorLayout.disconnect()
       window.removeEventListener('resize', update)
       window.removeEventListener('scroll', update, true)
       window.visualViewport?.removeEventListener('resize', update)

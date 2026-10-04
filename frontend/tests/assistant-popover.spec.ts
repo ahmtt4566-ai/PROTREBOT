@@ -1,4 +1,5 @@
 import {expect, test, type Page} from '@playwright/test'
+import {mockAssistant} from './helpers/assistant-api'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 
@@ -43,8 +44,8 @@ for (const width of [1440, 390]) {
     expect(box!.x + box!.width).toBeLessThanOrEqual(width)
     expect(box!.y + box!.height).toBeLessThanOrEqual(844)
     if (width >= 768) {
-      expect(box!.width).toBeCloseTo(360, 0)
-      expect(box!.height).toBeLessThanOrEqual(520)
+      expect(box!.width).toBeCloseTo(400, 0)
+      expect(box!.height).toBeLessThanOrEqual(600)
       expect(box!.y).toBeGreaterThanOrEqual(anchor!.y + anchor!.height)
       const arrow = await dialog.evaluate(element => Number.parseFloat(getComputedStyle(element).getPropertyValue('--assistant-arrow-left')))
       expect(box!.x + arrow).toBeCloseTo(anchor!.x + anchor!.width / 2, 0)
@@ -106,6 +107,58 @@ test('New title eye tracks and blinks, while reduced motion disables popover ani
   await expect(eye).toHaveAttribute('data-look-x', '0')
 })
 
+for (const [width, height] of [[800, 420], [1280, 600], [1440, 900], [768, 844], [390, 844], [320, 844]]) {
+  test(`Fixed header and composer stay inside ${width}x${height}, including keyboard viewport`, async ({page}) => {
+    await page.setViewportSize({width, height})
+    await page.emulateMedia({reducedMotion: 'reduce'})
+    const state = await mockAssistant(page)
+    state.chatBody = {reply: 'Uzun platform yanıtı.\n'.repeat(80), language: 'tr', sources: []}
+    await page.goto('/')
+    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+    const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
+    const input = dialog.getByRole('textbox', {name: 'Kais AI mesajın', exact: true})
+    const send = dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true})
+    const assertContained = async (top: number, bottom: number) => {
+      const panel = (await dialog.boundingBox())!
+      expect(panel.y).toBeGreaterThanOrEqual(top)
+      expect(panel.y + panel.height).toBeLessThanOrEqual(bottom)
+      for (const locator of [dialog.locator('.assistantHeader'), dialog.locator('.assistantComposer'), input, send]) {
+        const box = (await locator.boundingBox())!
+        expect(box.x).toBeGreaterThanOrEqual(panel.x)
+        expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width)
+        expect(box.y).toBeGreaterThanOrEqual(panel.y)
+        expect(box.y + box.height).toBeLessThanOrEqual(panel.y + panel.height)
+      }
+    }
+    await expect(input).toBeFocused()
+    await assertContained(0, height)
+    await input.fill('Platform kullanımı')
+    await send.click()
+    await expect(dialog.locator('.assistantMessage.assistant')).toHaveCount(1)
+    await expect(dialog.locator('.assistantTyping')).toHaveCount(0)
+    expect(await dialog.getByRole('log').evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
+    await input.fill('Birinci\nİkinci\nÜçüncü\nDördüncü\nBeşinci')
+    await assertContained(0, height)
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!
+      Object.defineProperties(viewport, {
+        height: {configurable: true, value: 260},
+        offsetTop: {configurable: true, value: 40},
+      })
+      viewport.dispatchEvent(new Event('resize'))
+    })
+    await expect(dialog).toHaveAttribute('data-compact-viewport', 'true')
+    await expect.poll(async () => (await dialog.boundingBox())!.y + (await dialog.boundingBox())!.height).toBeLessThanOrEqual(300)
+    await assertContained(40, 300)
+    expect((await input.boundingBox())!.height).toBeLessThanOrEqual(80)
+    const headerBefore = await dialog.locator('.assistantHeader').boundingBox()
+    const composerBefore = await dialog.locator('.assistantComposer').boundingBox()
+    await dialog.getByRole('log').evaluate(element => {element.scrollTop = 0})
+    expect(await dialog.locator('.assistantHeader').boundingBox()).toEqual(headerBefore)
+    expect(await dialog.locator('.assistantComposer').boundingBox()).toEqual(composerBefore)
+  })
+}
+
 test('Content, secret warning and assistant response remain in the popover with one eye design', async ({page}) => {
   await page.emulateMedia({reducedMotion: 'reduce'})
   await prepare(page)
@@ -114,7 +167,7 @@ test('Content, secret warning and assistant response remain in the popover with 
   const composer = dialog.getByRole('textbox', {name: 'Kais AI mesajın'})
   await expect(composer).toBeFocused()
   await expect(dialog).toContainText('Günlük mesaj hakkı: 19/20')
-  await expect(dialog.getByRole('button', {name: 'Premium ne kadar?', exact: true})).toBeVisible()
+  await expect(dialog.getByRole('button', {name: 'Premium üyelik ne kadar?', exact: true})).toBeVisible()
   await composer.fill(`API Secret: ${'A'.repeat(40)}`)
   await expect(dialog.locator('#assistant-secret-warning')).toBeVisible()
   await composer.fill('Planım hakkında yardım')
