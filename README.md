@@ -2,6 +2,47 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Ortam dosyaları ve secret yapılandırması
+
+Kök `.env` yalnızca yerel dosyadır ve Git tarafından ignore edilir; gerçek
+değerleri commit'e eklemeyin. `.env.example` aynı yapılandırma anahtarlarını
+değerleri boş olarak listeler. Zorunlu anahtarları doldurun; kullanılmayan
+isteğe bağlı ayarların satırlarını yerel `.env` dosyasında silin veya yorumlayın.
+Özellikle boş sayı/boolean ayarları, mevcut doğrulayıcılar için geçerli
+varsayılan değer değildir. Üretimde dosya yerine sunucunun secret store'unu kullanın.
+
+Backend'i kök dizinden yerel ortam dosyasıyla başlatma:
+`python -m uvicorn app.main:app --app-dir backend --env-file .env`.
+Mevcut süreç ortamı dosyadaki değerlerden önceliklidir.
+Kök eski `main.py` içindeki gömülü veritabanı bağlantı varsayılanı kaldırılmıştır;
+bu giriş noktası boş/eksik `DATABASE_URL` ile açık hata verir.
+Taşınan yerel bağlantının gerçek bir servis üzerinde geçerliliği doğrulanmamıştır.
+
+| Ayarlar | Nerede tanımlanır? | Gereklilik |
+|---|---|---|
+| `DATABASE_URL` | Backend sunucu | Kalıcı üretim depolaması için zorunlu |
+| `SESSION_SECRET` veya eski adı `PROTREBOT_SESSION_SECRET` | Backend secret store | En az 32 karakter; tüm worker'larda aynı ve kalıcı. İkisi farklıysa başlangıç hata verir |
+| `PROTREBOT_WEB_ACCESS_TOKEN` | Backend secret store | Owner erişimi için güçlü token; eski session/vault türetme uyumu korunur |
+| `PROTREBOT_VAULT_MASTER_KEY` | Backend secret store | Ayrı kasa anahtarı önerilir; mevcut owner-token uyumu korunur |
+| `PROTREBOT_DURABLE_AUTH_REQUIRED`, `PROTREBOT_WEB_REQUIRE_AUTH` | Backend sunucu | Üretimde `true`; kalıcı oturum anahtarı yoksa başlangıç durur |
+| `APP_BASE_URL`, `PROTREBOT_CORS_ORIGINS` | Backend sunucu | Gerçek frontend URL/origin listesi |
+| `ANTHROPIC_API_KEY` | Backend secret store | LLM asistanı kullanılacaksa zorunlu |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Backend secret store | E-posta doğrulama/sıfırlama gönderimi için zorunlu |
+| `GMAIL_FROM_EMAIL`, `GMAIL_FROM_NAME` | Backend sunucu | Gönderici yapılandırması |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MASTER_MODE_MONTHLY` | Backend secret store / sunucu | Stripe etkinse zorunlu; plan kimliği sunucuda tutulur |
+| `REDIS_URL`, `PROTREBOT_DATA_DIR`, `PROTREBOT_BOOTSTRAP_OWNER_EMAIL` | Backend sunucu | İsteğe bağlı mevcut altyapı ayarları |
+| `ASSISTANT_*`, `ANALYST_*`, `CREDIT_WINDOW_HOURS`, `PROTREBOT_EXPOSE_DEV_TOKENS` | Backend sunucu | Bütçe/özellik ayarları; dev token üretimde `false` |
+| `POSTGRES_PASSWORD` | Yerel Docker ortamı | Docker PostgreSQL için zorunlu; tarayıcıya verilmez |
+| `VITE_OWNER_PREVIEW`, `VITE_WEB_ACCESS_REQUIRED` | Vercel frontend build ortamı | Gizli olmayan UI bayrakları; üretimde erişim kapısını kapatmayın |
+| `VITE_BUILD_COMMIT` | Vercel frontend build ortamı | İsteğe bağlı, gizli olmayan build kimliği |
+| `VITE_API_BASE` | Eski frontend yapılandırması | Gizli olmayan legacy URL; üretim `/api` taşımasını değiştirmez |
+
+`SESSION_SECRET`, API secret/token ve `DATABASE_URL` asla `VITE_` öneki
+almamalıdır. Vercel'de backend secret'larını frontend build ortamına koymayın.
+Binance kullanıcı anahtarları mevcut şifreli kasa üzerinden kaydedilir;
+üretimde paylaşımlı `BINANCE_*` ortam anahtarlarıyla üyelik kapsamı atlatılmaz.
+Testlerdeki açıkça sentetik anahtar/token değerleri gerçek deployment ayarı değildir.
+
 ## Güvenlik ve tarayıcı oturumları
 
 Tarayıcı üyelik oturumu ve yönetici erişimi `HttpOnly`, `SameSite=Lax`,

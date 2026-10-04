@@ -200,13 +200,26 @@ def parse_date(value: str | None) -> datetime:
         return datetime.fromtimestamp(0, timezone.utc)
 
 
+def configured_session_secret() -> str:
+    configured = str(os.environ.get("SESSION_SECRET") or "").strip()
+    legacy = str(os.environ.get("PROTREBOT_SESSION_SECRET") or "").strip()
+    if configured and legacy and configured != legacy:
+        raise RuntimeError("SESSION_SECRET ve PROTREBOT_SESSION_SECRET farklı; yalnızca birini yapılandırın")
+    value = configured or legacy
+    if value and len(value) < 32:
+        raise RuntimeError("SESSION_SECRET / PROTREBOT_SESSION_SECRET en az 32 karakter olmalıdır")
+    return value
+
+
 def load_secret() -> bytes:
-    configured = str(os.getenv("PROTREBOT_SESSION_SECRET") or "").strip()
-    if len(configured) >= 32:
+    configured = configured_session_secret()
+    if configured:
         return hashlib.sha256(configured.encode("utf-8")).digest()
     web_owner_token = str(os.getenv("PROTREBOT_WEB_ACCESS_TOKEN") or "").strip()
     if len(web_owner_token) >= MIN_ACCESS_TOKEN_LENGTH:
         return hashlib.sha256(f"protrebot-v22-session-v1:{web_owner_token}".encode("utf-8")).digest()
+    if DURABLE_AUTH_REQUIRED:
+        raise RuntimeError("Kalıcı oturum anahtarı eksik: SESSION_SECRET veya PROTREBOT_SESSION_SECRET yapılandırın")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if SECRET_PATH.exists():
         raw = SECRET_PATH.read_bytes()
@@ -221,7 +234,7 @@ def load_secret() -> bytes:
 
 
 def has_stable_session_secret() -> bool:
-    configured = str(os.getenv("PROTREBOT_SESSION_SECRET") or "").strip()
+    configured = configured_session_secret()
     web_owner_token = str(os.getenv("PROTREBOT_WEB_ACCESS_TOKEN") or "").strip()
     return len(configured) >= 32 or len(web_owner_token) >= MIN_ACCESS_TOKEN_LENGTH
 

@@ -51,10 +51,9 @@ FUTURES_MARKET_DATA_API = "https://demo-fapi.binance.com"
 LEGACY_PAPER_CONTRACT = 'version="20.2.0"'
 LEGACY_V25_API_CONTRACT = 'version="25.0.0"'
 DEPLOYMENT_PATCH = "27.0.0-cloud-operations-evidence"
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://protrebot:protrebot_local_change_me@127.0.0.1:5432/protrebot",
-).strip()
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL ortam değişkeni eksik; veritabanı bağlantısını yapılandırın")
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0").strip()
 WEB_REQUIRE_AUTH = env_flag("PROTREBOT_WEB_REQUIRE_AUTH", default=False)
 WEB_ACCESS_TOKEN = os.getenv("PROTREBOT_WEB_ACCESS_TOKEN", "").strip()

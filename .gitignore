@@ -3,8 +3,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
-!.env (1).example
 backend/.env
+frontend/.env
 backend/data/demo_credentials.dat
 backend/data/v21_demo_state.json
 backend/data/v22_commercial_state.json
