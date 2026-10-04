@@ -43,6 +43,38 @@ Binance kullanıcı anahtarları mevcut şifreli kasa üzerinden kaydedilir;
 üretimde paylaşımlı `BINANCE_*` ortam anahtarlarıyla üyelik kapsamı atlatılmaz.
 Testlerdeki açıkça sentetik anahtar/token değerleri gerçek deployment ayarı değildir.
 
+### Custom domain authentication
+
+The production frontend origin is `https://kaistrade.com`. The backend explicitly
+trusts this origin and the existing `https://frontend-nu-two-18.vercel.app` origin
+for both CORS and cookie/CSRF checks. Additional exact origins from
+`PROTREBOT_CORS_ORIGINS` use the existing validated parser; custom domains are no
+longer discarded by the Vercel-preview filter. Wildcards and untrusted browser
+origins remain rejected.
+
+Render production settings must use `APP_BASE_URL=https://kaistrade.com` and
+`PROTREBOT_CORS_ORIGINS=https://kaistrade.com,https://frontend-nu-two-18.vercel.app`.
+The blueprint contains these non-secret settings, but an existing Render service
+must receive the settings and deploy the updated backend; editing the blueprint
+alone does not prove its live environment changed. Frontend requests remain
+same-origin `/api`; no frontend secret or absolute backend URL is required.
+
+This checkout has no Supabase Auth client or Google sign-in/callback integration.
+The existing Google button has no OAuth handler; Gmail OAuth is for sending
+verification/reset email, not Google login. Fixing the origin rejection does not
+by itself implement Google sign-in.
+
+If a separate Supabase Auth integration is deployed, verify its Site URL is
+`https://kaistrade.com`, and explicitly allow the actual frontend callback URLs
+on both domains in Additional Redirect URLs. In Google Cloud, retain the old
+Vercel JavaScript origin and add `https://kaistrade.com` if the integration uses
+Google's browser SDK. For Supabase, the Google Authorized redirect URI is the
+actual project's `https://<project-ref>.supabase.co/auth/v1/callback` (or its
+configured custom Auth domain), not an invented frontend callback. A direct
+Google integration instead needs its implemented server callback URI. Dashboard
+settings and a full Google redirect cannot be verified without that integration
+and access to its non-secret provider configuration.
+
 ## Güvenlik ve tarayıcı oturumları
 
 Tarayıcı üyelik oturumu ve yönetici erişimi `HttpOnly`, `SameSite=Lax`,

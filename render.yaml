@@ -25,9 +25,9 @@ services:
       - key: PROTREBOT_SESSION_SECRET
         sync: false
       - key: PROTREBOT_CORS_ORIGINS
-        value: https://frontend-nu-two-18.vercel.app
+        value: https://kaistrade.com,https://frontend-nu-two-18.vercel.app
       - key: APP_BASE_URL
-        value: https://frontend-nu-two-18.vercel.app
+        value: https://kaistrade.com
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET

@@ -102,13 +102,12 @@ def _sanitize_db_error(exc: BaseException) -> str:
 
 WEB_REQUIRE_AUTH = env_flag("PROTREBOT_WEB_REQUIRE_AUTH", default=False)
 WEB_ACCESS_TOKEN = os.getenv("PROTREBOT_WEB_ACCESS_TOKEN", "").strip()
-PRODUCTION_WEB_ORIGIN = "https://frontend-nu-two-18.vercel.app"
+PRODUCTION_WEB_ORIGIN = "https://kaistrade.com"
+LEGACY_PRODUCTION_WEB_ORIGIN = "https://frontend-nu-two-18.vercel.app"
 WEB_CORS_ORIGINS = list(dict.fromkeys([
     PRODUCTION_WEB_ORIGIN,
-    *[
-        origin for origin in cors_origins(os.getenv("PROTREBOT_CORS_ORIGINS"), fallback=[])
-        if VERCEL_PREVIEW_ORIGIN_RE.fullmatch(origin)
-    ],
+    LEGACY_PRODUCTION_WEB_ORIGIN,
+    *cors_origins(os.getenv("PROTREBOT_CORS_ORIGINS"), fallback=[]),
 ]))
 WEB_CORS_ORIGIN_REGEX = VERCEL_PREVIEW_ORIGIN_RE.pattern
 PAPER_ENABLED = env_flag("PROTREBOT_PAPER_ENABLED", default=True)

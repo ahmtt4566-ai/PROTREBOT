@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,6 +11,48 @@ from app.web_security import bootstrap_access_allowed, bearer_token, cors_origin
 
 
 class WebSecurityTests(unittest.TestCase):
+    def test_custom_domain_and_legacy_domain_pass_real_auth_origin_checks(self):
+        from fastapi.testclient import TestClient
+        from app import main
+
+        client = TestClient(main.app, base_url="https://protrebot-rkpt.onrender.com")
+        for origin in ("https://kaistrade.com", "https://frontend-nu-two-18.vercel.app"):
+            with self.subTest(origin=origin):
+                response = client.options("/api/v22/auth/login", headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type,x-requested-with",
+                })
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
+                self.assertEqual(response.headers.get("access-control-allow-credentials"), "true")
+                invalid_login = client.post("/api/v22/auth/login", json={}, headers={
+                    "Origin": origin, "X-Requested-With": "XMLHttpRequest",
+                })
+                self.assertEqual(invalid_login.status_code, 422)
+                self.assertNotIn("Browser request origin is not allowed", invalid_login.text)
+                with patch.object(main.app.state, "v22_commercial", {
+                    "secret": b"synthetic-offline-domain-test-secret", "state": {"users": []},
+                }, create=True):
+                    protected = client.get("/api/v22/me", headers={"Origin": origin})
+                self.assertEqual(protected.status_code, 401)
+        client.close()
+
+    def test_untrusted_domains_still_fail_real_auth_origin_checks(self):
+        from fastapi.testclient import TestClient
+        from app import main
+
+        client = TestClient(main.app, base_url="https://protrebot-rkpt.onrender.com")
+        for origin in ("https://evil.example", "https://kaistrade.com.evil.example", "http://kaistrade.com"):
+            with self.subTest(origin=origin):
+                response = client.post("/api/v22/auth/login", json={}, headers={
+                    "Origin": origin, "X-Requested-With": "XMLHttpRequest",
+                })
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json()["detail"], "Browser request origin is not allowed")
+                self.assertNotIn("access-control-allow-origin", response.headers)
+        client.close()
+
     def test_local_mode_can_be_disabled(self):
         decision = evaluate_access(
             required=False, configured_token="", authorization=None,
@@ -134,7 +177,8 @@ class WebSecurityTests(unittest.TestCase):
         from fastapi.middleware.cors import CORSMiddleware
 
         main_source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
-        self.assertIn('PRODUCTION_WEB_ORIGIN = "https://frontend-nu-two-18.vercel.app"', main_source)
+        self.assertIn('PRODUCTION_WEB_ORIGIN = "https://kaistrade.com"', main_source)
+        self.assertIn('LEGACY_PRODUCTION_WEB_ORIGIN = "https://frontend-nu-two-18.vercel.app"', main_source)
         self.assertIn('"Authorization"', main_source)
         self.assertIn('"Content-Type"', main_source)
         self.assertIn('"X-ProTreBot-Session"', main_source)
