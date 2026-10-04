@@ -32,6 +32,7 @@ RETENTION_FIELDS = frozenset({
     "verified_realized", "reduce_only", "executed_at", "closed_at", "opened_at",
 })
 PERSONAL_TABLES = (
+    "commercial_google_identities", "commercial_google_attempts",
     "trading_accounts", "protrebot_exchange_session_vault", "assistant_usage",
     "assistant_proactive_state", "analyst_credits", "analyst_requests", "analyst_cache",
 )

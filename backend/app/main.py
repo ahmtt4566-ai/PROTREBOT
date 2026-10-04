@@ -28,6 +28,7 @@ from .browser_security import (
     OWNER_ACCESS_COOKIE, USER_SESSION_COOKIE, browser_request, clear_browser_cookie,
     set_browser_cookie, validate_browser_request,
 )
+from .google_oauth import CALLBACK_PATH as GOOGLE_CALLBACK_PATH, callback_query as google_callback_query, router as google_oauth_router
 from .premium_access import public_projection, requires_premium
 from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .exchange_connections import (
@@ -1208,6 +1209,8 @@ MEMBER_PUBLIC_PATHS = frozenset({
     "/api/health", "/api/health/database", "/api/web/access/check", "/api/web/access/logout", "/api/client-errors", "/api/v22/public", "/api/v22/bootstrap",
     "/api/v22/auth/login", "/api/v22/auth/register", "/api/v22/auth/verify-email",
     "/api/v22/auth/verification-status", "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
+    "/api/v22/auth/google/start", "/api/v22/auth/google/callback",
+    "/api/v22/auth/google/pending", "/api/v22/auth/google/complete",
 })
 
 
@@ -1269,6 +1272,8 @@ def apply_cors_headers(request, response):
 
 @app.middleware("http")
 async def owner_preview_gate(request, call_next):
+    if request.url.path == GOOGLE_CALLBACK_PATH:
+        google_callback_query(request)
     request.state.request_id = request.headers.get("x-request-id", "").strip()[:100] or str(uuid.uuid4())
     try:
         validate_browser_request(request, WEB_CORS_ORIGINS)
@@ -1361,6 +1366,7 @@ async def owner_preview_gate(request, call_next):
 app.include_router(binance_demo_router)
 app.include_router(v21_demo_router)
 app.include_router(v22_commercial_router)
+app.include_router(google_oauth_router)
 app.include_router(v24_commerce_router)
 app.include_router(v25_execution_router)
 app.include_router(v27_cloud_router)

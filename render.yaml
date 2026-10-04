@@ -28,6 +28,10 @@ services:
         value: https://kaistrade.com,https://frontend-nu-two-18.vercel.app
       - key: APP_BASE_URL
         value: https://kaistrade.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET

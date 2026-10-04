@@ -59,21 +59,45 @@ must receive the settings and deploy the updated backend; editing the blueprint
 alone does not prove its live environment changed. Frontend requests remain
 same-origin `/api`; no frontend secret or absolute backend URL is required.
 
-This checkout has no Supabase Auth client or Google sign-in/callback integration.
-The existing Google button has no OAuth handler; Gmail OAuth is for sending
-verification/reset email, not Google login. Fixing the origin rejection does not
-by itself implement Google sign-in.
+### Google login (existing commercial authentication)
 
-If a separate Supabase Auth integration is deployed, verify its Site URL is
-`https://kaistrade.com`, and explicitly allow the actual frontend callback URLs
-on both domains in Additional Redirect URLs. In Google Cloud, retain the old
-Vercel JavaScript origin and add `https://kaistrade.com` if the integration uses
-Google's browser SDK. For Supabase, the Google Authorized redirect URI is the
-actual project's `https://<project-ref>.supabase.co/auth/v1/callback` (or its
-configured custom Auth domain), not an invented frontend callback. A direct
-Google integration instead needs its implemented server callback URI. Dashboard
-settings and a full Google redirect cannot be verified without that integration
-and access to its non-secret provider configuration.
+Google login uses server-side Authorization Code + PKCE S256 and OIDC, not
+Supabase or Google Identity Services. Configure the existing Web Application
+OAuth client's `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the backend secret
+store only. Do not create a client, change Gmail credentials or use `VITE_` for
+these settings. Missing configuration/storage rejects the flow explicitly;
+email/password login remains available through its existing endpoints.
+
+Add BOTH exact Authorized redirect URIs to that existing Google client:
+
+- `https://kaistrade.com/api/v22/auth/google/callback`
+- `https://frontend-nu-two-18.vercel.app/api/v22/auth/google/callback`
+
+Endpoints: `POST /api/v22/auth/google/start`, `GET /api/v22/auth/google/callback`,
+`GET /api/v22/auth/google/pending`, `POST /api/v22/auth/google/complete`.
+Start uses the existing Origin/XHR checks and returns Google's authorization URL
+for top-level navigation. The callback uses a 5-minute, browser-bound, atomically
+consumed PostgreSQL attempt, PKCE and nonce; it checks signature, issuer,
+audience, expiry and verified email before creating the existing USER cookie.
+Remember-me follows the existing session lifetimes. Tokens are not returned in
+frontend URLs/storage. The application/Uvicorn callback query is stripped before
+access logging; external proxy/provider log policies must separately redact
+query strings. No extra CORS or third-party script permission is needed.
+
+Identity binding is unique `(issuer, sub)`. An unbound identity with an existing
+email is NOT merged: the user is told to use email/password; no account-linking
+bypass is introduced. New Google users explicitly accept terms/privacy before
+CUSTOMER/FREE creation with no fabricated password. Existing bound users retain
+their original ID, role, subscription and auth version. Account erasure removes
+Google bindings; ordinary logout also clears pending OAuth cookies.
+
+Apply `backend/migrations/20261004_002_google_oauth.sql` after the commercial
+auth/erasure migration, before release. It adds the two OAuth tables, unique
+identity constraint and expiry index; runtime also ensures the idempotent
+schema on first OAuth use. Attempts contain purpose-separated encrypted data
+and hashed handles/browser bindings, not Google access/refresh tokens. Existing
+session keys must remain stable across workers. No provider dashboard changes
+or real Google-account login are claimed by offline tests.
 
 ## Güvenlik ve tarayıcı oturumları
 

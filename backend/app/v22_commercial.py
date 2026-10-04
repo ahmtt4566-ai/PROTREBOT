@@ -397,6 +397,10 @@ async def ensure_commercial_schema(application: Any) -> None:
         )
         """
     )
+    from .google_oauth import SCHEMA as google_schema, configured as google_configured
+    if google_configured():
+        await pool.execute(google_schema)
+        application.state.google_oauth_schema_ready = True
 
 
 _DB_CREDENTIAL_RE = re.compile(r"(?i)(\w+://)[^\s@/]+@")
@@ -419,17 +423,20 @@ async def persist_v22_commercial(application: Any) -> bool:
             await apply_erasure_tombstones(application)
             await persist_auth_security(application)
             await refresh_state_auth_security(application)
-            payload = json.dumps(sanitize_state(state), ensure_ascii=False)
-            await pool.execute(
-                """
+            query = """
                 INSERT INTO application_state_snapshots (state_key, updated_at, payload)
                 VALUES ($1, NOW(), $2::jsonb)
                 ON CONFLICT (state_key) DO UPDATE
                 SET updated_at = NOW(), payload = EXCLUDED.payload
-                """,
-                COMMERCIAL_STATE_KEY,
-                payload,
-            )
+                """
+            from .google_oauth import configured, merge_registered_users
+            if configured():
+                async with pool.acquire() as connection, connection.transaction():
+                    await connection.execute("SELECT pg_advisory_xact_lock(hashtext($1))", COMMERCIAL_STATE_KEY)
+                    await merge_registered_users(application, connection)
+                    await connection.execute(query, COMMERCIAL_STATE_KEY, json.dumps(sanitize_state(state), ensure_ascii=False))
+            else:
+                await pool.execute(query, COMMERCIAL_STATE_KEY, json.dumps(sanitize_state(state), ensure_ascii=False))
         if int(state.get("_database_revision", 0)) == revision:
             state["_database_dirty"] = False
         rt["storage_status"] = "POSTGRESQL_KALICI"
@@ -794,21 +801,27 @@ async def authenticated_user_async(request: Request, *, owner: bool = False) -> 
         raise HTTPException(401, str(exc)) from exc
     user = next((item for item in rt["state"]["users"] if item.get("id") == payload["sub"]), None)
     if user is None:
-        raise HTTPException(401, "Kullanıcı etkin değil")
+        from .google_oauth import hydrate_user
+        user = await hydrate_user(request, user_id=payload["sub"])
+        if user is None:
+            raise HTTPException(401, "Kullanıcı etkin değil")
     await refresh_auth_security(request, user)
     request.state.v22_authoritative_token = token
     return authenticated_user(request, owner=owner)
 
 
-async def enforce_auth_limit(request: Request, action: str, account: str) -> None:
+async def enforce_auth_limit(request: Request, action: str, account: str | None) -> None:
     """Fixed-window shared counters, keyed by IP and normalized account hashes."""
     if runtime(request).get("auth_storage_sync_failed"):
         raise HTTPException(503, "Kimlik doğrulama depolama eşitlemesi başarısız")
     limit, window = AUTH_LIMITS[action]
     host = request.client.host if request.client else "unknown"
+    identities = [("ip", host)]
+    if account is not None:
+        identities.append(("account", normalize_email(account)))
     buckets = [
         f"{action}:{kind}:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
-        for kind, value in (("ip", host), ("account", normalize_email(account)))
+        for kind, value in identities
     ]
     pool = getattr(request.app.state, "db_pool", None)
     if pool is None:
@@ -1307,6 +1320,12 @@ async def v22_login(payload: LoginRequest, request: Request, response: Response 
 
 @router.post("/auth/register")
 async def v22_register(payload: RegisterRequest, request: Request):
+    from .google_oauth import registration_guard
+    async with registration_guard(request, payload.email):
+        return await register_password_user(payload, request)
+
+
+async def register_password_user(payload: RegisterRequest, request: Request):
     await enforce_auth_limit(request, "register", payload.email)
     if not payload.terms_accepted:
         raise HTTPException(422, "Kullanım koşullarını kabul etmelisiniz")
@@ -1895,6 +1914,9 @@ async def v22_logout(request: Request, response: Response = None):
     await persist_v22_commercial(request.app)
     if response is not None:
         clear_browser_cookie(response, request, SESSION_COOKIE_NAME)
+        from .google_oauth import BINDING_COOKIE, PENDING_COOKIE, clear_flow_cookie
+        clear_flow_cookie(response, request, BINDING_COOKIE)
+        clear_flow_cookie(response, request, PENDING_COOKIE)
     return {"ok": True}
 
 
