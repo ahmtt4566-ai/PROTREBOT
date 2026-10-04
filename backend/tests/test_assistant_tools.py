@@ -15,7 +15,7 @@ from app.assistant_api import AssistantService, ModelAnswer, router
 from app.assistant_config import AssistantConfig
 from app.assistant_fastpath import detect_language, intent
 from app.assistant_prompt import IDENTITY_REPLIES
-from app.assistant_storage import AssistantStore
+from app.assistant_storage import AssistantStorageError, AssistantStore
 from app.assistant_tools import ARGUMENT_MODELS, TOOL_DEFINITIONS, AssistantTools
 from app.commercial_core import default_commercial_state, issue_token
 from app.exchange_connections import session_id
@@ -446,6 +446,103 @@ class AssistantToolsTests(AssistantToolsTestCase):
         self.config = self.config.model_copy(update={"enabled": False})
         self.assertEqual((await self.chat("What is my plan?")).status_code, 503)
         self.assertEqual((await self.tool("get_plans")).status_code, 503)
+
+    async def test_bilingual_new_fastpaths_and_variants_do_not_call_llm_or_spend(self):
+        self.config = self.config.model_copy(update={"api_key": AssistantConfig(ANTHROPIC_API_KEY="").api_key, "monthly_budget_usd": 0})
+        for message, source, language in (
+            ("Premium üyelik ne kadar?", "get_plans", "tr"),
+            ("PREMİUM ÜYELİĞİN FİYATI KAÇ?", "get_plans", "tr"),
+            ("premium uyelik kac para", "get_plans", "tr"),
+            ("How much is Premium membership?", "get_plans", "en"),
+            ("API anahtarlarımı nasıl girerim?", "search_help", "tr"),
+            ("API ANAHTARLARIMI NEREYE GIRERIM?", "search_help", "tr"),
+            ("Api anahtarimi nasil eklerim?", "search_help", "tr"),
+            ("How do I enter my API keys?", "search_help", "en"),
+            ("Günlük kullanım limitim ne kadar?", "usage", "tr"),
+            ("GUNLUK KULLANIM LIMITIM KAC?", "usage", "tr"),
+            ("Kalan mesaj hakkım ne?", "usage", "tr"),
+            ("What is my daily usage limit?", "usage", "en"),
+        ):
+            with self.subTest(message=message):
+                response = await self.chat(message)
+                self.assertEqual(response.status_code, 200)
+                result = response.json()
+                self.assertEqual(result["language"], language)
+                self.assertEqual(result["sources"], [source])
+                if source == "get_plans":
+                    self.assertIn("119,90" if language == "tr" else "119.90", result["reply"])
+                    self.assertIn("7", result["reply"])
+                elif source == "search_help":
+                    for text in ("AYARLAR", "Bağlantılar", "API & Connection Center"):
+                        self.assertIn(text, result["reply"])
+                    self.assertIn("LIVE", result["reply"])
+        self.provider.assert_not_awaited()
+        self.assertEqual((await self.client.get("/api/assistant/usage", headers=self.headers())).json()["remaining"], self.config.daily_limit)
+        self.app.state.analyst_analysis.assert_not_awaited()
+        self.assertEqual((await self.credits.credits("a", False))["remaining"], self.credits.config.total)
+
+    async def test_usage_fastpath_uses_same_snapshot_as_endpoint_with_custom_limits(self):
+        self.config = self.config.model_copy(update={"daily_limit": 31, "per_minute_limit": 4})
+        await self.chat("Explain this platform")
+        usage = (await self.client.get("/api/assistant/usage", headers=self.headers())).json()
+        self.provider.reset_mock()
+        reply = (await self.chat("Günlük kullanım limitim ne kadar?")).json()["reply"]
+        self.assertIn("Kullanılan".lower(), reply.lower())
+        for text in ("kullanılan: 1", f"Kalan: {usage['remaining']}", f"Günlük limit: {usage['total']}", "Dakikalık limit: 4"):
+            self.assertIn(text, reply)
+        self.provider.assert_not_awaited()
+        self.assertEqual((await self.client.get("/api/assistant/usage", headers=self.headers())).json(), usage)
+
+    async def test_usage_fastpath_failure_is_explicit_without_inventing_numbers_or_model_call(self):
+        with patch.object(self.app.state.assistant_service.store, "usage", AsyncMock(side_effect=AssistantStorageError("private diagnostic"))):
+            with self.assertLogs("app.assistant_fastpath", level="WARNING"):
+                response = await self.chat("Günlük kullanım limitim ne kadar?")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("şu an alamadım", response.json()["reply"])
+        self.assertIn("sayacını", response.json()["reply"])
+        self.assertNotRegex(response.json()["reply"], r"\d")
+        self.assertNotIn("private diagnostic", response.text)
+        self.provider.assert_not_awaited()
+
+    async def test_analysis_status_requires_owned_tool_without_new_analysis_or_charge(self):
+        original = AssistantTools.dispatch
+        calls = []
+        async def dispatch(tools, user_id, name, arguments):
+            calls.append((user_id, name, arguments))
+            return await original(tools, user_id, name, arguments)
+        before = await self.credits.credits("a", False)
+        with patch.object(AssistantTools, "dispatch", dispatch):
+            for message in ("BTC için analiz durumu ne?", "btc analiz durumu", "What is the analysis status for BTC?"):
+                response = await self.chat(message)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["sources"], ["get_analysis"])
+                self.assertNotIn("needs_confirmation", response.json())
+                self.assertNotRegex(response.json()["reply"], r"\d")
+        self.assertEqual(calls, [("a", "get_analysis", {"symbol": "BTCUSDT", "timeframe": "15m"})] * 3)
+        self.provider.assert_not_awaited()
+        self.app.state.analyst_analysis.assert_not_awaited()
+        self.assertEqual(await self.credits.credits("a", False), before)
+        self.assertEqual((await self.client.get("/api/assistant/usage", headers=self.headers())).json()["remaining"], self.config.daily_limit)
+
+    async def test_analysis_status_returns_only_cached_safe_summary_and_stale_disclosure(self):
+        await self.confirm(await self.preview())
+        before = await self.credits.credits("a", False)
+        self.app.state.analyst_analysis.reset_mock()
+        response = await self.chat("BTC için analiz durumu ne?")
+        self.assertEqual(response.status_code, 200)
+        reply = response.json()["reply"]
+        for text in ("BTCUSDT", "Final Decision: 78", "Confidence: 85", "MTF: 90"):
+            self.assertIn(text, reply)
+        for private in ("987654", "123456", "999888", "private strategy"):
+            self.assertNotIn(private, reply)
+        self.provider.assert_not_awaited()
+        self.app.state.analyst_analysis.assert_not_awaited()
+        self.assertEqual(await self.credits.credits("a", False), before)
+        self.assertIn("bulunamadı", (await self.chat("BTC analiz durumu", "b")).json()["reply"])
+        with patch.object(AssistantTools, "get_analysis", AsyncMock(return_value={"data": {
+            "symbol": "BTCUSDT", "direction": "LONG", "data_age_seconds": 1000,
+        }, "fetched_at": "2026-01-15T12:00:00Z", "stale": True})):
+            self.assertIn("Bayat/doğrulanmamış", (await self.chat("BTC analiz durumu")).json()["reply"])
 
     async def test_unmatched_requests_use_llm_and_body_cannot_confirm_analysis(self):
         preview = await self.preview()

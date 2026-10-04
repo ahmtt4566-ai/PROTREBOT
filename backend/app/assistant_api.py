@@ -309,7 +309,8 @@ async def assistant_chat(request: Request) -> JSONResponse:
         assistant = service(request)
         tools = AssistantTools(request, config=config, clock=assistant.clock)
         try:
-            quick = await fastpath_answer(tools, str(user["id"]), payload.message, language)
+            quick = await fastpath_answer(tools, str(user["id"]), payload.message, language,
+                                          usage_reader=lambda: usage_snapshot(assistant, str(user["id"]), config))
         except (HTTPException, asyncpg.PostgresError, asyncpg.InterfaceError, sqlite3.Error, OSError, TimeoutError):
             audit(str(user["id"]), assistant.clock(), None, None, warning=True)
             return reply_response(text(language, "Asistan bilgisi alınamadı.", "Assistant information could not be fetched."), language, 503)
@@ -366,28 +367,32 @@ async def assistant_confirm_analysis(request: Request) -> JSONResponse:
     return await tool_request(request, "get_analysis", confirmation=True)
 
 
+async def usage_snapshot(assistant: AssistantService, user_id: str, config: AssistantConfig) -> dict[str, Any]:
+    now = assistant.clock()
+    row = await assistant.store.usage(user_id, config.request_timeout_seconds)
+    daily_count, _, _, _ = quota_state(row, now)
+    current = datetime.fromtimestamp(now, timezone.utc)
+    return {
+        "remaining": max(0, config.daily_limit - daily_count),
+        "total": config.daily_limit,
+        "limits": {
+            "max_input_chars": config.max_input_chars,
+            "history_messages": config.history_messages,
+            "history_message_max_chars": config.history_message_max_chars,
+            "page_context_max_chars": config.page_context_max_chars,
+            "secret_min_alphanumeric_chars": config.secret_min_alphanumeric_chars,
+        },
+        "resetsAt": (current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat(),
+    }
+
+
 @router.get("/usage")
 async def assistant_usage(request: Request) -> JSONResponse:
     user = authenticated_user(request)
     try:
         config = load_assistant_config()
         assistant = service(request)
-        now = assistant.clock()
-        row = await assistant.store.usage(str(user["id"]), config.request_timeout_seconds)
-        daily_count, _, _, _ = quota_state(row, now)
-        current = datetime.fromtimestamp(now, timezone.utc)
-        return JSONResponse({
-            "remaining": max(0, config.daily_limit - daily_count),
-            "total": config.daily_limit,
-            "limits": {
-                "max_input_chars": config.max_input_chars,
-                "history_messages": config.history_messages,
-                "history_message_max_chars": config.history_message_max_chars,
-                "page_context_max_chars": config.page_context_max_chars,
-                "secret_min_alphanumeric_chars": config.secret_min_alphanumeric_chars,
-            },
-            "resetsAt": (current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat(),
-        })
+        return JSONResponse(await usage_snapshot(assistant, str(user["id"]), config))
     except (ValidationError, AssistantStorageError, asyncpg.PostgresError, asyncpg.InterfaceError, sqlite3.Error, OSError, TimeoutError):
         audit(str(user["id"]), time.time(), None, None, warning=True)
         return JSONResponse({"detail": "Asistan kullanım bilgisi alınamadı."}, status_code=503)

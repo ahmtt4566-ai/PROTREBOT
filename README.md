@@ -504,6 +504,12 @@ kimlik/onay/mutasyon argümanları reddedilir. Tüm sonuçlar
   araç verisiyle TR/EN şablon yanıtı üretir. Bu yanıtlar LLM/dakika/gün kotasından
   düşmez; API anahtarı eksik veya LLM bütçesi dolu olsa da çalışır.
   `ASSISTANT_ENABLED=false` tüm asistan yollarını kapatır.
+- Türkçe/İngilizce fiyat, API bağlantısı ve günlük kullanım soruları deterministik
+  cevaplanır. Kullanım `/usage` ile aynı salt okunur snapshot'tan gelir; veri
+  alınamazsa sayı uydurulmaz ve panel sayacına yönlendirilir. Sembol+analiz durumu
+  sorusu mevcut `get_analysis` aracını zorunlu çağırır (varsayılan 15m); cache
+  bulunamazsa yeni analiz önerilir, otomatik analiz veya kredi harcaması yapılmaz.
+  Bu hızlı yollar da LLM, günlük mesaj ve dakika kotası tüketmez.
 - Kais AI kimlik sorularına (`Sen kimsin?`, `Who are you?`) kısa TR/EN hızlı
   yanıt verir: yapay zeka asistanıdır; plan, kredi, API bağlantısı ve platform
   kullanımı hakkında yardım eder, işlem yapmaz. Bu kimlik yanıtı araç/model
