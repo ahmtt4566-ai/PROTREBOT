@@ -423,30 +423,38 @@ class SharedMTFDecisionTests(unittest.TestCase):
 
         app = type("App", (), {})()
         app.state = type("State", (), {})()
-        app.state.v25_execution = {
-            "auto": {"last_scan": None, "busy": False, "last_decision": ""},
-            "policy": {"allowed_symbols": ["BTCUSDT"], "interval": "15m", "scan_seconds": 30},
-            "intents": {},
-            "duplicate_blocks": 0,
-        }
-        with patch.object(v25, "auto_session_active", return_value=True), \
-             patch.object(v25, "readiness", return_value={"ready": True}), \
-             patch.object(v25, "client_for", return_value=object()), \
+        import time
+        app.state.v25_execution = v25.initial_state()
+        app.state.v25_execution["auto"].update(enabled=True, session_until=time.time() + 3600)
+        frames, _ = self._aligned_frames()
+        frames["1h"] = frames["1h"][-10:]
+        frames["4h"] = frames["4h"][-10:]
+        original_decision = v25.canonical_live_decision
+        decisions = []
+
+        async def record_decision(*args, **kwargs):
+            result = await original_decision(*args, **kwargs)
+            decisions.append(result)
+            return result
+
+        with patch.object(v25, "readiness_for", return_value={"ready": True}), \
+             patch.object(v25, "client_for_with_credentials", return_value=object()), \
              patch.object(v25, "account_snapshot", AsyncMock(return_value={})), \
              patch.object(v25, "live_daily_metrics", return_value={}), \
-             patch.object(v25, "live_candles", AsyncMock(side_effect=[([{"time": 0, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 1} for _ in range(220)], 1), ([{"time": 0, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 1} for _ in range(10)], 1), ([{"time": 0, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 1} for _ in range(10)], 1)])), \
-             patch.object(v25, "analyze", return_value={"direction": "LONG", "confidence": 82.0, "entry": 100.0, "stop_loss": 95.0, "tp1": 110.0}), \
-             patch.object(v25, "spread_bps", AsyncMock(return_value=10.0)), \
-             patch.object(v25, "evaluate_entry_gates", return_value={"passed": True}), \
-             patch.object(v25, "risk_sized_order", return_value={"margin_usdt": 50.0, "leverage": 1}), \
+             patch.object(v25, "scan_market_candidates", AsyncMock(return_value=[{"symbol":"BTCUSDT"}])), \
+             patch.object(v25, "live_candles", AsyncMock(side_effect=[(frames[interval], 1) for interval in ("15m", "1h", "4h")])), \
+             patch.object(v25, "canonical_live_decision", AsyncMock(side_effect=record_decision)), \
              patch.object(v25, "persist_state", lambda *args, **kwargs: None), \
              patch.object(v25, "add_event", lambda *args, **kwargs: None), \
              patch.object(v25, "execute_live_order", AsyncMock()) as execute_mock:
             import asyncio
-            asyncio.run(v25.automatic_cycle(app))
-        self.assertFalse(execute_mock.called)
-        self.assertNotIn("MTF", app.state.v25_execution["auto"]["last_decision"])
-        self.assertEqual(app.state.v25_execution["auto"]["last_decision"], "Canlı otomasyon turu güvenli biçimde durduruldu.")
+            asyncio.run(v25.automatic_cycle(app, credentials=("offline-key", "offline-secret")))
+        execute_mock.assert_not_awaited()
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision"], "WAIT")
+        self.assertFalse(decisions[0]["entry_eligible"])
+        self.assertEqual(decisions[0]["reason"], "INSUFFICIENT_CLOSED_CANDLES")
+        self.assertEqual(app.state.v25_execution["auto"]["last_cycle_stage"], "completed")
 
 
 if __name__ == "__main__":

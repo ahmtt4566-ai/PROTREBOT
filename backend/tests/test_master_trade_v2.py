@@ -9,7 +9,10 @@ SCHEMA = ROOT / 'database' / 'init.sql'
 class MasterTradeV2SafetyTests(unittest.TestCase):
     def test_master_trade_has_v2_persistence_and_recovery_signals(self):
         source = MASTER.read_text(encoding='utf-8')
-        self.assertIn('MASTER TRADE V2', source)
+        self.assertIn('MASTER TRADE', source)
+        self.assertIn('sharedStatus={liveStatus}', source)
+        self.assertIn('sharedConnections={liveConnections}', source)
+        self.assertIn('refreshAccountData', source)
         self.assertIn('PERSISTENT HISTORY', source)
         self.assertIn('LIVE ACCOUNT SNAPSHOT', source)
         self.assertNotIn('DEMO ACCOUNT', source)

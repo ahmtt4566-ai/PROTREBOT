@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, CheckCircle2, CircleDollarSign, Eye, EyeOff, KeyRound, LockKeyhole, Power, RefreshCw, Send, ShieldAlert, ShieldCheck, TriangleAlert, UnlockKeyhole, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
+import { fetchWithTimeout } from '../../master-trade-request'
 import { liveCopy } from '../../ui-copy'
 import { MasterTradeLiveLayout } from '../../MasterTradeLayout'
 import {useKaisErrorReaction} from '../../useKaisPageReactions'
@@ -113,6 +114,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [notice, setNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string}>({kind: 'info', text: 'LIVE başlatılmadı. Gerçek emir kilidi varsayılan olarak kapalıdır.'})
   useKaisErrorReaction(notice)
   const refreshInFlight = useRef(false)
+  const actionInFlight = useRef(false)
   const confirmationOpen = useRef(false)
   confirmationOpen.current = confirm !== null
   const status = sharedStatus !== undefined ? sharedStatus : localStatus
@@ -133,8 +135,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (rateLimitSeconds !== null && rateLimitSeconds > 0 && base === CONNECTIONS && isConnectionAction(path)) throw new Error(rateLimitMessage(rateLimitSeconds))
     const headers = new Headers(options.headers)
     if (options.body) headers.set('Content-Type', 'application/json')
-    const response = await fetch(`${base}${path}`, {...options, headers})
-    const payload = await response.json().catch(() => ({})) as unknown
+    const response = await fetchWithTimeout(`${base}${path}`, {...options, headers})
+    const payload:unknown = await response.json()
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get('Retry-After'))
       const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 0
@@ -155,18 +157,18 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
 
   const refresh = async (quiet = true) => {
+    if (!onRefreshStatus && (refreshInFlight.current || confirmationOpen.current)) return
     setRefreshPending(true)
     if (onRefreshStatus) {
       try {
         await onRefreshStatus(!quiet)
+        return true
       } catch (error) {
         if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
+        return false
       }
       finally { setRefreshPending(false) }
-      return
     }
-    if (refreshInFlight.current) return
-    if (confirmationOpen.current) return
     refreshInFlight.current = true
     try {
       const [nextStatus, nextConnections] = await Promise.all([
@@ -177,8 +179,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       setLocalStatus(nextStatus)
       setLocalConnections(nextConnections)
       setPolicyDraft(current => current || nextStatus.policy || {})
+      return true
     } catch (error) {
+      setLocalStatus(null)
+      setLocalConnections(null)
       if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
+      return false
     } finally {
       refreshInFlight.current = false
       setRefreshPending(false)
@@ -196,13 +202,19 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }, [active, symbol, Boolean(onRefreshStatus)])
 
   const run = async (key: string, action: () => Promise<void>, success: string) => {
+    if (actionInFlight.current) return
+    actionInFlight.current = true
     setBusy(key)
-    try { await action(); setNotice({kind: 'ok', text: success}); await refresh() }
+    try {
+      await action()
+      if (!await refresh()) throw new Error('İşlem sonrasında LIVE durumu doğrulanamadı; tekrar göndermeden önce durumu kontrol edin.')
+      setNotice({kind: 'ok', text: success})
+    }
     catch (error) {
       await refresh()
       setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE işlemi tamamlanamadı.'})
     }
-    finally { setBusy('') }
+    finally { actionInFlight.current = false; setBusy('') }
   }
 
   const liveConnection = connections?.connections?.LIVE
@@ -444,7 +456,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
 
   const confirmAction = () => {
-    if (!confirm || (!confirm.simple && confirmText.trim().toUpperCase() !== confirm.expected)) return
+    if (actionInFlight.current || !confirm || (!confirm.simple && confirmText.trim().toUpperCase() !== confirm.expected)) return
     const action = confirm.action
     setConfirm(null); setConfirmText('')
     void run('confirmed', action, 'LIVE backend safety zinciri işlemi tamamlandı.')
@@ -603,7 +615,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   )
 
   if (!active) return null
-  if (masterTrade) return <MasterTradeLiveLayout tab={masterTradeTab} step={status?.live_auto_trade ? 3 : !configured || !connected ? 0 : !readinessReady ? 1 : !liveArmed ? 2 : 3}><section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
+  if (masterTrade) return <MasterTradeLiveLayout tab={masterTradeTab} step={status?.live_auto_trade ? 3 : !configured || !connected ? 0 : !readinessReady ? 1 : !liveArmed ? 2 : 3} notice={notice.kind !== 'info' ? <div className={`liveNotice masterTradeLiveNotice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.kind === 'error' ? <TriangleAlert/> : <CheckCircle2/>}<span>{notice.text}</span></div> : undefined}><section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
     <header className={`masterTradeLiveHeader ${liveState.toLowerCase()}`}>
       <div className="masterTradeLiveTitle"><span className="masterTradeLiveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE AUTO TRADE</h2><p>Binance Futures Mainnet · V25 backend control</p></div>
       <div className="masterTradeLiveHeadline"><span className="liveStateDot" /><strong>{liveState}</strong><small>{status?.live_auto_trade ? executionLocked ? 'SCANNER ACTIVE · LIVE ORDERS LOCKED' : 'AUTO TRADE IS RUNNING' : 'AUTO TRADE IS OFF'}</small></div>

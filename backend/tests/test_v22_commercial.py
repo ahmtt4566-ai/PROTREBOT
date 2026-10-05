@@ -307,7 +307,7 @@ class V22CommercialTests(unittest.TestCase):
         source = V22_SOURCE
         self.assertIn('@router.get("/admin/users/{user_id}/trading-accounts")', source)
         self.assertIn("authenticated_user(request, owner=True)", source)
-        self.assertIn('SELECT id, provider, environment, status, created_at, updated_at', source)
+        self.assertIn('SELECT id, provider, environment, account_reference, status, created_at, updated_at', source)
         self.assertNotIn('SELECT * FROM trading_accounts', source)
         self.assertIn('raise HTTPException(404, "Kullanıcı bulunamadı")', source)
 
@@ -443,35 +443,46 @@ class V22CommercialTests(unittest.TestCase):
             def __init__(self, rows=None):
                 self.rows = rows or []
                 self.executed = []
+                self.fetched = []
 
             async def execute(self, query, *args):
                 self.executed.append(query)
 
             async def fetch(self, query, *args):
+                self.fetched.append((query, args))
                 return self.rows
 
         pool = Pool()
         application = SimpleNamespace(state=SimpleNamespace(
-            db_pool=pool,
+            db_pool=OfflineCanonicalPool([owner, customer], pool),
             v22_commercial={"secret": secret, "state": {"users": [owner, customer]}},
         ))
         owner_token = issue_token(owner["id"], owner["role"], secret, now=int(time.time()), ttl_seconds=3_600)
         customer_token = issue_token(customer["id"], customer["role"], secret, now=int(time.time()), ttl_seconds=3_600)
-        owner_request = SimpleNamespace(app=application, headers={"authorization": f"Bearer {owner_token}"})
-        customer_request = SimpleNamespace(app=application, headers={"authorization": f"Bearer {customer_token}"})
-        missing_request = SimpleNamespace(app=application, headers={"authorization": f"Bearer {owner_token}"})
+        owner_request = authoritative_request(application, owner_token)
+        customer_request = authoritative_request(application, customer_token)
+        missing_request = authoritative_request(application, owner_token)
+
+        with self.assertRaises(HTTPException) as unverified:
+            asyncio.run(v22_admin_trading_accounts(customer["id"], offline_request(application, owner_token)))
+        self.assertEqual(unverified.exception.status_code, 503)
 
         empty = asyncio.run(v22_admin_trading_accounts(customer["id"], owner_request))
         self.assertEqual(empty, {"user_id": customer["id"], "accounts": []})
-        with self.assertRaisesRegex(HTTPException, "Yönetici yetkisi gerekli"):
+        with self.assertRaisesRegex(HTTPException, "Yönetici yetkisi gerekli") as customer_denied:
             asyncio.run(v22_admin_trading_accounts(customer["id"], customer_request))
-        unauthenticated = SimpleNamespace(app=application, headers={})
-        with self.assertRaisesRegex(HTTPException, "Oturum gerekli"):
+        self.assertEqual(customer_denied.exception.status_code, 403)
+        unauthenticated = offline_request(application)
+        with self.assertRaisesRegex(HTTPException, "Oturum gerekli") as anonymous_denied:
             asyncio.run(v22_admin_trading_accounts(customer["id"], unauthenticated))
-        with self.assertRaisesRegex(HTTPException, "Kullanıcı bulunamadı"):
+        self.assertEqual(anonymous_denied.exception.status_code, 401)
+        with self.assertRaisesRegex(HTTPException, "Kullanıcı bulunamadı") as missing:
             asyncio.run(v22_admin_trading_accounts("missing-user", missing_request))
+        self.assertEqual(missing.exception.status_code, 404)
 
-        self.assertEqual(len(pool.executed), 3)
+        self.assertEqual(len(pool.executed), 12)
+        self.assertEqual(len(pool.fetched), 1)
+        self.assertEqual(pool.fetched[0][1], (customer["id"],))
 
     def test_trading_account_endpoint_returns_only_safe_account_fields(self):
         secret = b"trading-account-response-secret-long-enough"
@@ -499,6 +510,42 @@ class V22CommercialTests(unittest.TestCase):
         self.assertNotIn("api_key", str(response).lower())
         self.assertNotIn("secret", str(response).lower())
         self.assertNotIn("password", str(response).lower())
+
+    def test_nonempty_trading_account_select_projects_every_response_field(self):
+        secret = b"trading-account-projection-test-secret"
+        owner = {"id": "owner-projection", "role": "OWNER", "active": True, "email_verified": True, "auth_version": 1}
+        row = {
+            "id": "account-projection", "provider": "BINANCE", "environment": "TESTNET",
+            "account_reference": "safe-reference", "status": "UNASSIGNED",
+            "created_at": datetime(2026, 10, 5, tzinfo=timezone.utc),
+            "updated_at": datetime(2026, 10, 5, tzinfo=timezone.utc),
+        }
+
+        class Pool:
+            async def execute(self, query, *args):
+                return None
+
+            async def fetch(self, query, *args):
+                self.query = query
+                self.args = args
+                columns = query.split("SELECT", 1)[1].split("FROM", 1)[0].strip().split(",")
+                return [{column.strip(): row[column.strip()] for column in columns}]
+
+        pool = Pool()
+        application = SimpleNamespace(state=SimpleNamespace(
+            db_pool=OfflineCanonicalPool([owner], pool),
+            v22_commercial={"secret": secret, "state": {"users": [owner]}},
+        ))
+        token = issue_token(owner["id"], owner["role"], secret, now=int(time.time()), ttl_seconds=3_600)
+        request = authoritative_request(application, token)
+        response = asyncio.run(v22_admin_trading_accounts(owner["id"], request))
+        self.assertEqual(response, {
+            "user_id": owner["id"],
+            "accounts": [{**row, "created_at": row["created_at"].isoformat(), "updated_at": row["updated_at"].isoformat()}],
+        })
+        self.assertEqual(pool.args, (owner["id"],))
+        self.assertIn("WHERE user_id = $1", pool.query)
+        self.assertNotIn("SELECT *", pool.query)
 
     def test_owner_can_link_and_unlink_mapping_without_provider_calls(self):
         from fastapi import HTTPException

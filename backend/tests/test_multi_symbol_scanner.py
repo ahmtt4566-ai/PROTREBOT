@@ -78,8 +78,9 @@ class MultiSymbolScannerTests(unittest.TestCase):
         state["auto"].update({"enabled": True, "session_until": time.time() + 3600})
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
         client = SimpleNamespace(last_scan_eligible_count=7)
-        with patch("app.v25_execution.readiness", return_value={"ready": True}), \
-                patch("app.v25_execution.client_for", return_value=client), \
+        with patch("app.v25_execution.readiness_for", return_value={"ready": True}), \
+                patch("app.v25_execution.client_for_with_credentials", return_value=client), \
+                patch("app.v25_execution.auto_session_credentials", new=AsyncMock(return_value=("offline-key", "offline-secret"))), \
                 patch("app.v25_execution.account_snapshot", new=AsyncMock(return_value={"positions": [], "open_orders": []})), \
                 patch("app.v25_execution.live_daily_metrics", return_value={"entries": 0, "realized_pnl": 0, "unverified_closures": 0}), \
                 patch("app.v25_execution.scan_market_candidates", new=AsyncMock(return_value=[])) as scan, \
@@ -98,8 +99,10 @@ class MultiSymbolScannerTests(unittest.TestCase):
         client = SimpleNamespace(last_scan_eligible_count=3)
         candidates = [{"symbol": symbol} for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT")]
         candles = [{"time": index, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 1} for index in range(220)]
-        with patch("app.v25_execution.readiness", return_value={"ready": True}), \
-                patch("app.v25_execution.client_for", return_value=client), \
+        with patch("app.v25_execution.readiness_for", return_value={"ready": True}), \
+                patch("app.v25_execution.client_for_with_credentials", return_value=client), \
+                patch("app.v25_execution.auto_session_credentials", new=AsyncMock(return_value=("offline-key", "offline-secret"))), \
+                patch("app.v25_execution.execute_live_order", new=AsyncMock(return_value={})), \
                 patch("app.v25_execution.account_snapshot", new=AsyncMock(return_value={"positions": [], "open_orders": []})), \
                 patch("app.v25_execution.live_daily_metrics", return_value={"entries": 0, "realized_pnl": 0, "unverified_closures": 0}), \
                 patch("app.v25_execution.scan_market_candidates", new=AsyncMock(return_value=candidates)), \
@@ -167,14 +170,15 @@ class MultiSymbolScannerTests(unittest.TestCase):
         async def stop_loop(_seconds):
             raise asyncio.CancelledError
 
-        with patch("app.v25_execution.live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
+        credentials = ("offline-key", "offline-secret")
+        with patch("app.v25_execution.auto_session_credentials", new=AsyncMock(return_value=credentials)), \
                 patch("app.v25_execution.reconcile", new=AsyncMock()), \
                 patch("app.v25_execution.automatic_cycle", new=AsyncMock()) as cycle, \
                 patch("app.v25_execution.automation_telemetry") as telemetry, \
                 patch("app.v25_execution.asyncio.sleep", new=stop_loop):
             with self.assertRaises(asyncio.CancelledError):
                 asyncio.run(execution_loop(application))
-        cycle.assert_awaited_once_with(application)
+        cycle.assert_awaited_once_with(application, credentials=credentials)
         telemetry.assert_any_call("AUTOMATION_LOOP running", reason="loop_running")
 
     def test_inactive_and_expired_sessions_emit_distinct_skip_reasons(self):
@@ -211,8 +215,10 @@ class MultiSymbolScannerTests(unittest.TestCase):
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
         request = SimpleNamespace(app=application)
         with patch("app.v25_execution.execution_owner", return_value={"id": "TEST"}), \
-                patch("app.v25_execution.is_armed", return_value=True), \
-                patch("app.v25_execution.readiness", return_value={"ready": True}), \
+                patch("app.v25_execution.live_auto_start_gate", return_value=(True, "ready")), \
+                patch("app.v25_execution.live_credentials_status", return_value=("offline-key", "offline-secret", "offline-fingerprint")), \
+                patch("app.v25_execution.session_id", return_value="offline-session"), \
+                patch("app.v25_execution.authenticated_live_expiry", return_value=time.time() + 600), \
                 patch("app.v25_execution.persist_state"), \
                 patch("app.v25_execution.public_status", return_value={}):
             asyncio.run(v25_auto_start(request, Confirmation(confirmation="CANLI OTOMATİK")))

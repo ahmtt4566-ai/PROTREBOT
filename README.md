@@ -189,6 +189,20 @@ Eksik metrikler skeleton ile, sinyal fiyatları yalnızca gösterimde iki ondal�
 ham değerler tooltip'te korunur. Dar ekranlarda içerik tek kolona, metrikler iki kolona
 geçer. LOCKED, ARM, consent, backend doğrulamaları ve mevcut işlem koşulları değişmez.
 
+Hesap durumu okunamazsa önceki LIVE yetkisi temizlenir; ağ istekleri zaman aşımıyla
+sınırlıdır. Onaylar aynı anda yalnız bir işlem gönderir. Aktif Auto Trade oturumunu
+yeniden başlatmak HTTP 409 döndürür ve yetki süresini uzatmaz. Bir canlı kapı kapanırsa
+otomasyon, ARM ve otomatik oturum yetkisi kapatılır; mevcut koruyucu emirler korunur.
+Sembol/zaman dilimi değişiminde eski analiz yanıtları yeni görünümü değiştiremez.
+LIVE geçmişi ve performans yalnız `/v25/status` içindeki doğrulanmış kapanmış LIVE
+planlarından üretilir; DEMO günlüğü kullanılmaz. Kapatma sonucu yenilenmiş plan
+kimliği ve o işlemin doğrulanmış PnL değeriyle kontrol edilir.
+
+Owner trading-account listesi, kullanıcıya ait `account_reference` dahil güvenli
+mapping alanlarını SELECT eder; API key/secret döndürmez. Test fixture'ları da
+istek kapsamındaki canonical oturum doğrulamasını kullanır; OWNER kontrolü ve
+doğrulanmamış oturumun reddi korunur.
+
 Doğrulama: kökte `npm run build`; `frontend` içinde
 `npx playwright test master-trade-live-ui.spec.ts master-trade-readonly.spec.ts --project=chromium`.
 UI testi gerçek emir/bağlantı işlemi yapmadan mock verilerle masaüstü, tablet ve mobil

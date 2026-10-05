@@ -146,7 +146,7 @@ function groupLiveInsights(slots: ReactNode[], cards: ReactNode[], tab: Tab): Re
     : index === signal ? [] : [slot])
 }
 
-export function MasterTradeLiveLayout({tab = 'canli', step, children}: {tab?: Tab; step: number; children: LayoutElement}) {
+export function MasterTradeLiveLayout({tab = 'canli', step, children, notice}: {tab?: Tab; step: number; children: LayoutElement; notice?:ReactNode}) {
   const [selectedStep, setSelectedStep] = useState<number | null>(null)
   const activeStep = selectedStep !== null && selectedStep <= step ? selectedStep : step
   const cards = flattenCards(children.props.children)
@@ -154,6 +154,7 @@ export function MasterTradeLiveLayout({tab = 'canli', step, children}: {tab?: Ta
   const progressionStates = Children.toArray(progression?.props.children).filter(child => isValidElement(child) && child.type === 'span')
   const content = <>
     <nav className="masterTradeStepper" aria-label={progression?.props['aria-label']} hidden={tab !== 'canli'}>{STEPS.map((label, index) => <button key={label} type="button" disabled={index > step} data-complete={index < step || undefined} aria-current={activeStep === index ? 'step' : undefined} onClick={() => setSelectedStep(index)}><span className="masterTradeStepIndex">{index > step ? <LockKeyhole/> : index < step ? <Check/> : index + 1}</span><span><b>{label}</b><small>{progressionStates[index]}</small></span></button>)}</nav>
+    {notice}
     {groupLiveInsights(cards.map(node => {
       if (!isValidElement(node)) return node
       const card = node as LayoutElement

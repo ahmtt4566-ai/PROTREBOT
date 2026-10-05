@@ -6,6 +6,7 @@ import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDe
 import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
 import { PremiumWorkspace, useMemberAccess } from './premium-access'
 import {useKaisWorkspaceReaction} from './useKaisPageReactions'
+import { fetchWithTimeout } from './master-trade-request'
 
 type TradeSide = 'LONG' | 'SHORT'
 type TradeHistoryRow = {
@@ -101,19 +102,6 @@ const navigateTab = (tab: MasterTradeTab) => {
   window.history.pushState(window.history.state, '', url)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
-const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 15000) => {
-  const controller = new AbortController()
-  const parentAbort = () => controller.abort()
-  init.signal?.addEventListener('abort', parentAbort, { once: true })
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch(input, { ...init, signal: controller.signal })
-  } finally {
-    window.clearTimeout(timeout)
-    init.signal?.removeEventListener('abort', parentAbort)
-  }
-}
-
 const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   const responses = await Promise.all(MTF_INTERVALS.map(async timeframe => {
     try {
@@ -156,6 +144,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const [snapshot, setSnapshot] = useState<MasterTradeSnapshot | null>(null)
   const [accountRefreshNonce, setAccountRefreshNonce] = useState(0)
   const accountRef = useRef<AccountSnapshot | null>(null)
+  const historyRef = useRef<TradeHistoryRow[]>([])
+  const positionActionInFlight = useRef(false)
   const timelineKeysRef = useRef<string[]>([])
   const [decisionTimeline, setDecisionTimeline] = useState<Array<{ time: string; message: string }>>([])
   const triggerLifecycleRef = useRef<TriggerLifecycle | null>(null)
@@ -175,21 +165,20 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const [lastAccountSyncAt, setLastAccountSyncAt] = useState<string | null>(null)
   const [lastHistorySyncAt, setLastHistorySyncAt] = useState<string | null>(null)
   const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null)
-  const marketRefreshInFlight = useRef(false)
-  const scannerRefreshInFlight = useRef(false)
   const accountRefreshInFlight = useRef(false)
   const candles = snapshot?.candles ?? []
-  const analysis = snapshot?.analysis ?? null
+  const analysis = snapshot?.marketError || dataError ? null : snapshot?.analysis ?? null
   const mtfAnalyses = snapshot?.mtf ?? []
-  const account = snapshot?.account ?? (liveStatus?.account as AccountSnapshot | null) ?? null
+  const account = snapshot?.account ?? accountRef.current
 
   useEffect(() => {
     const controller = new AbortController()
     let active = true
     setMarketLoading(true)
+    let inFlight = false
     const refreshMarkets = async () => {
-      if (!active || marketRefreshInFlight.current) return
-      marketRefreshInFlight.current = true
+      if (!active || inFlight) return
+      inFlight = true
       try {
         const response = await fetchWithTimeout(`${API_BASE}/markets?limit=50`, { signal: controller.signal })
         if (!response.ok) throw new Error('Market data unavailable')
@@ -202,8 +191,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       } catch (error) {
         if (active && !(error instanceof Error && error.name === 'AbortError')) setMarketError('DATA STALE / DATA UNAVAILABLE')
       } finally {
-        marketRefreshInFlight.current = false
-        setMarketLoading(false)
+        inFlight = false
+        if (active) setMarketLoading(false)
       }
     }
     void refreshMarkets()
@@ -214,18 +203,23 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   useEffect(() => {
     const controller = new AbortController()
     let active = true
+    let inFlight = false
+    setScannerCandidates([])
     const refreshScanner = async () => {
-      if (!active || scannerRefreshInFlight.current) return
-      scannerRefreshInFlight.current = true
+      if (!active || inFlight) return
+      inFlight = true
       try {
         const response = await fetchWithTimeout(`${API_BASE}/analysis-universe?interval=${interval}&limit=40`, { signal: controller.signal }, 15000)
         if (!response.ok) throw new Error('Scanner data unavailable')
         const payload = await response.json() as { results?: ScannerCandidate[] }
         if (active) setScannerCandidates(Array.isArray(payload.results) ? payload.results : [])
       } catch (error) {
-        if (active && !(error instanceof Error && error.name === 'AbortError')) setMarketError('MARKET ANALYSIS DELAYED · RAW MARKETS ACTIVE')
+        if (active && !(error instanceof Error && error.name === 'AbortError')) {
+          setScannerCandidates([])
+          setMarketError('MARKET ANALYSIS DELAYED · RAW MARKETS ACTIVE')
+        }
       } finally {
-        scannerRefreshInFlight.current = false
+        inFlight = false
       }
     }
     void refreshScanner()
@@ -236,6 +230,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   useEffect(() => {
     const controller = new AbortController()
     let firstLoad = true
+    let active = true
     setSnapshot(null)
     let inFlight = false
     const refresh = async () => {
@@ -251,21 +246,22 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         if (!candleResponse.ok) throw new Error('Market data unavailable')
         const nextCandles = await candleResponse.json() as Candle[]
         const nextAnalysis = analysisResponse.ok ? await analysisResponse.json() as Analysis : null
+        if (!active) return
         if (!nextCandles.length || !nextAnalysis) throw new Error('Market data unavailable')
         setSnapshot({ symbol: draft.market, timeframe: interval, candles: nextCandles, analysis: nextAnalysis, mtf: nextMtf, account: accountRef.current, currentPrice: nextCandles[nextCandles.length - 1]?.close ?? null, priceUpdatedAt: new Date().toISOString(), marketUpdatedAt: new Date().toISOString(), accountUpdatedAt: null, marketError: '', accountError: '' })
         const latest = nextCandles[nextCandles.length - 1]
         setDataError('')
       } catch (error) {
-        if (error instanceof Error && error.name !== 'AbortError') { setDataError('DATA STALE / DATA UNAVAILABLE'); setSnapshot(current => current ? { ...current, marketError: 'DATA STALE / DATA UNAVAILABLE' } : current) }
+        if (active && error instanceof Error && error.name !== 'AbortError') { setDataError('DATA STALE / DATA UNAVAILABLE'); setSnapshot(current => current ? { ...current, marketError: 'DATA STALE / DATA UNAVAILABLE' } : current) }
       } finally {
         inFlight = false
         firstLoad = false
-        setDataLoading(false)
+        if (active) setDataLoading(false)
       }
     }
     void refresh()
     const timer = window.setInterval(() => void refresh(), 30000)
-    return () => { controller.abort(); window.clearInterval(timer) }
+    return () => { active = false; controller.abort(); window.clearInterval(timer) }
   }, [draft.market, interval])
 
   const refreshAccountData = async (forceLiveSnapshot = false) => {
@@ -274,14 +270,15 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     try {
       const response = await Promise.all([
         forceLiveSnapshot
-          ? fetch(`${API_BASE}/v25/connect/read-only`, {method: 'POST'})
-          : fetch(`${API_BASE}/v25/status`),
-        fetch(`${API_BASE}/exchange-connections/status`),
-        fetch(`${API_BASE}/v21/journal?limit=200`),
-        fetch(`${API_BASE}/v21/performance?period=all`),
-        fetch(`${API_BASE}/v21/performance?period=daily`),
+          ? fetchWithTimeout(`${API_BASE}/v25/connect/read-only`, {method: 'POST'})
+          : fetchWithTimeout(`${API_BASE}/v25/status`),
+        fetchWithTimeout(`${API_BASE}/exchange-connections/status`),
       ])
-      const [accountResponse, connectionResponse, journalResponse, performanceResponse, dailyResponse] = response
+      const [accountResponse, connectionResponse] = response
+      setLiveStatus(null)
+      setLiveConnections(null)
+      accountRef.current = null
+      setSnapshot(current => current ? {...current, account:null} : current)
       if (connectionResponse.ok) setLiveConnections(await connectionResponse.json() as SharedConnectionStatus)
 
       if (accountResponse.status === 412) {
@@ -293,7 +290,10 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         return false
       }
 
-      const accountPayload = accountResponse.ok ? await accountResponse.json().catch(() => null) as { account?: AccountSnapshot; plans?: AccountPlan[]; detail?: unknown } : null
+      const accountPayload = accountResponse.ok ? await accountResponse.json() as SharedLiveStatus & {
+        account?:AccountSnapshot; plans?:AccountPlan[]; detail?:unknown;
+        journal?:Array<Record<string,unknown>>; performance?:PerformanceSnapshot; daily_performance?:PerformanceSnapshot;
+      } : null
       if (!accountResponse.ok || !accountPayload) {
         const detail = accountPayload && typeof accountPayload.detail === 'string'
           ? accountPayload.detail
@@ -314,9 +314,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     setLastSuccessfulRefreshAt(new Date().toISOString())
     setSnapshot(current => current ? { ...current, account: liveAccount, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
 
-    if (journalResponse.ok) {
-      const journalPayload = await journalResponse.json().catch(() => null) as { items?: Array<Record<string, unknown>> } | null
-      const rows = ((journalPayload?.items || []) as Array<Record<string, unknown>>).filter(item => item.verified_realized === true && typeof item.realized_pnl === 'number').map((item, index) => {
+    if (Array.isArray(accountPayload.journal)) {
+      const rows = accountPayload.journal.filter(item => item.verified_realized === true && typeof item.realized_pnl === 'number' && Number.isFinite(item.realized_pnl)).map((item, index) => {
         const direction = String(item.side || item.direction || '').toUpperCase()
         return {
           id: String(item.id || `journal-${index}`), symbol: String(item.symbol || '--'), side: direction === 'BUY' || direction === 'LONG' ? 'LONG' : 'SHORT',
@@ -326,29 +325,28 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
           closeReason: typeof item.reason === 'string' ? item.reason : null, source: String(item.source || 'BINANCE LIVE'), analysisScore: null, opportunityScore: null, scanCycle: null,
         } satisfies TradeHistoryRow
       })
+      historyRef.current = rows
       setHistory(rows)
       setHistorySyncState(rows.length === 0 ? 'EMPTY' : 'READY')
       setLastHistorySyncAt(rows.length ? new Date().toISOString() : null)
     } else {
+      historyRef.current = []
       setHistory([])
       setHistorySyncState('UNAVAILABLE')
       setLastHistorySyncAt(null)
     }
 
-    if (performanceResponse.ok) {
-      const performance = await performanceResponse.json().catch(() => null) as PerformanceSnapshot | null
-      setPerformanceSnapshot(performance)
-    } else {
-      setPerformanceSnapshot(null)
-    }
-
-    if (dailyResponse.ok) {
-      const daily = await dailyResponse.json().catch(() => null) as PerformanceSnapshot | null
-      setDailyPerformance(daily)
-    } else {
-      setDailyPerformance(null)
-    }
-      return true
+    setPerformanceSnapshot(accountPayload.performance ?? null)
+    setDailyPerformance(accountPayload.daily_performance ?? null)
+      return connectionResponse.ok
+    } catch (error) {
+      setLiveStatus(null)
+      setLiveConnections(null)
+      accountRef.current = null
+      setAccountSyncState('DISCONNECTED')
+      setHistorySyncState('UNAVAILABLE')
+      setSnapshot(current => current ? {...current, account:null, accountError:error instanceof Error ? error.message : 'ACCOUNT DISCONNECTED'} : current)
+      throw error
     } finally {
       accountRefreshInFlight.current = false
     }
@@ -434,7 +432,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   }, [snapshot?.marketUpdatedAt, snapshot?.symbol, snapshot?.timeframe, tradeDecision.direction, triggerMonitor.lifecycle, triggerMonitor.remainingConditions])
 
   const submitPositionAction = async () => {
-    if (!positionAction || positionAction.mode === 'DETAILS' || positionActionBusy) return
+    if (!positionAction || positionAction.mode === 'DETAILS' || positionActionInFlight.current) return
     const quantity = positionAction.position.quantity || 0
     const requestedQuantity = positionAction.mode === 'CLOSE' ? quantity : Number(reduceQuantity)
     if (!(requestedQuantity > 0) || requestedQuantity > quantity) {
@@ -445,6 +443,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     const isClose = positionAction.mode === 'CLOSE'
     const targetSymbol = positionAction.position.symbol
     const closeStartedAt = new Date().toISOString()
+    positionActionInFlight.current = true
     setPositionActionBusy(true)
     setPositionActionError('')
     setCloseLifecycle({ state: 'CLOSING', message: isClose ? 'CLOSING POSITION...' : 'REDUCING POSITION...' })
@@ -453,9 +452,9 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       const token = userSessionToken()
       const headers = new Headers({ 'Content-Type': 'application/json' })
       if (token) headers.set('Authorization', `Bearer ${token}`)
-      const livePlan = account?.plans?.find(plan => plan.symbol === targetSymbol) as (AccountPlan & { id?: string }) | undefined
+      const livePlan = accountRef.current?.plans?.find(plan => plan.symbol === targetSymbol) as (AccountPlan & { id?: string }) | undefined
       if (isClose && !livePlan?.id) throw new Error('LIVE tracked plan is unavailable for this position.')
-      const response = await fetch(`${API_BASE}/v25/position/close`, {
+      const response = await fetchWithTimeout(`${API_BASE}/v25/position/close`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ plan_id: livePlan?.id, confirmation: 'CANLI POZİSYONU KAPAT' }),
@@ -470,9 +469,9 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       const refreshedAccount = accountRef.current
       const positionsAfterClose = Array.isArray(refreshedAccount?.positions) ? refreshedAccount.positions : []
       const positionStillOpen = positionsAfterClose.some(item => item.symbol === targetSymbol && Number(item.quantity || 0) > 0)
-      const historyRowsAfterClose = history.slice()
-      const historyHasClose = historyRowsAfterClose.some(row => row.symbol === targetSymbol && new Date(row.closeTime).getTime() >= new Date(closeStartedAt).getTime())
-      const pnlValue = typeof performanceSnapshot?.net_profit === 'number' ? performanceSnapshot.net_profit : (typeof refreshedAccount?.unrealized_pnl === 'number' ? refreshedAccount.unrealized_pnl : null)
+      const closedTrade = historyRef.current.find(row => row.id === livePlan?.id && row.symbol === targetSymbol && new Date(row.closeTime).getTime() >= new Date(closeStartedAt).getTime())
+      const historyHasClose = Boolean(closedTrade)
+      const pnlValue = closedTrade?.realizedPnl ?? null
 
       if (!refreshed || !positionStillOpen && !historyHasClose) {
         setCloseLifecycle({ state: 'SYNC_FAILED', message: 'POSITION CLOSED · HISTORY SYNC FAILED', detail: 'Backend acknowledged the close request, but position and history verification did not complete.' })
@@ -510,6 +509,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       setCloseLifecycle({ state: 'CLOSE_FAILED', message: 'CLOSE FAILED', detail: error instanceof Error ? error.message : 'Position close failed.' })
       setPositionActionError(error instanceof Error ? error.message : 'Pozisyon işlemi başarısız.')
     } finally {
+      positionActionInFlight.current = false
       setPositionActionBusy(false)
     }
   }
@@ -869,7 +869,9 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         </div>
 
         <div className="masterTradeOperationsPanel" id={`master-panel-${layoutTab === 'analiz' ? 'operations' : layoutTab}`} role="tabpanel" aria-labelledby={`master-tab-${layoutTab}`} hidden={layoutTab === 'analiz'}>
-          <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade masterTradeTab={layoutTab} sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={(force = false) => refreshAccountData(force).then(() => undefined)} />
+          <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade masterTradeTab={layoutTab} sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={async (force = false) => {
+            if (!await refreshAccountData(force)) throw new Error('LIVE durum yenilemesi başarısız; işlem durumunu doğrulayın.')
+          }} />
 
         <div className="masterTradeDataGrid" hidden={layoutTab === 'canli'}>
           <section className="masterTradePanel riskMonitorPanel" hidden={layoutTab !== 'baglanti'}>
@@ -896,6 +898,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             </div>
 
             <div className="tableWrap portfolioScrollRegion">
+              {closeLifecycle.state !== 'IDLE' && <p role="status">{closeLifecycle.message}{closeLifecycle.detail ? ` · ${closeLifecycle.detail}` : ''}</p>}
               <table>
                 <thead>
                   <tr>

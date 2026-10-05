@@ -3021,7 +3021,33 @@ def live_daily_metrics(state: dict[str, Any]) -> dict[str, Any]:
     return metrics
 
 
+def verified_live_journal(state: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for plan in state.get("plans", {}).values():
+        pnl = plan.get("realized_pnl")
+        if plan.get("status") != "KAPANDI" or plan.get("pnl_verified") is not True:
+            continue
+        if isinstance(pnl, bool) or not isinstance(pnl, (int, float)) or not math.isfinite(pnl):
+            continue
+        rows.append({
+            "id": plan["id"],
+            "symbol": plan["symbol"],
+            "side": plan.get("side"),
+            "price": plan.get("exit_price"),
+            "quantity": plan.get("quantity"),
+            "created_at": plan.get("closed_at"),
+            "opened_at": plan.get("opened_at"),
+            "reason": plan.get("close_reason"),
+            "source": "BINANCE LIVE",
+            "verified_realized": True,
+            "realized_pnl": pnl,
+        })
+    return rows
+
+
 def public_status(application: Any, request: Request | None = None) -> dict[str, Any]:
+    from .v21_demo import performance_payload
+
     state = application.state.v25_execution
     if request is not None:
         guard_execution_ownership(request)
@@ -3035,6 +3061,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         key in snapshot for key in ("wallet_balance", "available_balance", "positions", "open_orders")
     )
     scan_stats = state["auto"].get("last_scan_stats") or {}
+    journal = verified_live_journal(state)
     return {
         "version": V25_VERSION,
         "mode": "LIVE_GUARD",
@@ -3091,6 +3118,9 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "readiness": release,
         "account": {"wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"), "unrealized_pnl": snapshot.get("unrealized_pnl"), "positions": snapshot.get("positions", []), "open_orders": snapshot.get("open_orders", []), "open_algo_orders": snapshot.get("open_algo_orders", []), "hedge_mode": snapshot.get("hedge_mode")},
         "daily": live_daily_metrics(state),
+        "journal": journal,
+        "performance": performance_payload({"journal": journal}),
+        "daily_performance": performance_payload({"journal": journal}, "daily"),
         "plans": list(state.get("plans", {}).values())[:50],
         "events": state.get("events", [])[:80],
         "emergency": state.get("emergency"),
@@ -3389,6 +3419,10 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             "session_until": 0.0,
             "last_decision": "Canlı yayın kapılarından biri kapandı; otomatik oturum kilitlendi.",
         })
+        state["live_auto_trade"] = False
+        state["real_trading_locked"] = True
+        state["armed_until"] = 0.0
+        state["auto_authorization"] = initial_state()["auto_authorization"]
         add_event(state, "LIVE_AUTO_FAIL_CLOSED", "Canlı yayın kapısı kapanınca otomatik yeni girişler durduruldu.")
         persist_state(state)
         return
@@ -4853,6 +4887,8 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     if body.confirmation.strip().upper() != "CANLI OTOMATİK":
         raise HTTPException(422, "Otomasyonu açmak için CANLI OTOMATİK yazın.")
     state = request.app.state.v25_execution
+    if auto_session_is_active(state):
+        raise HTTPException(409, "Canlı otomasyon zaten aktif; mevcut oturum uzatılmadı.")
     allowed, reason = live_auto_start_gate(request.app, state, request)
     if not allowed:
         raise HTTPException(423, reason)

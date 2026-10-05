@@ -82,7 +82,10 @@ async function prepareReadOnly(page: Page) {
       return
     }
     if (url.includes('/api/analysis-universe')) {
-      await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({results: [{symbol: 'BTCUSDT', display: 'BTC/USDT', direction: 'LONG', confidence: 80, final_decision_score: 82, opportunity_score: 78, smart_score: 80, price: 84300, change: 1.2, volume: 1000000}]})})
+      await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({results: [
+        {symbol: 'BTCUSDT', display: 'BTC/USDT', direction: 'LONG', confidence: 80, final_decision_score: 82, opportunity_score: 78, smart_score: 80, price: 84300, change: 1.2, volume: 1000000},
+        {symbol: 'ETHUSDT', display: 'ETH/USDT', direction: 'LONG', confidence: 80, final_decision_score: 81, opportunity_score: 78, smart_score: 80, price: 2800, change: 2, volume: 500000},
+      ]})})
       return
     }
     if (url.includes('/api/klines/')) {
@@ -112,7 +115,7 @@ async function prepareReadOnly(page: Page) {
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({})})
   })
 
-  await page.goto('/master-trade')
+  await page.goto('/master-trade', {waitUntil:'domcontentloaded'})
   return mutations
 }
 
@@ -186,6 +189,9 @@ test('Master Trade responsive geometry stays read-only at desktop, tablet and mo
   const mobilePills = await page.locator('.masterTradeChartPills > span').evaluateAll(elements => elements.map(element => ({top: element.getBoundingClientRect().top, font: getComputedStyle(element).fontSize})))
   expect(mobilePills.every(pill => pill.font === '12px')).toBe(true)
   expect(mobilePills.slice(1).every((pill, index) => pill.top - mobilePills[index].top >= 16)).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.setViewportSize({width:320,height:844})
+  expect(await page.locator('.masterTradeWorkspace').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.emulateMedia({reducedMotion: 'reduce'})
   expect(await page.locator('.masterTradeSkeleton').first().evaluate(element => getComputedStyle(element).animationName)).toBe('none')

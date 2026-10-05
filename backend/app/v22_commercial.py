@@ -1938,7 +1938,7 @@ async def v22_admin_trading_accounts(user_id: str, request: Request):
     await ensure_commercial_schema(request.app)
     rows = await pool.fetch(
         """
-        SELECT id, provider, environment, status, created_at, updated_at
+        SELECT id, provider, environment, account_reference, status, created_at, updated_at
         FROM trading_accounts
         WHERE user_id = $1
         ORDER BY created_at ASC, id ASC

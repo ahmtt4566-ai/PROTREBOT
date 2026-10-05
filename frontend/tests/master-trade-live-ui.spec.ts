@@ -1,10 +1,11 @@
 import {expect, test} from '@playwright/test'
 import {join} from 'node:path'
+import {mockAssistant} from './helpers/assistant-api'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 test.setTimeout(60000)
 
-for (const width of [1440, 1024, 390]) {
+for (const width of [1440, 1024, 390, 320]) {
   test(`Canlı İşlem presentation at ${width}px preserves locked actions`, async ({page}, testInfo) => {
     const mutations: string[] = []
     await page.setViewportSize({width, height: 900})
@@ -46,7 +47,7 @@ for (const width of [1440, 1024, 390]) {
           : fixtures[path] ?? {}
       await route.fulfill({json: body})
     })
-    await page.goto('/master-trade?tab=canli')
+    await page.goto('/master-trade?tab=canli', {waitUntil:'domcontentloaded'})
     await expect(page.getByRole('heading', {name: 'LIVE AUTO TRADE', exact: true})).toBeVisible()
     const workspace = page.locator('#master-trade-live-terminal')
     await expect(workspace.locator('.masterTradeStepper button').nth(1)).toBeDisabled()
@@ -107,33 +108,38 @@ for (const width of [1440, 1024, 390]) {
     await page.evaluate(() => window.scrollTo(0, 0))
     await page.screenshot({path: screenshotPath, fullPage: true, animations: 'disabled'})
     await testInfo.attach(screenshotName, {path: screenshotPath, contentType: 'image/png'})
-    if (width === 1440) {
-      let armed = false
-      let consent = true
-      let running = false
-      await page.route('**/api/exchange-connections/status', route => route.fulfill({json: {vault: {ready: true}, connections: {LIVE: {configured: true, active: true}}}}))
-      await page.route('**/api/v25/status', route => route.fulfill({json: {
-        connected: true, credentials: {configured: true}, real_trading_locked: !armed,
-        armed, live_auto_trade: running, execution_state: armed ? 'ARMED' : 'LOCKED',
-        recovery_ready: true, authorization: {valid: consent}, policy_acknowledged: consent,
-        readiness: {ready: true, gates: [{key: 'risk', passed: true}, {key: 'protection', passed: true}]},
-        account: {positions: [], open_orders: []}, events: [],
-      }}))
-      await page.reload()
-      await expect(workspace.locator('.masterTradeStepper button').nth(2)).toHaveAttribute('aria-current', 'step')
-      await expect(workspace.locator('.masterTradeLiveAssistantActions').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
-      armed = true
-      consent = false
-      await page.reload()
-      await expect(workspace.locator('.masterTradeStepper button').nth(3)).toHaveAttribute('aria-current', 'step')
-      await expect(workspace.locator('.masterTradeLiveAssistantActions').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
-      consent = true
-      await page.reload()
-      await expect(workspace.locator('.masterTradeLiveAssistantActions').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeEnabled()
-      running = true
-      await page.reload()
-      await expect(workspace.locator('.masterTradeLiveAssistantActions').getByRole('button', {name: 'STOP AUTO TRADE', exact: true})).toBeEnabled()
-    }
     expect(mutations).toEqual([])
   })
 }
+
+for (const scenario of [
+  {name:'ARM required',armed:false,consent:true,running:false,step:2},
+  {name:'consent required',armed:true,consent:false,running:false,step:3},
+  {name:'ready',armed:true,consent:true,running:false,step:null},
+  {name:'running',armed:true,consent:true,running:true,step:null},
+]) test(`LIVE ${scenario.name} authority survives reload without a mutation`, async ({page}) => {
+  const mock = await mockAssistant(page)
+  const user = {id:'live-ui-owner',role:'OWNER',active:true,email_verified:true}
+  await page.route('**/api/v22/{profile,session}',route => route.fulfill({json:{user,access:{canAccessMasterTrade:true}}}))
+  await page.route('**/api/exchange-connections/status',route => route.fulfill({json:{connections:{LIVE:{configured:true,active:true}}}}))
+  await page.route('**/api/v25/status',route => route.fulfill({json:{
+    connected:true,credentials:{configured:true},real_trading_locked:!scenario.armed,
+    armed:scenario.armed,live_auto_trade:scenario.running,execution_state:scenario.armed ? 'ARMED' : 'LOCKED',
+    recovery_ready:true,authorization:{valid:scenario.consent},policy_acknowledged:scenario.consent,
+    readiness:{ready:true,gates:[{key:'risk',passed:true},{key:'protection',passed:true}]},
+    account:{positions:[],open_orders:[]},events:[],
+  }}))
+  const assertAuthority = async () => {
+    const workspace = page.locator('#master-trade-live-terminal')
+    if (scenario.step !== null) await expect(workspace.locator('.masterTradeStepper button').nth(scenario.step)).toHaveAttribute('aria-current','step')
+    const start = workspace.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true})
+    if (scenario.running) await expect(workspace.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'STOP AUTO TRADE',exact:true})).toBeEnabled()
+    else if (scenario.armed && scenario.consent) await expect(start).toBeEnabled()
+    else await expect(start).toBeDisabled()
+  }
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  await assertAuthority()
+  await page.reload({waitUntil:'domcontentloaded'})
+  await assertAuthority()
+  expect(mock.requests.filter(request => /^(POST|PUT|PATCH|DELETE) \/api\/v25\//.test(request) && !request.endsWith('/risk/preview'))).toEqual([])
+})
