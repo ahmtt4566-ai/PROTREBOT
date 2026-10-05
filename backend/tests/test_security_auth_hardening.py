@@ -476,6 +476,125 @@ class SecurityAuthHardeningTests(unittest.IsolatedAsyncioTestCase):
             self.request, duplicate["verification_status_token"],
         ), {"verified": False})
 
+    async def test_resend_uses_existing_durable_single_use_verification_token(self):
+        self.store.users["customer"]["security"]["email_verified"] = False
+        status = core.issue_token("customer", "CUSTOMER", SECRET, kind="EMAIL_STATUS")
+        with patch.object(auth, "gmail_configured", return_value=True), patch.object(auth, "send_auth_email") as sender:
+            result = await auth.v22_resend_verification(auth.EmailTokenRequest(token=status), self.request)
+        self.assertEqual(set(result), {"ok", "message", "retry_after"})
+        self.assertEqual(result["retry_after"], 60)
+        sender.assert_called_once()
+        arguments = sender.call_args.kwargs
+        self.assertEqual(arguments["subject"], "KaisTrade hesabını doğrula")
+        token = arguments["action_url"].split("token=", 1)[1]
+        proof = core.verify_token(token, SECRET, expected_kind="EMAIL_VERIFY")
+        self.assertEqual(proof["sub"], "customer")
+        self.assertEqual(proof["exp"] - proof["iat"], 24 * 60 * 60)
+        self.assertEqual(len(self.store.account_tokens), 1)
+        await auth.v22_verify_email(auth.EmailTokenRequest(token=token), self.request)
+        self.assertTrue(self.store.users["customer"]["security"]["email_verified"])
+        await self.expect_status(400, auth.v22_verify_email(auth.EmailTokenRequest(token=token), self.request))
+
+    async def test_resend_neutral_for_verified_inactive_and_synthetic_accounts(self):
+        results = []
+        with patch.object(auth, "gmail_configured", return_value=True), patch.object(auth, "send_auth_email") as sender:
+            for subject, updates in [
+                ("customer", {"email_verified": True}),
+                ("customer", {"email_verified": False, "active": False}),
+                ("registration-unknown", {}),
+            ]:
+                self.store.limits.clear()
+                self.store.users["customer"]["security"].update(updates)
+                token = core.issue_token(subject, "CUSTOMER", SECRET, kind="EMAIL_STATUS")
+                results.append(await auth.v22_resend_verification(auth.EmailTokenRequest(token=token), self.request))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[1], results[2])
+        sender.assert_not_called()
+        self.assertEqual(self.store.account_tokens, {})
+
+    async def test_resend_rejects_login_verify_expired_and_tampered_tokens(self):
+        with patch.object(auth, "gmail_configured", return_value=True), patch.object(auth, "send_auth_email") as sender:
+            for token in (
+                core.issue_token("customer", "CUSTOMER", SECRET),
+                core.issue_token("customer", "CUSTOMER", SECRET, kind="EMAIL_VERIFY"),
+                core.issue_token("customer", "CUSTOMER", SECRET, kind="EMAIL_STATUS", now=1),
+                "invalid-offline-token.signature",
+            ):
+                self.store.limits.clear()
+                await self.expect_status(400, auth.v22_resend_verification(auth.EmailTokenRequest(token=token), self.request))
+        sender.assert_not_called()
+
+    async def test_resend_cooldown_and_hourly_limits_cannot_be_bypassed_with_new_status_token(self):
+        self.store.users["customer"]["security"]["email_verified"] = False
+        with patch.object(auth, "gmail_configured", return_value=True), patch.object(auth, "send_auth_email") as sender:
+            for index in range(5):
+                # This SQL fixture has no clock: clear only the short-window counters.
+                self.store.limits = {key: value for key, value in self.store.limits.items()
+                                     if not key.startswith("verification-resend:")}
+                token = core.issue_token("customer", "CUSTOMER", SECRET, kind="EMAIL_STATUS")
+                await auth.v22_resend_verification(auth.EmailTokenRequest(token=token), self.request)
+                if index == 0:
+                    with self.assertRaises(HTTPException) as caught:
+                        await auth.v22_resend_verification(auth.EmailTokenRequest(token=token), self.request)
+                    self.assertEqual(caught.exception.status_code, 429)
+                    self.assertEqual(caught.exception.headers["Retry-After"], "60")
+            self.store.limits = {key: value for key, value in self.store.limits.items()
+                                 if not key.startswith("verification-resend:")}
+            token = core.issue_token("customer", "CUSTOMER", SECRET, kind="EMAIL_STATUS")
+            with self.assertRaises(HTTPException) as caught:
+                await auth.v22_resend_verification(auth.EmailTokenRequest(token=token), self.request)
+        self.assertEqual(caught.exception.status_code, 429)
+        self.assertEqual(caught.exception.headers["Retry-After"], "3600")
+        self.assertEqual(sender.call_count, 5)
+
+    async def test_resend_storage_failure_sends_nothing_and_delivery_failure_is_explicit(self):
+        self.store.users["customer"]["security"]["email_verified"] = False
+        token = core.issue_token("customer", "CUSTOMER", SECRET, kind="EMAIL_STATUS")
+        with patch.object(auth, "gmail_configured", return_value=True), patch.object(auth, "send_auth_email") as sender:
+            with patch.object(auth, "persist_v22_commercial", new=AsyncMock(return_value=False)):
+                await self.expect_status(503, auth.v22_resend_verification(auth.EmailTokenRequest(token=token), self.request))
+            sender.assert_not_called()
+            self.store.limits.clear()
+            sender.side_effect = RuntimeError("private provider details")
+            with self.assertRaises(HTTPException) as caught:
+                await auth.v22_resend_verification(auth.EmailTokenRequest(token=token), self.request)
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.headers["X-Email-Delivery-Error"], "1")
+        self.assertNotIn("private provider details", caught.exception.detail)
+
+    async def test_resend_local_limits_enforce_exact_cooldown_and_hourly_retry_after(self):
+        clock = [0.0]
+        request = make_request(self.user)
+        with patch.object(auth, "DURABLE_AUTH_REQUIRED", False), \
+             patch.object(auth, "time", SimpleNamespace(monotonic=lambda: clock[0])), \
+             patch.dict(auth.LOGIN_ATTEMPTS, {}, clear=True), \
+             patch.object(auth, "gmail_configured", return_value=True), \
+             patch.object(auth, "send_auth_email") as sender:
+            def payload():
+                return auth.EmailTokenRequest(token=core.issue_token(
+                    "registration-unknown", "CUSTOMER", SECRET, kind="EMAIL_STATUS"))
+
+            await auth.v22_resend_verification(payload(), request)
+            clock[0] = 59.999
+            await self.expect_status(429, auth.v22_resend_verification(payload(), request))
+            auth.LOGIN_ATTEMPTS.clear()
+            clock[0] = 0
+            await auth.v22_resend_verification(payload(), request)
+            clock[0] = 60
+            await auth.v22_resend_verification(payload(), request)
+            auth.LOGIN_ATTEMPTS.clear()
+            for index in range(5):
+                clock[0] = index * 61
+                await auth.v22_resend_verification(payload(), request)
+            clock[0] = 305
+            with self.assertRaises(HTTPException) as caught:
+                await auth.v22_resend_verification(payload(), request)
+            self.assertEqual(caught.exception.status_code, 429)
+            self.assertEqual(caught.exception.headers["Retry-After"], "3600")
+            clock[0] = 305 + 3600
+            await auth.v22_resend_verification(payload(), request)
+        sender.assert_not_called()
+
     async def test_forgot_unconfigured_email_is_explicit_even_for_unknown_account(self):
         with patch.object(auth, "gmail_configured", return_value=False), \
              patch.object(auth, "env_flag", return_value=False):

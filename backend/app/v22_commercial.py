@@ -8,10 +8,8 @@ remain disabled so this package cannot move real money or place real orders.
 from __future__ import annotations
 
 import asyncio
-import base64
 import copy
 import hashlib
-from html import escape
 import json
 import logging
 import os
@@ -20,18 +18,17 @@ import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from google.auth.exceptions import GoogleAuthError, RefreshError
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel, ConfigDict, Field
 from .error_monitoring import build_error_event, schedule_log_event
+from . import email_service
+from .email_service import auth_email_html, send_auth_email, VERIFY_SUBJECT, RESET_SUBJECT
 from .browser_security import (
     COOKIE_SESSION_PREFIX as BROWSER_SESSION_MARKER_PREFIX,
     browser_request,
@@ -93,6 +90,7 @@ LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 AUTH_LIMITS = {
     "login": (8, 300), "register": (5, 900), "forgot": (5, 900),
     "reset": (8, 900), "verify": (12, 300), "verify-status": (120, 60),
+    "verification-resend": (1, 60), "verification-resend-hour": (5, 3600),
 }
 AUTH_SECURITY_FIELDS = ("password", "active", "role", "email_verified", "email", "display_name", "password_changed_at", "closed_at")
 STANDARD_SESSION_SECONDS = 8 * 60 * 60
@@ -100,10 +98,6 @@ REMEMBER_SESSION_SECONDS = 30 * 24 * 60 * 60
 COMMERCIAL_STATE_KEY = "v22-commercial"
 DURABLE_AUTH_REQUIRED = str(os.getenv("PROTREBOT_DURABLE_AUTH_REQUIRED", "")).strip().lower() in {"1", "true", "yes", "on"}
 BOOTSTRAP_OWNER_EMAIL = normalize_email(os.getenv("PROTREBOT_BOOTSTRAP_OWNER_EMAIL", "ahmtt4565@gmail.com"))
-DEFAULT_GMAIL_FROM_EMAIL = "privacykais@gmail.com"
-DEFAULT_GMAIL_FROM_NAME = "ProTreBot"
-GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
-GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
 GMAIL_DELIVERY_ERRORS = (HttpError, GoogleAuthError, RefreshError, OSError, RuntimeError, ValueError)
 
 
@@ -112,29 +106,18 @@ def now_iso() -> str:
 
 
 def gmail_failure_log(exc: BaseException) -> dict[str, str]:
-    raw_message = str(exc)
-    sanitized = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email-redacted]", raw_message)
-    sanitized = re.sub(r"(?i)(password|passwd|secret|token|authorization|bearer|credential)(\s*[:=]\s*)[^\s,;]+", r"\1\2[redacted]", sanitized)
-    sanitized = re.sub(r"(?i)(https?://[^\s?]+)\?[^\s]+", r"\1?[redacted]", sanitized)
-    response = getattr(exc, "resp", None)
-    code = getattr(response, "status", None) or getattr(exc, "status_code", None)
-    reason = "gmail_api"
-    if code in {401, 403}:
-        reason = "authentication"
-    elif isinstance(exc, (TimeoutError, ConnectionError)):
-        reason = "timeout"
-    return {"type": type(exc).__name__, "code": str(code) if code is not None else "none", "reason": reason, "message": sanitized[:500]}
+    return email_service.failure_details(exc)
 
 
 def log_gmail_failure(exc: BaseException, application: Any | None = None) -> None:
     details = gmail_failure_log(exc)
-    logger.warning("Gmail API email delivery failed: reason=%s type=%s code=%s message=%s", details["reason"], details["type"], details["code"], details["message"])
+    logger.warning("Email delivery failed: reason=%s type=%s code=%s", details["reason"], details["type"], details["code"])
     if application is not None:
-        schedule_log_event(application, build_error_event(source="backend", service="gmail_oauth", kind=details["type"], code="EMAIL_DELIVERY_FAILED", severity="ERROR", message=details["message"], details={"reason": details["reason"], "provider_code": details["code"]}))
+        schedule_log_event(application, build_error_event(source="backend", service="email", kind=details["type"], code="EMAIL_DELIVERY_FAILED", severity="ERROR", message=details["message"], details={"reason": details["reason"], "provider_code": details["code"]}))
 
 
 def gmail_configured() -> bool:
-    return all(os.getenv(name, "").strip() for name in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"))
+    return email_service.configured()
 
 
 def app_base_url() -> str:
@@ -143,35 +126,6 @@ def app_base_url() -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
         raise HTTPException(503, "APP_BASE_URL güvenli bir mutlak URL olarak yapılandırılmalı")
     return value
-
-
-def auth_email_html(title: str, display_name: str, action_url: str, action_label: str, expiry: str) -> str:
-    title, display_name, action_url, action_label, expiry = (
-        escape(str(value), quote=True) for value in (title, display_name, action_url, action_label, expiry)
-    )
-    return f"""<!doctype html><html><body style=\"margin:0;background:#071116;color:#dce8ee;font-family:Arial,sans-serif\"><table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"padding:32px 12px;background:#071116\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%\" style=\"max-width:560px;background:#101d23;border:1px solid #263943;border-radius:8px\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding:30px\"><div style=\"color:#64e3a1;font-size:12px;font-weight:700;letter-spacing:2px\">PROTREBOT</div><h1 style=\"font-size:26px;line-height:1.2;margin:22px 0 12px;color:#f1f7f8\">{title}</h1><p style=\"font-size:15px;line-height:1.6;color:#a9bbc2\">Merhaba {display_name}, hesabınız için güvenli işlem başlatıldı.</p><p style=\"font-size:15px;line-height:1.6;color:#a9bbc2\">Devam etmek için aşağıdaki düğmeyi kullanın:</p><p style=\"margin:26px 0\"><a href=\"{action_url}\" style=\"display:inline-block;padding:14px 22px;background:#64e3a1;color:#082016;text-decoration:none;border-radius:4px;font-weight:700\">{action_label}</a></p><p style=\"font-size:12px;line-height:1.5;color:#8297a0\">Bu bağlantı {expiry} içinde geçerliliğini yitirir ve yalnızca bir kez kullanılabilir.</p><p style=\"font-size:12px;line-height:1.5;color:#8297a0\">Bu işlemi siz başlatmadıysanız bu e-postayı güvenle yok sayın. ProTreBot ekibi parolanızı veya API anahtarınızı istemez.</p></td></tr></table></td></tr></table></body></html>"""
-
-
-def send_auth_email(*, to_email: str, display_name: str, subject: str, title: str, action_url: str, action_label: str) -> None:
-    missing = [name for name in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN") if not os.getenv(name, "").strip()]
-    if missing:
-        raise RuntimeError(f"Gmail API yapılandırması eksik: {', '.join(missing)}")
-    credentials = Credentials(
-        token=None,
-        refresh_token=os.environ["GMAIL_REFRESH_TOKEN"].strip(),
-        token_uri=GMAIL_TOKEN_URI,
-        client_id=os.environ["GMAIL_CLIENT_ID"].strip(),
-        client_secret=os.environ["GMAIL_CLIENT_SECRET"].strip(),
-        scopes=[GMAIL_SEND_SCOPE],
-    )
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = f"{os.getenv('GMAIL_FROM_NAME', DEFAULT_GMAIL_FROM_NAME).strip()} <{os.getenv('GMAIL_FROM_EMAIL', DEFAULT_GMAIL_FROM_EMAIL).strip()}>"
-    message["To"] = to_email
-    message.set_content(f"{title}\n\n{action_url}")
-    message.add_alternative(auth_email_html(title, display_name, action_url, action_label, "24 saat"), subtype="html")
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    build("gmail", "v1", credentials=credentials, cache_discovery=False).users().messages().send(userId="me", body={"raw": raw}).execute()
 
 
 def issue_one_time_token(state: dict[str, Any], user: dict[str, Any], secret: bytes, *, kind: str) -> str:
@@ -1441,9 +1395,8 @@ async def register_password_user(payload: RegisterRequest, request: Request):
     if "@" not in email:
         raise HTTPException(422, "Geçerli bir e-posta yazın")
     expose_dev_token = env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False)
-    logger.warning("Gmail config presence: client_id=%s client_secret=%s refresh_token=%s", bool(os.getenv("GMAIL_CLIENT_ID", "").strip()), bool(os.getenv("GMAIL_CLIENT_SECRET", "").strip()), bool(os.getenv("GMAIL_REFRESH_TOKEN", "").strip()))
     if not gmail_configured() and not expose_dev_token:
-        raise HTTPException(503, "E-posta servisi yapılandırılmamış; kayıt şu anda tamamlanamıyor")
+        raise HTTPException(503, email_service.unavailable_message(), headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"})
     async with rt["lock"]:
         await apply_erasure_tombstones(request.app)
         state = rt["state"]
@@ -1465,13 +1418,12 @@ async def register_password_user(payload: RegisterRequest, request: Request):
                 try:
                     await asyncio.to_thread(
                         send_auth_email, to_email=email, display_name=synthetic["display_name"],
-                        subject="Your ProTreBot registration request",
-                        title="Your ProTreBot registration request",
-                        action_url=app_base_url(), action_label="SIGN IN",
+                        subject=VERIFY_SUBJECT, title="Hesabını doğrula",
+                        action_url=app_base_url(), action_label="Hesabına git",
                     )
                 except GMAIL_DELIVERY_ERRORS as exc:
                     log_gmail_failure(exc, request.app)
-                    raise HTTPException(503, "Doğrulama e-postası gönderilemedi; SMTP ayarlarını kontrol edin") from exc
+                    raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.", headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
             return response
         user_id = uuid.uuid4().hex
         user = {
@@ -1500,7 +1452,7 @@ async def register_password_user(payload: RegisterRequest, request: Request):
         raise HTTPException(503, "Kalıcı hesap veritabanı hazır değil; kayıt güvenli şekilde tamamlanamadı")
     if gmail_configured():
         try:
-            await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Verify your ProTreBot account", title="Verify your ProTreBot account", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="VERIFY EMAIL")
+            await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject=VERIFY_SUBJECT, title="Hesabını doğrula", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="E-posta adresimi doğrula")
         except GMAIL_DELIVERY_ERRORS as exc:
             log_gmail_failure(exc, request.app)
             async with rt["lock"]:
@@ -1510,7 +1462,7 @@ async def register_password_user(payload: RegisterRequest, request: Request):
                 rt["state"]["auth_tokens"] = [item for item in rt["state"].get("auth_tokens", []) if item.get("user_id") != user["id"]]
                 save_state(rt["state"])
             await persist_v22_commercial(request.app)
-            raise HTTPException(503, "Doğrulama e-postası gönderilemedi; SMTP ayarlarını kontrol edin") from exc
+            raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.", headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
     response: dict[str, Any] = {"user": public_user(user), "message": "E-posta kayıt için uygunsa doğrulama bağlantısı gönderildi.", "email_verification_required": True, "verification_status_token": verification_status_token}
     if expose_dev_token:
         response["development_verification_token"] = verification_token
@@ -1539,6 +1491,52 @@ async def v22_verify_email(payload: EmailTokenRequest, request: Request):
     if DURABLE_AUTH_REQUIRED and not persisted:
         raise HTTPException(503, "E-posta doğrulaması kalıcı depoya yazılamadı")
     return {"ok": True, "message": "E-posta doğrulandı. Artık giriş yapabilirsiniz."}
+
+
+@router.post("/auth/resend-verification")
+async def v22_resend_verification(payload: EmailTokenRequest, request: Request):
+    rt = runtime(request)
+    account = token_limit_account(payload.token, rt["secret"], "EMAIL_STATUS")
+    await enforce_auth_limit(request, "verification-resend", account)
+    await enforce_auth_limit(request, "verification-resend-hour", account)
+    try:
+        proof = verify_token(payload.token, rt["secret"], expected_kind="EMAIL_STATUS")
+    except ValueError:
+        raise HTTPException(400, "Doğrulama isteği geçersiz veya süresi dolmuş.") from None
+    if not gmail_configured():
+        raise HTTPException(503, email_service.unavailable_message(), headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"})
+    user = next((row for row in rt["state"]["users"] if row.get("id") == proof["sub"]), None)
+    if user is None and getattr(request.app.state, "db_pool", None) is not None:
+        from .google_oauth import hydrate_user
+        user = await hydrate_user(request, user_id=proof["sub"])
+    result = {"ok": True, "message": "E-posta kayıt için uygunsa doğrulama bağlantısı gönderildi.", "retry_after": 60}
+    if user is None:
+        return result
+    try:
+        await refresh_auth_security(request, user)
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        return result
+    if not user.get("active") or user.get("email_verified"):
+        return result
+    async with rt["lock"]:
+        token = issue_one_time_token(rt["state"], user, rt["secret"], kind="EMAIL_VERIFY")
+        from .account_store import save_action_token
+        await save_action_token(request, token, user, "EMAIL_VERIFY")
+        save_state(rt["state"])
+    persisted = await persist_v22_commercial(request.app)
+    if DURABLE_AUTH_REQUIRED and not persisted:
+        raise HTTPException(503, "Kalıcı hesap veritabanı hazır değil.")
+    try:
+        await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"],
+                                subject=VERIFY_SUBJECT, title="Hesabını doğrula",
+                                action_url=f"{app_base_url()}/verify-email?token={token}", action_label="E-posta adresimi doğrula")
+    except GMAIL_DELIVERY_ERRORS as exc:
+        log_gmail_failure(exc, request.app)
+        raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.",
+                            headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
+    return result
 
 
 @router.get("/auth/verification-status")
@@ -1592,7 +1590,7 @@ async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
             raise HTTPException(503, "Kalıcı hesap veritabanı hazır değil")
         if gmail_configured():
             try:
-                await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
+                await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject=RESET_SUBJECT, title="Parolanı yenile", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="Parolamı yenile")
             except GMAIL_DELIVERY_ERRORS as exc:
                 log_gmail_failure(exc, request.app)
                 raise HTTPException(503, "Parola yenileme e-postası gönderilemedi") from exc
@@ -2206,7 +2204,7 @@ async def v22_admin_password_reset(user_id: str, request: Request):
     if (DURABLE_AUTH_REQUIRED or getattr(request.app.state, "db_pool", None) is not None) and not persisted:
         raise HTTPException(503, "Parola yenileme isteği kalıcı depoya yazılamadı")
     try:
-        await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
+        await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject=RESET_SUBJECT, title="Parolanı yenile", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="Parolamı yenile")
     except GMAIL_DELIVERY_ERRORS:
         raise HTTPException(503, "Parola yenileme e-postası gönderilemedi") from None
     return {"ok": True, "message": "Parola yenileme bağlantısı gönderildi.", "demo_only": True}

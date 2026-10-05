@@ -2,6 +2,47 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## KaisTrade transactional email / Render
+
+Mail transport is centralized in `backend/app/email_service.py` using the
+already pinned `httpx` dependency; no Resend SDK or SMTP password is needed.
+The following backend-only variables are secret-store settings, never `VITE_`
+variables. `.env.example` lists their names with empty values:
+
+| Variable | Purpose |
+|---|---|
+| `EMAIL_PROVIDER` | Select `resend` explicitly; absent/blank preserves the legacy transport |
+| `RESEND_API_KEY` | Required only with the Resend provider |
+| `EMAIL_FROM` | Verified Resend sender address; displayed as KaisTrade |
+| `EMAIL_REPLY_TO` | Optional reply address for either provider |
+
+For compatibility, `EMAIL_PROVIDER=smtp` names the existing **Gmail OAuth HTTP
+API** path, not a new SMTP socket transport. Existing `GMAIL_*` credentials
+remain valid on this default path. With `resend`, missing/invalid configuration
+or an API failure is explicit; there is no fallback to Gmail.
+
+Render rollout: deploy the code first without setting `EMAIL_PROVIDER` to
+preserve current delivery. Verify the already configured Resend key and sender
+in Render's secret store without copying their values into logs or source.
+Then set `EMAIL_PROVIDER=resend`, confirm `APP_BASE_URL` is the production
+KaisTrade origin, and redeploy/restart. The verified domain's `eu-west-1`
+region does not change the HTTPS API endpoint. Only after deployment, manually
+register a controlled account, inspect both HTML and plain text, follow its
+verification link, and check Spam plus the Resend dashboard. API acceptance is
+not proof of inbox delivery.
+
+Verification resend requires the existing signed registration-status token:
+60-second backend cooldown between resend attempts and five attempts per hour,
+with shared IP/account limits. The registration UI also waits 60 seconds after
+the initial request. Initial delivery failure retains the existing registration
+rollback; its retry submits the same validated registration form.
+
+Bounce/complaint webhooks and admin delivery history are intentionally not
+enabled in this change. Durable event storage, replay/idempotency protection,
+raw-body signature verification, and recipient mapping need a separate change;
+no unsigned webhook exists and `RESEND_WEBHOOK_SECRET` is not currently used.
+Provider tests mock HTTPS/Gmail and send no real messages.
+
 ## Ortam dosyaları ve secret yapılandırması
 
 Kök `.env` yalnızca yerel dosyadır ve Git tarafından ignore edilir; gerçek
@@ -27,7 +68,7 @@ Taşınan yerel bağlantının gerçek bir servis üzerinde geçerliliği doğru
 | `PROTREBOT_DURABLE_AUTH_REQUIRED`, `PROTREBOT_WEB_REQUIRE_AUTH` | Backend sunucu | Üretimde `true`; kalıcı oturum anahtarı yoksa başlangıç durur |
 | `APP_BASE_URL`, `PROTREBOT_CORS_ORIGINS` | Backend sunucu | Gerçek frontend URL/origin listesi |
 | `ANTHROPIC_API_KEY` | Backend secret store | LLM asistanı kullanılacaksa zorunlu |
-| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Backend secret store | E-posta doğrulama/sıfırlama gönderimi için zorunlu |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Backend secret store | Varsayılan/eski Gmail posta yolu için zorunlu; Resend yolunda kullanılmaz |
 | `GMAIL_FROM_EMAIL`, `GMAIL_FROM_NAME` | Backend sunucu | Gönderici yapılandırması |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MASTER_MODE_MONTHLY` | Backend secret store / sunucu | Stripe etkinse zorunlu; plan kimliği sunucuda tutulur |
 | `REDIS_URL`, `PROTREBOT_DATA_DIR`, `PROTREBOT_BOOTSTRAP_OWNER_EMAIL` | Backend sunucu | İsteğe bağlı mevcut altyapı ayarları |
@@ -211,7 +252,8 @@ adrese gönderilen süreli, tek kullanımlık bağlantı `/profile?email_token=.
 üzerinden açık onay gerektirir. Parola değişikliği mevcut parolayı; Google-only
 hesapta mevcut doğrulanmış adrese gönderilen kodu gerektirir. Etkin 2FA için
 Authenticator veya tek kullanımlık kurtarma kodu da gerekir. Mevcut Gmail
-OAuth sunucu yapılandırması kullanılmaya devam eder; tarayıcıya posta
+OAuth sunucu yapılandırması varsayılan olarak korunur; `EMAIL_PROVIDER=resend`
+ile aynı işlemler merkezi Resend posta yolunu kullanır. Tarayıcıya posta
 anahtarı verilmez. Sağlayıcı yapılandırılmamışsa posta gerektiren işlemler
 kullanılamaz ve arayüz sebebi gösterir; başarılı gönderim taklit edilmez.
 

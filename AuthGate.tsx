@@ -71,7 +71,7 @@ function detail(payload:unknown):string {
 }
 
 class AuthRequestError extends Error {
-  constructor(message:string, readonly status:number) { super(message) }
+  constructor(message:string, readonly status:number, readonly retryAfter = 0, readonly emailDelivery = false) { super(message) }
 }
 
 function TermsConsent({accepted,error,onChange}:{accepted:boolean;error:string;onChange:(value:boolean)=>void}) {
@@ -84,9 +84,12 @@ async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
   const response = await fetch(`${API_BASE}/v22${path}`, {...options, headers})
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
+    const retryHeader = Number(response.headers.get('Retry-After'))
+    const retryAfter = Number.isFinite(retryHeader) && retryHeader > 0 ? Math.min(Math.ceil(retryHeader),86400) : 0
+    if (response.headers.get('X-Email-Delivery-Error') === '1') throw new AuthRequestError(detail(payload), response.status, retryAfter, true)
     if (response.status === 409) throw new AuthRequestError('Bu e-posta adresiyle zaten bir hesap bulunuyor.', response.status)
     if (response.status >= 500) throw new AuthRequestError('Sunucuda geçici bir sorun oluştu. Lütfen biraz sonra tekrar deneyin.', response.status)
-    throw new AuthRequestError(detail(payload), response.status)
+    throw new AuthRequestError(detail(payload), response.status, retryAfter)
   }
   return payload as T
 }
@@ -156,6 +159,9 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [fieldErrors,setFieldErrors] = useState<Record<string,string>>({})
   const [termsError,setTermsError] = useState('')
   const [verificationNotice,setVerificationNotice] = useState(false)
+  const [verificationMailFailed,setVerificationMailFailed] = useState(false)
+  const [resendSeconds,setResendSeconds] = useState(0)
+  const registrationFormRef = useRef<HTMLFormElement>(null)
   const autoVerificationStarted = useRef(false)
   const [autoVerifying,setAutoVerifying] = useState(false)
   const sessionRoleRef = useRef<string|null>(null)
@@ -166,6 +172,26 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const memberMenuRef = useRef<HTMLDivElement>(null)
   const [memberMenuPosition,setMemberMenuPosition] = useState({top:0,left:12})
   const [profileHeaderSlot,setProfileHeaderSlot] = useState<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (resendSeconds <= 0) return
+    const timer = window.setInterval(() => setResendSeconds(seconds => Math.max(0,seconds - 1)),1000)
+    return () => window.clearInterval(timer)
+  },[resendSeconds])
+
+  const resendVerification = async () => {
+    if (busy || resendSeconds > 0 || !verificationStatusToken) return
+    setBusy(true); setSubmitFailed(false); setResendSeconds(60)
+    try {
+      const result = await request<{message:string;retry_after:number}>('/auth/resend-verification',{method:'POST',body:JSON.stringify({token:verificationStatusToken})})
+      if (!result || typeof result.message !== 'string' || !Number.isFinite(result.retry_after) || result.retry_after < 0) throw new AuthRequestError('Doğrulama mailinin sonucu doğrulanamadı. Lütfen tekrar dene.',502)
+      setMessage(result.message); setVerificationNotice(true); setVerificationMailFailed(false); setResendSeconds(Math.max(60,result.retry_after))
+    } catch (error) {
+      setSubmitFailed(true); setVerificationNotice(false); setVerificationMailFailed(true)
+      setMessage(error instanceof Error ? error.message : 'Doğrulama maili gönderilemedi.')
+      if (error instanceof AuthRequestError && error.retryAfter) setResendSeconds(Math.max(60,error.retryAfter))
+    } finally { setBusy(false) }
+  }
 
   useEffect(() => {
     if (!LOCAL_OWNER_SETUP_PAGE) {
@@ -417,7 +443,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
       } else if (mode === 'register') {
         const result = await request<{verification_status_token?:string;message:string}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
-        setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setVerificationNotice(true); setMode('verify'); setMessage(result.message)
+        setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setVerificationNotice(true); setVerificationMailFailed(false); setResendSeconds(60); setMode('verify'); setMessage(result.message)
         setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
       } else if (mode === 'forgot') {
         const result = await request<{development_reset_token?:string;message:string}>('/auth/forgot-password',{method:'POST',body:JSON.stringify({email})})
@@ -430,7 +456,14 @@ export default function AuthGate({children}:{children:ReactNode}) {
         await request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:verificationInput})})
         setVerificationNotice(false); setMessage('E-posta doğrulandı. Şimdi giriş yapabilirsiniz.'); setMode('login')
       }
-    } catch (error) { setSubmitFailed(true); setMessage(error instanceof Error ? error.message : 'İşlem başarısız.') }
+    } catch (error) {
+      setSubmitFailed(true); setMessage(error instanceof Error ? error.message : 'İşlem başarısız.')
+      if (mode === 'register' && error instanceof AuthRequestError && error.emailDelivery) {
+        setVerificationMailFailed(true); setResendSeconds(Math.max(60,error.retryAfter))
+      } else if (verificationMailFailed && error instanceof AuthRequestError && error.retryAfter) {
+        setResendSeconds(error.retryAfter)
+      }
+    }
     finally { setBusy(false) }
   }
 
@@ -479,7 +512,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         <div className="authLoginBrand"><img src="/kaistrade-logo.png" alt="KaiStrade"/></div>
         <div className="authCardHead"><div className="authMark">{mode === 'verify' ? <MailCheck/> : mode === 'mfa' ? <ShieldCheck/> : <UserRound/>}</div><div><span>{mode === 'bootstrap' ? 'YEREL YÖNETİCİ' : mode === 'register' || isGoogleConsent ? 'HESAP OLUŞTUR' : 'ÜYE GİRİŞİ'}</span><h2>{mode === 'mfa' ? 'İki aşamalı doğrulama' : mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'bootstrap' ? 'İlk yönetici hesabı' : mode === 'register' || isGoogleConsent ? 'Hesabını oluştur' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı kontrol edin'}</h2></div></div>
         <p className="authCardLead">{mode === 'mfa' ? 'Authenticator uygulamasındaki kodu veya tek kullanımlık kurtarma kodunuzu girin.' : mode === 'login' ? 'Çalışma alanınıza güvenli şekilde erişin.' : mode === 'bootstrap' ? 'Yerel yönetici hesabınız için güçlü bir parola belirleyin.' : mode === 'register' || isGoogleConsent ? 'KAISTrade hesabını oluştur ve piyasaları tek bir yerden takip et.' : mode === 'forgot' ? 'Hesabınıza yeniden erişmek için güvenli bir bağlantı gönderelim.' : mode === 'reset' ? 'Yeni ve güçlü bir parola belirleyin.' : 'Gelen kutunuzdaki bağlantıyla hesabınızı güvenle etkinleştirin.'}</p>
-        <form onSubmit={submit} noValidate={mode === 'login'} aria-busy={busy}>
+        <form ref={registrationFormRef} onSubmit={submit} noValidate={mode === 'login'} aria-busy={busy}>
           {mode === 'login' && <><label className={fieldErrors.email ? 'authFieldError' : ''}>E-posta<div className="authInputWithIcon"><Mail aria-hidden="true"/><input type="email" required autoComplete="email" aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? 'login-email-error' : undefined} value={login.email} onChange={event => {setLogin({...login,email:event.target.value});setFieldErrors(current => ({...current,email:''}))}} placeholder="siz@ornek.com"/></div>{fieldErrors.email && <em id="login-email-error" role="alert">{fieldErrors.email}</em>}</label><label className={fieldErrors.password ? 'authFieldError' : ''}>Parola<div className="authPassword authInputWithIcon"><LockKeyhole aria-hidden="true"/><input data-private="true" required type={showPassword ? 'text' : 'password'} autoComplete="current-password" aria-invalid={Boolean(fieldErrors.password)} aria-describedby={fieldErrors.password ? 'login-password-error' : undefined} placeholder="Parolanız" value={login.password} onChange={event => {setLogin({...login,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Parolayı gizle' : 'Parolayı göster'} aria-pressed={showPassword}>{showPassword ? <EyeOff/> : <Eye/>}</button></div>{fieldErrors.password && <em id="login-password-error" role="alert">{fieldErrors.password}</em>}</label><label className="authCheck"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Bu cihazda oturumu hatırla</span></label></>}
           {isRegistration && <>
             <label>Ad soyad<input required autoComplete="name" value={register.display_name} onChange={event => setRegister({...register,display_name:event.target.value})} placeholder="Ada Yılmaz"/></label>
@@ -497,7 +530,13 @@ export default function AuthGate({children}:{children:ReactNode}) {
           <button className="authSubmit" disabled={busy} aria-busy={busy}>{busy ? 'İŞLENİYOR…' : mode === 'mfa' ? 'DOĞRULA VE GİRİŞ YAP' : mode === 'login' ? 'GÜVENLİ GİRİŞ' : mode === 'bootstrap' ? 'YÖNETİCİ HESABINI OLUŞTUR' : mode === 'register' || isGoogleConsent ? 'HESAP OLUŞTUR' : mode === 'forgot' ? 'YENİLEME BAĞLANTISI GÖNDER' : mode === 'reset' ? 'PAROLAYI GÜNCELLE' : 'E-POSTAYI DOĞRULA'}{busy ? <LoaderCircle className="spin"/> : <ArrowRight/>}</button>
         </form>
         {mode === 'login' && <div className="authSocial"><span>veya</span><button type="button" className="authGoogle" aria-label="Google ile devam et" disabled={busy} aria-busy={busy} onClick={() => void startGoogle()}><span className="authGoogleMark" aria-hidden="true">G</span>Google ile devam et</button></div>}
-        {mode === 'verify' && verificationNotice && <div className="authVerificationPanel"><b>Doğrulama bağlantısını e-posta adresinize gönderdik.</b><span>E-postayı göremiyor musunuz? Spam / Gereksiz / Tanıtımlar klasörünü de kontrol edin.</span><small>Doğrulama bekleniyor... Bu sayfa başka cihazdan yapılan doğrulamayı otomatik algılar.</small></div>}
+        {(mode === 'verify' || (mode === 'register' && verificationMailFailed)) && <div className="authVerificationPanel">
+          <b>{verificationNotice && mode === 'verify' ? 'E-posta kayıt için uygunsa doğrulama bağlantısı gönderildi.' : verificationMailFailed ? 'Doğrulama maili gönderilemedi.' : 'E-posta doğrulaması bekleniyor.'}</b>
+          <span>Spam klasörünü kontrol et. Gereksiz / Tanıtımlar klasörüne de bakabilirsin.</span>
+          {mode === 'verify' && <small>Doğrulama bekleniyor... Bu sayfa başka cihazdan yapılan doğrulamayı otomatik algılar.</small>}
+          {(mode === 'register' || verificationStatusToken) && <button type="button" className="authSubmit" disabled={busy || resendSeconds > 0} onClick={() => mode === 'register' ? registrationFormRef.current?.requestSubmit() : void resendVerification()}>Doğrulama mailini tekrar gönder{resendSeconds > 0 ? ` (${resendSeconds} sn)` : ''}</button>}
+          {mode === 'verify' && <button type="button" className="authGoogle" disabled={busy} onClick={() => void startGoogle()}>Google ile devam et</button>}
+        </div>}
         {message && message !== 'Oturum doğrulanıyor…' && <p className={`authMessage${submitFailed ? ' authMessageError' : ''}`} role={submitFailed ? 'alert' : 'status'}>{message}</p>}
         <div className={`authLinks${mode === 'register' ? ' authRegisterLinks' : ''}`}>{mode === 'login' && <><button onClick={() => setMode('forgot')}>Parolamı unuttum</button><button onClick={() => setMode('register')}>Yeni hesap oluştur</button></>}{mode === 'register' ? <><span>Zaten hesabın var mı?</span><button type="button" onClick={() => setMode('login')}>Giriş yap</button></> : mode !== 'login' && <button onClick={() => setMode('login')}>Giriş ekranına dön</button>}</div>
         {mode === 'login' && LOCAL_OWNER_SETUP_PAGE && ownerSetupAvailable && <div className="authLinks"><button type="button" onClick={() => {setRegister(current => ({...current,email:login.email,password:'',confirm_password:''}));setMessage('');setFieldErrors({});setTermsError('');setMode('bootstrap')}}><ShieldCheck aria-hidden="true"/> İlk yönetici kurulumu</button></div>}

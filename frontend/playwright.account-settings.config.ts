@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export default defineConfig({
   testDir: resolve(root, 'frontend', 'tests'),
-  testMatch: 'account-settings.spec.ts',
+  testMatch: ['account-settings.spec.ts', 'email-verification.spec.ts'],
   outputDir: process.env.ACCOUNT_TEST_RESULTS ?? resolve(tmpdir(), `protrebot-account-${randomUUID()}`),
   workers: 1, reporter: 'line',
   use: {baseURL: 'http://127.0.0.1:4176', trace: 'retain-on-failure'},

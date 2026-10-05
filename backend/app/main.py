@@ -870,7 +870,16 @@ async def health_check_redis(application: FastAPI) -> dict:
 
 
 async def health_check_gmail(application: FastAPI) -> dict:
+    from . import email_service
     started = time.perf_counter()
+    try:
+        selected = email_service.provider()
+    except email_service.EmailDeliveryError:
+        return health_item("Email", "ERROR", "Email provider configuration is invalid.", started)
+    if selected == "resend":
+        if not gmail_configured():
+            return health_item("Email / Resend", "NOT CONFIGURED", "Required email configuration is incomplete.", started)
+        return health_item("Email / Resend", "CONFIGURED", "Configuration present; delivery and inbox receipt are not tested by health checks.", started)
     if not gmail_configured():
         return health_item("Email / Gmail API", "NOT CONFIGURED", "Gmail OAuth configuration is incomplete.", started)
     try:
@@ -888,7 +897,7 @@ async def health_check_gmail(application: FastAPI) -> dict:
         schedule_log_event(application, build_error_event(source="backend", service="gmail_oauth", kind="GmailOAuthError", code="OAUTH_TIMEOUT", severity="ERROR", message="Gmail OAuth refresh timed out."))
         return health_item("Email / Gmail API", "WARNING", "OAuth refresh timed out.", started)
     except Exception as exc:
-        schedule_log_event(application, build_error_event(source="backend", service="gmail_oauth", kind=type(exc).__name__, code="OAUTH_REFRESH_FAILED", severity="ERROR", message=str(exc)))
+        schedule_log_event(application, build_error_event(source="backend", service="gmail_oauth", kind="EmailDeliveryError", code="OAUTH_REFRESH_FAILED", severity="ERROR", message=email_service.failure_details(exc)["message"]))
         return health_item("Email / Gmail API", "ERROR", "OAuth connection unavailable.", started)
 
 
@@ -1204,12 +1213,13 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Accept", "Authorization", "Content-Type", "Origin", "X-Requested-With", "X-Protrebot-Owner", "X-ProTreBot-Session"],
+    expose_headers=["Retry-After", "X-Email-Delivery-Error"],
 )
 
 MEMBER_PUBLIC_PATHS = frozenset({
     "/api/health", "/api/health/database", "/api/web/access/check", "/api/web/access/logout", "/api/client-errors", "/api/v22/public", "/api/v22/bootstrap",
     "/api/v22/auth/login", "/api/v22/auth/2fa/login", "/api/v22/auth/register", "/api/v22/auth/verify-email",
-    "/api/v22/auth/verification-status", "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
+    "/api/v22/auth/verification-status", "/api/v22/auth/resend-verification", "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
     "/api/v22/auth/google/start", "/api/v22/auth/google/callback",
     "/api/v22/auth/google/pending", "/api/v22/auth/google/complete",
 })

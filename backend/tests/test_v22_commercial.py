@@ -685,7 +685,7 @@ class V22CommercialTests(unittest.TestCase):
         send_email.assert_not_called()
 
     def test_gmail_delivery_requires_oauth_configuration_without_sending(self):
-        with patch.dict(os.environ, {}, clear=True), patch("app.v22_commercial.build") as gmail_build:
+        with patch.dict(os.environ, {}, clear=True), patch("app.email_service.build") as gmail_build:
             with self.assertRaisesRegex(RuntimeError, "Gmail API yapılandırması eksik"):
                 send_auth_email(
                     to_email="user@example.com", display_name="Test User", subject="Verify",
@@ -719,7 +719,7 @@ class V22CommercialTests(unittest.TestCase):
             "GMAIL_FROM_EMAIL": "privacykais@gmail.com",
             "GMAIL_FROM_NAME": "ProTreBot",
         }
-        with patch.dict(os.environ, env, clear=True), patch("app.v22_commercial.build", return_value=Gmail()) as gmail_build:
+        with patch.dict(os.environ, env, clear=True), patch("app.email_service.build", return_value=Gmail()) as gmail_build:
             send_auth_email(
                 to_email="user@example.com", display_name="Test User", subject="Verify",
                 title="Verify", action_url="https://example.com/verify?token=local", action_label="VERIFY",
@@ -728,7 +728,7 @@ class V22CommercialTests(unittest.TestCase):
         self.assertEqual(sent["user_id"], "me")
         decoded = base64.urlsafe_b64decode(sent["body"]["raw"] + "=" * (-len(sent["body"]["raw"]) % 4))
         parsed = email.message_from_bytes(decoded)
-        self.assertEqual(parsed["From"], "ProTreBot <privacykais@gmail.com>")
+        self.assertEqual(parsed["From"], "KaisTrade <privacykais@gmail.com>")
         part_types = [part.get_content_type() for part in parsed.walk()]
         self.assertIn("text/plain", part_types)
         self.assertIn("text/html", part_types)

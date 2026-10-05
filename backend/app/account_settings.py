@@ -261,14 +261,15 @@ def new_challenge(doc, user, kind, *, seconds=600, **extra):
     return token, row
 
 
-async def delivery(request, user, *, email=None, title, action_url, label):
+async def delivery(request, user, *, email=None, title, action_url, label, expiry="24 saat"):
     if not auth.gmail_configured():
         raise HTTPException(503, "E-posta servisi kullanılamıyor")
     try:
         await asyncio.to_thread(auth.send_auth_email, to_email=email or user["email"],
                                 display_name=user.get("display_name", ""), subject=title, title=title,
-                                action_url=action_url, action_label=label)
-    except Exception:
+                                action_url=action_url, action_label=label, expiry=expiry)
+    except auth.GMAIL_DELIVERY_ERRORS as exc:
+        auth.log_gmail_failure(exc, request.app)
         # Provider exception messages may contain recipients, OTPs or URLs.
         raise HTTPException(503, "E-posta gönderilemedi") from None
 
@@ -432,8 +433,8 @@ async def reauth_email(request: Request):
     async with store.edit(request, user["id"]) as doc:
         challenge, row = new_challenge(doc, user, "reauth")
         row["code_hash"] = digest(challenge + ":" + code)
-        await delivery(request, user, title="ProTreBot hesap doğrulaması", action_url=auth.app_base_url() + "/profile",
-                       label="Doğrulama kodu: " + code)
+        await delivery(request, user, title="KaisTrade hesap doğrulaması", action_url=auth.app_base_url() + "/profile",
+                       label="Doğrulama kodu: " + code, expiry="10 dakika")
     return {"challenge_id": challenge, "expires_at": iso(row["expires"])}
 
 
@@ -447,8 +448,8 @@ async def request_new_email(request, user, email):
     async with store.edit(request, user["id"]) as doc:
         token, row = new_challenge(doc, user, "email-change", seconds=1800, new_email=email)
         doc["pending_email"] = {"email": email, "expires": row["expires"], "token_hash": digest(token)}
-        await delivery(request, user, email=email, title="ProTreBot yeni e-posta doğrulaması",
-                       action_url=auth.app_base_url() + "/profile?email_token=" + quote(token), label="E-POSTAYI ONAYLA")
+        await delivery(request, user, email=email, title="KaisTrade yeni e-posta doğrulaması",
+                       action_url=auth.app_base_url() + "/profile?email_token=" + quote(token), label="E-posta adresimi onayla", expiry="30 dakika")
         activity(doc, "EMAIL_CHANGE_REQUESTED", "E-posta değişikliği istendi")
         pending = copy.deepcopy(doc["pending_email"])
     return pending_response(pending)
@@ -520,7 +521,7 @@ async def email_confirm(payload: Token, request: Request, response: Response):
     await persist_projection(request)
     auth.clear_rotated_session_cookie(request, response, user["id"])
     try:
-        await delivery(request, user, email=old_email, title="ProTreBot e-posta adresiniz değiştirildi",
+        await delivery(request, user, email=old_email, title="KaisTrade e-posta adresin değiştirildi",
                        action_url=auth.app_base_url() + "/login", label="HESABINIZI KONTROL EDİN")
     except HTTPException:
         # Confirmation is committed. Never undo it because notification failed.
@@ -537,8 +538,8 @@ async def verification_resend(request: Request):
     token = auth.issue_one_time_token(auth.runtime(request)["state"], user, auth.runtime(request)["secret"], kind="EMAIL_VERIFY")
     await store.save_action_token(request, token, user, "EMAIL_VERIFY")
     await persist_projection(request)
-    await delivery(request, user, title="Verify your ProTreBot account",
-                   action_url=auth.app_base_url() + "/verify-email?token=" + quote(token), label="VERIFY EMAIL")
+    await delivery(request, user, title=auth.VERIFY_SUBJECT,
+                   action_url=auth.app_base_url() + "/verify-email?token=" + quote(token), label="E-posta adresimi doğrula")
     return {"ok": True}
 
 
@@ -803,6 +804,6 @@ async def admin_password_reset(user_id: str, request: Request):
     token = auth.issue_one_time_token(auth.runtime(request)["state"], user, auth.runtime(request)["secret"], kind="PASSWORD_RESET")
     await store.save_action_token(request, token, user, "PASSWORD_RESET")
     await persist_projection(request)
-    await delivery(request, user, title="Reset your ProTreBot password",
-                   action_url=auth.app_base_url() + "/reset-password?token=" + quote(token), label="RESET PASSWORD")
+    await delivery(request, user, title=auth.RESET_SUBJECT,
+                   action_url=auth.app_base_url() + "/reset-password?token=" + quote(token), label="Parolamı yenile")
     return {"ok": True}
