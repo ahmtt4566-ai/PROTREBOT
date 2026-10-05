@@ -2,6 +2,16 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Site favicon
+
+Both Vite entrypoints reference shared, same-origin site icons in
+`frontend/public`: a multi-size `favicon.ico`, a 96px PNG for search/browser
+surfaces, and a 180px Apple touch icon. These use the existing KaisTrade logo's
+round emblem, without changing the in-app wordmark. Keep these public URLs
+stable and crawlable. Google Search updates its icon after recrawling the home
+page; deployment does not guarantee an immediate search-result change.
+Regression checks: `node --test tools/site-icons.test.mjs`.
+
 ## KaisTrade transactional email / Render
 
 Mail transport is centralized in `backend/app/email_service.py` using the
