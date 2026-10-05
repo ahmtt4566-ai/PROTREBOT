@@ -183,6 +183,16 @@ genişliğe sığar. Diğer çalışma ekranlarındaki logo boyutu değişmez.
 
 ## Master Trade / Canlı İşlem arayüzü
 
+Masaüstü Analiz restorasyonu, varsayılanı kapalı `masterLayoutV2` sunum bayrağı
+ile denenebilir: `/master-trade?masterLayoutV2=1` (en az 1200 px).
+Bayrak yokken veya dar ekranda mevcut görünüm korunur. Sekme geçişleri bayrağı
+korur; karar/skor hesapları, API çağrıları ve işlem güvenlik akışları değişmez.
+Sağ karar paneli viewport'a göre tek dikey scroll kullanır. Auto Trade kısayolu
+yalnız Canlı İşlem sekmesine geçip mevcut Auto Trade bölümünü odaklar;
+otomasyonu açmaz, onay/2FA/ARM kapılarını atlamaz ve istek göndermez.
+Analiz ekranı mevcut LIVE snapshot'ını gösterir; Demo durumu varsayılmaz veya
+ek istekle sorgulanmaz. Durum bilinmiyorsa `—` gösterilir.
+
 `/master-trade?tab=canli` koyu/yeşil temada kompakt kartlar, yatay stepper,
 responsive metrik kutuları ve masaüstünde yan yana manuel emir/özet görünümü kullanır.
 Eksik metrikler skeleton ile, sinyal fiyatları yalnızca gösterimde iki ondalıkla sunulur;

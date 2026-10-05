@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefCallback } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefCallback } from 'react'
 import { Activity, BarChart3, Cable, Check, ChevronDown, Clock3, Crosshair, Gauge, History, ListChecks, LockKeyhole, ShieldX, UnlockKeyhole, Wallet, X, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
-import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
+import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradePresentation, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
 import { PremiumWorkspace, useMemberAccess } from './premium-access'
 import {useKaisWorkspaceReaction} from './useKaisPageReactions'
 import { fetchWithTimeout } from './master-trade-request'
+import { analysisPrice, autoTradePresentation, masterLayoutV2Enabled, MASTER_LAYOUT_DESKTOP_WIDTH } from './master-trade-presentation'
+import './master-trade-analysis-v2.css'
 
 type TradeSide = 'LONG' | 'SHORT'
 type TradeHistoryRow = {
@@ -96,6 +98,16 @@ const readTab = (): MasterTradeTab => {
   const requested = new URLSearchParams(window.location.search).get('tab')
   return MASTER_TRADE_TABS.find(tab => tab.id === requested)?.id ?? 'analiz'
 }
+const subscribePresentation = (notify: () => void) => {
+  const media = window.matchMedia(`(min-width: ${MASTER_LAYOUT_DESKTOP_WIDTH}px)`)
+  media.addEventListener('change', notify)
+  window.addEventListener('popstate', notify)
+  return () => {
+    media.removeEventListener('change', notify)
+    window.removeEventListener('popstate', notify)
+  }
+}
+const readPresentation = () => masterLayoutV2Enabled(window.location.search, window.innerWidth)
 const navigateTab = (tab: MasterTradeTab) => {
   const url = new URL(window.location.href)
   url.searchParams.set('tab', tab)
@@ -125,6 +137,9 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
 export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () => void; assistantSlotRef?: RefCallback<HTMLDivElement> }) {
   const {premium} = useMemberAccess()
   const layoutTab = useSyncExternalStore(subscribeTab, readTab, () => 'analiz' as MasterTradeTab)
+  const masterLayoutV2 = useSyncExternalStore(subscribePresentation, readPresentation, () => false)
+  const decisionColumn = useRef<HTMLElement>(null)
+  const shortcutPending = useRef(false)
   const reactionArea = useRef<HTMLElement>(null)
   useKaisWorkspaceReaction(layoutTab, reactionArea)
   const [history, setHistory] = useState<TradeHistoryRow[]>([])
@@ -632,10 +647,45 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     { label: 'Loss Streak', value: dailyPerformance ? String(dailyPerformance.losing_streak) : '--', tone: 'muted' },
   ]
   const masterTradeOffline = !snapshot && !markets.length && !marketLoading
+  const autoTrade = autoTradePresentation('LIVE', liveStatus?.live_auto_trade)
+  const scoreBreakdown: Array<[string, number]> = tradeDecision.breakdown ? [
+    ['Analysis', tradeDecision.breakdown.analysis], ['Liquidity', tradeDecision.breakdown.liquidity],
+    ['Volatility', tradeDecision.breakdown.volatility], ['MTF', tradeDecision.breakdown.mtf],
+    ['Freshness', tradeDecision.breakdown.freshness], ['Risk/Reward', tradeDecision.breakdown.riskReward],
+  ] : []
+  const triggerPriceText = (value: number | null | undefined) => masterLayoutV2 ? analysisPrice(value) : value === null || value === undefined ? '--' : `$${fmtDecisionNumber(value, 6)}`
+
+  useLayoutEffect(() => {
+    if (!masterLayoutV2 || layoutTab !== 'analiz' || !decisionColumn.current) return
+    const panel = decisionColumn.current
+    const measure = () => panel.style.setProperty('--analysis-panel-top', `${Math.max(124, panel.getBoundingClientRect().top)}px`)
+    measure()
+    const observer = new ResizeObserver(measure)
+    const header = reactionArea.current?.querySelector('.masterTradeSticky')
+    if (header) observer.observe(header)
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, {passive: true})
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure)
+      panel.style.removeProperty('--analysis-panel-top')
+    }
+  }, [masterLayoutV2, layoutTab])
+
+  useLayoutEffect(() => {
+    if (!shortcutPending.current || layoutTab !== 'canli') return
+    const target = reactionArea.current?.querySelector<HTMLElement>('#master-trade-auto-trade')
+    if (!target) return
+    shortcutPending.current = false
+    target.scrollIntoView({block: 'center', behavior: 'instant'})
+    target.focus({preventScroll: true})
+  }, [layoutTab])
 
   return (
+    <MasterTradePresentation restored={masterLayoutV2 && layoutTab === 'analiz'}>
     <PremiumWorkspace>
-    <section ref={reactionArea} className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}`} data-layout-tab={layoutTab}>
+    <section ref={reactionArea} className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}${masterLayoutV2 ? ' masterLayoutV2' : ''}`} data-layout-tab={layoutTab}>
       <div className="masterTradeShell">
         <header className="masterTradeTerminalHeader">
           <div className="masterTradeTerminalIdentity">
@@ -670,7 +720,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             <strong>{masterTradeOffline ? 'DATA UNAVAILABLE' : tradeDecision.status}</strong>
           </div>
           <div className="masterTradeFocusMetric">
-            <small>CONFIDENCE</small>
+            <small>{masterLayoutV2 ? 'Güven' : 'CONFIDENCE'}</small>
             <strong><MasterTradeValue>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</MasterTradeValue></strong>
           </div>
           <div className="masterTradeFocusMetric">
@@ -678,8 +728,13 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             <strong><MasterTradeValue>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</MasterTradeValue></strong>
           </div>
           <div className="masterTradeFocusConnection">
+            {masterLayoutV2 ? <span className="masterTradeConnectionBadge" role="status" data-connected={Boolean(liveStatus?.connected)}>
+              <i aria-hidden="true"/>{liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}
+              {liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'} · {liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}
+            </span> : <>
             <span className={liveStatus?.connected ? 'positive' : 'muted'}>{liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
             <strong className={liveStatus?.real_trading_locked === false ? 'positive' : 'warning'}>{liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}{liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}</strong>
+            </>}
           </div>
           {masterTradeOffline && <p className="masterTradeFocusNotice">Market bağlantısı bekleniyor. İşlem kararı ve canlı metrikler veri gelene kadar pasif tutuluyor.</p>}
         </section>
@@ -712,8 +767,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
                       <span>{scannerCandidates.length ? `FINAL ${fmtDecisionNumber(item.finalDecisionScore)}/100` : 'FINAL DECISION PENDING'}</span>
                     </div>
                     <div className="watchlistStats">
-                      <strong>${item.price.toLocaleString('en-US', { maximumFractionDigits: 6 })}</strong>
-                      <em className={item.direction === 'LONG' ? 'positive' : item.direction === 'SHORT' ? 'negative' : 'muted'}>{item.direction} {scannerCandidates.length ? `${fmtDecisionNumber(item.confidence)}%` : 'RAW MARKET'}</em>
+                      <strong>{masterLayoutV2 ? analysisPrice(scannerCandidates.find(candidate => candidate.symbol === item.symbol)?.price ?? markets.find(market => market.symbol === item.symbol)?.price) : `$${item.price.toLocaleString('en-US', { maximumFractionDigits: 6 })}`}</strong>
+                      <em className={item.direction === 'LONG' ? 'positive' : item.direction === 'SHORT' ? 'negative' : 'muted'}>{item.direction} {scannerCandidates.length ? `${masterLayoutV2 ? 'Skor ' : ''}${fmtDecisionNumber(item.confidence)}%` : 'RAW MARKET'}</em>
                     </div>
                   </button>
                 ))}
@@ -723,7 +778,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
                 <div><span className="panelEyebrow">MARKET SCANNER</span><h3>Top opportunities</h3></div>
                 <span className="livePill">LIVE</span>
               </summary>
-              <div className="scannerList">{scannerCandidates.length ? scannerCandidates.map((candidate, index) => <button type="button" key={candidate.symbol} onClick={() => selectMarket(candidate.symbol)}><div className="scannerCandidateMeta"><strong>{candidate.symbol}</strong><div><span className="scannerScore">#{index + 1}</span><strong>{fmtDecisionNumber(candidate.final_decision_score)}<small> / 100 FINAL DECISION</small></strong></div></div><div className="scannerCandidateStats"><strong><MasterTradeValue>{candidate.price === undefined ? '--' : `$${fmtMarketPrice(candidate.price)}`}</MasterTradeValue></strong><small data-tone={masterTradeTone(candidate.direction)} title={`${candidate.direction} · Confidence ${fmtDecisionNumber(candidate.confidence)}%`}>{candidate.direction} · Confidence {fmtDecisionNumber(candidate.confidence)}%</small></div></button>) : <div className="emptyState">NO CURRENT OPPORTUNITY SNAPSHOT</div>}</div>
+              <div className="scannerList">{scannerCandidates.length ? scannerCandidates.map((candidate, index) => <button type="button" key={candidate.symbol} onClick={() => selectMarket(candidate.symbol)}><div className="scannerCandidateMeta"><strong>{candidate.symbol}</strong><div><span className="scannerScore">#{index + 1}</span><strong>{fmtDecisionNumber(candidate.final_decision_score)}<small> / 100 FINAL DECISION</small></strong></div></div><div className="scannerCandidateStats"><strong><MasterTradeValue>{candidate.price === undefined ? '--' : `$${fmtMarketPrice(candidate.price)}`}</MasterTradeValue></strong><small data-tone={masterTradeTone(candidate.direction)} title={`${candidate.direction} · ${masterLayoutV2 ? 'Skor' : 'Confidence'} ${fmtDecisionNumber(candidate.confidence)}%`}>{candidate.direction} · {masterLayoutV2 ? 'Skor' : 'Confidence'} {fmtDecisionNumber(candidate.confidence)}%</small></div></button>) : <div className="emptyState">NO CURRENT OPPORTUNITY SNAPSHOT</div>}</div>
             </details>
             </div>
           </aside>
@@ -780,12 +835,12 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
               <MasterTradeMetricTile label="RSI" value={fmtDecisionNumber(analysis?.rsi, 2)} status={analysis?.rsi === undefined ? 'DATA UNAVAILABLE' : analysis.rsi >= 70 ? 'OVERBOUGHT' : analysis.rsi <= 30 ? 'OVERSOLD' : 'HEALTHY RANGE'}><MasterTradeMetricVisual kind="rsi" value={analysis?.rsi}/></MasterTradeMetricTile>
               <MasterTradeMetricTile label="MACD" value={fmtSigned(analysis?.macd)} tone={masterTradeTone(analysis?.macd)} status={analysis?.macd === undefined ? 'DATA UNAVAILABLE' : analysis.macd >= 0 ? 'BULLISH' : 'BEARISH'}><MasterTradeMetricVisual kind="macd" value={analysis?.macd}/></MasterTradeMetricTile>
               <MasterTradeMetricTile label="VOLUME" value={analysis?.volume_ratio ? `${fmtDecisionNumber(analysis.volume_ratio, 2)}x` : '--'}><MasterTradeMetricVisual kind="volume" volumes={chartCandles.slice(-24).map(candle => candle.volume)}/></MasterTradeMetricTile>
-              <MasterTradeMetricTile label="CONFIDENCE" value={tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}><MasterTradeMetricVisual kind="confidence" value={tradeDecision.confidenceScore}/></MasterTradeMetricTile>
+              <MasterTradeMetricTile label={masterLayoutV2 ? 'Güven' : 'CONFIDENCE'} value={tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}><MasterTradeMetricVisual kind="confidence" value={tradeDecision.confidenceScore}/></MasterTradeMetricTile>
               <MasterTradeMetricTile label="OPPORTUNITY" value={fmtDecisionNumber(tradeDecision.opportunityScore)}><MasterTradeMetricVisual kind="confidence" value={tradeDecision.opportunityScore}/></MasterTradeMetricTile>
             </div>
           </main>
 
-          <aside className="masterTradeDecisionColumn">
+          <aside ref={decisionColumn} className="masterTradeDecisionColumn" aria-label="Analysis decision panel">
             <section className={`tradeDecisionPanel decision-${tradeDecision.status.toLowerCase().replaceAll(' ', '-')}`} aria-label="Trade decision analysis">
               <div className="masterTradeFinalCard">
               <header className="tradeDecisionHeader">
@@ -793,7 +848,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
                 <div className="decisionScore"><strong><MasterTradeValue>{fmtDecisionNumber(tradeDecision.opportunityScore)}</MasterTradeValue></strong><span>/ 100<br />OPPORTUNITY</span></div>
               </header>
               <div className="decisionMetricGrid">
-                <div><small>CONFIDENCE</small><strong><MasterTradeValue>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</MasterTradeValue></strong></div>
+                <div><small>{masterLayoutV2 ? 'Güven' : 'CONFIDENCE'}</small><strong><MasterTradeValue>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</MasterTradeValue></strong></div>
                 <div><small>DIRECTION</small><strong><MasterTradeValue>{tradeDecision.direction}</MasterTradeValue></strong></div>
                 <div><small>SIGNAL STRENGTH</small><strong><MasterTradeValue>{tradeDecision.signalStrength || '--'}</MasterTradeValue></strong></div>
                 <div><small>ENTRY QUALITY</small><strong><MasterTradeValue>{tradeDecision.entryQuality || '--'}</MasterTradeValue></strong></div>
@@ -803,11 +858,16 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
               </div>
 
               <div className="decisionSectionGrid">
-                <details className="decisionList masterTradeAccordion"><summary><BarChart3 aria-hidden="true"/><h4 title="WHY THIS DECISION">WHY THIS DECISION</h4><span title={tradeDecision.reasons[0]}>{tradeDecision.reasons[0] || 'DATA UNAVAILABLE'}</span><ChevronDown aria-hidden="true"/></summary>{tradeDecision.reasons.length ? <ul>{tradeDecision.reasons.map(reason => <li key={reason}>+ {reason}</li>)}</ul> : <p>DATA UNAVAILABLE</p>}</details>
+                <details className="decisionList masterTradeAccordion"><summary><BarChart3 aria-hidden="true"/><h4 title="WHY THIS DECISION">WHY THIS DECISION</h4><span title={tradeDecision.reasons[0]}>{tradeDecision.reasons[0] || 'DATA UNAVAILABLE'}</span><ChevronDown aria-hidden="true"/></summary>{tradeDecision.reasons.length ? <ul>{tradeDecision.reasons.map(reason => <li key={reason}>+ {reason}</li>)}</ul> : <p>DATA UNAVAILABLE</p>}
+                  {masterLayoutV2 && ['WAIT', 'WATCH', 'NO TRADE'].includes(tradeDecision.status) && <div className="decisionWaitReasons">
+                    <h5>WHY WAIT?</h5><ul>{tradeDecision.whyWait.map(reason => <li key={reason}>{reason}</li>)}</ul>
+                    <h5>WHAT WE ARE WAITING FOR</h5><ul>{tradeDecision.waitingFor.map(reason => <li key={reason}>{reason}</li>)}</ul>
+                  </div>}
+                </details>
                 <div className="decisionList"><h4>RISK FLAGS</h4>{tradeDecision.riskFlags.length ? <ul className="riskList">{tradeDecision.riskFlags.map(flag => <li key={flag}>! {flag}</li>)}</ul> : <p className="positive">NO MAJOR RISK FLAGS</p>}</div>
               </div>
 
-              {(tradeDecision.status === 'WAIT' || tradeDecision.status === 'WATCH' || tradeDecision.status === 'NO TRADE') && <div className="decisionSectionGrid decisionWaitGrid">
+              {!masterLayoutV2 && (tradeDecision.status === 'WAIT' || tradeDecision.status === 'WATCH' || tradeDecision.status === 'NO TRADE') && <div className="decisionSectionGrid decisionWaitGrid">
                 <details className="decisionList masterTradeAccordion"><summary><Clock3 aria-hidden="true"/><h4>WHY WAIT?</h4><span title={tradeDecision.whyWait[0]}>{tradeDecision.whyWait[0] || 'Confirmation still required'}</span><ChevronDown aria-hidden="true"/></summary><ul>{tradeDecision.whyWait.length ? tradeDecision.whyWait.map(reason => <li key={reason}>- {reason}</li>) : <li>Confirmation still required</li>}</ul></details>
                 <div className="decisionList"><h4>WHAT WE ARE WAITING FOR</h4><ul>{tradeDecision.waitingFor.length ? tradeDecision.waitingFor.map(reason => <li key={reason}>✓ {reason}</li>) : <li>Fresh market confirmation</li>}</ul><p>Trigger: --</p></div>
               </div>}
@@ -817,17 +877,21 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
                 <div className="decisionList"><h4>SHORT CASE</h4><ul>{tradeDecision.shortCase.map(item => <li key={item}>{item.includes('not ') ? <X aria-hidden="true" className="negative"/> : <Check aria-hidden="true" className="positive"/>}<span>{item}</span></li>)}</ul></div>
               </div>
 
-              <div className="decisionBreakdown"><h4>WHY THIS SCORE?</h4>{tradeDecision.breakdown ? <div className="decisionBreakdownGrid">{[['Analysis', tradeDecision.breakdown.analysis], ['Liquidity', tradeDecision.breakdown.liquidity], ['Volatility', tradeDecision.breakdown.volatility], ['MTF', tradeDecision.breakdown.mtf], ['Freshness', tradeDecision.breakdown.freshness], ['Risk/Reward', tradeDecision.breakdown.riskReward]].map(([label, value]) => <span key={label}><small>{label}</small><strong>{fmtDecisionNumber(value)}</strong></span>)}</div> : <p>DATA UNAVAILABLE</p>}</div>
+              <div className="decisionBreakdown"><h4>WHY THIS SCORE?</h4>{tradeDecision.breakdown ? <div className="decisionBreakdownGrid">{scoreBreakdown.map(([label, value]) => <span key={label}><small>{label}</small><strong>{fmtDecisionNumber(value)}</strong></span>)}</div> : <p>DATA UNAVAILABLE</p>}</div>
 
-              <div className="decisionAutoTrade"><span>AUTO TRADE</span><strong>SEPARATE SAFETY GATES</strong><small>Final Decision does not send orders or grant Auto Trade eligibility.</small></div>
+              <div className="decisionAutoTrade"><span>AUTO TRADE</span><strong>SEPARATE SAFETY GATES</strong><small>Final Decision does not send orders or grant Auto Trade eligibility.</small>
+                {masterLayoutV2 && <><span className="analysisAutoStatus" aria-label="Auto Trade state">{autoTrade.label}</span>
+                  <button type="button" className="analysisAutoShortcut" onClick={() => { shortcutPending.current = true; navigateTab('canli') }}>{autoTrade.action}<ChevronDown aria-hidden="true"/></button>
+                </>}
+              </div>
 
               <section className={`triggerMonitor trigger-${triggerMonitor.lifecycle.toLowerCase()}`} aria-label="Trigger monitor">
-                <header className="triggerHeader"><div><h4>TRIGGER MONITOR</h4><strong>{triggerMonitor.lifecycle}</strong><small>{triggerMonitor.statusMessage}</small></div><span>{triggerMonitor.available ? 'LIVE SNAPSHOT' : 'DATA UNAVAILABLE'}</span></header>
-                <div className="triggerSummary"><div><small>CURRENT</small><strong>{triggerMonitor.currentPrice === null ? '--' : `$${fmtDecisionNumber(triggerMonitor.currentPrice, 6)}`}</strong></div><div><small>{triggerMonitor.direction === 'SHORT' ? 'SHORT TRIGGER BELOW' : 'LONG TRIGGER ABOVE'}</small><strong>{triggerMonitor.triggerPrice === null ? '--' : `$${fmtDecisionNumber(triggerMonitor.triggerPrice, 6)}`}</strong></div><div><small>DISTANCE</small><strong>{triggerMonitor.distancePct === null ? '--' : `${triggerMonitor.distancePct.toFixed(2)}%`}</strong><em>{triggerMonitor.waitingMessage}</em></div></div>
-                <details className="triggerConditions masterTradeAccordion"><summary><Crosshair aria-hidden="true"/><h4 title="TRIGGER CONDITIONS">TRIGGER CONDITIONS</h4><span>{triggerMonitor.remainingConditions === null ? '--' : `${triggerMonitor.remainingConditions} CONDITIONS REMAINING`}</span><ChevronDown aria-hidden="true"/></summary>{triggerMonitor.conditions.length ? <div className="triggerConditionGrid">{triggerMonitor.conditions.map(condition => <span key={condition.key} className={!condition.available ? 'unavailable' : condition.passed ? 'passed' : 'pending'}><b>{condition.passed ? '✓' : condition.available ? '✕' : '--'}</b><small>{condition.label}</small><em>{condition.detail}</em></span>)}</div> : <p className="triggerUnavailable">NO TRADE — waiting for a complete market snapshot.</p>}</details>
+                <header className="triggerHeader"><div><h4>TRIGGER MONITOR</h4><strong>{masterLayoutV2 && triggerMonitor.lifecycle === 'WAITING' ? 'Waiting' : triggerMonitor.lifecycle}</strong>{(!masterLayoutV2 || triggerMonitor.statusMessage !== triggerMonitor.lifecycle) && <small>{triggerMonitor.statusMessage}</small>}</div><span>{triggerMonitor.available ? 'LIVE SNAPSHOT' : 'DATA UNAVAILABLE'}</span></header>
+                <div className="triggerSummary"><div><small>CURRENT</small><strong>{triggerPriceText(triggerMonitor.currentPrice)}</strong></div><div><small>{triggerMonitor.direction === 'SHORT' ? 'SHORT TRIGGER BELOW' : 'LONG TRIGGER ABOVE'}</small><strong>{triggerPriceText(triggerMonitor.triggerPrice)}</strong></div><div><small>DISTANCE</small><strong>{triggerMonitor.distancePct === null ? masterLayoutV2 ? '—' : '--' : `${triggerMonitor.distancePct.toFixed(2)}%`}</strong><em>{masterLayoutV2 ? triggerMonitor.waitingMessage.replace(/^WAITING\s*—\s*/, '') : triggerMonitor.waitingMessage}</em></div></div>
+                <details className="triggerConditions masterTradeAccordion"><summary><Crosshair aria-hidden="true"/><h4 title="TRIGGER CONDITIONS">TRIGGER CONDITIONS</h4><span>{triggerMonitor.remainingConditions === null ? '--' : `${triggerMonitor.remainingConditions} CONDITIONS REMAINING`}</span><ChevronDown aria-hidden="true"/></summary>{triggerMonitor.conditions.length ? <div className="triggerConditionGrid">{triggerMonitor.conditions.map(condition => <span key={condition.key} className={!condition.available ? 'unavailable' : condition.passed ? 'passed' : 'pending'}><b>{condition.passed ? '✓' : condition.available ? '✕' : '--'}</b><small>{condition.label}</small><em>{masterLayoutV2 && condition.key === 'breakout' ? `Trigger ${analysisPrice(triggerMonitor.triggerPrice)}` : condition.detail}</em></span>)}</div> : <p className="triggerUnavailable">NO TRADE — waiting for a complete market snapshot.</p>}</details>
                 <div className="triggerDetailGrid"><details className="decisionList masterTradeAccordion"><summary><ShieldX aria-hidden="true"/><h4>INVALIDATION</h4><span title={triggerMonitor.invalidation[0]}>{triggerMonitor.invalidation[0] || '--'}</span><ChevronDown aria-hidden="true"/></summary><ul>{triggerMonitor.invalidation.map(item => <li key={item}>- {item}</li>)}</ul></details><details className="decisionList masterTradeAccordion"><summary><History aria-hidden="true"/><h4 title="DECISION TIMELINE">DECISION TIMELINE</h4><span title={decisionTimeline[0]?.message}>{decisionTimeline[0]?.message || 'NO RECENT ACTIVITY'}</span><ChevronDown aria-hidden="true"/></summary>{decisionTimeline.length ? <ul>{decisionTimeline.map(event => <li key={`${event.time}-${event.message}`}>{new Date(event.time).toLocaleTimeString('en-GB')} · {event.message}</li>)}</ul> : <p>NO RECENT ACTIVITY</p>}</details></div>
-                {triggerMonitor.entryPreview && <div className="triggerPreview"><h4>ENTRY PREVIEW</h4><div className="triggerPreviewGrid"><span><small>ENTRY</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.entry, 6)}</strong></span><span><small>SL</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.stopLoss, 6)}</strong></span><span><small>TP1 · 30%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp1, 6)}</strong></span><span><small>TP2 · 30%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp2, 6)}</strong></span><span><small>TP3 · 40%</small><strong>{fmtDecisionNumber(triggerMonitor.entryPreview.tp3, 6)}</strong></span><span><small>R / R</small><strong>1 : {fmtDecisionNumber(triggerMonitor.entryPreview.riskReward, 2)}</strong></span></div></div>}
-                <details className="preTradeCheck masterTradeAccordion"><summary><ListChecks aria-hidden="true"/><h4 title="PRE-TRADE CHECK · READ ONLY">PRE-TRADE CHECK · READ ONLY</h4><span>NO ORDER SENT</span><ChevronDown aria-hidden="true"/></summary><div className="preTradeCheckGrid">{triggerMonitor.preTradeChecks.map(check => <span key={check.label} className={`check-${check.status.toLowerCase()}`}><b>{check.status}</b><small>{check.label}</small><em>{check.detail}</em></span>)}</div></details>
+                {triggerMonitor.entryPreview && <div className="triggerPreview"><h4>ENTRY PREVIEW</h4><div className="triggerPreviewGrid"><span><small>ENTRY</small><strong>{masterLayoutV2 ? analysisPrice(triggerMonitor.entryPreview.entry) : fmtDecisionNumber(triggerMonitor.entryPreview.entry, 6)}</strong></span><span><small>SL</small><strong>{masterLayoutV2 ? analysisPrice(triggerMonitor.entryPreview.stopLoss) : fmtDecisionNumber(triggerMonitor.entryPreview.stopLoss, 6)}</strong></span><span><small>TP1 · 30%</small><strong>{masterLayoutV2 ? analysisPrice(triggerMonitor.entryPreview.tp1) : fmtDecisionNumber(triggerMonitor.entryPreview.tp1, 6)}</strong></span><span><small>TP2 · 30%</small><strong>{masterLayoutV2 ? analysisPrice(triggerMonitor.entryPreview.tp2) : fmtDecisionNumber(triggerMonitor.entryPreview.tp2, 6)}</strong></span><span><small>TP3 · 40%</small><strong>{masterLayoutV2 ? analysisPrice(triggerMonitor.entryPreview.tp3) : fmtDecisionNumber(triggerMonitor.entryPreview.tp3, 6)}</strong></span><span><small>R / R</small><strong>1 : {fmtDecisionNumber(triggerMonitor.entryPreview.riskReward, 2)}</strong></span></div></div>}
+                <details className="preTradeCheck masterTradeAccordion"><summary><ListChecks aria-hidden="true"/><h4 title="PRE-TRADE CHECK · READ ONLY">PRE-TRADE CHECK · READ ONLY</h4><span>NO ORDER SENT</span><ChevronDown aria-hidden="true"/></summary><div className="preTradeCheckGrid">{triggerMonitor.preTradeChecks.map(check => <span key={check.label} className={`check-${check.status.toLowerCase()}`}><b>{check.status}</b><small>{check.label}</small><em>{masterLayoutV2 && check.label === 'Stop Loss' ? analysisPrice(analysis?.stop_loss) : check.detail}</em></span>)}</div></details>
               </section>
             </section>
 
@@ -842,7 +906,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             <div className="marketAnalysisDecision">
               <span>MARKET REGIME</span>
               <strong>{tradeDecision.marketRegime || '--'}</strong>
-              <em>{tradeDecision.direction || '--'} · {tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`} CONFIDENCE</em>
+              <em>{tradeDecision.direction || '--'} · {tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`} {masterLayoutV2 ? 'Güven' : 'CONFIDENCE'}</em>
             </div>
             <div className="marketAnalysisMetrics">
               <div><small>TREND</small><strong>{analysis?.trend || '--'}</strong></div>
@@ -1154,5 +1218,6 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
 
     </section>
     </PremiumWorkspace>
+    </MasterTradePresentation>
   )
 }

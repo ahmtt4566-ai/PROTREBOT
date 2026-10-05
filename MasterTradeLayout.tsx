@@ -1,12 +1,19 @@
-import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useState } from 'react'
+import { Children, cloneElement, createContext, isValidElement, type ReactElement, type ReactNode, useContext, useState } from 'react'
 import { Activity, Cable, Check, ChevronDown, ListChecks, LockKeyhole, Minus, Power, Send, Settings2, ShieldCheck, Wallet, X } from 'lucide-react'
 import { PremiumWorkspace } from './premium-access'
 
 type LayoutElement = ReactElement<{className?: string; children?: ReactNode; title?: string; 'aria-label'?: string; 'data-status'?: string}>
 type Tab = 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'
 const STEPS = ['Bağlan', 'Onayla', 'Arm', 'Çalıştır']
+const RestoredPresentation = createContext(false)
+
+export function MasterTradePresentation({restored, children}: {restored: boolean; children: ReactNode}) {
+  return <RestoredPresentation.Provider value={restored}>{children}</RestoredPresentation.Provider>
+}
 
 export function MasterTradeValue({children}: {children: ReactNode}) {
+  const restored = useContext(RestoredPresentation)
+  if (restored && (children === '--' || children === '—')) return <span className="masterTradeMissingValue">—</span>
   return children === '--' || children === '—' ? <span className="masterTradeSkeleton"><span className="masterTradeScreenReader">{children}</span></span> : children
 }
 
@@ -26,6 +33,10 @@ export function MasterTradeMetricTile({label, value, tone = 'neutral', status, c
 }
 
 export function MasterTradeMetricVisual({kind, value, volumes = []}: {kind: 'rsi' | 'macd' | 'volume' | 'confidence'; value?: number | null; volumes?: number[]}) {
+  const restored = useContext(RestoredPresentation)
+  if (restored && (kind === 'volume' ? !volumes.length : typeof value !== 'number' || !Number.isFinite(value))) {
+    return <span className="masterTradeMissingValue">—</span>
+  }
   if (kind === 'volume') {
     const maximum = Math.max(...volumes, 1)
     const points = volumes.map((volume, index) => `${index * 100 / Math.max(volumes.length - 1, 1)},${28 - volume / maximum * 24}`).join(' ')
@@ -39,10 +50,12 @@ export function MasterTradeMetricVisual({kind, value, volumes = []}: {kind: 'rsi
 }
 
 export function MasterTradeChartLabels({lines, currentPrice, toY, format, pills = false}: {lines: Array<{label: string; value: number; tone: string}>; currentPrice?: number | null; toY: (value: number) => number; format: (value: number) => string; pills?: boolean}) {
+  const restored = useContext(RestoredPresentation)
+  const gap = restored ? 24 : 18
   const labels = [...lines, ...(currentPrice === null || currentPrice === undefined ? [] : [{label: '', value: currentPrice, tone: 'current'}])].sort((left, right) => toY(left.value) - toY(right.value))
   const positions: number[] = []
-  labels.forEach((line, index) => { positions.push(Math.max(14, toY(line.value), index ? positions[index - 1] + 18 : 14)) })
-  for (let index = positions.length - 1; index >= 0; index -= 1) positions[index] = Math.min(positions[index], index === positions.length - 1 ? 278 : positions[index + 1] - 18)
+  labels.forEach((line, index) => { positions.push(Math.max(14, toY(line.value), index ? positions[index - 1] + gap : 14)) })
+  for (let index = positions.length - 1; index >= 0; index -= 1) positions[index] = Math.min(positions[index], index === positions.length - 1 ? 278 : positions[index + 1] - gap)
   if (pills) return <div className="masterTradeChartPills">{labels.map((line, index) => <span key={`${line.label}-${line.value}`} className={`level-${line.tone}`} style={{top: `${(positions[index] - 12) / 300 * 100}%`}} title={`${line.label} ${format(line.value)}`}>{line.label}{line.label ? ' ' : ''}{format(line.value)}</span>)}</div>
   return <g className="masterTradeChartLabels">{labels.map((line, index) => <g key={`${line.label}-${line.value}`} className={`chartLevel level-${line.tone}`} data-label-y={positions[index]}>
     <line x1="0" x2="760" y1={toY(line.value)} y2={toY(line.value)} strokeDasharray={line.tone === 'current' ? undefined : '3 4'}/>
@@ -178,7 +191,9 @@ export function MasterTradeLiveLayout({tab = 'canli', step, children, notice}: {
       const summaryText = cardText(card, ['p', 'small'])
       const summary = <summary>{tab === 'canli' && <Icon aria-hidden="true"/>}<span className="masterTradeCardTitle" title={typeof title === 'string' ? title : undefined}>{title}</span>{tab === 'canli' && <small className="masterTradeCardSummary" title={typeof summaryText === 'string' ? summaryText : undefined}>{summaryText}</small>}{locked ? <LockKeyhole aria-hidden="true"/> : <ChevronDown aria-hidden="true"/>}</summary>
       const secondary = positions || className.includes('masterTradeLiveActivityRail') || tab === 'canli' && workflowStep === null && !className.includes('masterTradeLiveHeader') && !className.includes('masterTradeLiveAssistant')
-      return <div className="masterTradeLiveSlot" key={card.key} hidden={!visible} data-flow-card={workflowStep ?? undefined} data-flow-expanded={workflowStep === null ? undefined : expanded}>
+      const autoTradeTarget = className.split(' ').includes('masterTradeLiveAssistant')
+      return <div className="masterTradeLiveSlot" key={card.key} hidden={!visible} data-flow-card={workflowStep ?? undefined} data-flow-expanded={workflowStep === null ? undefined : expanded}
+        id={autoTradeTarget ? 'master-trade-auto-trade' : undefined} tabIndex={autoTradeTarget ? -1 : undefined} aria-label={autoTradeTarget ? 'Auto Trade controls' : undefined}>
         {workflowStep !== null && tab === 'canli' && !expanded ? <details className="masterTradeFlowCard" inert={locked} aria-disabled={locked || undefined}>{summary}{presented}</details> : secondary ? <details className="masterTradeFlowCard">{summary}{presented}</details> : presented}
       </div>
     }), cards, tab)}

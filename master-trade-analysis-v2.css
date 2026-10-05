@@ -1,0 +1,223 @@
+@media (min-width: 1200px) {
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 {
+    --mt-surface: #111820;
+    --mt-raised: #17212d;
+    --mt-muted: #9aa9ba;
+    --mt-ink: #edf2f8;
+    --mt-line: rgba(164, 182, 204, .1);
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeSticky { background: #10171f; }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeTerminalMode { color: #9aa9ba; }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeFocusPanel {
+    grid-template-columns: 1fr 1fr 1fr .65fr .75fr 1.35fr;
+    background: #141d28;
+    border: 0;
+    box-shadow: none;
+  }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeTabs {
+    background: #10171f;
+    border: 0;
+    gap: 24px;
+  }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeTabs button[aria-selected="true"] {
+    color: #eef3fa;
+    border-bottom: 1px solid #cfdae8;
+  }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeConnectionBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 20px;
+    background: #202c3a;
+    color: #c4d0de;
+    font-size: 11px;
+  }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeConnectionBadge i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #8998aa;
+    box-shadow: none;
+  }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeConnectionBadge[data-connected="true"] i { background: #55d79b; }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 .masterTradeConnectionBadge svg { width: 12px; height: 12px; }
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2 #master-trade-auto-trade:focus {
+    outline: 2px solid #96b9ee;
+    outline-offset: 6px;
+    border-radius: 12px;
+    scroll-margin-block: 140px;
+  }
+
+  #root > main.v26App.masterTradeRoute .masterTradePage.masterTrade.masterLayoutV2[data-layout-tab="analiz"] {
+    & .masterTradeWorkspace { grid-template-columns: 216px minmax(0, 1fr) 344px; gap: 20px; }
+    & .masterTradeSafetyBanner { padding: 0 2px 8px; border: 0; background: transparent; box-shadow: none; }
+    & .masterTradePanel { border: 0 !important; box-shadow: none; }
+    & .watchlistPanel { padding: 16px 12px; }
+    & .marketSearch { background: var(--mt-surface); }
+    & .watchlistItem { gap: 8px; padding: 12px 4px; border: 0; border-radius: 0; }
+    & .watchlistItem.active { background: rgba(164, 190, 224, .06); box-shadow: none; }
+    & .watchlistMeta b, & .watchlistStats strong { font-size: 12px; }
+    & .watchlistMeta span, & .watchlistStats em { font-size: 10px; }
+    & .watchlistStats em { padding: 0; border: 0; }
+    & .watchlistMeta { align-content: start; }
+    & .chartPanel { padding: 20px; }
+    & .masterTradeChartHeader { flex-wrap: wrap; gap: 12px; overflow: visible; }
+    & .masterTradeChartHeader .marketStatsStrip > span { flex: 1 1 75px; }
+    & .masterTradeChartHeader .chartPriceSummary strong { font-size: 19px; }
+    & .chartToolbar { flex-wrap: wrap; overflow: visible; border: 0; padding: 0; gap: 4px; background: transparent; }
+    & .chartToolbar button.active { color: #d2e2f9; background: #26374f; box-shadow: none; }
+    & .chartCanvas { height: 360px; min-height: 360px; background: #0e151d; }
+    & .chartGrid line { opacity: .25; }
+    & .masterTradeChartPills > span {
+      max-width: 165px;
+      height: 22px;
+      line-height: 22px;
+      padding: 0 7px;
+      border: 0;
+      border-radius: 5px;
+      background: #1b2735;
+      font-size: 11px;
+    }
+    & .masterTradeChartPills > .level-current { color: #d0e2f9; }
+    & .indicatorGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: visible; gap: 16px; }
+    & .indicatorGrid .masterTradeMetricTile {
+      min-height: 112px;
+      padding: 4px 0;
+      gap: 8px;
+      border: 0 !important;
+      background: transparent !important;
+      border-radius: 0;
+    }
+    & .masterTradeMetricTile > strong {
+      white-space: normal;
+      overflow: visible;
+      overflow-wrap: anywhere;
+      text-overflow: clip;
+      font-size: 17px;
+      line-height: 1.4;
+    }
+    & .masterTradeMetricTile .masterTradeMetricStatus {
+      position: static;
+      max-width: none;
+      white-space: normal;
+      overflow: visible;
+      align-self: start;
+      padding: 0;
+      border: 0;
+      font-size: 10px;
+    }
+    & .masterTradeMetricVisual { height: auto; min-height: 16px; margin-bottom: 0; }
+    & .masterTradeMiniMeter { width: 100%; margin: 6px 0; }
+    & .meter-confidence > i { background: #9cbcf0; }
+    & .masterTradeDecisionColumn {
+      position: sticky;
+      top: 124px;
+      height: max(0px, calc(100dvh - var(--analysis-panel-top, 264px) - 20px));
+      min-height: 0;
+      max-height: none;
+      display: block;
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      scrollbar-color: #41516a #111820;
+      padding: 20px 16px 24px 20px;
+      background: #111820;
+      border-radius: 14px;
+    }
+    & .masterTradeDecisionColumn * { min-width: 0; max-height: none; }
+    & .masterTradeDecisionColumn :is(div, section, details, ul) { overflow: visible; }
+    & .tradeDecisionPanel { padding: 0; margin: 0; border: 0 !important; background: transparent; }
+    & .masterTradeFinalCard { padding: 0; border: 0; background: transparent; border-radius: 0; }
+    & :is(.masterTradeFinalCard, .masterTradeCases > .decisionList, .decisionMtfGrid > span, .decisionBreakdownGrid > span, .decisionAutoTrade, .triggerMonitor, .marketAnalysisPanel, .triggerSummary > div, .triggerConditionGrid > span, .preTradeCheckGrid > span, .triggerPreviewGrid > span) {
+      border: 0 !important;
+      border-radius: 0;
+      background: transparent !important;
+      box-shadow: none;
+    }
+    & .tradeDecisionHeader { margin-bottom: 18px; }
+    & .tradeDecisionHeader h3 { font-size: 20px; }
+    & .decisionScore { display: grid; gap: 4px; flex-shrink: 0; justify-items: end; }
+    & .decisionScore span { font-size: 10px; line-height: 1.5; }
+    & .decisionMetricGrid { gap: 16px; background: transparent; }
+    & .decisionMetricGrid > div { border: 0; padding: 0; background: transparent; }
+    & .decisionMetricGrid strong { white-space: normal; overflow: visible; font-size: 14px; line-height: 1.4; }
+    & .decisionMetricGrid em { line-height: 1.4; }
+    & :is(.decisionList h4, .decisionBreakdown h4, .triggerHeader h4, .triggerPreview h4, .preTradeCheck h4, .panelEyebrow, .decisionAutoTrade > span:first-child) {
+      color: #b8c7db;
+      font-size: 11px;
+      letter-spacing: .06em;
+    }
+    & :is(.decisionSectionGrid, .decisionBreakdown, .decisionAutoTrade, .triggerMonitor) { margin-top: 28px; }
+    & .decisionSectionGrid { gap: 24px; }
+    & .decisionList { border: 0; }
+    & .decisionList :is(li, p) { font-size: 12px; line-height: 1.6; }
+    & .masterTradeAccordion {
+      margin-top: 0;
+      padding: 0;
+      border: 0 !important;
+      border-radius: 0;
+      background: transparent !important;
+    }
+    & .masterTradeAccordion summary { grid-template-columns: 16px minmax(0, 1fr) 16px; gap: 8px; }
+    & .masterTradeAccordion summary span { grid-column: 2; grid-row: 2; white-space: normal; overflow: visible; line-height: 1.5; }
+    & .masterTradeAccordion summary svg:last-child { grid-column: 3; grid-row: 1; }
+    & .masterTradeAccordion summary h4 { white-space: normal; overflow: visible; line-height: 1.5; }
+    & .decisionWaitReasons h5 { margin: 16px 0 8px; color: var(--mt-muted); font-size: 11px; }
+    & .masterTradeCases { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    & .masterTradeCases > .decisionList { padding: 0; border: 0; background: transparent; border-radius: 0; }
+    & .decisionBreakdownGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; }
+    & .decisionBreakdownGrid > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 0; border: 0; background: transparent; border-radius: 0; }
+    & .decisionBreakdownGrid small { white-space: normal; overflow-wrap: anywhere; font-size: 11px; }
+    & .decisionAutoTrade { gap: 8px; border: 0; background: transparent; padding: 0; }
+    & .decisionAutoTrade small { font-size: 12px; line-height: 1.6; }
+    & .decisionAutoTrade .analysisAutoStatus { color: #bdcadb; font-size: 12px; letter-spacing: 0; }
+    & .analysisAutoShortcut {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 42px;
+      margin-top: 4px;
+      padding: 10px 14px;
+      border: 0;
+      border-radius: 9px;
+      background: #26374f;
+      color: #e0eafa;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    & .analysisAutoShortcut:hover { background: #304662; }
+    & .analysisAutoShortcut:focus-visible { outline: 2px solid #b2cef9; outline-offset: 3px; }
+    & .analysisAutoShortcut svg { width: 16px; height: 16px; transform: rotate(-90deg); }
+    & .triggerMonitor { border: 0; padding: 0; gap: 20px; }
+    & .triggerHeader { grid-template-columns: minmax(0, 1fr) auto; }
+    & .triggerHeader strong { font-size: 18px; margin-top: 8px; }
+    & .triggerSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; }
+    & .triggerSummary > div:last-child { grid-column: 1 / -1; }
+    & .triggerSummary :is(small, strong, em) { white-space: normal; overflow: visible; }
+    & .triggerSummary strong { font-size: 15px; line-height: 1.5; }
+    & .triggerSummary em { font-size: 11px; line-height: 1.5; }
+    & :is(.triggerConditionGrid, .preTradeCheckGrid, .triggerPreviewGrid) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    & :is(.triggerSummary > div, .triggerConditionGrid > span, .preTradeCheckGrid > span, .triggerPreviewGrid > span) {
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+    }
+    & :is(.triggerConditionGrid, .preTradeCheckGrid, .triggerPreviewGrid) :is(small, strong, em) { white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.5; }
+    & .preTradeCheckGrid > span { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    & .preTradeCheckGrid > span > * { grid-column: 1; grid-row: auto; }
+    & .preTradeCheckGrid b { grid-row: auto; font-size: 11px; }
+    & .preTradeCheckGrid small { order: -1; font-size: 11px; }
+    & .preTradeCheckGrid em { font-size: 11px; }
+    & .marketAnalysisPanel { margin-top: 28px; padding: 0; background: transparent; }
+    & .marketAnalysisPanel summary { background: transparent; border: 0; border-radius: 0; }
+    & .marketAnalysisMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    & .marketAnalysisMetrics > div { border: 0; background: transparent; }
+    & .marketAnalysisPanel :is(small, strong, em) { white-space: normal; overflow-wrap: anywhere; }
+  }
+}
