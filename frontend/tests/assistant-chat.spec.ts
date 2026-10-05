@@ -483,14 +483,15 @@ for (const width of [320, 390, 768, 1024, 1440]) {
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
       await expect(launcher).toBeVisible()
       await expect(page.locator('.assistantDialog')).toHaveCount(0)
+      // Settle Demo's mount-time scrolling before measuring; do not mutate scroll during the snapshot.
       await page.evaluate(() => window.scrollTo({top: 0, left: 0, behavior: 'instant'}))
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
       await expect.poll(() => launcher.evaluate(element =>
         element.closest('header')!.getAnimations({subtree: true}).every(animation =>
           !(animation instanceof CSSTransition) || animation.playState !== 'running'))).toBe(true)
-      const geometry = await launcher.evaluate(element => {
-        // Demo scrolls its active tab on mount; measure each workspace header at a fixed scroll origin.
+      const measureGeometry = () => launcher.evaluate(async element => {
         window.scrollTo({top: 0, left: 0, behavior: 'instant'})
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
         const box = element.getBoundingClientRect()
         const header = element.closest('header')!.getBoundingClientRect()
         const controls = Array.from(document.querySelectorAll<HTMLElement>('button, input[type="checkbox"], [role="button"], a'))
@@ -504,6 +505,11 @@ for (const width of [320, 390, 768, 1024, 1440]) {
           headerTop: header.top, headerBottom: header.bottom, position: getComputedStyle(element).position,
           inHeader: Boolean(element.closest('.v26Header, .masterTradeTerminalHeader')), scrollY: window.scrollY, controls}
       })
+      let geometry = await measureGeometry()
+      await expect.poll(async () => {
+        geometry = await measureGeometry()
+        return geometry.scrollY
+      }).toBe(0)
       expect(geometry.scrollY).toBe(0)
       expect(geometry.width).toBeGreaterThanOrEqual(44)
       expect(geometry.height).toBeGreaterThanOrEqual(44)

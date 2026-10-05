@@ -65,6 +65,32 @@ const money = (value: unknown) => {
 const date = (value: unknown) => value ? new Date(String(value)).toLocaleString('tr-TR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'
 const activityTime = (value: unknown) => value ? new Date(String(value)).toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit', second: '2-digit'}) : '--:--:--'
 
+export function liveBlockerMessage(status: LiveStatus | null, liveArmed: boolean): string {
+  if (status === null) return 'LIVE status is not available.'
+  if (status.emergency?.active) return status.reconciliation_diagnostic?.exception_message && status.emergency.reason === 'LIVE_EXCEPTION'
+    ? `${status.emergency.reason}: ${status.reconciliation_diagnostic.exception_message}`
+    : status.emergency.reason || 'Emergency stop is active.'
+  if (status.reconciliation_required || status.recovery_error || status.execution_state === 'UNKNOWN') return status.recovery_error || (status.reconciliation_required
+    ? 'Reconciliation is required before LIVE execution can continue.' : 'LIVE recovery is required before execution can continue.')
+  if (!status.connected) return 'LIVE account connection is required.'
+  if (status.authorization?.valid !== true) {
+    const reason = status.authorization?.reason || status.consent?.reason || 'EXPIRED'
+    const messages: Record<string, string> = {
+      EXPIRED: '24 saatlik izin sona erdi.',
+      TRADING_ACCOUNT_CHANGED: 'Doğrulanmış trading account değişti.',
+      CREDENTIAL_CHANGED: 'API credentials değişti.',
+      POLICY_CHANGED: 'Risk policy değişti; policy acknowledgement ve authorization yenilenmeli.',
+      USER_CHANGED: 'Kullanıcı değişti.',
+      RECOVERY_REQUIRED: 'Recovery tamamlanmadan authorization kullanılamaz.',
+      RECONCILIATION_REQUIRED: 'Reconciliation tamamlanmadan authorization kullanılamaz.',
+      EMERGENCY_BLOCKED: 'Emergency block aktif.',
+    }
+    return Object.hasOwn(messages, reason) ? messages[reason] : '24 saatlik LIVE authorization gerekli.'
+  }
+  if (status.readiness?.ready !== true) return 'Complete the required LIVE readiness checks before arming.'
+  return liveArmed ? 'No LIVE blocker.' : 'Canlı işlem onayı bekleniyor.'
+}
+
 function errorMessage(payload: unknown, fallback: string): string {
   if (typeof payload === 'string' && payload.trim()) return payload
   if (payload && typeof payload === 'object') {
@@ -492,23 +518,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     : positions.length === 0
       ? protectionState
       : positionProtectionStates.reduce((worst, current) => protectionPriority.indexOf(current) < protectionPriority.indexOf(worst) ? current : worst, 'PROTECTED')
-  const blocker = status === null
-    ? 'LIVE status is not available.'
-    : emergency
-      ? (status.reconciliation_diagnostic?.exception_message && status.emergency?.reason === 'LIVE_EXCEPTION'
-        ? `${status.emergency.reason}: ${status.reconciliation_diagnostic.exception_message}`
-        : (status.emergency?.reason || 'Emergency stop is active.'))
-      : recoveryRequired
-        ? (status.recovery_error || (status.reconciliation_required ? 'Reconciliation is required before LIVE execution can continue.' : 'LIVE recovery is required before execution can continue.'))
-        : !connected
-          ? 'LIVE account connection is required.'
-          : !authorizationValid
-              ? authorizationReasonText
-            : !readinessReady
-              ? 'Complete the required LIVE readiness checks before arming.'
-              : !liveArmed
-                ? 'Canlı işlem onayı bekleniyor.'
-                : 'No LIVE blocker.'
+  const blocker = liveBlockerMessage(status, liveArmed)
   const autoStatusLabel = status === null ? 'UNKNOWN' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : 'OFF'
   const liveState = status === null ? 'UNKNOWN' : emergency || recoveryRequired ? 'BLOCKED' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : liveArmed ? 'ARMED' : readinessReady ? 'READY' : 'LOCKED'
   const activeConfirm = confirm

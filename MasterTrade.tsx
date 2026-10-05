@@ -7,8 +7,11 @@ import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual,
 import { PremiumWorkspace, useMemberAccess } from './premium-access'
 import {useKaisWorkspaceReaction} from './useKaisPageReactions'
 import { fetchWithTimeout } from './master-trade-request'
-import { analysisPrice, autoTradePresentation, masterLayoutV2Enabled, MASTER_LAYOUT_DESKTOP_WIDTH } from './master-trade-presentation'
+import { analysisPrice, analysisValue, autoTradePresentation, masterLayoutV2Enabled, MASTER_LAYOUT_DESKTOP_WIDTH, MASTER_MTF_INTERVALS } from './master-trade-presentation'
 import './master-trade-analysis-v2.css'
+import MasterTradeReference from './MasterTradeReference'
+import {useMasterMarketQuotes} from './useMasterMarketQuotes'
+import {MarketDataFailure, marketDataFailure, marketDataResponseError} from './master-trade-data-error'
 
 type TradeSide = 'LONG' | 'SHORT'
 type TradeHistoryRow = {
@@ -48,7 +51,7 @@ type AccountOrder = { symbol?: string; side?: string; type?: string; price?: num
 type AccountSnapshot = { wallet_balance?: number; available_balance?: number; margin_balance?: number; unrealized_pnl?: number; positions?: AccountPosition[]; open_orders?: AccountOrder[]; open_algo_orders?: AccountOrder[]; plans?: AccountPlan[]; last_checked?: string | null; connected?: boolean; last_error?: string | null; limits?: { max_open_positions?: number; max_leverage?: number; max_margin_usdt?: number } }
 type BackendRiskPreview = { estimated_stop_loss_usdt?: number; stop_distance_pct?: number; notional_usdt?: number; margin_usdt?: number; max_stop_distance_pct?: number; capped?: boolean }
 type PerformanceSnapshot = { total_trades: number; wins: number; losses: number; win_rate: number; total_profit: number; total_loss: number; net_profit: number; average_trade: number; best_trade: number; worst_trade: number; profit_factor: number | null; average_win: number | null; average_loss: number | null; losing_streak: number; max_drawdown: number; history_quality: string }
-type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[]; analysis: Analysis | null; mtf: MtfAnalysis[]; account: AccountSnapshot | null; currentPrice: number | null; priceUpdatedAt: string | null; marketUpdatedAt: string | null; accountUpdatedAt: string | null; marketError: string; accountError: string }
+type MasterTradeSnapshot = { symbol: string; timeframe: string; candles: Candle[]; analysis: Analysis | null; mtf: MtfAnalysis[]; mtfError?: string; account: AccountSnapshot | null; currentPrice: number | null; priceUpdatedAt: string | null; marketUpdatedAt: string | null; accountUpdatedAt: string | null; marketError: string; accountError: string }
 type AccountSyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'DATA_UNAVAILABLE'
 type TradeHistorySyncState = 'READY' | 'EMPTY' | 'STALE' | 'DISCONNECTED' | 'UNAVAILABLE'
 type CloseLifecycleState = 'IDLE' | 'CLOSING' | 'CLOSED' | 'CLOSE_FAILED' | 'HISTORY_SYNC_FAILED' | 'ACCOUNT_SYNC_FAILED' | 'SYNC_FAILED'
@@ -73,7 +76,7 @@ const fmtMarketPrice = (value: number | null | undefined) => {
 
 const fmtSigned = (value: number | null | undefined) => {
   if (value === null || value === undefined || !Number.isFinite(value)) return '--'
-  return `${value >= 0 ? '+' : ''}${value.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`
+  return `${value >= 0 ? '+' : ''}${analysisValue(value)}`
 }
 
 const fmtSignalAge = (seconds: number | null) => {
@@ -82,7 +85,7 @@ const fmtSignalAge = (seconds: number | null) => {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
 
-const MTF_INTERVALS = ['1m', '5m', '15m', '1h', '4h']
+const MTF_INTERVALS = MASTER_MTF_INTERVALS
 const MASTER_TRADE_TABS = [
   {id: 'analiz', label: 'Analiz', icon: BarChart3},
   {id: 'canli', label: 'Canlı İşlem', icon: Activity},
@@ -115,29 +118,27 @@ const navigateTab = (tab: MasterTradeTab) => {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
-  const responses = await Promise.all(MTF_INTERVALS.map(async timeframe => {
+  const results = await Promise.all(MTF_INTERVALS.map(async timeframe => {
     try {
-      return await fetchWithTimeout(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal }, 10000)
+      const response = await fetchWithTimeout(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal }, 10000)
+      if (!response.ok) throw await marketDataResponseError(response)
+      const analysis = await response.json() as Analysis
+      if (!analysis || typeof analysis.direction !== 'string' || !Number.isFinite(analysis.confidence)) throw new MarketDataFailure('backend', 'Backend geçerli analiz verisi döndürmedi.')
+      return {analysis: {...analysis, timeframe}, error: ''}
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError' && signal?.aborted) throw error
-      return null
+      return {analysis: null, error: `MTF ${timeframe}: ${marketDataFailure(error).message}`}
     }
   }))
-  const values = await Promise.all(responses.map(async (response, index) => {
-    if (!response || !response.ok) return null
-    try {
-      return { ...(await response.json() as Analysis), timeframe: MTF_INTERVALS[index] }
-    } catch {
-      return null
-    }
-  }))
-  return values.filter((item): item is MtfAnalysis => item !== null)
+  return {analyses: results.map(result => result.analysis).filter(item => item !== null), error: results.map(result => result.error).filter(Boolean).join(' · ')}
 }
 
 export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () => void; assistantSlotRef?: RefCallback<HTMLDivElement> }) {
   const {premium} = useMemberAccess()
   const layoutTab = useSyncExternalStore(subscribeTab, readTab, () => 'analiz' as MasterTradeTab)
-  const masterLayoutV2 = useSyncExternalStore(subscribePresentation, readPresentation, () => false)
+  const referenceEnabled = useSyncExternalStore(subscribePresentation, readPresentation, () => false)
+  const masterLayoutV2 = referenceEnabled && layoutTab === 'analiz'
+  const marketFeed = useMasterMarketQuotes(referenceEnabled)
   const decisionColumn = useRef<HTMLElement>(null)
   const shortcutPending = useRef(false)
   const reactionArea = useRef<HTMLElement>(null)
@@ -157,6 +158,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const [marketError, setMarketError] = useState('')
   const [interval, setInterval] = useState('15m')
   const [snapshot, setSnapshot] = useState<MasterTradeSnapshot | null>(null)
+  const [marketRefreshNonce, setMarketRefreshNonce] = useState(0)
   const [accountRefreshNonce, setAccountRefreshNonce] = useState(0)
   const accountRef = useRef<AccountSnapshot | null>(null)
   const historyRef = useRef<TradeHistoryRow[]>([])
@@ -181,9 +183,12 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const [lastHistorySyncAt, setLastHistorySyncAt] = useState<string | null>(null)
   const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null)
   const accountRefreshInFlight = useRef(false)
-  const candles = snapshot?.candles ?? []
-  const analysis = snapshot?.marketError || dataError ? null : snapshot?.analysis ?? null
-  const mtfAnalyses = snapshot?.mtf ?? []
+  const activeSnapshot = snapshot?.symbol === draft.market && snapshot.timeframe === interval ? snapshot : null
+  const selectedQuote = referenceEnabled ? marketFeed.rows.find(row => row.symbol === draft.market) : undefined
+  const currentPrice = selectedQuote?.price ?? activeSnapshot?.currentPrice ?? null
+  const candles = activeSnapshot?.candles ?? []
+  const analysis = activeSnapshot?.marketError || dataError ? null : activeSnapshot?.analysis ?? null
+  const mtfAnalyses = activeSnapshot?.mtf ?? []
   const account = snapshot?.account ?? accountRef.current
 
   useEffect(() => {
@@ -201,7 +206,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         if (!active) return
         setMarkets(items)
         const selected = items.find(item => item.symbol === draft.market)
-        if (selected) setSnapshot(current => current ? { ...current, currentPrice: selected.price, priceUpdatedAt: new Date().toISOString() } : current)
+        if (selected) setSnapshot(current => current?.symbol === draft.market ? { ...current, currentPrice: selected.price, priceUpdatedAt: new Date().toISOString() } : current)
         setMarketError('')
       } catch (error) {
         if (active && !(error instanceof Error && error.name === 'AbortError')) setMarketError('DATA STALE / DATA UNAVAILABLE')
@@ -246,7 +251,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     const controller = new AbortController()
     let firstLoad = true
     let active = true
-    setSnapshot(null)
+    setSnapshot(current => current?.symbol === draft.market && current.timeframe === interval && !current.marketError ? current : null)
+    setDataError('')
     let inFlight = false
     const refresh = async () => {
       if (inFlight) return
@@ -258,16 +264,21 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
           fetchWithTimeout(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }, 10000),
           fetchMtfAnalyses(draft.market, controller.signal),
         ])
-        if (!candleResponse.ok) throw new Error('Market data unavailable')
+        if (!candleResponse.ok) throw await marketDataResponseError(candleResponse)
+        if (!analysisResponse.ok) throw await marketDataResponseError(analysisResponse)
         const nextCandles = await candleResponse.json() as Candle[]
-        const nextAnalysis = analysisResponse.ok ? await analysisResponse.json() as Analysis : null
+        const nextAnalysis = await analysisResponse.json() as Analysis
         if (!active) return
-        if (!nextCandles.length || !nextAnalysis) throw new Error('Market data unavailable')
-        setSnapshot({ symbol: draft.market, timeframe: interval, candles: nextCandles, analysis: nextAnalysis, mtf: nextMtf, account: accountRef.current, currentPrice: nextCandles[nextCandles.length - 1]?.close ?? null, priceUpdatedAt: new Date().toISOString(), marketUpdatedAt: new Date().toISOString(), accountUpdatedAt: null, marketError: '', accountError: '' })
-        const latest = nextCandles[nextCandles.length - 1]
+        if (!Array.isArray(nextCandles) || !nextCandles.length || !nextCandles.every(candle => candle && [candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume].every(Number.isFinite))) throw new MarketDataFailure('backend', 'Bu sembol için yeterli veri yok (backend geçerli mum verisi döndürmedi).')
+        if (!nextAnalysis || typeof nextAnalysis.direction !== 'string' || !Number.isFinite(nextAnalysis.confidence)) throw new MarketDataFailure('backend', 'Bu sembol için yeterli veri yok (backend geçerli analiz verisi döndürmedi).')
+        setSnapshot({ symbol: draft.market, timeframe: interval, candles: nextCandles, analysis: nextAnalysis, mtf: nextMtf.analyses, mtfError: nextMtf.error, account: accountRef.current, currentPrice: nextCandles[nextCandles.length - 1]?.close ?? null, priceUpdatedAt: new Date().toISOString(), marketUpdatedAt: new Date().toISOString(), accountUpdatedAt: null, marketError: '', accountError: '' })
         setDataError('')
       } catch (error) {
-        if (active && error instanceof Error && error.name !== 'AbortError') { setDataError('DATA STALE / DATA UNAVAILABLE'); setSnapshot(current => current ? { ...current, marketError: 'DATA STALE / DATA UNAVAILABLE' } : current) }
+        if (active && !controller.signal.aborted) {
+          const failure = marketDataFailure(error)
+          setDataError(failure.message)
+          setSnapshot(current => current ? {...current, marketError: failure.message} : current)
+        }
       } finally {
         inFlight = false
         firstLoad = false
@@ -277,7 +288,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     void refresh()
     const timer = window.setInterval(() => void refresh(), 30000)
     return () => { active = false; controller.abort(); window.clearInterval(timer) }
-  }, [draft.market, interval])
+  }, [draft.market, interval, marketRefreshNonce])
 
   const refreshAccountData = async (forceLiveSnapshot = false) => {
     if (accountRefreshInFlight.current) return false
@@ -424,7 +435,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   }), [backendRiskPreview, backendRiskPreviewError])
 
   const tradeDecision = useMemo<TradeDecision>(() => buildTradeDecision(analysis, candles, mtfAnalyses), [analysis, candles, mtfAnalyses])
-  const triggerMonitor = useMemo<TriggerMonitor>(() => buildTriggerMonitor(tradeDecision, analysis, candles, triggerLifecycleRef.current, snapshot?.currentPrice ?? candles[candles.length - 1]?.close), [tradeDecision, analysis, candles, snapshot?.currentPrice])
+  const triggerMonitor = useMemo<TriggerMonitor>(() => buildTriggerMonitor(tradeDecision, analysis, candles, triggerLifecycleRef.current, currentPrice ?? candles[candles.length - 1]?.close), [tradeDecision, analysis, candles, currentPrice])
 
   useEffect(() => {
     triggerLifecycleRef.current = triggerMonitor.lifecycle
@@ -563,7 +574,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     const display = market.display.toUpperCase().replace(/[^A-Z0-9]/g, '')
     return market.symbol.includes(normalizedMarketQuery) || display.includes(normalizedMarketQuery) || market.symbol.replace(/USDT$/, '').includes(normalizedMarketQuery)
   })
-  const selectedMarket = markets.find(market => market.symbol === draft.market)
+  const selectedMarket = selectedQuote ?? markets.find(market => market.symbol === draft.market)
+  const selectedChange = selectedMarket?.change ?? null
   const latestCandle = candles[candles.length - 1]
   const chartCandles = candles.slice(-80)
   const chartValues = chartCandles.map(candle => candle.close)
@@ -682,10 +694,26 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     target.focus({preventScroll: true})
   }, [layoutTab])
 
+  const referenceAnalysis = masterLayoutV2 && layoutTab === 'analiz'
+  const referenceContent = referenceAnalysis ? <MasterTradeReference assistantSlotRef={assistantSlotRef}
+      symbol={draft.market} interval={interval} query={marketQuery} onQuery={setMarketQuery}
+      scores={scannerCandidates.map(candidate => ({symbol: candidate.symbol, direction: candidate.direction, score: candidate.final_decision_score}))}
+      marketFeed={marketFeed}
+      onMarket={selectMarket} onInterval={setInterval} onNavigate={navigateTab}
+      onAutoTrade={() => {shortcutPending.current = true; navigateTab('canli')}}
+      onRefresh={() => setMarketRefreshNonce(value => value + 1)} refreshing={dataLoading}
+      candles={candles} analysis={analysis} decision={tradeDecision} trigger={triggerMonitor} live={liveStatus}
+      price={currentPrice} change={selectedChange} volume={selectedMarket?.volume}
+      levelsVisible={showChartLevels} volumeVisible={showChartVolume}
+      onLevels={() => setShowChartLevels(value => !value)} onVolume={() => setShowChartVolume(value => !value)}
+      timeline={decisionTimeline} dataIssue={dataError} error={dataError || activeSnapshot?.mtfError || marketError}/> : null
+
   return (
     <MasterTradePresentation restored={masterLayoutV2 && layoutTab === 'analiz'}>
     <PremiumWorkspace>
-    <section ref={reactionArea} className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}${masterLayoutV2 ? ' masterLayoutV2' : ''}`} data-layout-tab={layoutTab}>
+    <section ref={reactionArea} className="masterTradePresentationHost">
+    {referenceContent}
+    <section hidden={referenceAnalysis} className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}${masterLayoutV2 ? ' masterLayoutV2' : ''}`} data-layout-tab={layoutTab}>
       <div className="masterTradeShell">
         <header className="masterTradeTerminalHeader">
           <div className="masterTradeTerminalIdentity">
@@ -693,7 +721,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             <strong>MASTER TRADE</strong>
           </div>
           <span className="masterTradeTerminalMode">LIVE OPERATIONS · CONTROLLED</span>
-          {assistantSlotRef && <div className="assistantMasterSlot" ref={assistantSlotRef}/>}
+          {assistantSlotRef && !referenceAnalysis && <div className="assistantMasterSlot" ref={assistantSlotRef}/>}
         </header>
         <div className="terminalStatusStrip" aria-label="Master Trade connection status" hidden={layoutTab !== 'baglanti'}>
           <span className="terminalStatusItem online"><i /> CONNECTED</span>
@@ -713,11 +741,11 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
           </div>
           <div className="masterTradeFocusPrice">
             <small>MARKET PRICE</small>
-            <strong><MasterTradeValue>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</MasterTradeValue></strong>
+            <strong><MasterTradeValue>{currentPrice !== null ? `$${fmtMarketPrice(currentPrice)}` : '--'}</MasterTradeValue></strong>
           </div>
           <div className="masterTradeFocusDecision">
             <small>SIGNAL / STATUS</small>
-            <strong>{masterTradeOffline ? 'DATA UNAVAILABLE' : tradeDecision.status}</strong>
+            <strong>{!analysis ? 'Analiz yok' : tradeDecision.status}</strong>
           </div>
           <div className="masterTradeFocusMetric">
             <small>{masterLayoutV2 ? 'Güven' : 'CONFIDENCE'}</small>
@@ -795,14 +823,14 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             <div className="chartPriceSummary">
               <div>
                 <span className="chartSymbol">{draft.market}</span>
-                <strong><MasterTradeValue>{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</MasterTradeValue></strong>
+                <strong><MasterTradeValue>{currentPrice !== null ? `$${fmtMarketPrice(currentPrice)}` : '--'}</MasterTradeValue></strong>
               </div>
-              <span className={`delta ${selectedMarket && selectedMarket.change >= 0 ? 'positive' : 'negative'}`}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</span>
+              <span className={`delta ${selectedChange === null ? '' : selectedChange >= 0 ? 'positive' : 'negative'}`}>{selectedChange === null ? '--' : `${selectedChange >= 0 ? '+' : ''}${selectedChange.toFixed(2)}%`}</span>
             </div>
 
             <div className="marketStatsStrip">
-              <span><small>24H CHANGE</small><b className={selectedMarket && selectedMarket.change < 0 ? 'negative' : 'positive'}>{selectedMarket ? `${selectedMarket.change >= 0 ? '+' : ''}${selectedMarket.change.toFixed(2)}%` : '--'}</b></span>
-              <span><small>VOLUME</small><b><MasterTradeValue>{selectedMarket?.volume ? fmtCompact(selectedMarket.volume) : '--'}</MasterTradeValue></b></span>
+              <span><small>24H CHANGE</small><b className={selectedChange === null ? '' : selectedChange < 0 ? 'negative' : 'positive'}>{selectedChange === null ? '--' : `${selectedChange >= 0 ? '+' : ''}${selectedChange.toFixed(2)}%`}</b></span>
+              <span><small>VOLUME</small><b><MasterTradeValue>{fmtCompact(selectedMarket?.volume)}</MasterTradeValue></b></span>
               <span><small>HIGH</small><b><MasterTradeValue>{chartCandles.length ? fmtMarketPrice(Math.max(...chartCandles.map(candle => candle.high))) : '--'}</MasterTradeValue></b></span>
               <span><small>LOW</small><b><MasterTradeValue>{chartCandles.length ? fmtMarketPrice(Math.min(...chartCandles.map(candle => candle.low))) : '--'}</MasterTradeValue></b></span>
               <span><small>DATA HEALTH</small><b className={dataHealth === 'LIVE' ? 'positive' : dataHealth === 'STALE' ? 'warning' : 'negative'}>{dataHealth}</b></span>
@@ -822,11 +850,11 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
                 <g className="chartGrid">{[...Array(7)].map((_, index) => <line key={`h-${index}`} x1="0" x2="760" y1={22 + index * 35} y2={22 + index * 35} />)}{[...Array(9)].map((_, index) => <line key={`v-${index}`} x1={index * 95} x2={index * 95} y1="0" y2="260" />)}</g>
                 {chartCandles.map((candle, index) => { const x = chartX(index); const bodyTop = chartY(Math.max(candle.open, candle.close)); const bodyBottom = chartY(Math.min(candle.open, candle.close)); const bodyHeight = Math.max(2, bodyBottom - bodyTop); const bullish = candle.close >= candle.open; const candleWidth = Math.max(2, Math.min(10, 700 / chartCandles.length)); return <g key={`${candle.time}-${index}`} className={bullish ? 'candle bullish' : 'candle bearish'}><line x1={x} x2={x} y1={chartY(candle.high)} y2={chartY(candle.low)} /><rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} /></g> })}
                 {showChartVolume && chartCandles.map((candle, index) => { const x = chartX(index); const height = candle.volume / volumeMax * 28; return <rect key={`vol-${candle.time}`} className={`chartVolume ${candle.close >= candle.open ? 'up' : 'down'}`} x={x - 2} y={273 - height} width="4" height={height} /> })}
-                <MasterTradeChartLabels lines={premium && showChartLevels ? positionedLevelLines : []} currentPrice={snapshot?.currentPrice} toY={chartY} format={fmtMarketPrice}/>
+                <MasterTradeChartLabels lines={premium && showChartLevels ? positionedLevelLines : []} currentPrice={currentPrice} toY={chartY} format={fmtMarketPrice}/>
                 {chartHoverIndex !== null && <g className="chartCrosshair"><line x1={chartX(chartHoverIndex)} x2={chartX(chartHoverIndex)} y1="0" y2="260" /><circle cx={chartX(chartHoverIndex)} cy={chartY(chartCandles[chartHoverIndex].close)} r="3" /></g>}
               </svg>}
-              {!!chartCandles.length && <MasterTradeChartLabels lines={premium && showChartLevels ? positionedLevelLines : []} currentPrice={snapshot?.currentPrice} toY={chartY} format={fmtMarketPrice} pills/>}
-              <div className="chartBadge">{snapshot?.currentPrice !== null && snapshot?.currentPrice !== undefined ? `$${fmtMarketPrice(snapshot.currentPrice)}` : '--'}</div>
+              {!!chartCandles.length && <MasterTradeChartLabels lines={premium && showChartLevels ? positionedLevelLines : []} currentPrice={currentPrice} toY={chartY} format={fmtMarketPrice} pills/>}
+              <div className="chartBadge">{currentPrice !== null ? `$${fmtMarketPrice(currentPrice)}` : '--'}</div>
             </div>
 
             <div className="indicatorGrid">
@@ -844,12 +872,12 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             <section className={`tradeDecisionPanel decision-${tradeDecision.status.toLowerCase().replaceAll(' ', '-')}`} aria-label="Trade decision analysis">
               <div className="masterTradeFinalCard">
               <header className="tradeDecisionHeader">
-                <div><span className="panelEyebrow">FINAL DECISION</span><h3>{tradeDecision.status}</h3><small>{draft.market} · {interval} · {tradeDecision.marketRegime}</small></div>
+                <div><span className="panelEyebrow">FINAL DECISION</span><h3>{analysis ? tradeDecision.status : 'Analiz yok'}</h3><small>{draft.market} · {interval} · {tradeDecision.marketRegime}</small></div>
                 <div className="decisionScore"><strong><MasterTradeValue>{fmtDecisionNumber(tradeDecision.opportunityScore)}</MasterTradeValue></strong><span>/ 100<br />OPPORTUNITY</span></div>
               </header>
               <div className="decisionMetricGrid">
                 <div><small>{masterLayoutV2 ? 'Güven' : 'CONFIDENCE'}</small><strong><MasterTradeValue>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</MasterTradeValue></strong></div>
-                <div><small>DIRECTION</small><strong><MasterTradeValue>{tradeDecision.direction}</MasterTradeValue></strong></div>
+                <div><small>DIRECTION</small><strong><MasterTradeValue>{analysis ? tradeDecision.direction : '--'}</MasterTradeValue></strong></div>
                 <div><small>SIGNAL STRENGTH</small><strong><MasterTradeValue>{tradeDecision.signalStrength || '--'}</MasterTradeValue></strong></div>
                 <div><small>ENTRY QUALITY</small><strong><MasterTradeValue>{tradeDecision.entryQuality || '--'}</MasterTradeValue></strong></div>
                 <div><small>RISK / REWARD</small><strong><MasterTradeValue>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</MasterTradeValue></strong></div>
@@ -901,12 +929,12 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
                 <span className="panelEyebrow">MARKET ANALYSIS</span>
                 <h3>{draft.market}</h3>
               </div>
-              <span className="marketAnalysisState">{tradeDecision.status}</span>
+              <span className="marketAnalysisState">{analysis ? tradeDecision.status : 'Analiz yok'}</span>
             </summary>
             <div className="marketAnalysisDecision">
               <span>MARKET REGIME</span>
               <strong>{tradeDecision.marketRegime || '--'}</strong>
-              <em>{tradeDecision.direction || '--'} · {tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`} {masterLayoutV2 ? 'Güven' : 'CONFIDENCE'}</em>
+              <em>{analysis ? tradeDecision.direction : '--'} · {tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`} {masterLayoutV2 ? 'Güven' : 'CONFIDENCE'}</em>
             </div>
             <div className="marketAnalysisMetrics">
               <div><small>TREND</small><strong>{analysis?.trend || '--'}</strong></div>
@@ -924,7 +952,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             </div>
             <div className="marketAnalysisFooter">
               <span>DECISION</span>
-              <strong>{tradeDecision.status || '--'}</strong>
+              <strong>{analysis ? tradeDecision.status : 'Analiz yok'}</strong>
               <em>{tradeDecision.signalStrength || '--'}</em>
             </div>
           </details>
@@ -1216,6 +1244,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         </div>
       )}
 
+    </section>
     </section>
     </PremiumWorkspace>
     </MasterTradePresentation>

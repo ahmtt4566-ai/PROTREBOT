@@ -31,6 +31,7 @@ from .browser_security import (
 from .google_oauth import CALLBACK_PATH as GOOGLE_CALLBACK_PATH, callback_query as google_callback_query, router as google_oauth_router
 from .premium_access import public_projection, requires_premium
 from .binance_rate_limit import BINANCE_RATE_LIMITER
+from .market_universe import MarketUniverseCache, active_usdt_perpetual
 from .exchange_connections import (
     clear_vault_cache,
     ensure_exchange_vault,
@@ -1592,7 +1593,13 @@ async def web_access_logout(request: Request):
 
 
 @app.get("/api/markets")
-async def markets(limit: int = Query(500, ge=1, le=500)):
+async def markets(limit: int = Query(500, ge=1, le=500), all: bool = False):
+    if all:
+        cache = getattr(app.state, "market_universe_cache", None)
+        if cache is None:
+            cache = app.state.market_universe_cache = MarketUniverseCache()
+        rows, stale = await cache.get(lambda path: market_data_request(app, path))
+        return JSONResponse(rows, headers={"X-Market-Stale": "1" if stale else "0", "Cache-Control": "no-store"})
     return await _markets(limit=limit)
 
 
@@ -1617,7 +1624,7 @@ async def _markets(limit: int, timing: dict[str, float] | None = None):
     result = []
     for contract in exchange_response.json().get("symbols", []):
         symbol = contract.get("symbol", "")
-        if contract.get("status") != "TRADING" or contract.get("contractType") != "PERPETUAL" or contract.get("quoteAsset") != "USDT":
+        if not active_usdt_perpetual(contract):
             continue
         ticker = tickers.get(symbol)
         if not ticker:

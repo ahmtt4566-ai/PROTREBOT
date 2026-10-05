@@ -4,6 +4,7 @@
   "version": "28.0.0",
   "type": "module",
   "scripts": {
+    "prebuild": "node ../tools/run-coin-logo-refresh.mjs",
     "dev": "vite",
     "build": "node -e \"const path=require('path');const packagePath=require.resolve('typescript/package.json');process.argv=['node','tsc',...process.argv.slice(1)];require(path.join(path.dirname(packagePath),'bin/tsc'))\" -- -b && node --input-type=module -e \"import {createRequire} from 'node:module';import {dirname,join} from 'node:path';import {pathToFileURL} from 'node:url';const require=createRequire(import.meta.url);const packagePath=require.resolve('vite/package.json');process.argv=['node','vite',...process.argv.slice(1)];await import(pathToFileURL(join(dirname(packagePath),'bin/vite.js')).href)\" -- build",
     "preview": "vite preview",

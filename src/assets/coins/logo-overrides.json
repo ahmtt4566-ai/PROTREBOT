@@ -1,0 +1,9 @@
+{
+  "BTC": {"asset": "BTC", "sourceId": "bitcoin"},
+  "ETH": {"asset": "ETH", "sourceId": "ethereum"},
+  "PEPE": {"asset": "PEPE", "sourceId": "pepe"},
+  "SHIB": {"asset": "SHIB", "sourceId": "shiba-inu"},
+  "IOTA": {"asset": "IOTA", "sourceId": "iota", "legacyAsset": "MIOTA"},
+  "BTCDOM": {"asset": "BTC", "sourceId": "bitcoin", "note": "Bitcoin dominance index; BTC logo is a visual proxy, not a BTC pair."},
+  "LUNA2": {"asset": "LUNA", "legacyAsset": "LUNA2", "sourceId": "terra-luna-2"}
+}

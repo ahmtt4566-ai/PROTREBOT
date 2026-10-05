@@ -1,0 +1,55 @@
+#root > main.v26App.workspaceRoute.masterTradeRoute {
+  .masterReferenceAnalysis .refMarketUniverse.refMarkets { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow: hidden; }
+  .masterReferenceAnalysis .refMarketUniverse .refMarketSearch { flex: 0 0 auto; margin: 0; padding: 12px; }
+  .masterReferenceAnalysis .refMarketUniverse .refMarketSearch h2 { font-size: 12px; gap: 5px; }
+  .masterReferenceAnalysis .refMarketUniverse .refMarketSearch h2 > span { font-size: 11px; white-space: nowrap; color: #9cabb2; }
+  .masterReferenceAnalysis .refMarketUniverse .refMarketSearch > label { margin-top: 8px; }
+  .masterReferenceAnalysis .refMarketUniverse .refMarketFilters { display: flex; gap: 4px; margin-top: 8px; overflow-x: auto; scrollbar-width: thin; }
+  .masterReferenceAnalysis .refMarketFilters > button { flex-shrink: 0; padding: 5px 6px; border: 1px solid rgba(255,255,255,.08); border-radius: 5px; color: #aebdc3; font-size: 11px; background: transparent; }
+  .masterReferenceAnalysis .refMarketFilters > button[aria-pressed="true"] { color: #b5dfd8; background: rgba(94,148,140,.1); }
+  .masterReferenceAnalysis .refMarketUniverse label.refMarketSort { display: flex; justify-content: space-between; padding: 0; border: 0; background: none; color: #8da1aa; font-size: 11px; }
+  .masterReferenceAnalysis .refMarketSort select { border: 1px solid rgba(255,255,255,.08); padding: 4px 6px; border-radius: 5px; color: #c8d9df; background: #10181c; font-size: 11px; }
+  .masterReferenceAnalysis .refMarketDataNotice { color: #dac78c; font-size: 11px; line-height: 1.5; margin-top: 8px; }
+  .masterReferenceAnalysis .refMarketUniverse .refVirtualWatchlist { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px; overflow: hidden; }
+  .masterReferenceAnalysis .refMarketUniverse .refVirtualWatchlist > h2 { display: flex; flex-shrink: 0; margin: 0; padding: 5px 2px; font-size: 11px; }
+  .masterReferenceAnalysis .refVirtualWatchlist > h2 > span { color: #8da1aa; font-size: 11px; }
+  .masterReferenceAnalysis .refMarketViewport { flex: 1; min-height: 0; position: relative; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; contain: strict; }
+  .masterReferenceAnalysis .refMarketCanvas { position: relative; min-width: 0; }
+  .masterReferenceAnalysis .refMarketRow { position: absolute; height: 52px; display: flex; align-items: center; gap: 1px; border-radius: 5px; padding: 0 2px; box-sizing: border-box; contain: layout style paint; }
+  .masterReferenceAnalysis .refMarketRow.selected { background: rgba(28,78,73,.16); }
+  .masterReferenceAnalysis .refMarketRow:hover { background: rgba(255,255,255,.025); }
+  .masterReferenceAnalysis .refMarketRow .refMarketSelect { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; align-items: center; gap: 5px; flex: 1; min-width: 0; height: 52px; padding: 0; border: 0; color: #dce7e9; background: transparent; text-align: left; }
+  .masterReferenceAnalysis .refMarketRow .refMarketIdentity { display: grid; gap: 0; min-width: 0; text-align: left; line-height: 14px; }
+  .masterReferenceAnalysis .refMarketIdentity b { font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .masterReferenceAnalysis .refMarketIdentity small { font-size: 11px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; color: #8da1aa; }
+  .masterReferenceAnalysis .refMarketIdentity span.refMarketScore { display: flex; align-items: center; gap: 4px; height: 14px; font-size: 11px; color: #75878e; }
+  .masterReferenceAnalysis .refMarketScore i { font-size: 11px; font-style: normal; line-height: 12px; padding: 0 3px; border-radius: 3px; background: rgba(255,255,255,.035); }
+  .masterReferenceAnalysis .refMarketScore em { font-size: 11px; font-style: normal; color: #afc0c7; font-variant-numeric: tabular-nums; }
+  .masterReferenceAnalysis .refMarketRow .refMarketPrice { display: grid; gap: 2px; text-align: right; min-width: 0; max-width: 108px; font-variant-numeric: tabular-nums; }
+  .masterReferenceAnalysis .refMarketPrice strong { font-size: 12px; line-height: 14px; overflow-wrap: anywhere; }
+  .masterReferenceAnalysis .refMarketPrice small { font-size: 11px; line-height: 14px; }
+  .masterReferenceAnalysis .refMarketFavorite { display: grid; place-items: center; flex: 0 0 18px; width: 18px; height: 24px; padding: 0; border: 0; background: none; color: #71848d; }
+  .masterReferenceAnalysis .refMarketFavorite svg { width: 12px; height: 12px; }
+  .masterReferenceAnalysis .refMarketFavorite[aria-pressed="true"] { color: #e8c568; }
+  .masterReferenceAnalysis .refMarketFavorite[aria-pressed="true"] svg { fill: rgba(232,197,104,.15); }
+  .masterReferenceAnalysis .refMarketFavorite:disabled { opacity: .4; }
+  .masterReferenceAnalysis .refMarketEmpty { color: #8da1aa; padding: 16px 4px; font-size: 13px; }
+  .masterReferenceAnalysis .refMarketUniverse button:focus-visible,
+  .masterReferenceAnalysis .refMarketUniverse input:focus-visible,
+  .masterReferenceAnalysis .refMarketUniverse select:focus-visible,
+  .masterReferenceAnalysis .refMarketViewport:focus-visible { outline: 2px solid #90d2dc; outline-offset: -2px; }
+}
+@media (min-width: 1280px) {
+  #root > main.v26App.workspaceRoute.masterTradeRoute .masterReferenceAnalysis .refWorkspace { grid-template-columns: minmax(270px,18%) minmax(0,1fr) minmax(286px,22%); }
+  #root > main.v26App.workspaceRoute.masterTradeRoute .masterReferenceAnalysis .refMarketUniverse .refMarketFilters { flex-wrap: wrap; overflow-x: hidden; }
+  #root > main.v26App.workspaceRoute.masterTradeRoute .masterReferenceAnalysis .refIndicatorGrid > article:nth-child(2) > strong { font-size: clamp(14px,1vw,20px); }
+}
+@media (max-width: 1279px) {
+  #root > main.v26App.workspaceRoute.masterTradeRoute {
+    .masterReferenceAnalysis .refMarketUniverse.refMarkets { height: auto; width: 100%; }
+    .masterReferenceAnalysis .refMarketUniverse .refMarketSearch { width: 100%; }
+    .masterReferenceAnalysis .refMarketUniverse .refVirtualWatchlist { display: flex !important; flex: 0 0 auto; width: 100%; height: 98px; }
+    .masterReferenceAnalysis .refMarketUniverse .refMarketViewport { overflow-x: auto; overflow-y: hidden; min-height: 54px; }
+    .masterReferenceAnalysis .refMarketFilters { flex-wrap: nowrap; }
+  }
+}

@@ -1,0 +1,161 @@
+#root > main.v26App.workspaceRoute.masterTradeRoute {
+  .masterReferenceAnalysis .refWorkspace .refRight > section.refCard {
+    border-radius: 12px !important;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,.08);
+    background: rgba(255,255,255,.03);
+  }
+  .masterReferenceAnalysis .refAccordions {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    --advisory-tone: #9cabb2;
+  }
+  .masterReferenceAnalysis .refAccordions [data-tone="positive"] { --advisory-tone: #64e4b5; }
+  .masterReferenceAnalysis .refAccordions [data-tone="negative"] { --advisory-tone: #ff8297; }
+  .masterReferenceAnalysis .refAccordions [data-tone="warning"] { --advisory-tone: #e8c568; }
+  .masterReferenceAnalysis .refAccordions [data-tone="neutral"] { --advisory-tone: #9cabb2; }
+  .masterReferenceAnalysis .refAccordions .refAdvisoryAccordion {
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    interpolate-size: allow-keywords;
+  }
+  .masterReferenceAnalysis .refAdvisoryAccordion::details-content {
+    height: 0;
+    overflow: clip;
+    transition: height 180ms ease, content-visibility 180ms allow-discrete;
+  }
+  .masterReferenceAnalysis .refAdvisoryAccordion[open]::details-content { height: auto; }
+  .masterReferenceAnalysis .refAccordions .refAdvisoryAccordion > summary {
+    height: 50px;
+    padding: 0 2px;
+    gap: 8px;
+    border-radius: 6px;
+    transition: background-color 180ms ease;
+  }
+  .masterReferenceAnalysis .refAdvisoryAccordion > summary:hover { background: rgba(255,255,255,.025); }
+  .masterReferenceAnalysis .refAdvisoryAccordion > summary:focus-visible,
+  .masterReferenceAnalysis .refCaseTabs > button:focus-visible {
+    outline: 2px solid #90d2dc;
+    outline-offset: 2px;
+  }
+  .masterReferenceAnalysis .refAccordions .refAccordionIcon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    color: var(--advisory-tone);
+    background: color-mix(in srgb, var(--advisory-tone) 9%, transparent);
+  }
+  .masterReferenceAnalysis .refAccordions .refAccordionIcon > svg { width: 14px; height: 14px; color: inherit; }
+  .masterReferenceAnalysis .refAccordions .refAccordionCopy { gap: 2px; }
+  .masterReferenceAnalysis .refAccordionCopy > span { color: #dce7e9; font-size: 12px; font-weight: 600; }
+  .masterReferenceAnalysis .refAdvisoryAccordion .refAccordionChevron {
+    flex: 0 0 12px;
+    width: 12px;
+    height: 12px;
+    transition: transform 180ms ease;
+  }
+  .masterReferenceAnalysis .refAdvisoryAccordion[open] .refAccordionChevron { transform: rotate(180deg); }
+  .masterReferenceAnalysis .refAccordions .refStatusChip,
+  .masterReferenceAnalysis .refCheckCounts > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-shrink: 0;
+    padding: 3px 6px;
+    border: 1px solid color-mix(in srgb, var(--advisory-tone) 18%, transparent);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--advisory-tone) 7%, transparent);
+    color: var(--advisory-tone);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .masterReferenceAnalysis .refStatusChip > svg { width: 12px; height: 12px; }
+  .masterReferenceAnalysis .refAdvisoryBody {
+    padding: 12px;
+    margin-bottom: 10px;
+    border-left: 2px solid color-mix(in srgb, var(--advisory-tone) 65%, transparent);
+    color: #dce7e9;
+    font-size: 13px;
+    line-height: 1.5;
+    min-width: 0;
+  }
+  .masterReferenceAnalysis .refConditionProgress { display: flex; gap: 4px; height: 3px; margin-bottom: 12px; }
+  .masterReferenceAnalysis .refConditionProgress > i { flex: 1; border-radius: 2px; background: var(--advisory-tone); opacity: .7; }
+  .masterReferenceAnalysis .refConditionList,
+  .masterReferenceAnalysis .refCaseItems { display: grid; gap: 7px; }
+  .masterReferenceAnalysis .refConditionRow {
+    display: grid;
+    grid-template-columns: 22px minmax(0,1fr) auto;
+    gap: 6px;
+    align-items: center;
+    min-height: 42px;
+    padding: 6px 7px;
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 6px;
+    background: rgba(255,255,255,.015);
+  }
+  .masterReferenceAnalysis .refConditionRow[data-tone="negative"] { background: rgba(255,80,105,.04); border-color: rgba(255,80,105,.12); }
+  .masterReferenceAnalysis .refConditionIcon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--advisory-tone); background: color-mix(in srgb, var(--advisory-tone) 9%, transparent); }
+  .masterReferenceAnalysis .refConditionIcon > svg { width: 12px; height: 12px; }
+  .masterReferenceAnalysis .refConditionName { color: #dce7e9; font-size: 13px; overflow-wrap: anywhere; }
+  .masterReferenceAnalysis .refConditionValue { padding: 3px 6px; max-width: 112px; border-radius: 4px; background: rgba(255,255,255,.04); color: #c5d6d9; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .masterReferenceAnalysis .refInvalidationGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .masterReferenceAnalysis .refInvalidationGrid > div { display: flex; align-items: flex-start; gap: 6px; padding: 8px; border: 1px solid rgba(232,197,104,.14); border-radius: 6px; color: #d9c68e; background: rgba(232,197,104,.035); font-size: 13px; overflow-wrap: anywhere; }
+  .masterReferenceAnalysis .refInvalidationGrid svg { width: 13px; height: 13px; margin-top: 3px; flex-shrink: 0; }
+  .masterReferenceAnalysis .refDecisionTimeline { display: grid; gap: 16px; list-style: none; margin: 0; padding: 0; }
+  .masterReferenceAnalysis .refDecisionTimeline > li { position: relative; display: grid; gap: 3px; padding-left: 20px; font-size: 13px; overflow-wrap: anywhere; }
+  .masterReferenceAnalysis .refDecisionTimeline > li::before { content: ''; position: absolute; left: 2px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: #566971; z-index: 1; }
+  .masterReferenceAnalysis .refDecisionTimeline > li[data-latest="true"]::before { background: #64e4b5; box-shadow: 0 0 0 3px rgba(100,228,181,.08); }
+  .masterReferenceAnalysis .refDecisionTimeline > li:not(:last-child)::after { content: ''; position: absolute; left: 5px; top: 12px; bottom: -21px; width: 1px; background: rgba(255,255,255,.12); }
+  .masterReferenceAnalysis .refDecisionTimeline time { color: #8da1aa; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .masterReferenceAnalysis .refCheckCounts { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+  .masterReferenceAnalysis .refCheckList { display: grid; gap: 8px; }
+  .masterReferenceAnalysis .refCheckRow { display: flex; align-items: center; gap: 7px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .masterReferenceAnalysis .refCheckRow > div { flex: 1; min-width: 0; display: grid; gap: 3px; }
+  .masterReferenceAnalysis .refCheckRow strong { color: #dce7e9; font-family: inherit; font-size: 13px; font-weight: 500; }
+  .masterReferenceAnalysis .refCheckDetail { color: #8da1aa; font-size: 12px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; overflow-wrap: anywhere; line-height: 17px; }
+  .masterReferenceAnalysis .refNoOrder { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; margin-top: 12px; border: 1px solid rgba(144,178,193,.16); border-radius: 5px; background: rgba(144,178,193,.035); color: #b0c7d0; font-size: 11px; }
+  .masterReferenceAnalysis .refNoOrder > svg { width: 13px; height: 13px; }
+  .masterReferenceAnalysis .refScoreTotal { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .masterReferenceAnalysis .refScoreTotal > svg { width: 54px; height: 54px; flex-shrink: 0; transform: rotate(-90deg); }
+  .masterReferenceAnalysis .refScoreTotal circle { fill: none; stroke-width: 3; }
+  .masterReferenceAnalysis .refScoreTrack { stroke: rgba(255,255,255,.08); }
+  .masterReferenceAnalysis .refScoreRing { stroke: var(--advisory-tone); stroke-linecap: round; }
+  .masterReferenceAnalysis .refScoreTotal strong { font-family: inherit; font-size: 28px; font-variant-numeric: tabular-nums; font-weight: 600; color: #e3eeef; }
+  .masterReferenceAnalysis .refScoreTotal span { margin-left: 4px; font-size: 13px; color: #8da1aa; }
+  .masterReferenceAnalysis .refScoreGrid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .masterReferenceAnalysis .refScoreGrid > div { display: grid; gap: 7px; padding: 10px; border: 1px solid rgba(255,255,255,.06); border-radius: 6px; background: rgba(255,255,255,.015); }
+  .masterReferenceAnalysis .refScoreGrid small { font-size: 11px; color: #8da1aa; text-transform: uppercase; }
+  .masterReferenceAnalysis .refScoreGrid strong { font-family: inherit; font-size: 18px; font-variant-numeric: tabular-nums; color: #e3eeef; font-weight: 600; }
+  .masterReferenceAnalysis .refScoreBar { height: 3px; background: rgba(255,255,255,.08); border-radius: 2px; }
+  .masterReferenceAnalysis .refScoreBar > i { display: block; height: 100%; border-radius: inherit; background: var(--advisory-tone); }
+  .masterReferenceAnalysis .refCaseTabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 4px; margin-bottom: 12px; padding: 3px; border-radius: 7px; border: 1px solid rgba(255,255,255,.08); }
+  .masterReferenceAnalysis .refCaseTabs > button { min-width: 0; border: 0; border-radius: 4px; padding: 7px; color: var(--advisory-tone); background: transparent; font-size: 12px; font-weight: 600; }
+  .masterReferenceAnalysis .refCaseTabs > button[aria-selected="true"] { background: color-mix(in srgb, var(--advisory-tone) 15%, transparent); }
+  .masterReferenceAnalysis .refCasePanel[hidden] { display: none !important; }
+  .masterReferenceAnalysis .refAccordions .refAdvisoryBody .refCasePanel,
+  .masterReferenceAnalysis .refAccordions .refAdvisoryBody .refCaseRisks { border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+  .masterReferenceAnalysis .refCaseItem { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
+  .masterReferenceAnalysis .refCaseItem .refConditionIcon { flex-shrink: 0; }
+  .masterReferenceAnalysis .refCaseItem > span:last-child { color: #dce7e9; overflow-wrap: anywhere; }
+  .masterReferenceAnalysis .refCaseRisks { margin-top: 14px; }
+  .masterReferenceAnalysis .refCaseRisks h3 { margin: 0 0 8px; color: #b9aa7d; font-size: 12px; text-transform: uppercase; }
+  .masterReferenceAnalysis .refCaseRisks > div { display: flex; flex-wrap: wrap; gap: 6px; }
+  .masterReferenceAnalysis .refCaseRisks span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 5px; border: 1px solid rgba(232,197,104,.14); background: rgba(232,197,104,.035); color: #d9c68e; font-size: 12px; }
+  .masterReferenceAnalysis .refCaseRisks svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .masterReferenceAnalysis .refAdvisoryEmpty { display: grid; gap: 9px; padding: 10px 0; opacity: .5; }
+  .masterReferenceAnalysis .refAdvisoryEmpty > span { height: 10px; border-radius: 3px; background: rgba(255,255,255,.09); }
+  .masterReferenceAnalysis .refAdvisoryEmpty > span:nth-child(2) { width: 80%; }
+  .masterReferenceAnalysis .refAdvisoryEmpty > span:nth-child(3) { width: 58%; }
+  .masterReferenceAnalysis .refInlinePlaceholder { display: inline-block; width: 40px; height: 10px; border-radius: 3px; background: rgba(255,255,255,.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #root > main.v26App.workspaceRoute.masterTradeRoute .masterReferenceAnalysis .refAccordions .refAdvisoryAccordion::details-content,
+  #root > main.v26App.workspaceRoute.masterTradeRoute .masterReferenceAnalysis .refAccordions .refAdvisoryAccordion > summary,
+  #root > main.v26App.workspaceRoute.masterTradeRoute .masterReferenceAnalysis .refAccordions .refAdvisoryAccordion .refAccordionChevron { transition: none; }
+}

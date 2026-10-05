@@ -183,15 +183,150 @@ genişliğe sığar. Diğer çalışma ekranlarındaki logo boyutu değişmez.
 
 ## Master Trade / Canlı İşlem arayüzü
 
-Masaüstü Analiz restorasyonu, varsayılanı kapalı `masterLayoutV2` sunum bayrağı
-ile denenebilir: `/master-trade?masterLayoutV2=1` (en az 1200 px).
-Bayrak yokken veya dar ekranda mevcut görünüm korunur. Sekme geçişleri bayrağı
-korur; karar/skor hesapları, API çağrıları ve işlem güvenlik akışları değişmez.
+Referans tasarımlı Analiz görünümü `/master-trade?tab=analiz` için varsayılandır.
+`masterLayoutV2=0` önceki görünümü açıkça seçer. 1280 px ve üzerinde üç kolon,
+768–1279 px arasında üstte yatay piyasa şeridi, daha dar ekranlarda tek kolon
+ve yatay gösterge kartları kullanılır. Sekme geçişleri parametreleri korur;
+karar/skor hesapları, API çağrıları ve işlem güvenlik akışları değişmez.
 Sağ karar paneli viewport'a göre tek dikey scroll kullanır. Auto Trade kısayolu
 yalnız Canlı İşlem sekmesine geçip mevcut Auto Trade bölümünü odaklar;
 otomasyonu açmaz, onay/2FA/ARM kapılarını atlamaz ve istek göndermez.
 Analiz ekranı mevcut LIVE snapshot'ını gösterir; Demo durumu varsayılmaz veya
-ek istekle sorgulanmaz. Durum bilinmiyorsa `—` gösterilir.
+ek istekle sorgulanmaz. Durum bilinmiyorsa `—` gösterilir. Auto Trade toggle'ı
+salt okunur durum/navigasyon sunumudur; eksik güvenlik kapılarında kilitli ve
+devre dışıdır. Limit/Piyasa Analiz'den emir göndermez, kilit bilgisi gösterir.
+Yenile mevcut hesap yenileme akışını kullanır. Test/önizleme verileri yalnız
+test yardımcılarında bulunur: 200 mum, yaklaşık %1–2 fiyat aralığı ve birbirinden
+%0,3–1,5 uzak seviyeler; ürün veri akışı bunları içe aktarmaz.
+
+Masaüstünde sol liste ve sağ rapor kendi içinde kayar; orta kolon viewport'u
+doldurur, grafik kartı en az 460 px olur. Grafik ekseni yalnız görünür mumların
+high/low aralığını üst ve altta %8 payla kullanır; entry/TP/SL veya güncel fiyat
+ekseni genişletmez. Aralık dışı seviyeler gerçek değerleriyle oklu kenar pill'i
+olarak kalır. Seviye pill'leri aralanır ve yakındaki eksen rakamları gizlenir.
+Hacim alt %15 ile sınırlıdır; dar grafikte gösterilen mum sayısı okunur gövde
+genişliğine göre uyarlanır. Bunlar yalnız çizim kurallarıdır; analiz hesapları
+ve mum/veri istekleri değişmez.
+
+Coin logoları `cryptocurrency-icons` 0.18.1 paketinin CC0-1.0 (CC0 1.0 Universal)
+asset'lerinden alınmıştır. Paket yalnız devDependency'dir; 483 yerel renkli SVG
+[`src/assets/coins/`](src/assets/coins/) altında lisansın tam metniyle birlikte
+tutulur. Ortak `CoinIcon` bileşeni Vite'ın lazy glob import'larını kullanır;
+yalnız monte edilen satırların SVG modülleri aynı kaynaktan yüklenir, dış CDN
+yoktur. Bilinmeyen base asset tutarlı renkli harf avatarıyla gösterilir.
+1000/10000/1000000/1M önekleri yalnız logo eşlemesinde kaldırılır; 1INCH korunur,
+sembol/işlem seçim mantığı değişmez.
+
+Güncel logo kaynağı [Web3 Icons](https://github.com/0xa3k5/web3icons),
+`@web3icons/core` 4.0.58'dir (MIT, Copyright (c) 2024 0xa3k5).
+Tam lisans [`LICENSE-web3icons.txt`](src/assets/coins/LICENSE-web3icons.txt)
+içinde bulunur. Logolar ilgili projelerin ticari markalarıdır; bu uygulama
+projelerle ortaklık veya onay iddiasında bulunmaz. Kaynak revizyonu, kaynak
+tarihi ve indirme tarihi [`logo-manifest.json`](src/assets/coins/logo-manifest.json)
+içinde kaydedilir. İlk güncel veri ölçümü 525 gerçek USDT perpetual sembolünde
+228 logo / 297 harf fallback'idir; 218 optimize SVG yerel olarak üretilmiştir.
+
+[`tools/fetch-coin-logos.mjs`](tools/fetch-coin-logos.mjs) iki frontend build'inde
+çalışır. Sembol evreni Binance'in herkese açık exchangeInfo verisidir; offline
+test fixture'ları kaynak olarak kullanılmaz. GitHub'ın MIT lisansı doğrulanır,
+metadata bir commit SHA'sına sabitlenir; npm'den tek toplu arşiv indirilip
+SHA-512 bütünlüğü denetlenir. SVG string modülleri **çalıştırılmaz**; yalnız
+statik string export'ları okunur, dış kaynak/aktif içerik reddedilir ve SVGO
+ile 64×64 boyuta optimize edilir. Kaynak eşleşmesi belirsizse otomatik
+seçim yapılmaz. [GitHub REST sınırı](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+kimlik doğrulamasız 60 istek/saattir; yenilemede tek REST isteği ve toplu
+dosyalar kullanılır, 24 saat cache vardır, otomatik tekrar yoktur. HTTP
+429/diğer hatalar açıkça uyarılır; mevcut dosyalar/manifest korunur, build
+kırılmaz. [GitHub kullanım şartları](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)
+ve kaynak MIT lisansı geçerlidir; API anahtarı veya CoinGecko hesabı gerekmez.
+
+Manuel yenileme: `node tools/fetch-coin-logos.mjs --refresh`. Ağsız build:
+`COIN_LOGO_OFFLINE=1` veya script'e `--offline`. `CoinIcon` önce yeni manifest'i,
+sonra eski CC0 SVG'yi, en son deterministik renkli/ortalı harf avatarını dener;
+yükleme ve görüntü çözümleme hatalarında da bu sırayı izler. Yalnız görünür
+sanal satırlar logo modüllerini lazy yükler; çalışma anında CDN isteği yoktur.
+[`logo-overrides.json`](src/assets/coins/logo-overrides.json) kaynak kimliği,
+eski dosya ve görsel alias override alanıdır. BTCDOM bir dominance endeksidir,
+BTC logo proxy'si açıklamalı kullanılır; sembol veya analiz BTC'ye dönüştürülmez.
+LUNA2 yalnız doğru `terra-luna-2` kaynağına bağlanır; eski LUNA markası
+fallback olarak kullanılmaz.
+
+650 satırlı performans preview'ındaki 637 sentetik `TOKENxxxxUSDT` satırı
+`test: true` ile işaretlidir: panelde **OFFLINE TEST** uyarısı, satırda **TEST**
+etiketi gösterilir. Bunlar yalnız test/önizleme fixture'ıdır, gerçek backend
+sembol evrenine veya üretim bundle'ına eklenmez.
+
+Referans Analiz piyasa listesi `/api/markets?all=true` ile aktif `TRADING`,
+`PERPETUAL`, USDT kontratlarının tamamını okur. Varsayılan/`limit` endpoint'i,
+scanner'ın 40 sembollük kapsamı ve analiz/kredi akışı değişmez. Borsa metadatası
+600 saniye, tek toplu 24 saat ticker sonucu 3 saniye süreç-içi cache'lenir;
+eşzamanlı yenilemeler birleştirilir. Hatalarda son başarılı sonuç
+`X-Market-Stale: 1` ile ve UI'da uyarıyla gösterilir; soğuk cache hatası 502/503
+döndürür. 429/418 yanıtında en az 30 saniye veya daha uzun `Retry-After` beklenir.
+İstemci tek uç noktayı 3 saniyede bir, örtüşmeden ve görünürken yeniler;
+her sembol için ayrı fiyat/analiz isteği atmaz.
+
+Bu toplu feed sol listeyle seçili sembolün fiyat, 24 saat değişim ve hacim
+sunumunda ortaktır; ilk 50 markete veya scanner kapsamına girmeyen coinler de
+kendi ticker verisini gösterir. Sembol seçimi mevcut `/api/klines/{symbol}`
+ve `/api/analysis/{symbol}` akışını, seçili zaman dilimini ve beş MTF isteğini
+kullanır. Önceki sembol/zaman diliminin snapshot'ı yeni seçimde gösterilmez.
+AI raporu, göstergeler ve TP/SL aynı seçili analizin çıktısından gelir;
+küçük fiyatlı coinlerin MACD değerlerinde anlamlı basamaklar korunur,
+sıfıra yuvarlanmaz. Her ticker yenilemesinde tüm coinler analiz edilmez. Canlı İşlem'e geçiş
+seçili ham sembolü mevcut emir formuna taşır; premium, kredi, consent, ARM,
+2FA ve backend sembol/quantity kuralları değişmez.
+Yeni listelenen kontratta yeterli mum yoksa backend'in mevcut 422 yanıtı
+korunur; rapor veya hedef uydurulmaz. Offline görsel önizleme canlı işlem
+ortamı değildir ve fixture'ı olmayan bir coin için gerçek analiz sunmaz.
+
+Seçili sembolün veri hatasında grafik, sebebiyle birlikte
+**Bu sembol için yeterli veri yok** mesajını gösterir; rapor rozeti **Analiz yok**
+olur. Mum geçmişi yetersizliği (422), borsanın geçersiz sembol yanıtı ve
+backend/erişim hataları ayrılır; veri hatası AL/SAT/BEKLE sonucu üretmez.
+Yalnız bir MTF zaman dilimi eksikse geçerli ana analiz korunur, eksik zaman
+dilimi ve nedeni açıkça bildirilir; teyit veya hedef uydurulmaz.
+Grafik araç çubuğundaki **YENİLE**, seçili sembol/zaman diliminin mumlarını,
+ana analizini ve beş MTF analizini yeniden alır; hesap veya işlem yetkisini
+değiştirmez. Aynı seçim yenilenirken son geçerli snapshot yanıt gelene kadar
+korunur; sembol/zaman dilimi değişiminde eski veri gösterilmez.
+Toplu fiyat akışının mevcut güncelleme sıklığı korunur.
+Offline preview sunucusu fixture'ı olmayan sembole
+`{code: "PREVIEW_DATA_UNAVAILABLE", detail: "Önizleme: bu sembol için örnek veri yok"}`
+ile 422 döndürür. UI bu durumu gerçek borsa/mum geçmişi hatası olarak sunmaz.
+
+Liste sabit 52 px satırlarla, iki satır overscan'li sanal pencere kullanır;
+1280 px altında 260 px yatay chip'lere geçer. Arama 150 ms debounce'ludur.
+Skor/yön yalnız mevcut scanner verisinden gelir; diğerleri `—` kalır.
+Favoriler `protrebot:master-market-favorites:<userId>` localStorage anahtarında
+kullanıcıya özeldir; okuma/yazma hataları açıkça bildirilir. Fiyat veya değişim
+yoksa sayı üretilmez; düşük fiyatlarda anlamlı basamaklar korunur.
+
+650 sembollü native kaydırma/asset bütçesi, geliştirme JSX stack
+enstrümantasyonu olmadan shipping build üzerinde ölçülür. Önce `npm run build`,
+ardından frontend Playwright CLI ile
+`--config frontend/playwright.master-market-performance.config.ts` kullanılır.
+Konfigürasyon tek yerel preview sunucusu açar; testler API'leri offline mock'lar,
+tanımsız API'yi 501 ile reddeder ve dış HTTPS/WSS erişimini engeller.
+Performans testi diğer projelerde atlanır, üretim preview projesinde 50 ms p95
+bütçesini ve sınırlı DOM/lazy asset sayısını zorunlu tutar. Test çıktıları
+varsayılan olarak repo dışındaki geçici dizine, isteğe göre
+`MASTER_TEST_RESULTS` / `MASTER_ANALYSIS_SCREENSHOTS` yollarına yazılır.
+
+Trigger Monitor'un durum pill'i, 2×2 veri alanı ve accordion özetleri mevcut
+snapshot'tan üretilir; eksik veriler `—` kalır. Accordion'lar varsayılan kapalıdır.
+Auto Trade durum/açıklama satırları ve outline kısayol yalnız sunumdur; mevcut
+kilit ve onay akışını değiştirmez. Bağlantı özeti yalnız üst barda gösterilir.
+
+Sağ kolonun altı danışma accordion'u aynı adlı native `details` grubuyla
+varsayılan kapalı ve aynı anda tek-açık çalışır. Enter/Space, odak halkası ve
+`aria-expanded` desteklenir; 180 ms yükseklik geçişi azaltılmış hareket tercihinde
+kapatılır. Koşul segmentleri, kontrol durum chip'leri, zaman çizelgesi, skor
+çubukları ve LONG/SHORT görünümü yalnız mevcut verinin sunumudur. Skor veya
+işlem hesaplaması yapılmaz; sayısal çubuklar yalnız çizim alanına sınırlandırılır.
+Olaylar görünümde en yeni üstte sıralanır, kaynak dizi değiştirilmez. Boş
+accordion içerikleri statik soluk placeholder kullanır. Bütün yeni içerik
+mevcut `PremiumBoundary` içinde kalır; görünüm seçimleri istek göndermez.
 
 `/master-trade?tab=canli` koyu/yeşil temada kompakt kartlar, yatay stepper,
 responsive metrik kutuları ve masaüstünde yan yana manuel emir/özet görünümü kullanır.

@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
+import {runCoinLogoRefresh} from './run-coin-logo-refresh.mjs'
 
 const commit = process.env.VITE_BUILD_COMMIT || (() => {
   try {
@@ -9,6 +10,7 @@ const commit = process.env.VITE_BUILD_COMMIT || (() => {
   }
 })()
 const environment = { ...process.env, VITE_BUILD_COMMIT: commit }
+runCoinLogoRefresh({env: environment})
 const commands = [
   [resolve('node_modules/typescript/bin/tsc'), ['-b']],
   [resolve('node_modules/typescript/bin/tsc'), ['--noEmit', '-p', 'tsconfig.access.json']],

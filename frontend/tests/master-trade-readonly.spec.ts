@@ -58,7 +58,7 @@ const status = {
   ],
 }
 
-async function prepareReadOnly(page: Page) {
+async function prepareReadOnly(page: Page, legacy = false) {
   const mutations: string[] = []
   await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'readonly-test-session'))
   await page.route('**/api/**', async route => {
@@ -115,7 +115,7 @@ async function prepareReadOnly(page: Page) {
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({})})
   })
 
-  await page.goto('/master-trade', {waitUntil:'domcontentloaded'})
+  await page.goto(`/master-trade${legacy ? '?masterLayoutV2=0' : ''}`, {waitUntil:'domcontentloaded'})
   return mutations
 }
 
@@ -123,8 +123,8 @@ test('Master Trade keeps account state read-only and locked', async ({page}) => 
   const mutations = await prepareReadOnly(page)
   await expect(page.getByRole('tab', {name: 'Analiz', exact: true})).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('.masterTradeAccordion[open]')).toHaveCount(0)
-  await page.locator('.watchlistItem').filter({hasText: 'ETHUSDT'}).click()
-  await expect(page.locator('.chartPanel h3')).toHaveText('ETHUSDT')
+  await page.locator('.refWatchlist [data-symbol="ETHUSDT"] .refMarketSelect').click()
+  await expect(page.locator('.refReportSymbol strong')).toHaveText('ETHUSDT')
   await page.getByRole('tab', {name: 'Canlı İşlem', exact: true}).click()
   await expect(page).toHaveURL(/tab=canli/)
   await expect(page.getByRole('heading', {name: 'LIVE AUTO TRADE'})).toBeVisible({timeout: 15000})
@@ -143,8 +143,8 @@ test('Master Trade keeps account state read-only and locked', async ({page}) => 
 
 test('Master Trade positions and connections preserve the read-only account snapshot', async ({page}) => {
   const mutations = await prepareReadOnly(page)
-  await page.locator('.watchlistItem').filter({hasText: 'ETHUSDT'}).click()
-  await expect(page.locator('.chartPanel h3')).toHaveText('ETHUSDT')
+  await page.locator('.refWatchlist [data-symbol="ETHUSDT"] .refMarketSelect').click()
+  await expect(page.locator('.refReportSymbol strong')).toHaveText('ETHUSDT')
   await page.getByRole('tab', {name: 'Pozisyonlar', exact: true}).click()
   await expect(page.locator('.masterTradeLiveAccountTable')).toHaveCount(0)
   await expect(page.locator('.positionsPanel').getByText('MUBARAKUSDT', {exact: true})).toBeVisible()
@@ -158,7 +158,7 @@ test('Master Trade positions and connections preserve the read-only account snap
 })
 
 test('Master Trade responsive geometry stays read-only at desktop, tablet and mobile sizes', async ({page}) => {
-  const mutations = await prepareReadOnly(page)
+  const mutations = await prepareReadOnly(page, true)
   await page.locator('.watchlistItem').filter({hasText: 'ETHUSDT'}).click()
   await expect(page.locator('.chartPanel h3')).toHaveText('ETHUSDT')
   await page.getByRole('tab', {name: 'Analiz', exact: true}).click()
