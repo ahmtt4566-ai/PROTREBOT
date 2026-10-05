@@ -2,6 +2,22 @@ import {expect, test} from '@playwright/test'
 import {PUBLIC_POLICIES, publicPolicyForPath} from '../../compliance-content'
 import {mockAssistant} from './helpers/assistant-api'
 
+test('home page publishes the KaisTrade site name before JavaScript in both entrypoints and production', async ({request}) => {
+  for (const base of ['http://127.0.0.1:4173', 'http://127.0.0.1:4175', 'http://127.0.0.1:4176']) {
+    const response = await request.get(base)
+    expect(response.status()).toBe(200)
+    const html = await response.text()
+    expect(html).toContain('<title>KaisTrade</title>')
+    expect(html).toContain('<meta property="og:site_name" content="KaisTrade"')
+    const schema = html.match(/<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/)?.[1]
+    if (!schema) throw new Error('Home page is missing its WebSite structured data')
+    expect(JSON.parse(schema)).toEqual({
+      '@context': 'https://schema.org', '@type': 'WebSite',
+      name: 'KaisTrade', url: 'https://kaistrade.com/',
+    })
+  }
+})
+
 for (const policy of ['privacy', 'terms', 'risk'] as const) {
   test(`${policy} is public in both entry points and the production build without auth requests`, async ({page}) => {
     const requests:string[] = []
@@ -19,7 +35,7 @@ for (const policy of ['privacy', 'terms', 'risk'] as const) {
         }
         await expect(page.locator('input[type="password"]')).toHaveCount(0)
         await expect(page.getByRole('button', {name:'Google ile devam et', exact:true})).toHaveCount(0)
-        await expect(page).toHaveTitle(`${PUBLIC_POLICIES[policy].title} | KaiStrade`)
+        await expect(page).toHaveTitle(`${PUBLIC_POLICIES[policy].title} | KaisTrade`)
       }
     }
     expect(requests).toEqual([])

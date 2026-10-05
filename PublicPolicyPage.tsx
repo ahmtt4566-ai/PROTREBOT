@@ -5,10 +5,10 @@ import './public-policy.css'
 
 export default function PublicPolicyPage({policy}:{policy:PublicPolicy}) {
   const title = PUBLIC_POLICIES[policy].title
-  useEffect(() => { document.title = `${title} | KaiStrade` }, [title])
+  useEffect(() => { document.title = `${title} | KaisTrade` }, [title])
 
   return <main className="publicPolicyPage">
-    <header><a href="/" aria-label="KaiStrade ana sayfa"><img src="/kaistrade-logo.png" alt="KaiStrade"/></a></header>
+    <header><a href="/" aria-label="KaisTrade ana sayfa"><img src="/kaistrade-logo.png" alt="KaisTrade"/></a></header>
     <nav aria-label="Politika sayfaları">
       <a href="/privacy" aria-current={policy === 'privacy' ? 'page' : undefined}>Gizlilik Politikası</a>
       <a href="/terms" aria-current={policy === 'terms' ? 'page' : undefined}>Kullanım Şartları</a>

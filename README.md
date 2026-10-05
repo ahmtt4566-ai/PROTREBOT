@@ -12,6 +12,19 @@ stable and crawlable. Google Search updates its icon after recrawling the home
 page; deployment does not guarantee an immediate search-result change.
 Regression checks: `node --test tools/site-icons.test.mjs`.
 
+The public brand spelling is `KaisTrade`. Both HTML entrypoints declare this
+in the document title, application name, Open Graph site name/title, and static
+`WebSite` JSON-LD for `https://kaistrade.com/`. Public policy titles and public
+logo labels use the same spelling. Google chooses its search-result site name
+automatically; request a home-page recrawl in Search Console after deployment
+and allow time for the updated name to be processed.
+
+After building both frontends, run the unchanged public-page content/access
+checks against their production bundles with
+`npx playwright test --config playwright.public-policies.config.ts` from
+`frontend`. This includes raw-HTML site-name metadata checks, so search engines
+do not have to execute JavaScript to discover the preferred name.
+
 ## KaisTrade transactional email / Render
 
 Mail transport is centralized in `backend/app/email_service.py` using the

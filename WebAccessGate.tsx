@@ -66,7 +66,7 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
 
   return <main className="webAccessShell">
     <section className="webAccessCard">
-      <div className="webAccessBrand"><span className="webAccessBrandLogo"><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div>
+      <div className="webAccessBrand"><span className="webAccessBrandLogo"><img src="/kaistrade-logo.png" alt="KaisTrade"/></span></div>
       <div className="webAccessIcon"><LockKeyhole/></div>
       <h1>Yönetici erişimi</h1>
       <p>Bot paneli ve API uçları internete karşı kilitlidir. Bu ekran Binance anahtarı istemez.</p>
