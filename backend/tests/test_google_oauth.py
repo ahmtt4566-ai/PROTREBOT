@@ -33,6 +33,7 @@ class Pool:
         self.attempts = {}
         self.identities = {}
         self.security = {}
+        self.account_settings = {}
         self.lock = asyncio.Lock()
         self.queries = []
         for user in state["users"]:
@@ -45,15 +46,20 @@ class Pool:
 
     @asynccontextmanager
     async def transaction(self):
-        backup = copy.deepcopy((self.snapshot, self.attempts, self.identities, self.security))
+        backup = copy.deepcopy((self.snapshot, self.attempts, self.identities, self.security, self.account_settings))
         try:
             yield
         except BaseException:
-            self.snapshot, self.attempts, self.identities, self.security = backup
+            self.snapshot, self.attempts, self.identities, self.security, self.account_settings = backup
             raise
 
     async def execute(self, query, *args):
         self.queries.append(query)
+        if "INSERT INTO commercial_account_settings" in query:
+            self.account_settings[args[0]] = json.loads(args[1])
+            return "OK"
+        if "commercial_account_tokens" in query:
+            return "OK"
         if query.startswith("DELETE FROM commercial_google_attempts"):
             self.attempts = {key: value for key, value in self.attempts.items() if value["expires_at"] > datetime.now(timezone.utc)}
         elif "INSERT INTO commercial_google_attempts" in query:
@@ -75,6 +81,11 @@ class Pool:
 
     async def fetchrow(self, query, *args):
         self.queries.append(query)
+        if "commercial_account_settings" in query:
+            doc = self.account_settings.get(args[0])
+            return {"payload": copy.deepcopy(doc)} if doc else None
+        if "commercial_account_tokens" in query:
+            return None
         if "commercial_google_attempts" in query:
             row = self.attempts.get(args[0])
             if not row or row["binding_hash"] != args[1] or row["purpose"] != args[2] or row["consumed_at"] or row["expires_at"] <= datetime.now(timezone.utc):
@@ -98,7 +109,7 @@ class Pool:
             row = self.security.get(args[0])
             if row is None:
                 return None
-            row["auth_version"] += 1
+            row["auth_version"] += 1 if "auth_version = auth_version +" in query else 0
             row["security"].update(json.loads(args[1]))
             return copy.deepcopy(row)
         if "SELECT auth_version, security FROM commercial_auth_users" in query:

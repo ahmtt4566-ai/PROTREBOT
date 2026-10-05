@@ -181,6 +181,66 @@ Ana sayfa başlık logosu 252 × 65,8 px hedef boyutuyla önceki boyuttan %40
 büyüktür; dar ekranlarda başlık kontrollerini örtmemek için kullanılabilir
 genişliğe sığar. Diğer çalışma ekranlarındaki logo boyutu değişmez.
 
+## Profil, hesap güvenliği ve yönetici kullanıcıları
+
+`/settings` ve `/profile` aynı sunucuya bağlı profil ekranını açar. Hesap özeti,
+paket/özellikler, e-posta doğrulaması, oturumlar ve etkinlik kayıtları
+`/api/v22/account/overview` verisidir; bulunmayan tarihler `—` gösterilir.
+Yönetici rolü ücretli Premium abonelik ile aynı şey değildir.
+
+E-posta değişikliğinde eski adres doğrulama tamamlanana kadar korunur. Yeni
+adrese gönderilen süreli, tek kullanımlık bağlantı `/profile?email_token=...`
+üzerinden açık onay gerektirir. Parola değişikliği mevcut parolayı; Google-only
+hesapta mevcut doğrulanmış adrese gönderilen kodu gerektirir. Etkin 2FA için
+Authenticator veya tek kullanımlık kurtarma kodu da gerekir. Mevcut Gmail
+OAuth sunucu yapılandırması kullanılmaya devam eder; tarayıcıya posta
+anahtarı verilmez. Sağlayıcı yapılandırılmamışsa posta gerektiren işlemler
+kullanılamaz ve arayüz sebebi gösterir; başarılı gönderim taklit edilmez.
+
+Hesap 2FA'sı TOTP/Authenticator kurulumudur. QR ve kurtarma kodları yalnızca
+kurulum penceresinde gösterilir, tarayıcı depolamasına yazılmaz. Parola ve
+Google girişinde ikinci aşama tamamlanmadan oturum açılmaz. Oturum yönetimi
+gerçek sunucu oturumlarını kapatır; parola/e-posta değişikliği yeniden giriş
+gerektirir. Bu hesap 2FA'sı Canlı İşlem'in ayrı ARM, step-up, Premium ve
+consent kapılarının yerine geçmez.
+
+İşlem tercihleri sunucuda kullanıcıya bağlı saklanır: bölüm, zaman dilimi,
+Binance, %0.1–1 risk ve USDT sembolleri. Varsayılanlar ilk yüklemede uygulanır;
+gecikmiş cevap kullanıcının değiştirdiği seçimi ezmez. `AUTO` tercihi yalnızca
+mevcut Auto Trade bölümüne gezinir/odaklanır, otomasyonu açmaz. Riskten marj
+hesaplama açık bir kullanıcı eylemidir; yalnızca taslak alanını doldurur,
+geçersiz/eksik veya yetersiz bakiyede sebep gösterir ve emir göndermez.
+
+Profilde **hesabı kapat** kalıcı silme değildir: giriş ve oturumlar kapatılır,
+kullanıcı ve işlem kayıtları yönetici panelinde tutulur. Ana yönetici ve
+güvenli kapatmaya engel olan işlem durumları korunur. Önceki kalıcı erasure
+API'si ayrı bir işlemdir ve bu ekran onu çağırmaz.
+
+Admin **Users** bölümü aynı hesap kayıtlarını sayfalı `/admin/accounts`
+uçlarından okur; ad/e-posta, rol ve giriş yöntemi, gerçek paket/Premium
+erişimi, doğrulama, 2FA durumu, aktif/kapalı hesabı, tarihler, tercihler,
+oturumlar ve etkinlikler görüntülenir. Detay/mutasyon uçları yalnızca owner
+erişimine açıktır. Parola hash'i, token, 2FA anahtarı, kurtarma kodu ve API
+anahtarı döndürülmez. Parola yenileme eylemi kullanıcıya e-posta gönderir,
+ham sıfırlama bağlantısını yöneticiye vermez.
+
+QR çizimi build içine gömülü `qrcode.react@4.2.0` (ISC) ile yapılır; çalışma
+anında harici QR servisine istek gönderilmez. Offline arayüz testleri:
+`npm run build`, ardından `cd frontend` ve
+`npx playwright test --config playwright.account-settings.config.ts`.
+Bu testler gerçek hesapları değiştirmez veya gerçek e-posta göndermez.
+
+Backend kurulumu `backend/requirements.txt` içindeki `pyotp==2.9.0` ekini
+de kapsamalıdır. Startup schema senkronizasyonu hesap belgeleri ve hash'li
+tek kullanımlık token tablolarını oluşturur; veritabanında gerekli DDL
+yetkileri gerekir. Üretimde `PROTREBOT_DURABLE_AUTH_REQUIRED=1` PostgreSQL
+olmadan kapalı kalır. Yerel/offline kayıtlar kalıcı `DATA_DIR` altında
+SQLite kullanır. Worker'lar aynı, en az 32 karakterlik sabit `SESSION_SECRET`
+(veya mevcut `PROTREBOT_SESSION_SECRET`) kullanmalıdır. TOTP şifreleme anahtarı
+bu sırdan türetilir; TOTP taşıma/kurtarma planı olmadan anahtar döndürülmez.
+2FA etkinleştirmede eski oturumlar hemen kapatılır; kurtarma kodları
+yetkisiz, yalnızca bellekteki ayrı ekranda kullanıcı kaydedene kadar korunur.
+
 ## Master Trade / Canlı İşlem arayüzü
 
 Referans tasarımlı Analiz görünümü `/master-trade?tab=analiz` için varsayılandır.

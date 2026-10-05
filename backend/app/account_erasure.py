@@ -32,6 +32,7 @@ RETENTION_FIELDS = frozenset({
     "verified_realized", "reduce_only", "executed_at", "closed_at", "opened_at",
 })
 PERSONAL_TABLES = (
+    "commercial_account_settings", "commercial_account_tokens",
     "commercial_google_identities", "commercial_google_attempts",
     "trading_accounts", "protrebot_exchange_session_vault", "assistant_usage",
     "assistant_proactive_state", "analyst_credits", "analyst_requests", "analyst_cache",
@@ -549,7 +550,11 @@ async def erase_user_account(request: Any, user: dict[str, Any]) -> dict[str, An
                 ):
                     paths.append(directory / name)
             await asyncio.to_thread(scrub_local_files, paths, user)
-            sqlite_paths = {DATA_DIR / "assistant_usage.sqlite3", DATA_DIR / "analyst_credits.sqlite3"}
+            sqlite_paths = {DATA_DIR / "assistant_usage.sqlite3", DATA_DIR / "analyst_credits.sqlite3",
+                            DATA_DIR / "account_settings.sqlite3"}
+            configured_account_path = getattr(request.app.state, "account_settings_path", None)
+            if configured_account_path:
+                sqlite_paths.add(Path(configured_account_path))
             for service_name in ("assistant_service", "analyst_credits"):
                 service = getattr(request.app.state, service_name, None)
                 path = getattr(getattr(service, "store", None), "path", None)

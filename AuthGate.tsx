@@ -3,6 +3,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'rea
 import { Activity, ArrowRight, BarChart3, Bitcoin, CircleDollarSign, Coins, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, LogOut, Mail, MailCheck, Pause, Play, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
 import { API_BASE, COOKIE_SESSION_PREFIX, USER_SESSION_KEY, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import AdminPanel from './AdminPanel'
+import ProfileSettings, {AccountRecoveryScreen} from './ProfileSettings'
 import { AUTH_PANEL_MARKETS, LIVE_MARKET_CONFIG } from './live-market-config'
 import TickerTape from './TickerTape'
 import TopMovers from './TopMovers'
@@ -13,8 +14,9 @@ import './auth.css'
 
 type User = { id:string; email:string; display_name:string; role:string; active:boolean; email_verified?:boolean }
 type Session = { user:User; maintenance?:{mode:string} }
-type Mode = 'login'|'register'|'bootstrap'|'forgot'|'reset'|'verify'|'google-consent'
-type ProfileData = {user:User;profile?:{full_name?:string;preferences?:Record<string,unknown>};subscription?:{plan?:string;status?:string;currentPeriodStart?:string;currentPeriodEnd?:string}}
+type Mode = 'login'|'register'|'bootstrap'|'forgot'|'reset'|'verify'|'google-consent'|'mfa'
+type AuthResult = {token: string; user: User; remember?: boolean} | {mfa_required: true; challenge_id: string}
+
 
 // Only Playwright's dedicated `--mode test` run bypasses login (it mocks every API response).
 // Regular local dev must go through the real login/register flow so a genuine session token exists.
@@ -119,24 +121,12 @@ function MaintenanceScreen({mode}:{mode:string}) {
   </main>
 }
 
-function ProfileSettings({token,user,onLogout,onSessionEnded}:{token:string;user:User;onLogout:()=>void;onSessionEnded:()=>void}) {
-  const [data,setData] = useState<ProfileData|null>(null)
-  const [name,setName] = useState(user.display_name)
-  const [passwords,setPasswords] = useState({current_password:'',new_password:''})
-  const [notice,setNotice] = useState('')
-  const [busy,setBusy] = useState(false)
-  const call = async <T,>(path:string,options:RequestInit = {}):Promise<T> => { const headers = new Headers(options.headers); headers.set('Authorization',`Bearer ${token}`); if (options.body) headers.set('Content-Type','application/json'); const response = await fetch(`${API_BASE}/v22${path}`,{...options,headers}); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(detail(payload)); return payload as T }
-  useEffect(() => { void call<ProfileData>('/profile').then(value => {setData(value);setName(value.profile?.full_name || value.user.display_name)}).catch(error => setNotice(error instanceof Error ? error.message : 'Profil yüklenemedi.')) },[])
-  const saveProfile = async () => { setBusy(true); try { await call('/profile',{method:'PATCH',body:JSON.stringify({display_name:name,preferences:data?.profile?.preferences || {}})}); setNotice('Profil güncellendi.') } catch (error) {setNotice(error instanceof Error ? error.message : 'Profil güncellenemedi.')} finally {setBusy(false)} }
-  const changePassword = async () => { setBusy(true); try { await call('/auth/change-password',{method:'POST',body:JSON.stringify(passwords)}); setPasswords({current_password:'',new_password:''}); setNotice('Parola güncellendi. Güvenlik için tekrar giriş yapın.'); setTimeout(onSessionEnded,700) } catch (error) {setNotice(error instanceof Error ? error.message : 'Parola güncellenemedi.')} finally {setBusy(false)} }
-  const deleteAccount = async () => { if (!window.confirm('Hesabınız ve kişisel verileriniz kalıcı olarak silinecek, tüm oturumlarınız sonlandırılacak. Finansal ve denetim kayıtları kimliğinizden ayrılarak saklanacak. Devam edilsin mi?')) return; setBusy(true); try { await call('/profile',{method:'DELETE'}); onSessionEnded() } catch (error) {setNotice(error instanceof Error ? error.message : 'Hesap silinemedi.')} finally {setBusy(false)} }
-  return <main className="profilePage"><header className="profileHeader"><div><span>ACCOUNT / SETTINGS</span><h1>Profile &amp; Settings</h1><p>Kimlik, güvenlik ve üyelik durumunuzu yönetin.</p></div><button onClick={onLogout}><LogOut/> Çıkış</button></header>{notice && <p className="profileNotice">{notice}</p>}<div className="profileGrid"><section className="profileCard"><span>PROFILE</span><h2>Personal details</h2><label>Full name<input value={name} onChange={event => setName(event.target.value)}/></label><label>Email<input value={user.email} readOnly/></label><div className="profileVerified"><MailCheck/> {user.email_verified === false ? 'Email verification required' : 'Email verified'}</div><button disabled={busy} onClick={() => void saveProfile()}>SAVE PROFILE</button></section><section className="profileCard"><span>SECURITY</span><h2>Change password</h2><label>Current password<input data-private="true" type="password" value={passwords.current_password} onChange={event => setPasswords({...passwords,current_password:event.target.value})}/></label><label>New password<input data-private="true" type="password" value={passwords.new_password} onChange={event => setPasswords({...passwords,new_password:event.target.value})}/></label><button disabled={busy} onClick={() => void changePassword()}>UPDATE PASSWORD</button><p className="profileMuted">Session: HttpOnly cookie · {user.role === 'OWNER' ? 'Admin' : 'Member'}</p></section><section className="profileCard"><span>SUBSCRIPTION</span><h2>Current membership</h2><div className="profileFacts"><b>Plan <strong>{data?.subscription?.plan || 'FREE'}</strong></b><b>Status <strong>{data?.subscription?.status || 'inactive'}</strong></b><b>Started <strong>{data?.subscription?.currentPeriodStart ? new Date(data.subscription.currentPeriodStart).toLocaleDateString('tr-TR') : '—'}</strong></b><b>Expires <strong>{data?.subscription?.currentPeriodEnd ? new Date(data.subscription.currentPeriodEnd).toLocaleDateString('tr-TR') : '—'}</strong></b></div></section><section className="profileCard profileDanger"><span>ACCOUNT</span><h2>Delete account</h2><p>Kişisel verileriniz ve anahtarlarınız silinir; finansal/denetim kayıtları kimliğinizden ayrılarak saklanır. Borsadaki açık pozisyonlar ve emirler kapanmaz.</p><button disabled={busy || user.role === 'OWNER'} onClick={() => void deleteAccount()}>DELETE ACCOUNT</button></section></div></main>
-}
+
 
 export default function AuthGate({children}:{children:ReactNode}) {
   const [token,setToken] = useState(userSessionToken())
   const [session,setSession] = useState<Session|null>(null)
-  const [mode,setMode] = useState<Mode>(() => window.location.pathname === '/register' ? 'register' : window.location.pathname === '/forgot-password' ? 'forgot' : window.location.pathname === '/reset-password' ? 'reset' : window.location.pathname === '/verify-email' ? 'verify' : 'login')
+  const [mode,setMode] = useState<Mode>(() => new URLSearchParams(location.search).has('mfa_challenge') ? 'mfa' : window.location.pathname === '/register' ? 'register' : window.location.pathname === '/forgot-password' ? 'forgot' : window.location.pathname === '/reset-password' ? 'reset' : window.location.pathname === '/verify-email' ? 'verify' : 'login')
   const isRegistration = mode === 'register' || mode === 'bootstrap'
   const isGoogleConsent = mode === 'google-consent'
   const [ownerSetupAvailable,setOwnerSetupAvailable] = useState(false)
@@ -152,6 +142,9 @@ export default function AuthGate({children}:{children:ReactNode}) {
     return {result:parameters.get('google_login'),remember:parameters.get('google_remember') === '1'}
   })
   const [login,setLogin] = useState({email:'',password:''})
+  const [mfaChallenge,setMfaChallenge] = useState(() => new URLSearchParams(location.search).get('mfa_challenge') || '')
+  const [mfaCode,setMfaCode] = useState('')
+  const [enrollmentRecoveryCodes,setEnrollmentRecoveryCodes] = useState<string[]>([])
   const [register,setRegister] = useState({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
   const [email,setEmail] = useState('')
   const queryToken = new URLSearchParams(window.location.search).get('token') || ''
@@ -159,7 +152,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [verificationLinkToken,setVerificationLinkToken] = useState(window.location.pathname === '/verify-email' ? queryToken : '')
   const [verificationStatusToken,setVerificationStatusToken] = useState('')
   const [verificationInput,setVerificationInput] = useState('')
-  const [resetPassword,setResetPassword] = useState({password:'',confirm_password:''})
+  const [resetPassword,setResetPassword] = useState({password:'',confirm_password:'',totp_code:''})
   const [fieldErrors,setFieldErrors] = useState<Record<string,string>>({})
   const [termsError,setTermsError] = useState('')
   const [verificationNotice,setVerificationNotice] = useState(false)
@@ -257,12 +250,14 @@ export default function AuthGate({children}:{children:ReactNode}) {
     const parameters = new URLSearchParams(window.location.search)
     const googleResult = googleReturn.result
     const googleRemember = googleReturn.remember
-    if (googleResult) {
+    if (googleResult || mfaChallenge) {
       parameters.delete('google_login'); parameters.delete('google_remember')
+      parameters.delete('mfa_challenge')
       const query = parameters.toString()
       history.replaceState(null,'',`${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
     }
     const restore = async () => {
+      if (mfaChallenge) {setMode('mfa'); setRemember(googleRemember); setBusy(false); setSessionLoading(false); return}
       if (googleResult === 'consent') {
         try {
           const pending = await request<{email:string;display_name:string}>('/auth/google/pending')
@@ -358,6 +353,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
       else if (!/^\S+@\S+\.\S+$/.test(emailValue)) errors.email = 'E-posta geçersiz.'
     }
     if (mode === 'login' && !login.password) errors.password = 'Parola girin.'
+    if (mode === 'mfa' && !mfaCode.trim()) errors.mfa = 'Authenticator veya kurtarma kodunu girin.'
     if (isRegistration) {
       const missingPasswordRules = passwordRules(register.password).filter(([,passed]) => !passed).map(([label]) => label)
       if (!register.password) errors.password = 'Şifrenizi girin.'
@@ -394,19 +390,26 @@ export default function AuthGate({children}:{children:ReactNode}) {
     setBusy(true); setMessage('')
     try {
       if (mode === 'login') {
-        const result = await request<{token:string;user:User}>('/auth/login',{method:'POST',body:JSON.stringify({...login,remember})})
+        const result = await request<AuthResult>('/auth/login',{method:'POST',body:JSON.stringify({...login,remember})})
         setLogin({email:'',password:''})
-        if (result.user.role !== 'OWNER' && result.user.email_verified === false) {
+        if ('mfa_required' in result) {
+          setMfaChallenge(result.challenge_id); setMfaCode(''); setMode('mfa'); setMessage('Girişi tamamlamak için iki aşamalı doğrulama kodunuzu girin.')
+        } else if (result.user.role !== 'OWNER' && result.user.email_verified === false) {
           setEmail(result.user.email); setResetToken(''); setMode('verify'); setMessage('Önce e-posta adresinizi doğrulayın. Doğrulama kodunu e-postanızdan alın.')
         } else {
           saveUserSessionToken(result.token,remember); setMemberMenuOpen(false); setToken(result.token); setSession({user:result.user})
         }
+      } else if (mode === 'mfa') {
+        const result = await request<{token:string;user:User;remember?:boolean}>('/auth/2fa/login',{method:'POST',body:JSON.stringify({challenge_id:mfaChallenge,code:mfaCode})})
+        saveUserSessionToken(result.token,result.remember ?? remember)
+        setMfaChallenge(''); setMfaCode(''); setMode('login')
+        await loadSession(result.token,result.remember ?? remember)
       } else if (isGoogleConsent) {
-        const result = await request<{token:string;user:User;remember:boolean}>('/auth/google/complete',{method:'POST',body:JSON.stringify({terms_accepted:register.terms_accepted})})
-        saveUserSessionToken(result.token,result.remember)
-        await loadSession(result.token,result.remember)
+        const result = await request<AuthResult>('/auth/google/complete',{method:'POST',body:JSON.stringify({terms_accepted:register.terms_accepted})})
+        if ('mfa_required' in result) {setMfaChallenge(result.challenge_id); setMfaCode(''); setMode('mfa')}
+        else {saveUserSessionToken(result.token,result.remember ?? remember); await loadSession(result.token,result.remember)}
         setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
-        setMode('login')
+        if (!('mfa_required' in result)) setMode('login')
       } else if (mode === 'bootstrap') {
         if (!ownerSetupAvailable) throw new Error('Yerel yönetici kurulumu kullanılamıyor.')
         const result = await request<{token:string;user:User}>('/bootstrap',{method:'POST',body:JSON.stringify({...register,remember})})
@@ -421,7 +424,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         if (result.development_reset_token) setResetToken(result.development_reset_token)
         setMessage(result.message); if (result.development_reset_token) setMode('reset')
       } else if (mode === 'reset') {
-        await request('/auth/reset-password',{method:'POST',body:JSON.stringify({token:resetToken,...resetPassword})})
+        await request('/auth/reset-password',{method:'POST',body:JSON.stringify({token:resetToken,password:resetPassword.password,confirm_password:resetPassword.confirm_password,...(resetPassword.totp_code ? {totp_code:resetPassword.totp_code} : {})})})
         setMessage('Parolanız güncellendi. Giriş yapabilirsiniz.'); setMode('login')
       } else {
         await request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:verificationInput})})
@@ -434,7 +437,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const finishSession = () => {
     clearDemoCredentials(token)
     setLogin({email:'',password:''}); setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
-    setEmail(''); setResetToken(''); setResetPassword({password:'',confirm_password:''})
+    setEmail(''); setResetToken(''); setResetPassword({password:'',confirm_password:'',totp_code:''}); setMfaChallenge(''); setMfaCode('')
     setVerificationLinkToken(''); setVerificationStatusToken(''); setVerificationInput('')
     clearUserSessionToken(); setMemberMenuOpen(false); setToken(''); setSession(null); setMode('login'); setMessage('Oturum sonlandırıldı.')
   }
@@ -461,11 +464,12 @@ export default function AuthGate({children}:{children:ReactNode}) {
     finishSession(); setMessage(vaultProblem || 'Oturum kapatıldı.')
   }
 
+  if (enrollmentRecoveryCodes.length) return <AccountRecoveryScreen codes={enrollmentRecoveryCodes} onSaved={() => setEnrollmentRecoveryCodes([])}/>
   if (PLAYWRIGHT_TEST_MODE_AUTO_ACCESS) return <>{children}</>
   if (!session && expiredMemberMaintenance) return <MaintenanceScreen mode={expiredMemberMaintenance}/>
   if (sessionLoading && !session) return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>GÜVENLİ OTURUM</b><span>Hesap durumu kontrol ediliyor…</span></div></main>
   if (autoVerifying) return <main className="authLoading"><div className="authLoader"><MailCheck/><b>E-POSTA DOĞRULANIYOR</b><span>E-posta doğrulanıyor...</span></div></main>
-  if (!session) {
+  if (!session || (mode === 'reset' && resetToken) || (mode === 'forgot' && window.location.pathname === '/forgot-password')) {
     const registrationStrength = strength(register.password)
     return <LoginMarketShell>{market => <main className={`authPage${isRegistration ? ' authPageRegister' : ''}${mode === 'login' ? ' authPageLogin' : ''}`}>
       {mode !== 'login' && <p className="authMobileSlogan">KAİSTRADE piyasayı tek yerden yönetin</p>}
@@ -473,8 +477,8 @@ export default function AuthGate({children}:{children:ReactNode}) {
       <AuthIntroPanel data={market.data} status={market.status} movers={market.movers} premium={mode === 'login'}/>
       <section className={`authCard ${mode === 'verify' ? 'authCardVerify' : ''}${isRegistration ? ' authCardRegister' : ''}${mode === 'login' ? ' authCardLogin' : ''}`}>
         <div className="authLoginBrand"><img src="/kaistrade-logo.png" alt="KaiStrade"/></div>
-        <div className="authCardHead"><div className="authMark">{mode === 'verify' ? <MailCheck/> : <UserRound/>}</div><div><span>{mode === 'bootstrap' ? 'YEREL YÖNETİCİ' : mode === 'register' || isGoogleConsent ? 'HESAP OLUŞTUR' : 'ÜYE GİRİŞİ'}</span><h2>{mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'bootstrap' ? 'İlk yönetici hesabı' : mode === 'register' || isGoogleConsent ? 'Hesabını oluştur' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı kontrol edin'}</h2></div></div>
-        <p className="authCardLead">{mode === 'login' ? 'Çalışma alanınıza güvenli şekilde erişin.' : mode === 'bootstrap' ? 'Yerel yönetici hesabınız için güçlü bir parola belirleyin.' : mode === 'register' || isGoogleConsent ? 'KAISTrade hesabını oluştur ve piyasaları tek bir yerden takip et.' : mode === 'forgot' ? 'Hesabınıza yeniden erişmek için güvenli bir bağlantı gönderelim.' : mode === 'reset' ? 'Yeni ve güçlü bir parola belirleyin.' : 'Gelen kutunuzdaki bağlantıyla hesabınızı güvenle etkinleştirin.'}</p>
+        <div className="authCardHead"><div className="authMark">{mode === 'verify' ? <MailCheck/> : mode === 'mfa' ? <ShieldCheck/> : <UserRound/>}</div><div><span>{mode === 'bootstrap' ? 'YEREL YÖNETİCİ' : mode === 'register' || isGoogleConsent ? 'HESAP OLUŞTUR' : 'ÜYE GİRİŞİ'}</span><h2>{mode === 'mfa' ? 'İki aşamalı doğrulama' : mode === 'login' ? 'Hesabınıza giriş yapın' : mode === 'bootstrap' ? 'İlk yönetici hesabı' : mode === 'register' || isGoogleConsent ? 'Hesabını oluştur' : mode === 'forgot' ? 'Parolanızı yenileyin' : mode === 'reset' ? 'Yeni parola belirleyin' : 'E-postanızı kontrol edin'}</h2></div></div>
+        <p className="authCardLead">{mode === 'mfa' ? 'Authenticator uygulamasındaki kodu veya tek kullanımlık kurtarma kodunuzu girin.' : mode === 'login' ? 'Çalışma alanınıza güvenli şekilde erişin.' : mode === 'bootstrap' ? 'Yerel yönetici hesabınız için güçlü bir parola belirleyin.' : mode === 'register' || isGoogleConsent ? 'KAISTrade hesabını oluştur ve piyasaları tek bir yerden takip et.' : mode === 'forgot' ? 'Hesabınıza yeniden erişmek için güvenli bir bağlantı gönderelim.' : mode === 'reset' ? 'Yeni ve güçlü bir parola belirleyin.' : 'Gelen kutunuzdaki bağlantıyla hesabınızı güvenle etkinleştirin.'}</p>
         <form onSubmit={submit} noValidate={mode === 'login'} aria-busy={busy}>
           {mode === 'login' && <><label className={fieldErrors.email ? 'authFieldError' : ''}>E-posta<div className="authInputWithIcon"><Mail aria-hidden="true"/><input type="email" required autoComplete="email" aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? 'login-email-error' : undefined} value={login.email} onChange={event => {setLogin({...login,email:event.target.value});setFieldErrors(current => ({...current,email:''}))}} placeholder="siz@ornek.com"/></div>{fieldErrors.email && <em id="login-email-error" role="alert">{fieldErrors.email}</em>}</label><label className={fieldErrors.password ? 'authFieldError' : ''}>Parola<div className="authPassword authInputWithIcon"><LockKeyhole aria-hidden="true"/><input data-private="true" required type={showPassword ? 'text' : 'password'} autoComplete="current-password" aria-invalid={Boolean(fieldErrors.password)} aria-describedby={fieldErrors.password ? 'login-password-error' : undefined} placeholder="Parolanız" value={login.password} onChange={event => {setLogin({...login,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Parolayı gizle' : 'Parolayı göster'} aria-pressed={showPassword}>{showPassword ? <EyeOff/> : <Eye/>}</button></div>{fieldErrors.password && <em id="login-password-error" role="alert">{fieldErrors.password}</em>}</label><label className="authCheck"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/><span>Bu cihazda oturumu hatırla</span></label></>}
           {isRegistration && <>
@@ -485,10 +489,12 @@ export default function AuthGate({children}:{children:ReactNode}) {
             <TermsConsent accepted={register.terms_accepted} error={termsError} onChange={value => {setRegister({...register,terms_accepted:value});setTermsError('')}}/>
           </>}
           {isGoogleConsent && <><label>Ad soyad<input value={register.display_name} readOnly/></label><label>E-posta<input type="email" value={register.email} readOnly/></label><TermsConsent accepted={register.terms_accepted} error={termsError} onChange={value => {setRegister({...register,terms_accepted:value});setTermsError('')}}/></>}
+          {mode === 'mfa' && <label>2FA veya kurtarma kodu<input data-private="true" required autoComplete="one-time-code" value={mfaCode} onChange={event => setMfaCode(event.target.value)} placeholder="Authenticator veya kurtarma kodu"/><small>İlk doğrulama tamamlandı; oturum henüz açılmadı.</small>{fieldErrors.mfa && <em role="alert">{fieldErrors.mfa}</em>}</label>}
           {mode === 'forgot' && <label>E-posta<input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="siz@ornek.com"/><small>Kayıtlıysa yenileme bağlantısı hazırlanır.</small></label>}
           {mode === 'verify' && <label className={fieldErrors.verification ? 'authFieldError' : ''}>Doğrulama kodu<input required value={verificationInput} onChange={event => {setVerificationInput(event.target.value);setFieldErrors(current => ({...current,verification:''}))}} placeholder="E-posta doğrulama kodu"/><small>{message || 'Kayıt sonrası e-postanızdaki kodu girin.'}</small>{fieldErrors.verification && <em>{fieldErrors.verification}</em>}</label>}
           {mode === 'reset' && <><label>Doğrulama kodu<input required value={resetToken} onChange={event => setResetToken(event.target.value)}/></label><label>Yeni parola<input data-private="true" required type="password" autoComplete="new-password" value={resetPassword.password} onChange={event => setResetPassword({...resetPassword,password:event.target.value})}/></label><label>Yeni parola tekrar<input data-private="true" required type="password" autoComplete="new-password" value={resetPassword.confirm_password} onChange={event => setResetPassword({...resetPassword,confirm_password:event.target.value})}/></label></>}
-          <button className="authSubmit" disabled={busy} aria-busy={busy}>{busy ? 'İŞLENİYOR…' : mode === 'login' ? 'GÜVENLİ GİRİŞ' : mode === 'bootstrap' ? 'YÖNETİCİ HESABINI OLUŞTUR' : mode === 'register' || isGoogleConsent ? 'HESAP OLUŞTUR' : mode === 'forgot' ? 'YENİLEME BAĞLANTISI GÖNDER' : mode === 'reset' ? 'PAROLAYI GÜNCELLE' : 'E-POSTAYI DOĞRULA'}{busy ? <LoaderCircle className="spin"/> : <ArrowRight/>}</button>
+          {mode === 'reset' && <label>2FA veya kurtarma kodu (etkinse)<input data-private="true" autoComplete="one-time-code" value={resetPassword.totp_code} onChange={event => setResetPassword({...resetPassword,totp_code:event.target.value})}/></label>}
+          <button className="authSubmit" disabled={busy} aria-busy={busy}>{busy ? 'İŞLENİYOR…' : mode === 'mfa' ? 'DOĞRULA VE GİRİŞ YAP' : mode === 'login' ? 'GÜVENLİ GİRİŞ' : mode === 'bootstrap' ? 'YÖNETİCİ HESABINI OLUŞTUR' : mode === 'register' || isGoogleConsent ? 'HESAP OLUŞTUR' : mode === 'forgot' ? 'YENİLEME BAĞLANTISI GÖNDER' : mode === 'reset' ? 'PAROLAYI GÜNCELLE' : 'E-POSTAYI DOĞRULA'}{busy ? <LoaderCircle className="spin"/> : <ArrowRight/>}</button>
         </form>
         {mode === 'login' && <div className="authSocial"><span>veya</span><button type="button" className="authGoogle" aria-label="Google ile devam et" disabled={busy} aria-busy={busy} onClick={() => void startGoogle()}><span className="authGoogleMark" aria-hidden="true">G</span>Google ile devam et</button></div>}
         {mode === 'verify' && verificationNotice && <div className="authVerificationPanel"><b>Doğrulama bağlantısını e-posta adresinize gönderdik.</b><span>E-postayı göremiyor musunuz? Spam / Gereksiz / Tanıtımlar klasörünü de kontrol edin.</span><small>Doğrulama bekleniyor... Bu sayfa başka cihazdan yapılan doğrulamayı otomatik algılar.</small></div>}
@@ -505,7 +511,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   if (['/login','/register','/forgot-password','/reset-password','/verify-email'].includes(path)) { history.replaceState(null,'','/dashboard') }
   if (path.startsWith('/admin') && session.user.role !== 'OWNER') return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>403 · ERİŞİM YOK</b><span>Bu alan yalnızca yönetici hesaplarına açıktır.</span><button onClick={() => {history.replaceState(null,'','/dashboard'); location.reload()}}>Dashboard'a dön</button></div></main>
   if (path.startsWith('/admin')) return <>{sessionNotice}<div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>ADMIN</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><AdminPanel token={token} onBack={() => {history.replaceState(null,'','/dashboard');location.reload()}}/></>
-  if (path.startsWith('/settings')) return <>{sessionNotice}<div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>{session.user.role === 'OWNER' ? 'ADMIN' : 'MEMBER'}</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><ProfileSettings token={token} user={session.user} onLogout={() => void logout()} onSessionEnded={finishSession}/></>
+  if (path.startsWith('/settings') || path === '/profile') return <>{sessionNotice}<ProfileSettings onLogout={() => void logout()} onSessionEnded={finishSession} onEnrollmentComplete={codes => {setEnrollmentRecoveryCodes(codes); finishSession()}}/></>
   const maintenanceMode = session.maintenance?.mode
   if (session.user.role !== 'OWNER' && (maintenanceMode === 'MAINTENANCE' || maintenanceMode === 'EMERGENCY')) {
     return <MaintenanceScreen mode={maintenanceMode as string}/>

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
 
 
 ROOT = Path(__file__).parents[2]
@@ -63,13 +64,38 @@ class OfflineCanonicalPool:
         }
         self.delegate = delegate
         self.attempts = {}
+        self.account_settings = {}
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self
+
+    @asynccontextmanager
+    async def transaction(self):
+        previous = copy.deepcopy(self.account_settings)
+        try:
+            yield
+        except BaseException:
+            self.account_settings = previous
+            raise
 
     async def execute(self, query, *args):
+        if "INSERT INTO commercial_account_settings" in query:
+            import json
+            self.account_settings[args[0]] = json.loads(args[1])
+            return "OK"
+        if "pg_advisory_xact_lock" in query:
+            return "OK"
         if self.delegate is not None:
             return await self.delegate.execute(query, *args)
         return "OK"
 
     async def fetchrow(self, query, *args):
+        if "commercial_account_settings" in query:
+            doc = self.account_settings.get(args[0])
+            return {"payload": copy.deepcopy(doc)} if doc else None
+        if "commercial_account_tokens" in query:
+            return None
         if "SELECT auth_version, security FROM commercial_auth_users" in query:
             return copy.deepcopy(self.users.get(args[0]))
         if "commercial_auth_limits" in query:
@@ -480,7 +506,7 @@ class V22CommercialTests(unittest.TestCase):
             asyncio.run(v22_admin_trading_accounts("missing-user", missing_request))
         self.assertEqual(missing.exception.status_code, 404)
 
-        self.assertEqual(len(pool.executed), 12)
+        self.assertEqual(len(pool.executed), 15)
         self.assertEqual(len(pool.fetched), 1)
         self.assertEqual(pool.fetched[0][1], (customer["id"],))
 

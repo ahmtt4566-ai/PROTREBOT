@@ -11,6 +11,7 @@ import { analysisPrice, analysisValue, autoTradePresentation, masterLayoutV2Enab
 import './master-trade-analysis-v2.css'
 import MasterTradeReference from './MasterTradeReference'
 import {useMasterMarketQuotes} from './useMasterMarketQuotes'
+import {useTradingPreferences} from './useTradingPreferences'
 import {MarketDataFailure, marketDataFailure, marketDataResponseError} from './master-trade-data-error'
 
 type TradeSide = 'LONG' | 'SHORT'
@@ -139,6 +140,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const referenceEnabled = useSyncExternalStore(subscribePresentation, readPresentation, () => false)
   const masterLayoutV2 = referenceEnabled && layoutTab === 'analiz'
   const marketFeed = useMasterMarketQuotes(referenceEnabled)
+  const tradingDefaults = useTradingPreferences()
+  const defaultsApplied = useRef(false)
   const decisionColumn = useRef<HTMLElement>(null)
   const shortcutPending = useRef(false)
   const reactionArea = useRef<HTMLElement>(null)
@@ -190,6 +193,17 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const analysis = activeSnapshot?.marketError || dataError ? null : activeSnapshot?.analysis ?? null
   const mtfAnalyses = activeSnapshot?.mtf ?? []
   const account = snapshot?.account ?? accountRef.current
+
+  useEffect(() => {
+    if (defaultsApplied.current || !tradingDefaults.preferences) return
+    defaultsApplied.current = true
+    if (!tradingDefaults.untouched()) return
+    const preferences = tradingDefaults.preferences
+    if (preferences.timeframe) setInterval(preferences.timeframe)
+    const symbol = preferences.symbols?.[0]
+    if (symbol) setDraft(current => ({...current, market: symbol, entry: 0, stopLoss: 0, tp1: 0, tp2: 0, tp3: 0}))
+    if (preferences.trading_mode === 'AUTO' && !new URLSearchParams(location.search).has('tab')) navigateTab('canli')
+  }, [tradingDefaults.preferences, tradingDefaults.untouched])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -712,6 +726,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     <MasterTradePresentation restored={masterLayoutV2 && layoutTab === 'analiz'}>
     <PremiumWorkspace>
     <section ref={reactionArea} className="masterTradePresentationHost">
+    {tradingDefaults.error && <p className="refError" role="alert">İşlem tercihleri uygulanamadı: {tradingDefaults.error}</p>}
     {referenceContent}
     <section hidden={referenceAnalysis} className={`masterTradePage masterTrade${masterTradeOffline ? ' masterTradeOffline' : ''}${masterLayoutV2 ? ' masterLayoutV2' : ''}`} data-layout-tab={layoutTab}>
       <div className="masterTradeShell">
@@ -840,7 +855,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             <div className="decisionMtf"><div className="decisionSubheading"><h4>MULTI-TIMEFRAME MATRIX</h4><strong>{tradeDecision.mtfScore === null ? 'MTF BIAS: --' : `MTF CONFIRMATION: ${tradeDecision.mtfConfirmed} / ${tradeDecision.mtfTotal}`}</strong></div><div className="decisionMtfGrid">{MTF_INTERVALS.map(timeframe => { const row = tradeDecision.mtfRows.find(item => item.timeframe === timeframe); return <span key={timeframe} data-tone={masterTradeTone(row?.available ? row.direction : undefined)}><b>{timeframe}</b><em><MasterTradeValue>{row?.available ? row.direction : '--'}</MasterTradeValue></em><small><MasterTradeValue>{row?.trend || '--'}</MasterTradeValue></small></span> })}</div>{!tradeDecision.mtfRows.length && <p>DATA UNAVAILABLE</p>}</div>
 
             <div className="chartToolbar" aria-label="Market chart controls">
-              <div className="chartControls">{['1m','5m','15m','1h','4h','1d'].map((range) => <button key={range} type="button" className={range === interval ? 'active' : ''} onClick={() => setInterval(range)}>{range.toUpperCase()}</button>)}</div>
+              <div className="chartControls">{Array.from(new Set(['1m','5m','15m','1h','4h','1d',interval])).map((range) => <button key={range} type="button" className={range === interval ? 'active' : ''} onClick={() => setInterval(range)}>{range.toUpperCase()}</button>)}</div>
               <div className="chartViewControls"><button type="button" className={showChartLevels ? 'active' : ''} onClick={() => setShowChartLevels(value => !value)}>LEVELS</button><button type="button" className={showChartVolume ? 'active' : ''} onClick={() => setShowChartVolume(value => !value)}>VOLUME</button></div>
             </div>
             <span className="chartOhlcLabel">{hoveredCandle ? new Date(hoveredCandle.time * (hoveredCandle.time < 1_000_000_000_000 ? 1000 : 1)).toLocaleString('en-GB') : 'OHLC / REAL MARKET DATA'}</span>

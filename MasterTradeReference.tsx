@@ -10,6 +10,7 @@ import {MasterTradeAccordions} from './MasterTradeAccordions'
 import {MasterTradeMarketWatch} from './MasterTradeMarketWatch'
 import type {MarketScore} from './master-market-data'
 import type {MasterMarketFeed} from './useMasterMarketQuotes'
+import {TRADING_TIMEFRAMES} from './account-settings-api'
 import './master-trade-reference.css'
 
 type Candle = {time: number; open: number; high: number; low: number; close: number; volume: number}
@@ -138,7 +139,7 @@ export default function MasterTradeReference(props: Props) {
       </section>
       <section className="refCenter">
         <section className="refCard refChart">
-          <div className="refToolbar" aria-label="Market chart controls"><span title="Mum grafiği"><BarChart3/><ChevronDown/></span><select aria-label="Zaman dilimi" value={props.interval} onChange={event => props.onInterval(event.target.value)}>{['1m','5m','15m','1h','4h','1d'].map(range => <option key={range}>{range}</option>)}</select>
+          <div className="refToolbar" aria-label="Market chart controls"><span title="Mum grafiği"><BarChart3/><ChevronDown/></span><select aria-label="Zaman dilimi" value={props.interval} onChange={event => props.onInterval(event.target.value)}>{TRADING_TIMEFRAMES.map(range => <option key={range}>{range}</option>)}</select>
             <details className="refIndicators"><summary><SlidersHorizontal/> Göstergeler <ChevronDown/></summary><div><button type="button" aria-pressed={props.levelsVisible} onClick={props.onLevels}>LEVELS</button><button type="button" aria-pressed={props.volumeVisible} onClick={props.onVolume}>VOLUME</button></div></details>
             <div className="refDrawingTools"><button disabled aria-label="Çizim araçları mevcut değil"><Crosshair/></button><button disabled aria-label="Grafik ayarları mevcut değil"><Settings2/></button><button disabled aria-label="Grafik ekran görüntüsü mevcut değil"><Camera/></button></div>
             <div className="refOrderTools">{['LİMİT', 'PİYASA'].map(label => <span className="refLockedAction" key={label} onClick={lockedOrder}><button type="button" disabled><LockKeyhole/>{label}</button><button type="button" className="refLockInfo" aria-label={`${label} neden kilitli?`} onClick={event => {event.stopPropagation(); lockedOrder()}}><LockKeyhole/></button></span>)}<button type="button" disabled={props.refreshing} onClick={props.onRefresh}><RefreshCw/>YENİLE</button></div>

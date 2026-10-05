@@ -53,6 +53,21 @@ class SharedStore:
         self.snapshot = None
         self.fail = False
         self.erased_hashes = set()
+        self.account_settings = {}
+        self.account_tokens = {}
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self
+
+    @asynccontextmanager
+    async def transaction(self):
+        previous = copy.deepcopy((self.users, self.account_settings))
+        try:
+            yield
+        except BaseException:
+            self.users, self.account_settings = previous
+            raise
 
     def check(self, sql):
         self.sql.append(sql)
@@ -61,6 +76,12 @@ class SharedStore:
 
     async def execute(self, sql, *args):
         self.check(sql)
+        if "INSERT INTO commercial_account_tokens" in sql:
+            self.account_tokens[args[0]] = {"args": args, "used": False}
+            return
+        if "INSERT INTO commercial_account_settings" in sql:
+            self.account_settings[args[0]] = json.loads(args[1])
+            return
         if "INSERT INTO commercial_auth_users" in sql and "VALUES" in sql:
             self.users.setdefault(args[0], {"auth_version": args[1], "security": json.loads(args[2])})
         elif "INSERT INTO application_state_snapshots" in sql:
@@ -68,6 +89,21 @@ class SharedStore:
 
     async def fetchrow(self, sql, *args):
         self.check(sql)
+        if "commercial_account_settings" in sql:
+            doc = self.account_settings.get(args[0])
+            return {"payload": copy.deepcopy(doc)} if doc else None
+        if "commercial_account_tokens" in sql:
+            row = self.account_tokens.get(args[0])
+            if "INSERT INTO" in sql:
+                if row:
+                    return None
+                self.account_tokens[args[0]] = {"args": args, "used": True}
+                return {"token_hash": args[0]}
+            if "UPDATE" in sql:
+                if not row or row["used"] or row["args"][:5] != args[:5] or row["args"][5] <= args[5]:
+                    return None
+                row["used"] = True
+            return {"token_hash": args[0]} if row else None
         if "SELECT payload FROM application_state_snapshots" in sql:
             return {"payload": copy.deepcopy(self.snapshot)} if self.snapshot is not None else None
         if "commercial_auth_limits" in sql:
@@ -84,7 +120,7 @@ class SharedStore:
             else:
                 if len(args) == 3 and args[2] is not None and row["auth_version"] != args[2]:
                     return None
-                delta, updates = 1, args[1]
+                delta, updates = (1 if "auth_version = auth_version +" in sql else 0), args[1]
             row["auth_version"] += delta
             row["security"].update(json.loads(updates))
         return copy.deepcopy(row)

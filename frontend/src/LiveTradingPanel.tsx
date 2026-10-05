@@ -7,6 +7,8 @@ import { fetchWithTimeout } from '../../master-trade-request'
 import { liveCopy } from '../../ui-copy'
 import { MasterTradeLiveLayout } from '../../MasterTradeLayout'
 import {useKaisErrorReaction} from '../../useKaisPageReactions'
+import {useTradingPreferences} from '../../useTradingPreferences'
+import {preferredRiskMargin} from '../../account-risk-sizing'
 
 type LivePolicy = Record<string, unknown>
 type LiveStatus = {
@@ -115,6 +117,18 @@ function errorMessage(payload: unknown, fallback: string): string {
 }
 
 export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
+  const tradingDefaults = useTradingPreferences()
+  const defaultsApplied = useRef(false)
+  const [sizingNotice, setSizingNotice] = useState('')
+  useEffect(() => {
+    if (!active || (masterTrade && masterTradeTab !== 'canli') || defaultsApplied.current || !tradingDefaults.preferences) return
+    defaultsApplied.current = true
+    if (tradingDefaults.untouched() && tradingDefaults.preferences.trading_mode === 'AUTO') {
+      const section = document.getElementById('master-trade-auto-trade')
+      section?.scrollIntoView({block: 'center'})
+      section?.focus({preventScroll: true})
+    }
+  }, [active, masterTrade, masterTradeTab, tradingDefaults.preferences, tradingDefaults.untouched])
   const [localStatus, setLocalStatus] = useState<LiveStatus | null>(null)
   const [localConnections, setLocalConnections] = useState<ConnectionStatus | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
@@ -604,6 +618,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
           <label>{liveCopy.tp2}<input type="number" value={order.tp2} onChange={event => setOrder({...order, tp2: event.target.value})}/></label>
           <label>{liveCopy.tp3}<input type="number" value={order.tp3} onChange={event => setOrder({...order, tp3: event.target.value})}/></label>
         </div>
+        {tradingDefaults.preferences?.risk_per_trade && <div className="liveUxFormActions"><span>Kişisel risk tercihi: %{tradingDefaults.preferences.risk_per_trade}</span><button type="button" disabled={Boolean(busy) || !manualOrderReady} onClick={() => {
+          const result = preferredRiskMargin({wallet: Number(status?.account?.wallet_balance), available: Number(status?.account?.available_balance), entry: order.order_type === 'LIMIT' ? Number(order.limit_price) : Number(analysis?.entry), stop: Number(order.stop_loss), leverage: Number(order.leverage), percent: tradingDefaults.preferences.risk_per_trade})
+          setSizingNotice(result.reason)
+          if (result.margin !== null) setOrder(current => ({...current, margin_usdt: String(result.margin)}))
+        }}>Tercih edilen riskle marjı hesapla</button></div>}
+        {(sizingNotice || tradingDefaults.error) && <p role="status">{sizingNotice || `İşlem tercihleri alınamadı: ${tradingDefaults.error}`}</p>}
         <div className="liveUxFormActions"><button type="button" onClick={fillAnalysis}><CircleDollarSign/> {liveCopy.fillAnalysis}</button><button type="button" className="primary" onClick={reviewOrder} disabled={Boolean(busy)}><Send/> {liveCopy.reviewOrder}</button></div>
         {reviewResult && <p className="liveUxReviewResult" role="status">{reviewResult.message} Gerçek emir gönderilmedi.</p>}
       </section>

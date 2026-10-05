@@ -285,6 +285,7 @@ def merge_user(rt: dict[str, Any], row: Any) -> dict[str, Any]:
     registration = user.pop("_registration", {})
     user.update(decode_payload(row["security"]))
     user["auth_version"] = int(row["auth_version"])
+    user["auth_provider"] = "google"
     current = next((item for item in rt["state"]["users"] if item["id"] == user["id"]), None)
     if current is None:
         rt["state"]["users"].append(user)
@@ -370,7 +371,7 @@ async def resolve_identity(request: Request, identity: dict[str, str], *, create
                 created = auth.now_iso()
                 user = {"id": uid, "email": identity["email"], "display_name": identity["display_name"],
                         "role": "CUSTOMER", "active": True, "auth_version": 1, "email_verified": True,
-                        "password": {}, "created_at": created}
+                        "password": {}, "auth_provider": "google", "created_at": created}
                 state["users"].append(user)
                 state["profiles"].append({"id": uuid.uuid4().hex, "user_id": uid, "full_name": user["display_name"],
                                           "avatar_url": None, "role": "user", "preferences": {},
@@ -414,6 +415,9 @@ async def resolve_identity(request: Request, identity: dict[str, str], *, create
 
 
 async def establish_session(request: Request, response: Response, user: dict[str, Any], remember: bool) -> str:
+    from .account_settings import enabled, login_record
+    if await enabled(request, user):
+        raise HTTPException(403, "İki aşamalı doğrulama gerekli")
     version = int(user.get("auth_version", 1))
     await auth.validate_authoritative_session(request.app, user["id"], version)
     await auth.restore_demo_state_for_user(request.app, user["id"])
@@ -421,6 +425,7 @@ async def establish_session(request: Request, response: Response, user: dict[str
     await auth.validate_authoritative_session(request.app, user["id"], version)
     token = issue_token(user["id"], user["role"], auth.runtime(request)["secret"], token_version=version,
                         ttl_seconds=auth.REMEMBER_SESSION_SECONDS if remember else auth.STANDARD_SESSION_SECONDS)
+    await login_record(request, user, token, google=True)
     return auth.browser_session_response_token(token, user, request, response, browser_session=True, remember=remember)
 
 
@@ -478,6 +483,15 @@ async def callback(request: Request):
             set_flow_cookie(response, request, BINDING_COOKIE, binding)
             set_flow_cookie(response, request, PENDING_COOKIE, pending)
             return response
+        from .account_settings import enabled, login_challenge
+        if await enabled(request, user):
+            challenge = await login_challenge(request, user, remember=attempt["remember"], browser_session=True, google=True)
+            response = RedirectResponse(origin + "/login?mfa_challenge=" + challenge["challenge_id"] +
+                                        "&google_remember=" + ("1" if attempt["remember"] else "0"), status_code=303,
+                                        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+            clear_flow_cookie(response, request, BINDING_COOKIE)
+            clear_flow_cookie(response, request, PENDING_COOKIE)
+            return response
         response = redirect(request, origin, "success", attempt["remember"])
         await establish_session(request, response, user, attempt["remember"])
         clear_flow_cookie(response, request, PENDING_COOKIE)
@@ -515,6 +529,12 @@ async def complete(payload: CompleteRequest, request: Request, response: Respons
         user = await resolve_identity(request, attempt["identity"], create=True)
         if user is None:
             raise OAuthFailure("account_unavailable")
+        from .account_settings import enabled, login_challenge
+        if await enabled(request, user):
+            result = await login_challenge(request, user, remember=attempt["remember"], browser_session=True, google=True)
+            clear_flow_cookie(response, request, BINDING_COOKIE)
+            clear_flow_cookie(response, request, PENDING_COOKIE)
+            return result
         marker = await establish_session(request, response, user, attempt["remember"])
     except OAuthFailure as exc:
         logger.warning("Google registration rejected: %s", exc.reason)

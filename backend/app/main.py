@@ -1208,7 +1208,7 @@ app.add_middleware(
 
 MEMBER_PUBLIC_PATHS = frozenset({
     "/api/health", "/api/health/database", "/api/web/access/check", "/api/web/access/logout", "/api/client-errors", "/api/v22/public", "/api/v22/bootstrap",
-    "/api/v22/auth/login", "/api/v22/auth/register", "/api/v22/auth/verify-email",
+    "/api/v22/auth/login", "/api/v22/auth/2fa/login", "/api/v22/auth/register", "/api/v22/auth/verify-email",
     "/api/v22/auth/verification-status", "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
     "/api/v22/auth/google/start", "/api/v22/auth/google/callback",
     "/api/v22/auth/google/pending", "/api/v22/auth/google/complete",
@@ -1367,6 +1367,8 @@ async def owner_preview_gate(request, call_next):
 app.include_router(binance_demo_router)
 app.include_router(v21_demo_router)
 app.include_router(v22_commercial_router)
+from .account_settings import router as account_settings_router
+app.include_router(account_settings_router)
 app.include_router(google_oauth_router)
 app.include_router(v24_commerce_router)
 app.include_router(v25_execution_router)

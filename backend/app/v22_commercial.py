@@ -94,7 +94,7 @@ AUTH_LIMITS = {
     "login": (8, 300), "register": (5, 900), "forgot": (5, 900),
     "reset": (8, 900), "verify": (12, 300), "verify-status": (120, 60),
 }
-AUTH_SECURITY_FIELDS = ("password", "active", "role", "email_verified")
+AUTH_SECURITY_FIELDS = ("password", "active", "role", "email_verified", "email", "display_name", "password_changed_at", "closed_at")
 STANDARD_SESSION_SECONDS = 8 * 60 * 60
 REMEMBER_SESSION_SECONDS = 30 * 24 * 60 * 60
 COMMERCIAL_STATE_KEY = "v22-commercial"
@@ -309,18 +309,30 @@ async def ensure_commercial_schema(application: Any) -> None:
         """
     )
     await ensure_erasure_schema(pool)
+    from .account_store import SCHEMA as account_schema
+    await pool.execute(account_schema)
     await pool.execute(
         """
         INSERT INTO commercial_auth_users (user_id, auth_version, security)
         SELECT u->>'id', COALESCE((u->>'auth_version')::bigint, 1),
                jsonb_build_object('password', u->'password', 'active', u->'active',
-                                  'role', u->'role', 'email_verified', u->'email_verified')
+                                  'role', u->'role', 'email_verified', u->'email_verified',
+                                  'email', u->'email', 'display_name', u->'display_name')
         FROM application_state_snapshots,
              jsonb_array_elements(payload->'users') AS u
         WHERE state_key = 'v22-commercial'
         ON CONFLICT (user_id) DO NOTHING
         """
     )
+    await pool.execute("""
+        UPDATE commercial_auth_users AS a SET security = jsonb_build_object(
+          'email', u->'email', 'display_name', u->'display_name') || a.security
+        FROM application_state_snapshots AS s, jsonb_array_elements(s.payload->'users') AS u
+        WHERE s.state_key = 'v22-commercial' AND a.user_id = u->>'id'
+          AND NOT (a.security ? 'email')
+    """)
+    await pool.execute("""CREATE UNIQUE INDEX IF NOT EXISTS commercial_auth_email_unique
+        ON commercial_auth_users (lower(security->>'email')) WHERE security->>'email' IS NOT NULL""")
     await pool.execute(
         """
         CREATE TABLE IF NOT EXISTS commercial_auth_limits (
@@ -642,6 +654,8 @@ async def refresh_auth_security(request: Request, user: dict[str, Any]) -> None:
     if pool is None:
         if DURABLE_AUTH_REQUIRED or rt.get("authoritative_auth_enabled"):
             raise HTTPException(503, "Kalıcı kimlik doğrulama veritabanı hazır değil")
+        from .account_settings import local_security
+        await local_security(request, user)
         return
     rt["authoritative_auth_enabled"] = True
     try:
@@ -707,6 +721,10 @@ async def validate_authoritative_session(
         if DURABLE_AUTH_REQUIRED or rt.get("authoritative_auth_enabled"):
             raise HTTPException(503, "Kalıcı kimlik doğrulama veritabanı hazır değil")
         user = next((item for item in rt["state"].get("users", []) if item.get("id") == user_id), None)
+        if user:
+            from types import SimpleNamespace
+            from .account_settings import local_security
+            await local_security(SimpleNamespace(app=application), user)
         security = auth_security(user) if user else {}
         actual_version = int(user.get("auth_version", 1)) if user else 0
     else:
@@ -759,13 +777,20 @@ async def invalidate_user_sessions(
     if pool is None:
         if DURABLE_AUTH_REQUIRED or runtime(request).get("authoritative_auth_enabled"):
             raise HTTPException(503, "Kalıcı kimlik doğrulama veritabanı hazır değil")
-        if expected_version is not None and int(user.get("auth_version", 1)) != expected_version:
-            raise HTTPException(401, "Oturum yenilenmeli")
-        user.update(updates)
-        user["auth_version"] = int(user.get("auth_version", 1)) + 1
+        from . import account_store
+        async with account_store.edit(request, user["id"]) as doc:
+            if doc.get("auth_overlay"):
+                user.update(copy.deepcopy(doc["auth_overlay"]))
+            if expected_version is not None and int(user.get("auth_version", 1)) != expected_version:
+                raise HTTPException(401, "Oturum yenilenmeli")
+            user.update(updates)
+            user["auth_version"] = int(user.get("auth_version", 1)) + 1
+            doc["auth_overlay"] = {"auth_version": user["auth_version"], **auth_security(user)}
         return
+    from .account_store import active_connection
+    connection = active_connection(request, user["id"]) or pool
     try:
-        row = await pool.fetchrow(
+        row = await connection.fetchrow(
             """UPDATE commercial_auth_users
                SET auth_version = auth_version + 1, security = security || $2::jsonb
                WHERE user_id = $1 AND ($3::bigint IS NULL OR auth_version = $3)
@@ -773,6 +798,8 @@ async def invalidate_user_sessions(
             user["id"], json.dumps(updates), expected_version,
         )
     except Exception as exc:
+        if "email" in updates and type(exc).__name__ == "UniqueViolationError":
+            raise HTTPException(409, "E-posta kullanılamıyor") from None
         raise HTTPException(503, "Oturum iptali kalıcı depoya yazılamadı") from exc
     if row is None:
         raise HTTPException(401, "Kullanıcı etkin değil")
@@ -803,11 +830,56 @@ async def authenticated_user_async(request: Request, *, owner: bool = False) -> 
     if user is None:
         from .google_oauth import hydrate_user
         user = await hydrate_user(request, user_id=payload["sub"])
+        if user is None and getattr(request.app.state, "db_pool", None) is not None:
+            try:
+                row = await request.app.state.db_pool.fetchrow(
+                    "SELECT auth_version, security FROM commercial_auth_users WHERE user_id = $1", payload["sub"])
+            except Exception:
+                raise HTTPException(503, "Kimlik doğrulama deposu kullanılamıyor") from None
+            if row:
+                security = row["security"]
+                security = json.loads(security) if isinstance(security, str) else security
+                user = {"id": payload["sub"], **security, "auth_version": int(row["auth_version"])}
+                rt["state"]["users"].append(user)
         if user is None:
             raise HTTPException(401, "Kullanıcı etkin değil")
     await refresh_auth_security(request, user)
+    from .account_settings import track_session
+    await track_session(request, token)
     request.state.v22_authoritative_token = token
     return authenticated_user(request, owner=owner)
+
+
+async def update_auth_security(request: Request, user: dict[str, Any], updates: dict[str, Any]) -> None:
+    """CAS non-revoking metadata/verification updates against canonical authority."""
+    if any(key not in AUTH_SECURITY_FIELDS for key in updates):
+        raise ValueError("Unsupported security field")
+    from . import account_store
+    pool = getattr(request.app.state, "db_pool", None)
+    async with account_store.edit(request, user["id"]) as doc:
+        if pool is not None:
+            connection = account_store.active_connection(request, user["id"]) or pool
+            try:
+                row = await connection.fetchrow("""UPDATE commercial_auth_users
+                    SET security = security || $2::jsonb WHERE user_id = $1 AND auth_version = $3
+                    RETURNING auth_version, security""",
+                    user["id"], json.dumps(updates), int(user.get("auth_version", 1)))
+            except Exception:
+                raise HTTPException(503, "Hesap güvenliği kaydedilemedi") from None
+            if row is None:
+                raise HTTPException(409, "Hesap eşzamanlı olarak değişti")
+            security = row["security"]
+            user.update(json.loads(security) if isinstance(security, str) else security)
+            user["auth_version"] = int(row["auth_version"])
+        elif doc.get("auth_overlay"):
+            if int(doc["auth_overlay"].get("auth_version", 1)) != int(user.get("auth_version", 1)):
+                raise HTTPException(409, "Hesap eşzamanlı olarak değişti")
+            user.update(copy.deepcopy(doc["auth_overlay"]))
+        user.update(updates)
+        if pool is None:
+            doc["auth_overlay"] = {"auth_version": int(user.get("auth_version", 1)), **auth_security(user)}
+        runtime(request).setdefault("auth_baseline", {})[user["id"]] = {
+            "auth_version": int(user.get("auth_version", 1)), **auth_security(user)}
 
 
 async def enforce_auth_limit(request: Request, action: str, account: str | None) -> None:
@@ -928,7 +1000,7 @@ def authenticated_user(request: Request, *, owner: bool = False) -> dict[str, An
     if not user:
         schedule_log_event(request.app, build_error_event(source="backend", service="auth", kind="AuthenticationError", code="USER_INACTIVE", severity="WARNING", message="Authenticated user is inactive.", route=request.url.path, method=request.method, request_id=getattr(request.state, "request_id", None)))
         raise HTTPException(401, "Kullanıcı etkin değil")
-    if user.get("role") != "OWNER" and user.get("email_verified") is False:
+    if user.get("role") != "OWNER" and user.get("email_verified") is False and request.url.path != "/api/v22/account/verification/resend":
         raise HTTPException(403, "E-posta doğrulaması gerekli")
     if int(payload.get("ver", 1)) != int(user.get("auth_version", 1)):
         schedule_log_event(request.app, build_error_event(source="backend", service="auth", kind="AuthenticationError", code="SESSION_STALE", severity="WARNING", message="Session version is stale.", route=request.url.path, method=request.method, request_id=getattr(request.state, "request_id", None), user_id=user.get("id")))
@@ -1065,6 +1137,7 @@ class PasswordResetConfirmRequest(BaseModel):
     token: str = Field(min_length=20, max_length=600)
     password: str = Field(min_length=10, max_length=256)
     confirm_password: str = Field(min_length=10, max_length=256)
+    totp_code: str | None = Field(default=None, max_length=80)
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -1164,6 +1237,7 @@ class RevokeRequest(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=10, max_length=256)
+    totp_code: str | None = Field(default=None, max_length=80)
 
 
 class ReleaseEvidenceRequest(BaseModel):
@@ -1251,6 +1325,9 @@ async def v22_bootstrap(payload: BootstrapRequest, request: Request, response: R
         raise HTTPException(503, "Hesap PostgreSQL'e yazılamadı; kayıt tamamlanmadı")
     if not user.get("active") or user.get("role") != "OWNER" or int(user["auth_version"]) != granted_version:
         raise HTTPException(409, "Hesap güvenliği değişti; yönetici kurulumunu yeniden deneyin")
+    from .account_settings import enabled, login_challenge, login_record
+    if await enabled(request, user):
+        return await login_challenge(request, user, remember=payload.remember, browser_session=payload.browser_session)
     token = issue_token(
         user_id,
         "OWNER",
@@ -1258,6 +1335,7 @@ async def v22_bootstrap(payload: BootstrapRequest, request: Request, response: R
         token_version=user["auth_version"],
         ttl_seconds=REMEMBER_SESSION_SECONDS if payload.remember else STANDARD_SESSION_SECONDS,
     )
+    await login_record(request, user, token)
     token = browser_session_response_token(
         token, user, request, response, browser_session=payload.browser_session, remember=payload.remember,
     )
@@ -1288,10 +1366,34 @@ async def v22_login(payload: LoginRequest, request: Request, response: Response 
     rt = runtime(request)
     await enforce_auth_limit(request, "login", payload.email)
     user = next((item for item in rt["state"]["users"] if item.get("email") == normalize_email(payload.email)), None)
+    pool = getattr(request.app.state, "db_pool", None)
+    if user is None and pool is None:
+        from .account_store import local_user_by_email
+        canonical = await local_user_by_email(request, normalize_email(payload.email))
+        if canonical:
+            user = next((item for item in rt["state"]["users"] if item["id"] == canonical["id"]), None)
+            if user is None:
+                user = canonical
+                rt["state"]["users"].append(user)
+    if user is None and pool is not None:
+        try:
+            row = await pool.fetchrow("SELECT user_id, auth_version, security FROM commercial_auth_users WHERE lower(security->>'email') = $1", normalize_email(payload.email))
+        except Exception:
+            raise HTTPException(503, "Kimlik doğrulama deposu kullanılamıyor") from None
+        if row:
+            security = row["security"]
+            security = json.loads(security) if isinstance(security, str) else security
+            user = next((item for item in rt["state"]["users"] if item["id"] == row["user_id"]), None)
+            if user is None:
+                user = {"id": row["user_id"], **security, "auth_version": int(row["auth_version"])}
+                rt["state"]["users"].append(user)
     if user:
         await refresh_auth_security(request, user)
-    if not user or not user.get("active") or not verify_password(payload.password, user.get("password", {})):
+    if not user or user.get("email") != normalize_email(payload.email) or not user.get("active") or not verify_password(payload.password, user.get("password", {})):
         raise HTTPException(401, "E-posta veya parola hatalı")
+    from .account_settings import enabled, login_challenge, login_record
+    if await enabled(request, user):
+        return await login_challenge(request, user, remember=payload.remember, browser_session=payload.browser_session)
     verified_version = int(user.get("auth_version", 1))
     if user["password"].get("algorithm") != PASSWORD_ALGORITHM:
         user["password"] = hash_password(payload.password)
@@ -1312,6 +1414,7 @@ async def v22_login(payload: LoginRequest, request: Request, response: Response 
         token_version=int(user.get("auth_version", 1)),
         ttl_seconds=REMEMBER_SESSION_SECONDS if payload.remember else STANDARD_SESSION_SECONDS,
     )
+    await login_record(request, user, token)
     token = browser_session_response_token(
         token, user, request, response, browser_session=payload.browser_session, remember=payload.remember,
     )
@@ -1380,6 +1483,8 @@ async def register_password_user(payload: RegisterRequest, request: Request):
         state["profiles"].append({"id": uuid.uuid4().hex, "user_id": user_id, "full_name": user["display_name"], "avatar_url": None, "role": "user", "preferences": {}, "created_at": user["created_at"], "updated_at": user["created_at"]})
         state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": user_id, "plan": "FREE", "status": "inactive", "started_at": user["created_at"], "expires_at": None, "created_at": user["created_at"], "updated_at": user["created_at"]})
         verification_token = issue_one_time_token(state, user, rt["secret"], kind="EMAIL_VERIFY")
+        from .account_store import save_action_token
+        await save_action_token(request, verification_token, user, "EMAIL_VERIFY")
         verification_status_token = issue_token(user_id, user["role"], rt["secret"], kind="EMAIL_STATUS", ttl_seconds=24 * 60 * 60)
         add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
         save_state(state)
@@ -1416,11 +1521,19 @@ async def register_password_user(payload: RegisterRequest, request: Request):
 async def v22_verify_email(payload: EmailTokenRequest, request: Request):
     rt = runtime(request)
     await enforce_auth_limit(request, "verify", token_limit_account(payload.token, rt["secret"], "EMAIL_VERIFY"))
-    token = consume_one_time_token(rt["state"], payload.token, rt["secret"], kind="EMAIL_VERIFY")
+    try:
+        token = verify_token(payload.token, rt["secret"], expected_kind="EMAIL_VERIFY")
+    except ValueError:
+        raise HTTPException(400, "Doğrulama bağlantısı geçersiz") from None
     user = next((item for item in rt["state"]["users"] if item.get("id") == token["sub"]), None)
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
-    user["email_verified"] = True
+    await refresh_auth_security(request, user)
+    if not user.get("active"):
+        raise HTTPException(400, "Doğrulama bağlantısı geçersiz")
+    from .account_store import consume_action_token
+    await consume_action_token(request, payload.token, user, "EMAIL_VERIFY")
+    await update_auth_security(request, user, {"email_verified": True})
     save_state(rt["state"])
     persisted = await persist_v22_commercial(request.app)
     if DURABLE_AUTH_REQUIRED and not persisted:
@@ -1471,6 +1584,8 @@ async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
     if user:
         async with rt["lock"]:
             reset_token = issue_one_time_token(rt["state"], user, rt["secret"], kind="PASSWORD_RESET")
+            from .account_store import save_action_token
+            await save_action_token(request, reset_token, user, "PASSWORD_RESET")
             save_state(rt["state"])
         persisted = await persist_v22_commercial(request.app)
         if DURABLE_AUTH_REQUIRED and not persisted:
@@ -1492,15 +1607,26 @@ async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Requ
     await enforce_auth_limit(request, "reset", token_limit_account(payload.token, rt["secret"], "PASSWORD_RESET"))
     if payload.password != payload.confirm_password:
         raise HTTPException(422, "Parolalar eşleşmiyor")
-    token = consume_one_time_token(rt["state"], payload.token, rt["secret"], kind="PASSWORD_RESET")
+    try:
+        token = verify_token(payload.token, rt["secret"], expected_kind="PASSWORD_RESET")
+    except ValueError:
+        raise HTTPException(400, "Parola yenileme bağlantısı geçersiz") from None
     user = next((item for item in rt["state"]["users"] if item.get("id") == token["sub"]), None)
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
+    await refresh_auth_security(request, user)
+    if not user.get("active"):
+        raise HTTPException(400, "Parola yenileme bağlantısı geçersiz")
+    from .account_settings import require_totp
+    await require_totp(request, user, payload.totp_code)
+    from .account_store import consume_action_token
+    token = await consume_action_token(request, payload.token, user, "PASSWORD_RESET")
     try:
-        await invalidate_user_sessions(request, user, security_updates={"password": hash_password(payload.password)})
+        await invalidate_user_sessions(request, user, security_updates={"password": hash_password(payload.password), "password_changed_at": now_iso()})
     except HTTPException:
-        row = next(item for item in rt["state"]["auth_tokens"] if item.get("jti") == token["jti"])
-        row["used"] = False
+        row = next((item for item in rt["state"]["auth_tokens"] if item.get("jti") == token["jti"]), None)
+        if row:
+            row["used"] = False
         raise
     save_state(rt["state"])
     persisted = await persist_v22_commercial(request.app)
@@ -1523,6 +1649,12 @@ async def v22_profile(request: Request):
     user = authenticated_user(request)
     state = runtime(request)["state"]
     profile = next((item for item in state.get("profiles", []) if item.get("user_id") == user["id"]), None)
+    from .account_store import read as read_account_settings
+    account = await read_account_settings(request, user["id"])
+    if account and account.get("preferences"):
+        if profile is None:
+            profile = {"user_id": user["id"], "preferences": {}}
+        profile.setdefault("preferences", {}).update(copy.deepcopy(account["preferences"]))
     return {"user": public_user(user), "profile": profile, "subscription": subscription_for_user(state, user["id"]), "access": access_snapshot(state, user), "demo_only": True}
 
 
@@ -2057,16 +2189,26 @@ async def v22_admin_password_reset(user_id: str, request: Request):
     user = next((item for item in rt["state"]["users"] if item.get("id") == user_id), None)
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
+    if not gmail_configured():
+        raise HTTPException(503, "E-posta servisi yapılandırılmamış")
+    await refresh_auth_security(request, user)
+    await enforce_auth_limit(request, "forgot", user["email"])
     async with rt["lock"]:
         reset_token = issue_one_time_token(rt["state"], user, rt["secret"], kind="PASSWORD_RESET")
+        from .account_store import save_action_token
+        await save_action_token(request, reset_token, user, "PASSWORD_RESET")
         add_audit(rt["state"], "PASSWORD_RESET_REQUESTED", "Yönetici parola yenileme bağlantısı istedi.", actor=owner["id"], subject=user_id)
-        save_state(rt["state"])
-    await persist_v22_commercial(request.app)
-    if gmail_configured():
         try:
-            await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
-        except GMAIL_DELIVERY_ERRORS as exc:
-            log_gmail_failure(exc, request.app)
+            save_state(rt["state"])
+        except Exception:
+            raise HTTPException(503, "Parola yenileme isteği kaydedilemedi") from None
+    persisted = await persist_v22_commercial(request.app)
+    if (DURABLE_AUTH_REQUIRED or getattr(request.app.state, "db_pool", None) is not None) and not persisted:
+        raise HTTPException(503, "Parola yenileme isteği kalıcı depoya yazılamadı")
+    try:
+        await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject="Reset your ProTreBot password", title="Reset your ProTreBot password", action_url=f"{app_base_url()}/reset-password?token={reset_token}", action_label="RESET PASSWORD")
+    except GMAIL_DELIVERY_ERRORS:
+        raise HTTPException(503, "Parola yenileme e-postası gönderilemedi") from None
     return {"ok": True, "message": "Parola yenileme bağlantısı gönderildi.", "demo_only": True}
 
 
@@ -2080,8 +2222,13 @@ async def v22_admin_revoke_sessions(user_id: str, request: Request, response: Re
             raise HTTPException(404, "Kullanıcı bulunamadı")
         await invalidate_user_sessions(request, user)
         add_audit(rt["state"], "SESSIONS_REVOKED", "Kullanıcının tüm oturumları sonlandırıldı.", actor=owner["id"], subject=user_id)
-        save_state(rt["state"])
-    await persist_v22_commercial(request.app)
+        try:
+            save_state(rt["state"])
+        except Exception:
+            raise HTTPException(503, "Oturum iptali kaydedilemedi") from None
+    persisted = await persist_v22_commercial(request.app)
+    if (DURABLE_AUTH_REQUIRED or getattr(request.app.state, "db_pool", None) is not None) and not persisted:
+        raise HTTPException(503, "Oturum iptali kalıcı depoya yazılamadı")
     clear_rotated_session_cookie(request, response, user_id)
     return {"ok": True, "message": "Tüm kullanıcı oturumları sonlandırıldı.", "demo_only": True}
 
@@ -2129,9 +2276,11 @@ async def v22_change_password(payload: PasswordChangeRequest, request: Request, 
     rt = runtime(request)
     if not verify_password(payload.current_password, user.get("password", {})):
         raise HTTPException(401, "Mevcut parola hatalı")
+    from .account_settings import require_totp
+    await require_totp(request, user, payload.totp_code)
     async with rt["lock"]:
         await invalidate_user_sessions(
-            request, user, security_updates={"password": hash_password(payload.new_password)},
+            request, user, security_updates={"password": hash_password(payload.new_password), "password_changed_at": now_iso()},
             expected_version=int(user.get("auth_version", 1)),
         )
         add_audit(rt["state"], "PASSWORD_CHANGED", "Hesap parolası değiştirildi; eski oturumlar kapatıldı.", actor=user["id"], subject=user["id"])
@@ -2178,6 +2327,11 @@ async def v22_customer_status(user_id: str, payload: CustomerStatusRequest, requ
         await refresh_auth_security(request, user)
         if user.get("role") == "OWNER":
             raise HTTPException(409, "Sahip hesabı bu ekrandan askıya alınamaz")
+        if not payload.active:
+            from .account_settings import close_blocker
+            blocker = await close_blocker(request, user)
+            if blocker:
+                raise HTTPException(409, blocker)
         await invalidate_user_sessions(request, user, security_updates={"active": payload.active})
         if not payload.active:
             for agent in rt["state"]["agents"]:
@@ -2188,8 +2342,13 @@ async def v22_customer_status(user_id: str, payload: CustomerStatusRequest, requ
         kind = "CUSTOMER_ACTIVATED" if payload.active else "CUSTOMER_SUSPENDED"
         message = f"{user['email']} {'etkinleştirildi' if payload.active else 'askıya alındı'}: {payload.reason}"
         add_audit(rt["state"], kind, message, actor=owner["id"], subject=user_id)
-        save_state(rt["state"])
-    await persist_v22_commercial(request.app)
+        try:
+            save_state(rt["state"])
+        except Exception:
+            raise HTTPException(503, "Hesap durumu kaydedilemedi") from None
+    persisted = await persist_v22_commercial(request.app)
+    if (DURABLE_AUTH_REQUIRED or getattr(request.app.state, "db_pool", None) is not None) and not persisted:
+        raise HTTPException(503, "Hesap durumu kalıcı depoya yazılamadı")
     return {"user": public_user(user), "agents_revoked": not payload.active, "demo_only": True}
 
 

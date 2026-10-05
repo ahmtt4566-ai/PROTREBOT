@@ -17,6 +17,7 @@
     "googleapis": "^182.0.0",
     "lightweight-charts": "5.2.0",
     "lucide-react": "1.25.0",
+    "qrcode.react": "4.2.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "typescript": "7.0.2",

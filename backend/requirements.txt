@@ -12,3 +12,4 @@ stripe==12.5.1
 google-api-python-client==2.187.0
 google-auth==2.43.0
 anthropic==1.11.0
+pyotp==2.9.0

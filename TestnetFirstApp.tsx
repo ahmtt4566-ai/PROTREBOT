@@ -8,6 +8,7 @@ import ScannerCenter from './ScannerCenter'
 import AssistantChat from './AssistantChat'
 import ComplianceContent from './ComplianceContent'
 import {useKaisErrorReaction, useKaisWorkspaceReaction} from './useKaisPageReactions'
+import {useTradingPreferences} from './useTradingPreferences'
 
 function BinanceDemoLoadRecovery() {
   useEffect(() => {
@@ -463,6 +464,15 @@ export default function TestnetFirstApp() {
   const [marketQuery,setMarketQuery] = useState('')
   const [marketPickerOpen,setMarketPickerOpen] = useState(false)
   const [interval,setInterval] = useState('15m')
+  const tradingDefaults = useTradingPreferences()
+  const defaultsApplied = useRef(false)
+  useEffect(() => {
+    if (defaultsApplied.current || !tradingDefaults.preferences) return
+    defaultsApplied.current = true
+    if (!tradingDefaults.untouched()) return
+    if (tradingDefaults.preferences.symbols?.[0]) setSymbol(tradingDefaults.preferences.symbols[0])
+    if (tradingDefaults.preferences.timeframe) setInterval(tradingDefaults.preferences.timeframe)
+  }, [tradingDefaults.preferences, tradingDefaults.untouched])
   const [analysis,setAnalysis] = useState<Analysis|null>(null)
   const [analysisProgress,setAnalysisProgress] = useState(0)
   const [health,setHealth] = useState<Health|null>(null)
@@ -765,6 +775,7 @@ export default function TestnetFirstApp() {
   },[mobileMenuOpen,notificationsOpen,marketPickerOpen,complianceOpen])
 
   return <main ref={reactionArea} className={`v26App ${view === 'dashboard' ? 'homeRoute' : 'workspaceRoute'} ${view === 'master-trade' ? 'masterTradeRoute' : ''}${connectionState === 'offline' ? ' backendOffline' : ''}`}>
+    {tradingDefaults.error && <p className="v26MarketError" role="alert">İşlem tercihleri uygulanamadı: {tradingDefaults.error}</p>}
     {showConnectionNotice && <section className={`v26OfflineNotice ${connectionState}`} role="status" aria-live="polite"><span><i/><b>{connectionState === 'offline' ? 'Sunucu bağlantısı bekleniyor' : connectionState === 'checking' ? 'Sunucu bağlantısı kontrol ediliyor' : 'Sunucu bağlantısı kuruldu'}</b><small>{connectionState === 'offline' ? 'Veriler güncellenemiyor. Bağlantı kurulduğunda otomatik olarak yeniden denenecek.' : connectionState === 'checking' ? 'Sunucu ve piyasa verileri kontrol ediliyor…' : 'Veriler güncellenmeye devam ediyor.'}</small></span>{connectionState !== 'online' && <button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'KONTROL EDİLİYOR…' : 'YENİDEN DENE'}</button>}</section>}
     <header className={`v26Header v26HomeHeader${headerHidden ? ' v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
       <div className="v26Brand" role="button" tabIndex={0} aria-label="Ana sayfaya dön" onClick={() => navigate('dashboard')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); navigate('dashboard') } }}><span className="v26BrandLogo"><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div>
@@ -821,7 +832,7 @@ export default function TestnetFirstApp() {
             <div className="v26MarketOptions">{markets.filter(market => `${market.display} ${market.symbol}`.toUpperCase().includes(marketQuery.trim().toUpperCase())).map(market => <button type="button" key={market.symbol} className={market.symbol === symbol ? 'active' : ''} onClick={() => {setSymbol(market.symbol);setMarketPickerOpen(false);setMarketQuery('')}}><b>{market.display}</b><span>{format(market.price)}</span><em className={market.change >= 0 ? 'up' : 'down'}>{market.change >= 0 ? '+' : ''}{market.change.toFixed(2)}%</em></button>)}</div>
           </div>}
         </div>
-        <div className="v26Intervals">{['1m','5m','15m','1h','4h'].map(item => <button key={item} className={interval === item ? 'active' : ''} onClick={() => setInterval(item)}>{item}</button>)}</div>
+        <div className="v26Intervals">{Array.from(new Set(['1m','5m','15m','1h','4h',interval])).map(item => <button key={item} className={interval === item ? 'active' : ''} onClick={() => setInterval(item)}>{item}</button>)}</div>
         {marketError && <div className="v26MarketError" role="alert"><span>Market verisi yüklenemedi.</span><button className="action-button" type="button" aria-label="Market verisini yeniden dene" title="Market verisini yeniden dene" onClick={() => void refresh()} disabled={loading}>{loading ? <RefreshCw className="spin"/> : 'TEKRAR DENE'}</button></div>}
       </section>
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Testnet merkezi hazırlanıyor…</div>}>
