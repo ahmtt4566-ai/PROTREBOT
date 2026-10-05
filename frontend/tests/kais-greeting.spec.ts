@@ -21,6 +21,8 @@ async function installClock(page: Page) {
 }
 
 async function prepare(page: Page, authenticated = true, reducedMotion = true) {
+  await page.route('https://**', route => route.abort())
+  await page.routeWebSocket('wss://**', socket => socket.close())
   await installClock(page)
   await page.emulateMedia({reducedMotion: reducedMotion ? 'reduce' : 'no-preference'})
   await page.addInitScript(authenticated => {

@@ -130,8 +130,26 @@ yerel backend proxy'si kullanır. Çerezli durum değiştiren isteklerde
 Vercel CSP inline script/eval'i engeller; dinamik React stilleri için yalnızca
 `style-src` içinde inline stil izni bulunur. Güvenlik başlıkları yapılandırma
 üzerinden tanımlıdır; canlı edge ayarları ayrıca doğrulanmalıdır.
+İki Vite build'i fontları aynı-origin dosyalar olarak çıkarır; küçük fontlar
+`data:` URL'e çevrilmez ve `font-src 'self'` politikası gevşetilmez. Diğer
+asset'lerin varsayılan inline eşiği ve coin logolarının lazy yüklemesi korunur.
 Eski mutlak `VITE_API_BASE`/`VITE_API_URL` ayarları tarayıcı taşımasını değiştirmez;
 başka bir backend gerekiyorsa aynı-origin proxy hedefi değiştirilmelidir.
+
+Abonelik ekranında yüklenemeyen veri süresi dolmuş üyelik gibi gösterilmez:
+hata ve yeniden deneme sunulur. Fatura geçmişi yüklenmediğinde boş geçmiş
+iddiası yerine Stripe portalına yönlendiren açıklama gösterilir. Master Trade
+kısayolu mevcut yetki kontrolü üzerinden `/master-trade` çalışma alanına gider.
+Genel ana sayfaya dönüş `/billing`, `/pricing` ve `/master-trade` adreslerini
+`/` olarak günceller; sayfa yenileme eski çalışma alanını yeniden açmaz.
+Bu regresyonlar iki build sonrası `frontend` klasöründen
+`npx playwright test --config playwright.site-checkup.config.ts site-checkup.spec.ts`
+ile üretim bundle'ı ve mock API üzerinden doğrulanır; gerçek ödeme veya emir
+gönderilmez.
+Kais karşılama balonunun yerleşim RAF döngüsü gizli sekmede durur ve sekme
+görünür olduğunda yeniden başlar; 2 saniyelik bekleme ve 8 saniyelik görünür
+yaşam süresi yalnızca görünür sekmede ilerler. Karşılama testlerinin API,
+harici HTTP ve WebSocket bağlantıları offline fixture'larla izole edilir.
 
 Aktif LIVE kontrolü kullanıcı/oturum/hesap sahibine bağlıdır; başka bir premium
 üye veya OWNER aynı kontrolü devralamaz. Yeni bir oturuma geçiş açık yeniden

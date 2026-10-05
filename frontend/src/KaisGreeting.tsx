@@ -94,6 +94,7 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
     const element = bubbleRef.current
     let frame: number | undefined
     const update = () => {
+      if (document.hidden) return
       const button = anchorRef.current
       const anchor = button?.getBoundingClientRect()
       if (!anchor) {
@@ -121,11 +122,18 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
         previous.arrow === arrow && previous.fits === fits ? previous : {left, top, width, arrow, fits})
     }
     const trackLayout = () => {
+      frame = undefined
+      if (document.hidden) return
       update()
       frame = requestAnimationFrame(trackLayout)
     }
-    update()
-    frame = requestAnimationFrame(trackLayout)
+    const visibility = () => {
+      if (frame !== undefined) cancelAnimationFrame(frame)
+      frame = undefined
+      if (!document.hidden) trackLayout()
+    }
+    visibility()
+    document.addEventListener('visibilitychange', visibility)
     const anchorLayout = new ResizeObserver(update)
     for (let host: HTMLElement | null = anchorRef.current; host; host = host.parentElement) anchorLayout.observe(host)
     for (const control of anchorRef.current?.closest('header')?.querySelectorAll('button, a, input, [role="button"]') ?? []) anchorLayout.observe(control)
@@ -139,6 +147,7 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
     return () => {
       anchorLayout.disconnect()
       if (frame !== undefined) cancelAnimationFrame(frame)
+      document.removeEventListener('visibilitychange', visibility)
       window.removeEventListener('resize', update)
       window.removeEventListener('scroll', update, true)
       document.removeEventListener('transitionrun', update, true)

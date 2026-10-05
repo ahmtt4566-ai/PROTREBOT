@@ -23,9 +23,13 @@ class V25SessionCredentialTests(unittest.TestCase):
         user = {"id": "owner", "role": "OWNER", "active": True, "email_verified": True, "auth_version": 1}
         application = application or SimpleNamespace(state=SimpleNamespace(v25_execution=v25_execution.initial_state()))
         application.state.v22_commercial = {"secret": self.secret, "state": {"users": [user]}}
-        application.state.db_pool = SimpleNamespace(fetchrow=AsyncMock(return_value={
-            "auth_version": 1, "security": {"active": True, "role": "OWNER", "email_verified": True},
-        }))
+        async def fetchrow(query, user_id):
+            self.assertEqual(user_id, "owner")
+            if "FROM commercial_account_settings" in query:
+                return None
+            self.assertIn("FROM commercial_auth_users", query)
+            return {"auth_version": 1, "security": {"active": True, "role": "OWNER", "email_verified": True}}
+        application.state.db_pool = SimpleNamespace(fetchrow=AsyncMock(side_effect=fetchrow))
         request = SimpleNamespace(
             app=application, method=method, state=SimpleNamespace(),
             headers={"x-protrebot-session": self.tokens[session]}, cookies={},
@@ -34,6 +38,15 @@ class V25SessionCredentialTests(unittest.TestCase):
         if bind:
             v25_execution.guard_execution_ownership(request, claim=True)
         return request
+
+    def test_request_fixture_checks_canonical_auth_and_distinct_account_store(self):
+        request = self.request("session-a")
+        calls = request.app.state.db_pool.fetchrow.await_args_list
+        self.assertTrue(any("FROM commercial_auth_users" in call.args[0] for call in calls))
+        self.assertTrue(any("FROM commercial_account_settings" in call.args[0] for call in calls))
+        self.assertEqual(request.state.member["id"], "owner")
+        self.assertEqual(request.state.member["role"], "OWNER")
+        self.assertEqual(request.state.v22_authoritative_token, self.tokens["session-a"])
 
     def live_metadata(self):
         return {

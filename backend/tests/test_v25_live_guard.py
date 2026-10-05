@@ -34,7 +34,7 @@ from app.execution_core import (  # noqa: E402
     sanitize_execution_policy,
 )
 from app import v25_execution  # noqa: E402
-from app import exchange_connections  # noqa: E402
+from app import exchange_connections, binance_rate_limit  # noqa: E402
 from app.binance_demo import BinanceDemoError, verify_symbol_configuration  # noqa: E402
 from app.v25_execution import BinanceLiveClient, LiveExchangeError, LiveOrderRequest, classify_plan_protection, close_reason_for_client_id, close_reason_for_intent, client_id_for, confirm_live_plan_provenance, initial_state, live_auto_start_gate, lock_live_execution, owned_protection_rows, process_live_stream_event, prune_mtf_decision_history, rank_market_tickers, sanitized_state, submit_entry, summarize_mtf_relaxation, validate_protection_readiness  # noqa: E402
 
@@ -1410,7 +1410,9 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
                 return Response()
 
         client = BinanceLiveClient(FakeHttp(), "TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")
-        with patch.object(v25_execution.asyncio, "sleep", new=AsyncMock()) as sleep:
+        with patch.object(binance_rate_limit, "time", SimpleNamespace(monotonic=lambda: 1000.0)), \
+             patch.object(v25_execution, "BINANCE_RATE_LIMITER", binance_rate_limit.BinanceRateLimiter()), \
+             patch.object(v25_execution.asyncio, "sleep", new=AsyncMock()) as sleep:
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
         sleep.assert_awaited_once()
