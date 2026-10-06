@@ -5,6 +5,23 @@ Donchian composes the native lifecycle, funding, sizing, spec and protections.
 It has no Original analysis, confidence tie-breaker, network or persisted cache.
 The native market opportunity ranking remains primary, with its stable ordering.
 
+Data-window behavior change:
+- Donchian receives only the last W closed 15m rows. W is read from the native
+  Series.closed limit default, also used by Series.history_complete (259 now).
+  There is no tuning argument. W below max(N + 2, ATR period + 1) is an error.
+- An interior contract gap stops poisoning the signal once it leaves W; a gap
+  inside W still fails. Missing current/entry data and all native gates remain
+  mandatory; this does not reconcile unknown positions or funding.
+- ATR uses only these supplied contiguous rows: its first period true ranges
+  seed Wilder smoothing, without the preceding out-of-window close or ATR.
+  Versus full history, reseeding can change ATR, Stop/TP, sizing and decisions
+  in either direction even when the channel/first-cross inputs are unchanged.
+- Signal-v1/v2 parameters and provenance hashes remain unchanged: their
+  all-contiguous-history rule still applies to all rows supplied to the signal.
+  Separate data_window parameters/provenance are recorded on offline outputs.
+  Their hash enters the cache data hash; the cache namespace and resulting
+  offline signal/intent IDs change. Original outputs/cache are untouched.
+
 Original'dan bilinçli farklar:
 - Closed-history validation checks only 15m, not all Original timeframes.
 - Confidence-free tie-break: opportunity -> volume -> symbol order, using the
@@ -18,9 +35,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from inspect import signature
 from typing import Any
 
 from .. import execution_core as core
@@ -34,7 +52,7 @@ from ..backtest_baseline import (
     iso,
     metrics,
 )
-from ..backtest_data import Dataset
+from ..backtest_data import Dataset, Series
 from ..liquidation_risk import isolated_liquidation_risk
 from .contracts import StrategyInput, StrategyResult
 from .donchian_breakout import evaluate
@@ -44,8 +62,27 @@ from .offline_admission import AdmissionReport, admit, approved_params
 from .provenance import KAIS_ORIGINAL_ID, parameter_hash
 
 logger = logging.getLogger(__name__)
-CACHE_NAMESPACE = "offline_donchian_closed_contract_v1"
+CACHE_NAMESPACE = "offline_donchian_closed_contract_window_v1"
 CacheKey = tuple[str, str, str, str, str, str, int]
+
+
+@dataclass(frozen=True)
+class _ClosedDataWindow:
+    closed_bars: int
+
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "closed_bars": self.closed_bars, "interval": "15m",
+            "selection": "LAST_CLOSED_ROWS",
+            "atr_history": "WINDOW_ONLY_SEED_FIRST_PERIOD_TRUE_RANGES",
+        }
+
+    def as_dict(self) -> dict[str, Any]:
+        parameters = self.parameters()
+        return {
+            "policy_id": "native_closed_15m_window_v1",
+            "parameters": parameters, "parameter_hash": parameter_hash(parameters),
+        }
 
 
 class DonchianOfflineEngine:
@@ -53,10 +90,21 @@ class DonchianOfflineEngine:
 
     def __init__(self, data: Dataset, config: Config, params: DonchianParams):
         self.params = approved_params(params)
+        native_limit = signature(Series.closed).parameters["limit"].default
+        if type(native_limit) is not int or native_limit <= 0:
+            raise ValueError("Native closed-history limit must be a positive integer")
+        minimum = max(self.params.channel_period + 2, self.params.atr_period + 1)
+        if native_limit < minimum:
+            raise ValueError(f"Native closed-history window {native_limit} is below strategy warmup {minimum}")
+        self._data_window = _ClosedDataWindow(native_limit)
         self.state = Engine(data, config)
         self._decisions: dict[CacheKey, StrategyResult] = {}
         self.admissions: list[dict[str, Any]] = []
         self.decisions: list[dict[str, Any]] = []
+
+    @property
+    def data_window(self) -> _ClosedDataWindow:
+        return self._data_window
 
     @property
     def cache_keys(self) -> tuple[CacheKey, ...]:
@@ -65,7 +113,7 @@ class DonchianOfflineEngine:
     def request_at(self, symbol: str, at: int) -> StrategyInput:
         series = self.state.data.frames[symbol]["15m"]
         return StrategyInput(
-            symbol, at, {"15m": deepcopy(series.closed(at, limit=len(series.rows)))},
+            symbol, at, {"15m": deepcopy(series.closed(at, limit=self.data_window.closed_bars))},
             required_intervals=("15m",), market_type="USD_M_CONTRACT",
         )
 
@@ -74,6 +122,7 @@ class DonchianOfflineEngine:
         data_hash = parameter_hash({
             "closed_contract_15m": [asdict(candle) for candle in closed],
             "market_type": request.market_type, "required_intervals": request.required_intervals,
+            "data_window": self.data_window.as_dict(),
         })
         provenance = self.params.provenance
         return (CACHE_NAMESPACE, provenance.strategy_id, provenance.strategy_version,
@@ -103,7 +152,10 @@ class DonchianOfflineEngine:
             active_plans=[{**position.spec, "status": "ACTIVE"} for position in state.positions.values()],
         )
         report = admit(request, result, self.params, raw_entry_gates=raw, candidate_notional_usdt=notional)
-        self.admissions.append({"symbol": symbol, "at": at, "phase": phase, **report.as_dict()})
+        self.admissions.append({
+            "symbol": symbol, "at": at, "phase": phase, **report.as_dict(),
+            "data_window": self.data_window.as_dict(),
+        })
         if "gate_schema" not in report.failures:
             for gate in raw["gates"]:
                 if gate["key"] in state.gate_evaluations:
@@ -221,7 +273,10 @@ class DonchianOfflineEngine:
                     continue
                 result = self.canonical(symbol, at)
                 state.decisions_evaluated += 1
-                self.decisions.append({"symbol": symbol, "at": at, "signal": asdict(result.signal)})
+                self.decisions.append({
+                    "symbol": symbol, "at": at, "signal": asdict(result.signal),
+                    "data_window": self.data_window.as_dict(),
+                })
                 if not result.signal.strategy_eligible:
                     self.reject([result.signal.reason])
                     continue
@@ -245,7 +300,8 @@ class DonchianOfflineEngine:
             )
         rows = [
             {**position.row(), "intent_id": f"offline-intent-{position.signal_identifier}",
-             "strategy": asdict(self.params.provenance), "exit_policy_id": self.params.exit_policy_id}
+             "strategy": asdict(self.params.provenance), "exit_policy_id": self.params.exit_policy_id,
+             "data_window": self.data_window.as_dict()}
             for position in state.trades
         ]
         summary = metrics(rows, state.config.initial_equity)
@@ -256,6 +312,7 @@ class DonchianOfflineEngine:
         return {
             "label": "OFFLINE DONCHIAN ONLY / NOT LIVE OR DEMO",
             "strategy": asdict(self.params.provenance), "exit_policy_id": self.params.exit_policy_id,
+            "data_window": self.data_window.as_dict(),
             "period": {"start_inclusive": iso(state.config.start), "end_exclusive": iso(state.config.end)},
             "intrabar": state.config.intrabar, "spread_bps": state.config.spread_bps,
             "slippage_bps": state.config.slippage_bps, "fee_bps_per_side": 5,
