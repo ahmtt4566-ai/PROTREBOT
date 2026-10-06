@@ -82,6 +82,7 @@ from .trade_review import write_trade_review
 from .trade_r_metrics import calculate_r_multiple, initial_entry_risk_usdt
 from .liquidation_risk import isolated_liquidation_risk
 from .web_security import env_flag
+from . import signal_journal as observation
 from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user, subscription_for_user
 from .error_monitoring import build_error_event, log_event, schedule_log_event
@@ -1534,9 +1535,13 @@ def validate_live_isolated_snapshot(snapshot: dict[str, Any], policy: dict[str, 
 
 async def live_liquidation_risk(client: BinanceLiveClient, spec: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
     payload = await client.signed("GET", "/fapi/v1/leverageBracket", {"symbol": spec["symbol"]})
+    observation.emit("candidate", symbol=spec["symbol"], brackets=payload, spec=spec)
     try:
-        return isolated_liquidation_risk(spec, payload, policy)
+        result = isolated_liquidation_risk(spec, payload, policy)
+        observation.emit("candidate", symbol=spec["symbol"], liquidation_passed=True)
+        return result
     except ValueError as exc:
+        observation.emit("candidate", symbol=spec["symbol"], liquidation_passed=False, first_reject="LIQUIDATION_BUFFER")
         logger.warning("LIVE_LIQUIDATION_GATE_REJECTED symbol=%s reason=%s", spec["symbol"], exc)
         raise LiveExchangeError(f"Likidasyon güvenliği doğrulanamadı: {exc}", http_status=409) from exc
 
@@ -1634,8 +1639,10 @@ def record_auto_symbol_block(state: dict[str, Any], reason: str, symbol: str | N
 def ensure_live_auto_symbol_allowed(state: dict[str, Any], symbol: str) -> None:
     scope = live_auto_symbol_scope(state)
     if not scope:
+        observation.emit("candidate", symbol=symbol, first_reject="ALLOWED_SYMBOLS_EMPTY")
         raise LiveExchangeError(record_auto_symbol_block(state, "allowed_symbols_empty"), http_status=423)
     if symbol not in scope:
+        observation.emit("candidate", symbol=symbol, first_reject="SYMBOL_NOT_ALLOWED")
         raise LiveExchangeError(record_auto_symbol_block(state, "symbol_not_allowed", symbol), http_status=422)
 
 
@@ -1669,6 +1676,9 @@ async def scan_market_candidates(
     ) if isinstance(exchange_info, dict) else 0
     candidates = rank_market_tickers(exchange_info, tickers, excluded_symbols=occupied, allowed_symbols=set(symbol_scope))
     client.last_scan_eligible_count = eligible_count
+    observation.emit("universe", tickers=tickers, selected=candidates, allowed_symbols=tuple(symbol_scope),
+                     exchange_info=exchange_info, blocked_bases=tuple(BLOCKED_BASE_ASSETS),
+                     occupied=tuple(occupied), minimum_volume=MIN_24H_QUOTE_VOLUME, minimum_move=MIN_24H_MOVE_PCT)
     return candidates
 
 
@@ -2647,6 +2657,11 @@ async def verified_plan_pnl(client: BinanceLiveClient, plan: dict[str, Any]) -> 
         for item in selected
         if item.get("commissionAsset") and str(item.get("commissionAsset") or "").upper() != "USDT"
     })
+    observation.emit("fills", intent_id=str(plan.get("intent_id") or ""),
+                     expected_entry=plan.get("entry_price"), initial_risk_usdt=plan.get("initial_risk_usdt"),
+                     entries=entry_rows, close_rows=close_rows, commission_rows=selected,
+                     gross_pnl=float(gross), commission_usdt=float(commission_usdt),
+                     commission_complete=not non_usdt_commission)
     return {
         "gross_realized_pnl": round(float(gross), 8),
         "commission_usdt": round(float(commission_usdt), 8),
@@ -2938,6 +2953,11 @@ def confirm_live_plan_provenance(plan: dict[str, Any], position: dict[str, Any])
     plan.setdefault("requested_quantity", decimal_text(expected))
     plan["quantity"] = decimal_text(quantity)
     plan["provenance_state"] = "CONFIRMED"
+    if plan.get("source") == "V25_AUTO":
+        observation.emit("fills", intent_id=str(plan.get("intent_id") or ""),
+                         expected_entry=plan.get("entry_price"), initial_risk_usdt=plan.get("initial_risk_usdt"),
+                         entries=[{"qty": plan["quantity"], "price": position.get("entry_price")}],
+                         fill_source="VERIFIED_POSITION")
     return True
 
 
@@ -3553,6 +3573,7 @@ async def live_candles(client: BinanceLiveClient, symbol: str, interval: str, li
             continue
         candles.append({"time": int(row[0] / 1000), "open": float(row[1]), "high": float(row[2]), "low": float(row[3]), "close": float(row[4]), "volume": float(row[5])})
         last_open_time = int(row[0])
+    observation.emit("candles", symbol=symbol, interval=interval, rows=rows if isinstance(rows, list) else [], as_of=time.time())
     return candles, last_open_time
 
 
@@ -3642,6 +3663,7 @@ async def execute_live_order(
     if not readiness_for(application, state, request, credentials)["ready"]:
         raise HTTPException(423, "Canlı yayın kapıları tamamlanmadı; emir gönderilmedi.")
     submission_started = False
+    observation_stage = "ACCOUNT_MODE"
     async with state["lock"]:
         try:
             if source == "V25_AUTO":
@@ -3660,6 +3682,9 @@ async def execute_live_order(
             daily = live_daily_metrics(state)
             manual_signal = {"direction": body.direction, "confidence": 100, "radar": {"trap_score": 0}}
             current_spread = await spread_bps(client, symbol)
+            observation.emit("candidate", symbol=symbol, spread_bp=current_spread, snapshot=snapshot,
+                         cycle_candidates=cycle_candidates)
+            observation_stage = "ENTRY_GATES"
             if current_spread > float(state["policy"]["max_spread_bps"]):
                 await asyncio.sleep(0.25)
                 current_spread = await spread_bps(client, symbol)
@@ -3678,15 +3703,22 @@ async def execute_live_order(
             )
             if not guard["passed"]:
                 failed = next(gate for gate in guard["gates"] if not gate["passed"])
+                observation.emit("candidate", symbol=symbol, actual_gates=guard["gates"], first_reject=failed["key"].upper())
                 prefix = "Canlı yön risk kapısı" if failed["key"] in {"same_direction_positions", "direction_exposure"} else "Canlı risk kapısı"
                 raise LiveExchangeError(f"{prefix}: {guard['reason']}", http_status=409)
+            observation_stage = "AVAILABLE_BALANCE"
             if float(snapshot.get("available_balance") or 0) < body.margin_usdt:
                 raise LiveExchangeError("Canlı hesap kullanılabilir bakiyesi seçilen marjinden düşük.", http_status=409)
+            observation_stage = "SIZING"
             spec = await build_live_spec(client, body, state["policy"], allowed_symbols=manual_symbol_scope)
+            observation.emit("candidate", symbol=symbol, spec=spec, actual_gates=guard["gates"])
+            observation_stage = "PROTECTION_READINESS"
             validate_protection_readiness(spec, state["policy"])
+            observation_stage = "ISOLATED_MARGIN"
             expected_margin_type = await set_live_isolated_margin(client, spec["symbol"])
             if expected_margin_type != "ISOLATED":
                 raise LiveExchangeError("Isolated marjin uygulanamadı; canlı giriş reddedildi.", http_status=409)
+            observation_stage = "LEVERAGE"
             leverage_audit = await apply_live_verified_leverage(
                 client,
                 spec["symbol"],
@@ -3695,6 +3727,7 @@ async def execute_live_order(
             )
             if str(leverage_audit.get("margin_type") or "").upper() != "ISOLATED":
                 raise LiveExchangeError("Borsa isolated marjini doğrulamadı; canlı giriş reddedildi.", http_status=409)
+            observation_stage = "LIQUIDATION_BUFFER"
             spec["liquidation_guard"] = await live_liquidation_risk(client, spec, state["policy"])
             intent_id = body.intent_id or f"manual-{uuid.uuid4().hex}"
             client_id = client_id_for("ENTRY", intent_id)
@@ -3768,10 +3801,14 @@ async def execute_live_order(
                     )
                     failed = next((gate for gate in checks if not gate.passed), None)
                     if failed is not None:
+                        observation.emit("candidate", symbol=spec["symbol"], first_reject=failed.key.upper(),
+                                         actual_gates=[gate.as_dict() for gate in checks])
                         raise LiveExchangeError(f"Canlı yön risk kapısı: {failed.detail}", http_status=409)
 
+                observation_stage = "ENTRY_SUBMISSION"
                 result = await submit_entry(client, spec, client_id, test_only=False, before_submit=before_auto_submit)
             else:
+                observation_stage = "ENTRY_SUBMISSION"
                 result = await submit_entry(client, spec, client_id, test_only=False)
             plan_id = uuid.uuid4().hex[:16]
             plan = {
@@ -3797,6 +3834,11 @@ async def execute_live_order(
             # Persist exchange acceptance before any later API call. If the process
             # stops now, reconciliation can recover the exact intent and protection.
             persist_state(state)
+            observation.emit("candidate", symbol=symbol, accepted=True, intent_id=intent_id)
+            observation.emit("trade", intent_id=intent_id, update={
+                "plan_id": plan["id"], "expected_entry": spec["entry_price"],
+                "initial_risk_usdt": plan.get("initial_risk_usdt"),
+            })
             if spec["order_type"] == "MARKET":
                 await install_protection(client, state, plan)
             update_account_snapshot(state, await account_snapshot(client))
@@ -3804,6 +3846,7 @@ async def execute_live_order(
             outcome, message = live_plan_execution_outcome(plan)
             return {"ok": True, "order": {"order_id": result.get("orderId"), "client_order_id": client_id, "status": result.get("status", plan["status"])}, "plan": plan, "risk_guard": guard, "execution_outcome": outcome, "message": message, "profit_guaranteed": False}
         except (LiveExchangeError, BinanceDemoError) as exc:
+            observation.emit("candidate", symbol=normalize_symbol(body.symbol), execution_reject=observation_stage)
             if isinstance(exc, LiveExchangeError) and exc.unknown_execution:
                 lock_live_execution(
                     state,
@@ -3825,6 +3868,8 @@ async def execute_live_order(
             persist_state(state)
             raise safe_exchange_error(exc) from exc
         except Exception as exc:
+            observation.emit("candidate", symbol=str(body.symbol), execution_reject=observation_stage,
+                             execution_unknown=submission_started)
             safe_message = sanitized_exception_message(exc)
             frame = traceback.extract_tb(exc.__traceback__)[-1] if exc.__traceback__ else None
             lock_live_execution(
@@ -3904,18 +3949,22 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         return
     state["auto"]["last_scan"] = now_iso()
     state["auto"]["busy"] = True
+    observation_token = None
     try:
         client = client_for_with_credentials(application, credentials)
         snapshot = await account_snapshot(client)
         daily = live_daily_metrics(state)
+        observation_token = observation.start_round(state["policy"], snapshot, daily, state.get("plans", {}))
         state["auto"]["last_skip_reason"] = None
         state["auto"]["last_cycle_stage"] = "scanning"
         candidates = await scan_market_candidates(client, snapshot, allowed_symbols=allowed_symbols)
+        observation.emit("candidates", candidates=candidates)
         allowed_symbols = live_auto_symbol_scope(state)
         if not allowed_symbols:
             record_auto_symbol_block(state, "allowed_symbols_empty")
             return
         candidates = [candidate for candidate in candidates if candidate["symbol"] in allowed_symbols]
+        observation.emit("scope", allowed_symbols=allowed_symbols)
         logger.info(
             "MULTI_SYMBOL_SCAN started eligible symbols: %s top 100 selected deep analysis candidates: %s",
             getattr(client, "last_scan_eligible_count", 0),
@@ -3977,16 +4026,20 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                     timeout=ANALYSIS_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:
+                observation.emit("candidate", symbol=symbol, first_reject="CANDLE_TIMEOUT")
                 analysis_timeout_symbols.append(symbol)
                 logger.warning("MULTI_SYMBOL_SCAN candidate timeout during candles: %s", symbol)
                 continue
             except LiveExchangeError as exc:
                 if not exc.timed_out:
                     raise
+                observation.emit("candidate", symbol=symbol, first_reject="CANDLE_TIMEOUT")
                 analysis_timeout_symbols.append(symbol)
                 logger.warning("MULTI_SYMBOL_SCAN candidate exchange timeout during candles: %s", symbol)
                 continue
             if len(candles) < 220:
+                observation.emit("candidate", symbol=symbol, candles=candles, decision_time=candle_id // 1000,
+                                 first_reject="INSUFFICIENT_PRIMARY_CANDLES")
                 continue
             analyzed_symbols.append(symbol)
             try:
@@ -4002,12 +4055,14 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                     timeout=ANALYSIS_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:
+                observation.emit("candidate", symbol=symbol, first_reject="ANALYSIS_TIMEOUT")
                 analysis_timeout_symbols.append(symbol)
                 logger.warning("MULTI_SYMBOL_SCAN candidate timeout during deep analysis: %s", symbol)
                 continue
             except LiveExchangeError as exc:
                 if not exc.timed_out:
                     raise
+                observation.emit("candidate", symbol=symbol, first_reject="ANALYSIS_TIMEOUT")
                 analysis_timeout_symbols.append(symbol)
                 logger.warning("MULTI_SYMBOL_SCAN candidate exchange timeout during deep analysis: %s", symbol)
                 continue
@@ -4028,11 +4083,15 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             })
             state["mtf_decision_history"] = prune_mtf_decision_history(mtf_history)
             intent_id = f"auto-{symbol}-{state['policy']['interval']}-{candle_id}"
+            observation.emit("candidate", symbol=symbol, canonical=canonical, candles=candles,
+                             decision_time=candle_id // 1000, intent_id=intent_id)
             if intent_id in state["intents"]:
+                observation.emit("candidate", symbol=symbol, first_reject="DUPLICATE_INTENT")
                 state["duplicate_blocks"] += 1
                 continue
             if raw_direction not in {"LONG", "SHORT"}:
                 signal_reason = "DIRECTION_SCORE_MARGIN_NOT_MET" if signal else str(canonical.get("reason") or "SIGNAL_WAIT")
+                observation.emit("candidate", symbol=symbol, first_reject=signal_reason)
                 count_rejection("signal_wait_or_invalid", signal_reason)
                 continue
             if not canonical.get("entry_eligible"):
@@ -4077,11 +4136,13 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                     )
                 for reason in detailed_reasons:
                     count_rejection("entry_ineligible", str(reason))
+                observation.emit("candidate", symbol=symbol, first_reject=detailed_reasons[0], actual_reasons=detailed_reasons)
                 continue
             entry_price = float(signal.get("entry") or 0)
             stop_price = float(signal.get("stop_loss") or 0)
             stop_distance_pct = abs(entry_price - stop_price) / entry_price * 100 if entry_price > 0 and stop_price > 0 else float("inf")
             if stop_distance_pct > float(state["policy"]["max_stop_distance_pct"]):
+                observation.emit("candidate", symbol=symbol, first_reject="STOP_DISTANCE_ABOVE_MAX")
                 count_rejection("stop_distance", "STOP_DISTANCE_ABOVE_MAX")
                 rejected_risk_symbols.append(f"{symbol}:%{stop_distance_pct:.2f}")
                 continue
@@ -4089,6 +4150,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         signals.sort(key=lambda item: (float(item["candidate"].get("opportunity_score") or 0), int(item["signal"].get("confidence") or 0)), reverse=True)
         selected = signals[:3]
         selected_symbols = [item["candidate"]["symbol"] for item in selected]
+        observation.emit("selected", symbols=selected_symbols)
         executed_symbols: list[str] = []
         cycle_candidates: list[dict[str, Any]] = []
         logger.info(
@@ -4141,13 +4203,17 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 record_auto_symbol_block(state, "allowed_symbols_empty")
                 return
             if symbol not in allowed_symbols:
+                observation.emit("candidate", symbol=symbol, first_reject="SYMBOL_NOT_ALLOWED")
                 record_auto_symbol_block(state, "symbol_not_allowed", symbol)
                 continue
             try:
                 spread = await spread_bps(client, symbol)
             except LiveExchangeError as exc:
+                observation.emit("candidate", symbol=symbol, first_reject="SPREAD_DATA_UNAVAILABLE")
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · piyasa verisi reddedildi: {exc}"
                 continue
+            observation.emit("candidate", symbol=symbol, spread_bp=spread, snapshot=snapshot,
+                             cycle_candidates=list(cycle_candidates))
             guard = evaluate_entry_gates(
                 symbol=symbol, signal=signal, snapshot=snapshot, policy=state["policy"],
                 daily=daily, spread_bps=spread, armed=True, allowed_symbols=allowed_symbols,
@@ -4156,6 +4222,8 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             if any(not gate["passed"] and gate["key"] == "spread" for gate in guard.get("gates", [])):
                 count_rejection("spread", "SPREAD_ABOVE_MAX")
             if not guard["passed"]:
+                observation.emit("candidate", symbol=symbol, actual_gates=guard["gates"],
+                                 first_reject=next(gate["key"].upper() for gate in guard["gates"] if not gate["passed"]))
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · {guard['reason']}"
                 for gate in guard.get("gates", []):
                     if not gate["passed"] and gate["key"] in {"same_direction_positions", "direction_exposure"}:
@@ -4165,9 +4233,11 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             try:
                 risk = risk_sized_order(float(signal["entry"]), float(signal["stop_loss"]), state["policy"], atr=signal.get("atr"))
             except ValueError as exc:
+                observation.emit("candidate", symbol=symbol, first_reject="STOP_RISK")
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · risk hesabı reddedildi: {exc}"
                 continue
             if risk["margin_usdt"] < 5:
+                observation.emit("candidate", symbol=symbol, first_reject="MINIMUM_MARGIN")
                 state["auto"]["last_decision"] = f"{symbol}: Binance minimum güvenli marjin eşiği altında; BEKLE."
                 continue
             directional_checks = directional_entry_gates(
@@ -4177,6 +4247,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             )
             directional_failed = next((gate for gate in directional_checks if not gate.passed), None)
             if directional_failed is not None:
+                observation.emit("candidate", symbol=symbol, first_reject=directional_failed.key.upper())
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · {directional_failed.detail}"
                 count_rejection("entry_ineligible", directional_failed.key.upper())
                 add_event(state, "LIVE_DIRECTIONAL_ENTRY_BLOCKED", directional_failed.detail, symbol=symbol, direction=signal["direction"], gate=directional_failed.key)
@@ -4190,9 +4261,11 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             try:
                 result = await execute_live_order(application, body, source="V25_AUTO", credentials=credentials, cycle_candidates=list(cycle_candidates))
             except LiveExchangeError as exc:
+                observation.emit("candidate", symbol=symbol, execution_reject="EXECUTION_REJECTED")
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · emir risk kontrolünden geçmedi: {exc}"
                 continue
             except HTTPException as exc:
+                observation.emit("candidate", symbol=symbol, execution_reject="EXECUTION_REJECTED")
                 if exc.status_code == 409 and str(exc.detail).startswith("Canlı yön risk kapısı:"):
                     state["auto"]["last_decision"] = f"{symbol}: BEKLE · {exc.detail}"
                     count_rejection("entry_ineligible", "DIRECTIONAL_LIMIT")
@@ -4203,6 +4276,11 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                     return
                 continue
             plan = result.get("plan", {}) if isinstance(result, dict) else {}
+            observation.emit("candidate", symbol=symbol, accepted=True)
+            observation.emit("trade", intent_id=intent_id, update={
+                "plan_id": plan.get("id"), "expected_entry": plan.get("entry_price"),
+                "initial_risk_usdt": plan.get("initial_risk_usdt"),
+            })
             actual_quantity = float(plan.get("quantity") or 0)
             actual_entry = float(plan.get("entry_price") or 0)
             cycle_candidates.append({
@@ -4228,6 +4306,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         schedule_log_event(application, build_error_event(source="backend", service="trading_engine", kind="StrategyException", code="STRATEGY_EXCEPTION", severity="CRITICAL", message=str(exc), context={"stage": state["auto"].get("last_cycle_stage"), "bot": "V25"}))
         add_event(state, "AUTO_ERROR", "Canlı otomasyon turu hata nedeniyle yeni emir göndermedi.")
     finally:
+        observation.finish_round(observation_token, state["auto"].get("last_skip_reason"))
         state["auto"]["busy"] = False
         persist_state(state)
 
@@ -4654,6 +4733,7 @@ async def shutdown_v25_execution(application: Any) -> None:
         state["auto"]["enabled"] = False
         state["auto"]["session_until"] = 0.0
         persist_state(state)
+    await asyncio.to_thread(observation.shutdown)
 
 
 @router.get("/status")

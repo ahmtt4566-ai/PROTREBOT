@@ -1,0 +1,2 @@
+# Optional offline Parquet export; runtime journaling and CSV use the standard library.
+pyarrow==25.0.1

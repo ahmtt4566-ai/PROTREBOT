@@ -65,7 +65,7 @@ def adx(highs: list[float], lows: list[float], closes: list[float], period: int 
     return fmean(dx_values[-period:]) if dx_values else 0.0
 
 
-def analyze(candles: list[dict]) -> dict:
+def analyze(candles: list[dict], *, observation_scores: dict[str, int] | None = None) -> dict:
     closes = [c["close"] for c in candles]
     highs = [c["high"] for c in candles]
     lows = [c["low"] for c in candles]
@@ -107,6 +107,8 @@ def analyze(candles: list[dict]) -> dict:
             short_score += points
 
     difference = long_score - short_score
+    if observation_scores is not None:
+        observation_scores.update(long_score=long_score, short_score=short_score)
     direction = "LONG" if difference >= 10 else "SHORT" if difference <= -10 else "BEKLE"
     confidence = min(95, max(long_score, short_score)) if direction != "BEKLE" else min(69, 50 + abs(difference))
     if direction == "LONG":

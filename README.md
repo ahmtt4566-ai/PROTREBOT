@@ -53,6 +53,126 @@ No entry-strategy, BE/trailing or SHORT alignment filter changes are included.
 Offline regressions: `backend/tests/test_v25_risk_gate_repairs.py` plus the
 existing execution, partial-fill, ownership, scope, direction and R suites.
 
+## LIVE signal observations (stage 2)
+
+`PROTREBOT_SIGNAL_JOURNAL_ENABLED` defaults to **true**; set it to `false`
+to disable observation. `PROTREBOT_SIGNAL_JOURNAL_PATH` defaults to
+`DATA_DIR/live-signal-journal.sqlite3`. This must be a separate `.sqlite3`
+file: other applications' databases and native persistence files are refused.
+No exchange request, strategy, approval, order, protection or native R
+calculation is added or changed.
+
+The execution path only submits events to a bounded, nonblocking queue.
+SQLite writes, indicator projections, shadow gates and diagnostics run in a
+daemon worker. A slow/failed store or full queue never waits on or rejects
+an order. Overflow/storage errors are logged; overflow loses observations,
+not trades. Shutdown drains for at most two seconds off the event loop.
+If the OS cannot start the worker, enqueue errors remain in bounded memory
+until a worker recovers; a process crash can lose queued observations.
+This is best-effort research telemetry, **not an audit ledger**.
+
+Signals use SHA-256 of uppercase symbol, direction and decision-candle close
+epoch seconds. Repeated signals do not duplicate; per-round evaluations are
+retained separately in `rounds`. A later acceptance promotes the main signal
+record, never downgrades it. `ACCEPTED` means the native execution accepted
+the entry, not profitable execution or verified Stop/TP protection.
+First rejection is from the actual short-circuiting path; all later pure
+gates are also evaluated in the worker. `gate_results` distinguishes ACTUAL
+and SHADOW results; unavailable evidence has `passed=null` and appears in
+`unknown_gates`. No speculative gate changes the native decision.
+
+Stored features include both direction scores, confidence, trap/breakout,
+per-frame confidence/direction and native aggregate MTF alignment,
+EMA20/50/200, MACD histogram, RSI, ATR, ADX, BB width
+`(upper-lower)/middle`, volume ratio, spread bp and funding rate.
+`alignment_15m/1h/4h` are the native per-frame confidence scores, not
+calibrated probabilities. Early universe rejects often have no candles,
+spread or funding evidence: these stay null/UNKNOWN. A guessed candle
+anchor has `decision_time_verified=false`; outcomes are not produced for it.
+The separate offline import can supply time-valid missing evidence without
+adding network calls. Known native features and decisions are preserved;
+supplementary gate results use `enriched_*` fields.
+
+### Offline jobs and exports
+
+From the repository root, using a separate data directory:
+
+```powershell
+$db = 'C:\observations\live-signal-journal.sqlite3'
+.\.venv\Scripts\python.exe backend\signal_journal_cli.py --db $db summary
+.\.venv\Scripts\python.exe backend\signal_journal_cli.py --db $db export --format csv --output C:\observations\signals.csv
+.\.venv\Scripts\python.exe -m pip install --only-binary=:all: -r backend\requirements-observation.txt
+.\.venv\Scripts\python.exe backend\signal_journal_cli.py --db $db export --format parquet --output C:\observations\signals.parquet
+.\.venv\Scripts\python.exe backend\signal_journal_cli.py --db $db import-data --input C:\observations\evidence.json --as-of 2026-01-01T04:00:00+00:00
+.\.venv\Scripts\python.exe backend\signal_journal_cli.py --db $db fill --as-of 2026-01-01T04:00:00+00:00
+```
+
+CSV/journaling use only the standard library; Parquet has an optional pinned
+dependency. Nested fields export as JSON; missing values are blank/null,
+including uncomputed outcome columns. Summary reports decision counts,
+first/all rejection distributions and unknown gates.
+
+Offline evidence JSON has optional `candles`, `market` and `trades` arrays:
+
+```json
+{
+  "candles": [{
+    "symbol": "BTCUSDT", "interval": "15m",
+    "rows": [{"time": 1767224700, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 10}]
+  }],
+  "market": [{
+    "signal_id": "<existing signal SHA-256>", "observed_at": 1767225600,
+    "spread_bp": 2.5, "funding_rate": 0.0001
+  }],
+  "trades": [{
+    "intent_id": "<existing accepted intent>", "observed_at": 1767240000,
+    "gross_pnl": 4, "commission_usdt": 0.2, "commission_complete": true,
+    "funding_usdt": -0.1, "funding_complete": true
+  }]
+}
+```
+
+Candle dictionaries use open epoch **seconds**, or use original Binance
+array rows with open/close **milliseconds**. Supported intervals are
+15m/1h/4h. Only closed, valid OHLCV is stored; a provider-declared future
+close is excluded. Market evidence must be observed no later than the
+original scan and job cutoff; future market evidence is counted/ignored.
+Optional market `spec` and `brackets` use the existing sizing/maintenance
+shapes for pure liquidation evaluation. Indicator recomputation uses only
+candles closed by the original decision. Trade evidence requires an accepted
+intent and observation time between decision and job cutoff; completeness
+declarations are trusted offline inputs, not newly authenticated exchange
+proof. Import cannot overwrite the frozen initial risk.
+
+`fill` is a separate job: schedule it externally or run it after offline
+imports. It never fetches data. Exact contiguous 4/8/16 closed 15m bars are
+required for 1h/2h/4h raw price returns; gaps stay null. Four-hour hypothetical
+results use the recorded entry/Stop/TP1/TP3, 60% TP1 and remainder TP3,
+without BE/trailing. MAE/MFE are price excursions in initial per-unit Stop
+distance R through the exit bar, not reconstructed intrabar position equity.
+Stop-and-target in one bar uses STOP_FIRST and flags ambiguity; extrema
+later within an exit bar cannot be timed with OHLC. Stop/target fills are
+modeled at trigger prices, so gaps and real fill quality are not simulated.
+Gross and estimated fee/slippage-adjusted fields are separate (policy costs,
+normally 5/3 bp per side); hypothetical funding is explicitly excluded.
+Earlier `as-of` reruns are refused once later outcomes exist; use an isolated
+database for an earlier research snapshot.
+
+Verified entry-position averages/owned trade fills record actual
+fill-minus-original-expected-price slippage. Owned closure evidence records
+gross PnL and complete USDT fees; missing/non-USDT/incomplete fees leave net
+R unknown. Funding is null until complete offline evidence is supplied;
+then observer `net_pnl = gross - fees + funding`, `net_r = net_pnl /
+initial_risk_usdt`. Missing/nonpositive risk produces no R. Native
+funding-excluded accounting and immutable initial risk remain unchanged.
+This journal is for one execution/account lineage per database; multi-account
+research must use separate instance/database paths rather than merging
+identical native intent IDs. There is no retention policy or Stage 3
+backtester/performance claim in this stage.
+
+Offline regressions: `backend/tests/test_signal_journal.py`, together with
+the existing LIVE scope, execution, partial-fill, protection and R suites.
+
 ## LIVE entry partial fills
 
 Exact entry identity, symbol and direction remain mandatory. A positive actual
