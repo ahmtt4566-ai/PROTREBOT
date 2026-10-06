@@ -432,6 +432,156 @@ stage 3/native risk/accounting suites: 20 new tests, 743 passed / 216 subtests;
 one optional PostgreSQL skip and one previously proven stale-source baseline
 deselection. No strategy, LIVE source or stage 4 change.
 
+## Offline exit ablation (stage 4)
+
+`backend/backtest_ablation_cli.py` is a new opt-in offline command. Existing
+baseline/diagnosis/LIVE modules are unchanged. Default is **A only**, STOP_FIRST;
+new exits require `--all-variants`. It consumes the original stage 3 **350 USDT,
+spread 2 bp, slip 3 bp** baseline, checksums local data, and rebuilds only its
+approved entry specs with the original canonical/sizing/order helpers. No
+market rescan, new entry logic, network client or real order is used.
+
+```powershell
+$data = 'C:\research\protrebot\data'
+$baseline = 'C:\research\protrebot\baseline\stop_first-spread2-slip3.json'
+.\.venv\Scripts\python.exe backend\backtest_ablation_cli.py --data $data --metadata "$data\current-metadata.json" --baseline $baseline --output 'C:\research\protrebot\ablation' --conditional-current-metadata --all-variants --tp-first-sensitivity --include-time-stop
+```
+
+The parameter plan and baseline/metadata SHA-256 are written **before results**.
+Fixed presets, no tuning after viewing outcomes:
+
+| Preset | Only intentional change |
+|---|---|
+| A | Original exits/control; exact stage 3 trade/accounting/summary/bootstrap parity required |
+| B | Post-TP1 fee/slippage break-even Stop |
+| C_ATR2 / C_ATR3 | Post-TP1 Chandelier trailing, multiplier 2.0 / 3.0; no BE |
+| D_ATR2 / D_ATR3 | B plus the same trailing; choose the tighter Stop |
+| E40 / E50 / E60 | TP1 fraction 40% / 50% / 60%; original Stop/TP3, no BE; E60 is a second control |
+| G_NO_SHORT | Deliberately remove baseline SHORT entries; exits unchanged |
+| F8 / F16 / F32 | Isolated time stop; run last, in a separate output group |
+
+**Frozen primary cohort:** every non-G preset retains the same original entry
+time, quantity, actual fill and immutable risk. Each trade is an independent
+counterfactual, so this primary statistic is not an executable risk-gated
+portfolio. G explicitly excludes SHORTs; paired exit delta is calculated only
+on common LONG trades and does not represent the direction-selection effect.
+
+**Separate feasibility audit:** reattempt the ordered baseline entry schedule
+using native exposure, same-direction, daily loss/count/streak, duplication,
+open-loss and available-balance gates under changed exits. Report rejected
+entry IDs/reasons, matched performance, added/removed sets, and results
+separately. This audit does **not** recover formerly rejected/new scan signals.
+A must match the original stage 3 in both frozen and scheduled modes.
+
+**User-selected definitions, fixed before results:**
+
+- Chandelier uses the best **closed MARK_PRICE high/low since the TP1 bar**,
+  minus/plus 2.0 or 3.0 times native `analysis.atr` (14) on closed contract
+  candles. Stops never loosen and TP3 stays active. Native tick rounding.
+- BE is based on actual entry fill (entry slip already included) and covers
+  per-unit 5 bp entry fee, 5 bp exit fee and 3 bp exit slip on the remainder.
+  LONG threshold is `entry * (1 + fee) / ((1 - slip) * (1 - fee))`;
+  SHORT is `entry * (1 - fee) / ((1 + slip) * (1 + fee))`. Round toward coverage.
+  Funding remains in net PnL, not the BE threshold. Gaps can still lose money.
+- Updates use the prior **closed** candle and become active at the next
+  candle's open, before checking its Stop/TP events. Never retroactively apply
+  a new Stop to the source candle. If update and trigger occur in the same
+  active execution candle, STOP_FIRST is pessimistic; TP_FIRST is sensitivity.
+- F checks whether mark-price MFE ever reached **+0.3 initial R** in N complete
+  holding candles. If not, exit at the following contract open plus adverse
+  slip. Original protective Stop has priority on a simultaneous opening gap.
+  TIME_STOP is a fourth category, never mislabeled as a protective Stop.
+- TP1 uses native downward step rounding and minimum qty/notional checks;
+  too-small TP1 remains explicitly unprotected. All fees/funding/initial-risk
+  accounting delegates to the unchanged native offline Position/Engine.
+
+Outputs outside Git: preregistered plan, source quality, summary comparison
+CSV/JSON, per-preset trades and paired-delta CSV, portfolio-audit trades, Stop
+update traces, LONG/SHORT summaries and TP_FIRST sensitivities. Time presets
+are in `time-stop-last`, after all `exits-and-direction` runs.
+
+Paired inference matches deterministic signal IDs and verifies identical
+entry/fill/quantity/risk before computing each delta net R. Both seeded paired
+trade and whole UTC entry-day bootstrap give nominal 95% mean-delta intervals;
+missing net R/completion is excluded and counted, not fabricated as zero.
+Full mode registers 13 configurations including A/E60 controls, 11 noncontrol
+configurations, 26 primary ordering runs and 26 portfolio audits. All viewed
+runs are disclosed. Intervals are **unadjusted exploratory comparisons**:
+no family-wise correction, chosen winner, parameter search or unseen test.
+
+Inherited limitations: conditional current rules/tiers, static spread,
+instantaneous full fills, OHLC path ambiguity, funding settlement mark-open
+approximation and no real cancel/replace/price-protection/API-failure model.
+This is not permission to deploy a variant to LIVE. No stage 5 work.
+
+### Measured stage 4 ablation
+
+Same stage 3 dataset/conditional metadata. A and E60 matched original
+trades/accounting/summary/bootstrap exactly. Non-G exits retained 103
+identical entry times/fills/quantities/initial risks; G kept 69 original LONGs
+and removed 34 SHORTs. All 26 primary and 26 portfolio runs were inspected.
+No parameter changes after results: 13 configurations, including two
+controls and 11 noncontrol configurations.
+
+STOP_FIRST exit counts below mean **no executed TP1 then Stop / executed
+TP1 then Stop / TP3 / time exit**, not price touches of an uninstalled TP1.
+
+| Preset | N | Mean net R | USDT PF | Win % | DD USDT | Exit counts | Paired mean delta R |
+|---|---:|---:|---:|---:|---:|---|---:|
+| A | 103 | -0.0999 | 0.7624 | 35.92 | 49.98 | 43 / 34 / 26 / 0 | 0 |
+| B | 103 | -0.0063 | 0.9193 | 58.25 | 31.00 | 43 / 42 / 18 / 0 | +0.0936 |
+| C_ATR2 | 103 | +0.0027 | 0.9338 | 58.25 | 32.70 | 43 / 56 / 4 / 0 | +0.1026 |
+| C_ATR3 | 103 | -0.0124 | 0.9099 | 58.25 | 33.06 | 43 / 53 / 7 / 0 | +0.0875 |
+| D_ATR2 | 103 | +0.0027 | 0.9338 | 58.25 | 32.70 | 43 / 56 / 4 / 0 | +0.1026 |
+| D_ATR3 | 103 | -0.0204 | 0.8926 | 58.25 | 35.93 | 43 / 54 / 6 / 0 | +0.0795 |
+| E40 | 103 | -0.1087 | 0.7910 | 25.24 | 57.42 | 50 / 27 / 26 / 0 | -0.0088 |
+| E50 | 103 | -0.1117 | 0.7549 | 25.24 | 54.73 | 43 / 34 / 26 / 0 | -0.0118 |
+| E60 | 103 | -0.0999 | 0.7624 | 35.92 | 49.98 | 43 / 34 / 26 / 0 | 0 |
+| G_NO_SHORT | 69 | +0.0100 | 0.9550 | 39.13 | 22.90 | 25 / 24 / 20 / 0 | 0 on matched LONGs |
+| F8 | 103 | -0.1054 | 0.6905 | 28.16 | 41.78 | 18 / 21 / 15 / 49 | -0.0055 |
+| F16 | 103 | -0.1065 | 0.7182 | 29.13 | 49.08 | 28 / 27 / 20 / 28 | -0.0066 |
+| F32 | 103 | -0.1186 | 0.7344 | 33.01 | 51.51 | 36 / 31 / 23 / 13 | -0.0187 |
+
+Paired nominal 95% intervals, 2,000 draws / seed 2026:
+
+| Preset | Trade mean-delta R CI | UTC day-block mean-delta R CI |
+|---|---|---|
+| A / E60 / G matched LONGs | [0, 0] | [0, 0] |
+| B | [-0.0083, 0.1835] | [-0.0018, 0.1833] |
+| C_ATR2 / D_ATR2 | [-0.0313, 0.2322] | [-0.0290, 0.2313] |
+| C_ATR3 | [-0.0305, 0.2041] | [-0.0304, 0.2071] |
+| D_ATR3 | [-0.0408, 0.1969] | [-0.0418, 0.2015] |
+| E40 | [-0.0973, 0.0824] | [-0.0939, 0.0738] |
+| E50 | [-0.0349, 0.0098] | [-0.0342, 0.0098] |
+| F8 | [-0.1544, 0.1392] | [-0.1563, 0.1362] |
+| F16 | [-0.1187, 0.0993] | [-0.1221, 0.0957] |
+| F32 | [-0.1179, 0.0642] | [-0.1111, 0.0647] |
+
+All nontrivial delta intervals cross zero: unadjusted multiple comparisons
+do not establish improvement. Every overall USDT PF remains below 1.
+C_ATR2/D_ATR2 have slightly positive equal-weight mean R but net **-9.54
+USDT**, not monetary profit (risks differ). B is -11.63 versus A -38.14
+USDT; lower point drawdown is not an out-of-sample claim.
+
+E40 has **16 TP1 orders below step/minimum constraints**, explicitly
+`TP1_UNPROTECTED_MINIMUM`; entries were not dropped or amounts rounded up.
+This contributes to changed exit groups. E50/E60 have no such failures.
+
+TP_FIRST was run for all presets: all matched deltas and ambiguous Stop/TP
+bar counts are zero. Synthetic tie tests verify ordering behavior; identical
+historical results do not prove tick-path assumptions.
+
+The native-gated audit retained every scheduled entry: zero gate rejections
+and common-trade financial deltas, apart from G's intentional SHORT removals.
+No formerly rejected/new signals were recovered. Funding-null/unverified
+closure counts are zero. Full LONG/SHORT splits, paired per-trade deltas and
+Stop updates are retained in output JSON/CSV.
+
+Validation: 21 new tests; **764 passed / 225 subtests**, one optional
+PostgreSQL skip and one previously proven stale-source baseline deselection.
+Regressions: `backend/tests/test_backtest_ablation.py` plus unchanged native
+baseline, diagnosis, causal-data, risk and accounting suites.
+
 ## LIVE entry partial fills
 
 Exact entry identity, symbol and direction remain mandatory. A positive actual
