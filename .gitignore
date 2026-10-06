@@ -30,3 +30,5 @@ credentials-*.json
 service-account*.json
 service_account*.json
 *-service-account.json
+backtest-data/
+backtest-output/

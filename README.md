@@ -173,6 +173,135 @@ backtester/performance claim in this stage.
 Offline regressions: `backend/tests/test_signal_journal.py`, together with
 the existing LIVE scope, execution, partial-fill, protection and R suites.
 
+## Offline conditional baseline (stage 3)
+
+This is **CONDITIONAL BASELINE / KOŞULLU BASELINE**, not a verified historical
+exchange replay. It is a standalone offline CLI, never started by the web
+application. No LIVE execution file or stage 1/2 commit is changed.
+
+The required assumptions are listed first in every result:
+
+- Current `exchangeInfo` tick/step/minimum-notional rules, **not historical**.
+- Current public maintenance brackets held constant, **not historical**.
+- Constant spread (baseline 2 bp). At 1/2/5 bp below the native 8 bp ceiling,
+  the historical spread gate is effectively untested, not validated.
+- Entry at the decision candle's following **15m open plus adverse slippage**;
+  a complete instantaneous MARKET fill is assumed. Baseline slip is 3 bp,
+  commission is 5 bp per side. The native planned-spec initial risk is frozen.
+- One scan per closed 15m candle, not intrabar 120-second scans. Continuous
+  authorization/session availability and 1,000 USDT initial equity are modeled.
+
+The engine calls the existing canonical historical decision, which calls
+`analysis.analyze` and the native MTF decision. It passes only CLOSED 15m/1h/4h
+candles, using the native 260-fetch-equivalent 259 closed-candle window.
+Future primary/higher-frame values cannot influence that decision. Existing
+`risk_sized_order`, `build_live_spec`, protection/isolated validation,
+`evaluate_entry_gates`, `daily_execution_metrics`, liquidation estimator,
+`floor_step`, initial-risk and R helpers are reused. The native MARKET sizing
+and fee/slippage minimum-reward filter execute against a local two-response
+client; signed and unsupported endpoints raise immediately. No order function
+is called. The CLI alone memo-wraps the native pure analyzer by its exact
+OHLCV input and restores the binding on exit; cached and uncached decisions
+are regression-compared. No indicator or strategy implementation is copied.
+
+Stop and TP triggers use historical **MARK_PRICE** candles. TP1 closes
+`floor_step(actual_quantity * 0.60, step)` only when native quantity/notional
+minimums allow it; otherwise it remains explicitly unprotected, as in LIVE
+monitoring-only behavior. TP3 closes the remainder. There is no BE, trailing,
+time stop, pullback entry or forced period-end close.
+
+Intrabar Stop/target ambiguity defaults to STOP_FIRST; TP_FIRST is a separate
+sensitivity run. Intrabar market exits use trigger price plus adverse slip;
+opening gaps use contract open plus slip. Intrabar exits are timestamped at
+the last second of the bar; equal-time closed-equity points are grouped.
+Funding uses the archived settlement rate, settlement-bar mark open and
+remaining quantity, preserving subsecond settlement timestamps. Exact
+opening settlements occur before opening exits; later settlements precede
+modeled intrabar exits. This ordering and mark-open valuation are OHLC
+approximations, not tick-level fills.
+
+Price-protection divergence delays, real API/protection failures, liquidation
+penalties after gaps/funding, BNB fee discounts and orderbook depth are not
+simulated. Liquidation proof is the same **pre-entry** buffer gate as LIVE,
+not a guarantee of protection after entry. Missing funding remains null and
+is excluded from primary net-R statistics; `net_*_ex_funding` is explicitly
+separate. Unclosed positions have no realized net R. A missing open-position
+price bar creates an unverified data-gap outcome and activates the shared
+PnL-verification gate rather than inventing a Stop fill.
+
+### Data and commands
+
+All archives/results must be **outside the repository**. Public acquisition
+is a separate program; the replay program has no downloader or real network
+client. Acquisition supports only static USD-M archives and, with explicit
+`--public-metadata`, two unauthenticated read-only endpoints: exchangeInfo
+and the public website's maintenance table. No API key, signed request or
+order endpoint is used.
+
+```powershell
+$data = 'C:\research\protrebot\data'
+$output = 'C:\research\protrebot\baseline'
+.\.venv\Scripts\python.exe backend\backtest_download.py --output $data --start-month 2025-02 --end-month 2026-09 --public-metadata
+.\.venv\Scripts\python.exe backend\backtest_cli.py --data $data --metadata "$data\current-metadata.json" --output $output --start 2025-04-01T00:00:00+00:00 --end 2026-10-01T00:00:00+00:00 --conditional-current-metadata
+```
+
+February/March are warmup only; the evaluation is the last 18 **complete**
+months, April 2025 through September 2026. Archive SHA-256 checksums are
+verified during download and load. Duplicate candles are reported; conflicts,
+invalid OHLCV, misaligned/provider-invalid timestamps and altered files fail
+explicitly. Missing candles/archive files and funding coverage gaps are
+reported; no candles or funding payments are synthesized.
+
+Static daily mark-price supplements can repair a diagnosed monthly gap:
+
+```powershell
+.\.venv\Scripts\python.exe backend\backtest_download.py --output $data --start-month 2026-06 --end-month 2026-06 --repair-mark-date 2026-06-29
+```
+
+Preserve the original monthly data-quality report before repair. Repairs
+and their checksummed daily sources remain in the manifest and quality
+output; only actual official candles may fill a gap.
+
+Local CSV/Parquet is also supported via the same `manifest.json` contract.
+Each `archives` entry supplies `symbol`, `kind` (`klines`, `markPriceKlines`,
+`fundingRate`), `interval` (`15m`, `1h`, `4h`; null for funding), `month`,
+relative `path`, actual `sha256` and `status="OK"`. CSV/Parquet candle
+columns are `time` (seconds) or `open_time` (Binance milliseconds),
+`open/high/low/close/volume`, and `quote_volume` for the 24h universe filter.
+Original Binance CSV ZIPs/headerless klines are supported. Funding requires
+`calc_time`/`time`, `last_funding_rate`/`rate`, `funding_interval_hours`.
+Metadata JSON contains `historical`, `observed_at`, an `exchange_info`
+symbol/filter response and `brackets` keyed by symbol with the native
+maintenance-tier shape. Current metadata requires the explicit conditional
+flag. Parquet uses the existing optional observation dependency.
+
+### Outputs and measurements
+
+- Seven JSON/trade-CSV pairs: baseline STOP_FIRST (spread 2/slip 3),
+  TP_FIRST (2/3), and STOP_FIRST spread **1/2/5 × slip 3/6**.
+- `comparison.json`/CSV report expectancy/PF differences against baseline.
+- `data-quality.json` includes source hashes, counts, gaps, duplicates,
+  funding status and repair provenance.
+- Trade fields match stage 2 accounting names: signal/intent IDs,
+  gross PnL, fees, actual fill/slip, funding, net PnL, immutable initial risk,
+  `net_r`; quantities, exits and ambiguity/unprotected-target flags are added.
+- Summary includes closed/open/unverified counts, net expectancy R, net
+  USDT profit factor, win rate, average win/loss in USDT and R, closed-curve
+  max drawdown in USDT/R, LONG/SHORT breakdown and funding-null count.
+- Seeded paired-trade bootstrap gives percentile 95% expectancy/PF intervals
+  (2,000 samples, seed 2026). No-loss PF samples are explicitly unbounded,
+  never converted to a fake finite PF; IID intervals do not account for
+  serial dependence or prove future profitability.
+- Stage 1 gate counts include each named gate, even zero counts, plus
+  evaluations and first/all rejection distributions. Counts concern
+  candidates reaching that native gate, not a speculative shadow audit of
+  signals already rejected by quality/MTF. Multiple failed gates can count
+  the same candidate, so all-rejection counts are not disjoint.
+
+Offline regressions: `backend/tests/test_backtest_baseline.py` plus the
+unchanged stage 1/2, canonical, scope, protection and accounting suites.
+Stage 4 variants and strategy tuning are deliberately absent.
+
 ## LIVE entry partial fills
 
 Exact entry identity, symbol and direction remain mandatory. A positive actual
