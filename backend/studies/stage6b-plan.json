@@ -1,0 +1,43 @@
+{
+  "schema": "holdout-gap-amendment-v1",
+  "registered_at": "2026-10-06",
+  "base_plan_sha256": "853dfa4714e8f9bf348350c3616666bafa172da660b383c15f67b86dd63fcc66",
+  "inheritance": "ALL_STAGE6_CANDIDATES_CRITERIA_COSTS_ORDERINGS_BOOTSTRAP_AND_ENTRY_METHOD_UNCHANGED",
+  "prior_failure": {
+    "reason": "Eight archival mark-price candles missing at 2023-11-10T03:45:00Z; failed before native signals or replay",
+    "strategy_outcomes_seen": false,
+    "test-once.json": "8e0c5b5180102190cdf5bbcaf1c9b4d29b5987c5203c4cbe2ef6e40f398c5a33",
+    "test-data-quality.json": "1d706e320b5346958d7dc4935d580555e3ead755a576ae5d79bf644482724cea",
+    "holdout-lock.json": "becd19df50300f43f1222cd42dae2cfbe42ec8712be3796b1da176ddec4c27c3"
+  },
+  "gap_rule": {
+    "name": "EXACT_ARCHIVAL_MARK_GAP_CONTRACT_PROTECTION_ONLY",
+    "mark_bar_open": 1699587900,
+    "duration_seconds": 900,
+    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"],
+    "allowed_missing_mark_bars_per_symbol": 1,
+    "contract_candles_required_complete": true,
+    "other_mark_gaps_or_duplicates": "FAIL_DRY_VERIFY_BEFORE_CLAIM",
+    "blocked_native_decision_times": [1699587900, 1699588800],
+    "decision_rule": "NO_NEW_ENTRY_AT_GAP_OPEN_OR_FROM_GAP_CLOSING_BAR; DO_NOT_CALL_NATIVE_SIGNAL_AT_BLOCKED_TIMES",
+    "protection_rule": "EXISTING_STOP_TP_ONLY_USE_REAL_CONTRACT_OHLC_ON_GAP_BAR; SAME_NATIVE_INTRABAR_PRIORITY_FEES_SLIP_AND_QUANTITY",
+    "discretionary_update_rule": "SKIP_BE_STOP_UPDATE_AT_GAP_OPEN_AND_WHEN_PREVIOUS_CLOSED_MARK_BAR_IS_GAP; RESUME_WITH_NEXT_REAL_CLOSED_MARK_BAR",
+    "valuation_rule": "CONTRACT_OPEN_FOR_GAP_BAR_SNAPSHOT_AND_FUNDING_IF_NEEDED; FLAG_EXPOSED_TRADES",
+    "data_rule": "DO_NOT_INSERT_OR_INTERPOLATE_ANY_MARK_CANDLE; RAW_MARK_HISTORY_AND_SIGNAL_INPUTS_UNCHANGED",
+    "affected_trade_rule": "ANY_POSITION_OPEN_DURING_GAP_OR_USING_GAP_FALLBACK_IS_GAP_AFFECTED",
+    "exclusion_sensitivity": "REMOVE_ALL_GAP_AFFECTED_ROWS_FROM_SAME_OUTCOMES; NO_REPLAY_OR_CAPACITY_REFILL; SAME_BOOTSTRAP"
+  },
+  "protected_stage6_source_sha256": {
+    "holdout_cli.py": "549a0364779bf9fc16fc5245abe355dc22cafc29bfacb04dae9b5ef732534416",
+    "app/holdout_study.py": "45a546efaaec944ee7513488978897840cdda7fd605e80e42f19a41bb03139a2",
+    "app/holdout_statistics.py": "5921197e6c32214fa27af20a0a66c7741f7802e2afdc0691aa95b52022eb521a",
+    "studies/stage6-plan.json": "a203a478668667531fdc52169e449ca2377448a5d695345babd6c89363ca29a7",
+    "tests/test_holdout_study.py": "74c45ad3dcfaa501c5df0a3ffdd6ee6363ed4bee6316dbc40f544e311e23aefe"
+  },
+  "protected_readme_sha256": "3884b9c42c3ac7c7dcb81aa00620c19f2abe49e555c51f01fc5d78c1c4d785e4",
+  "dry_verify": "READ_AND_VALIDATE_ALL_RAW_INPUTS_WITHOUT_SIGNALS_REPLAY_OR_BOOTSTRAP; DOES_NOT_CONSUME_TEST_CLAIM",
+  "claim": "REQUIRE_SUCCESSFUL_UNCHANGED_DRY_VERIFY; NEW_EXCLUSIVE_REPOSITORY_AND_STAGE6B_RECEIPTS",
+  "one_bundle_only": true,
+  "rerun_after_claim_or_result": false,
+  "stage7_authorized": false
+}
