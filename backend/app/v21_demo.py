@@ -69,6 +69,7 @@ from .binance_demo import (
 )
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .stop_evidence import correlation_report, observe_position_snapshot, observe_stream_payload
+from .trade_r_metrics import r_performance_metrics
 
 
 router = APIRouter(prefix="/api/v21", tags=["V21 Demo Complete"])
@@ -2359,6 +2360,7 @@ def performance_payload(state: dict[str, Any], period: str = "all") -> dict[str,
         "best_trade": max(pnls) if pnls else 0, "worst_trade": min(pnls) if pnls else 0,
         "profit_factor": round(sum(wins) / abs(sum(losses)), 2) if losses else None,
         "average_win": average_win, "average_loss": average_loss,
+        **r_performance_metrics(events),
         "winning_streak": winning_streak, "losing_streak": losing_streak,
         "equity_curve": equity_curve if len(equity_curve) >= 2 else [],
         "directional": directional,

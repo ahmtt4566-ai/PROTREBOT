@@ -38,6 +38,7 @@ from .local_storage import DATA_DIR, migrate_legacy_files
 from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .maintenance import guard_new_entry
 from .stop_evidence import observe_position_snapshot
+from .trade_r_metrics import initial_entry_risk_usdt
 
 
 DEMO_REST_BASE = "https://demo-fapi.binance.com"
@@ -1932,6 +1933,7 @@ async def _account_snapshot(
         "quantity": float(item.get("origQty", 0)),
         "executed_quantity": float(item.get("executedQty", 0)),
         "reduce_only": bool(item.get("reduceOnly", False)),
+        "close_position": str(item.get("closePosition", "false")).lower() == "true",
     } for item in response_rows(orders)]
     open_algos = [{
         "symbol": item.get("symbol"),
@@ -3965,6 +3967,8 @@ async def execute_demo_order(
                 "entry_price": spec["entry_price"],
                 "quantity": spec["quantity"],
                 "initial_quantity": spec["quantity"],
+                "initial_risk_usdt": initial_entry_risk_usdt(spec),
+                "r_multiple": None,
                 "remaining_quantity": spec["quantity"],
                 "margin_usdt": spec["margin_usdt"],
                 "leverage": spec["leverage"],

@@ -8,6 +8,7 @@ type LiveStatus = {
   policyAcknowledged?: boolean
   authorizationValid?: boolean
   authorizationReason?: string
+  interval?: string
 }
 
 const statusFixture = (state: LiveStatus) => ({
@@ -35,14 +36,21 @@ const statusFixture = (state: LiveStatus) => ({
   consent: {active: true, expires_at: '2099-01-01T00:00:00Z'},
   authorization: {valid: state.authorizationValid !== false, expires_at: '2099-01-01T00:00:00Z', reason: state.authorizationReason || 'NONE', scope_match: state.authorizationValid !== false},
   policy_acknowledged: state.policyAcknowledged === true,
-  policy: {},
+  policy: {interval: state.interval || '15m'},
   auto: {enabled: state.live_auto_trade},
 })
 
-const openPanelWithStatus = async (page: Page, state: LiveStatus) => {
+const openPanelWithStatus = async (page: Page, state: LiveStatus, mutations: string[] = []) => {
   await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'live-state-ui-test-session'))
+  await page.routeWebSocket('**/*', socket => socket.close())
   await page.route('**/*', async route => {
-    const path = new URL(route.request().url()).pathname
+    const url = new URL(route.request().url())
+    if (!['127.0.0.1', 'localhost'].includes(url.hostname)) {
+      await route.abort()
+      return
+    }
+    const path = url.pathname
+    if (route.request().method() !== 'GET' && path.startsWith('/api/')) mutations.push(path)
     const user = {id: 'live-state-ui-owner', role: 'OWNER', active: true, email_verified: true}
     if (path === '/api/v22/session' || path === '/api/v22/profile') {
       await route.fulfill({json: {user, access: {canAccessMasterTrade: true, isPremium: true}}})
@@ -54,6 +62,10 @@ const openPanelWithStatus = async (page: Page, state: LiveStatus) => {
     }
     if (route.request().url().includes('/exchange-connections/status')) {
       await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({connections: {LIVE: {configured: true, active: true}}, testnet: {configured: true}})})
+      return
+    }
+    if (path.startsWith('/api/')) {
+      await route.fulfill({json: path === '/api/markets' || path.startsWith('/api/klines/') ? [] : {}})
       return
     }
     await route.continue()
@@ -121,4 +133,86 @@ test('shows backend-acknowledged policy checked and prevents acknowledging it ag
   await expect(checkbox).toBeDisabled()
   await expect(page.getByRole('button', {name: 'POLICY ACKNOWLEDGED', exact: true})).toBeDisabled()
   await expect(page.getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
+})
+
+for (const interval of ['1m', '5m', '1h', '4h']) {
+  test(`warns and prevents LIVE Auto Trade start at ${interval}`, async ({page}) => {
+    const mutations: string[] = []
+    await openPanelWithStatus(page, {
+      live_auto_trade: false, real_trading_locked: false, armed: true,
+      readinessReady: true, policyAcknowledged: true, interval,
+    }, mutations)
+    const warning = page.getByTestId('live-auto-timeframe-warning')
+    await expect(warning).toBeVisible()
+    await expect(warning).toHaveAttribute('role', 'alert')
+    await expect(warning).toContainText('yalnızca 15m')
+    await expect(warning).toContainText(`Timeframe: ${interval}.`)
+    const startButtons = page.getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})
+    await expect(startButtons).toHaveCount(2)
+    for (const button of await startButtons.all()) await expect(button).toBeDisabled()
+    expect(mutations.filter(path => path.endsWith('/auto/start'))).toEqual([])
+  })
+}
+
+test('15m keeps the existing Auto Trade confirmation flow', async ({page}) => {
+  const mutations: string[] = []
+  await openPanelWithStatus(page, {
+    live_auto_trade: false, real_trading_locked: false, armed: true,
+    readinessReady: true, policyAcknowledged: true, interval: '15m',
+  }, mutations)
+  await expect(page.getByTestId('live-auto-timeframe-warning')).toHaveCount(0)
+  const start = page.getByLabel('Auto Trade controls').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})
+  await expect(start).toBeEnabled()
+  await start.click()
+  await expect(page.getByRole('dialog')).toContainText('REAL MONEY WILL BE USED')
+  await expect(page.getByPlaceholder('CANLI OTOMATİK')).toBeVisible()
+  await expect(page.getByRole('dialog').getByRole('button', {name: 'CONFIRM', exact: true})).toBeDisabled()
+  expect(mutations.filter(path => path.endsWith('/auto/start'))).toEqual([])
+})
+
+test('unsaved timeframe changes warn without mutating the saved policy', async ({page}) => {
+  const mutations: string[] = []
+  await openPanelWithStatus(page, {
+    live_auto_trade: false, real_trading_locked: false, armed: true,
+    readinessReady: true, policyAcknowledged: true, interval: '15m',
+  }, mutations)
+  const setup = page.locator('.masterTradeLiveSetup')
+  await setup.evaluate(element => {
+    const details = element.closest('details')
+    if (details) details.open = true
+  })
+  const timeframe = setup.getByRole('combobox', {name: 'Timeframe', exact: true})
+  await timeframe.selectOption('1h')
+  await expect(page.getByTestId('live-auto-timeframe-warning')).toBeVisible()
+  await expect(page.getByLabel('Auto Trade controls').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
+  await timeframe.selectOption('15m')
+  await expect(page.getByTestId('live-auto-timeframe-warning')).toHaveCount(0)
+  await expect(page.getByLabel('Auto Trade controls').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeEnabled()
+  expect(mutations.filter(path => path.endsWith('/policy') || path.endsWith('/auto/start'))).toEqual([])
+})
+
+test('selecting 15m does not hide a saved unsupported timeframe before policy save', async ({page}) => {
+  await openPanelWithStatus(page, {
+    live_auto_trade: false, real_trading_locked: false, armed: true,
+    readinessReady: true, policyAcknowledged: true, interval: '1h',
+  })
+  const setup = page.locator('.masterTradeLiveSetup')
+  await setup.evaluate(element => {
+    const details = element.closest('details')
+    if (details) details.open = true
+  })
+  await setup.getByRole('combobox', {name: 'Timeframe', exact: true}).selectOption('15m')
+  await expect(page.getByTestId('live-auto-timeframe-warning')).toContainText('Timeframe: 1h.')
+  await expect(page.getByLabel('Auto Trade controls').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
+})
+
+test('unsupported timeframe does not disable stopping an existing Auto Trade session', async ({page}) => {
+  await openPanelWithStatus(page, {
+    live_auto_trade: true, real_trading_locked: false, armed: true,
+    readinessReady: true, policyAcknowledged: true, interval: '1h',
+  })
+  await expect(page.getByTestId('live-auto-timeframe-warning')).toBeVisible()
+  const stopButtons = page.getByRole('button', {name: 'STOP AUTO TRADE', exact: true})
+  await expect(stopButtons).toHaveCount(2)
+  for (const button of await stopButtons.all()) await expect(button).toBeEnabled()
 })

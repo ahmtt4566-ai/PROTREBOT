@@ -306,9 +306,14 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const exposureState = exposureGate !== 'UNKNOWN' ? exposureGate : status === null ? 'UNKNOWN' : exposure === 0 ? 'READY' : 'BLOCKED'
   const activePlanState = status === null ? 'UNKNOWN' : activePlans ? 'CONFLICT' : 'READY'
   const emergencyState = status === null ? 'UNKNOWN' : emergency ? 'ACTIVE' : 'CLEAR'
-  const autoReady = Boolean(status && connections && authorizationValid && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
-  const manualOrderReady = Boolean(status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
   const policy = policyDraft || status?.policy || {}
+  const selectedAutoTimeframe = String(policy.interval ?? status?.policy?.interval ?? '15m')
+  const savedAutoTimeframe = String(status?.policy?.interval ?? '15m')
+  const autoTimeframeSupported = selectedAutoTimeframe === '15m' && savedAutoTimeframe === '15m'
+  const autoTimeframeMessage = "LIVE Auto Trade yalnızca 15m zaman diliminde çalışır. Başlatmak için timeframe'i 15m seçip politikayı kaydedin."
+  const timeframeWarning = !autoTimeframeSupported ? <div className="liveNotice error" role="alert" data-testid="live-auto-timeframe-warning"><TriangleAlert aria-hidden="true"/><span>{autoTimeframeMessage} Timeframe: {selectedAutoTimeframe !== '15m' ? selectedAutoTimeframe : savedAutoTimeframe}.</span></div> : null
+  const autoReady = Boolean(autoTimeframeSupported && status && connections && authorizationValid && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
+  const manualOrderReady = Boolean(status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
   const updatePolicy = () => run('policy', async () => {
@@ -387,6 +392,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }, 'LIVE hesabı uzlaştırıldı; yeni emir kilidi korunuyor ve yeniden arm edilebilir.')
   const autoToggle = () => {
     if (status?.live_auto_trade || status?.auto?.enabled) return stopAutoTrade()
+    if (!autoTimeframeSupported) {
+      setNotice({kind: 'error', text: autoTimeframeMessage})
+      return
+    }
     setConfirm({title: 'LIVE AUTO-TRADE onayı', message: 'REAL MONEY WILL BE USED. Otomatik işlemler yalnız mevcut V25 live safety chain üzerinden ilerler.', expected: 'CANLI OTOMATİK', action: async () => { await call(V25, '/auto/start', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI OTOMATİK'})}) }})
     setConfirmText('')
   }
@@ -654,6 +663,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
     <div className="masterTradeLiveAssistant">
       <div className="masterTradeLiveAssistantCopy"><Power aria-hidden="true"/><div><span className="masterTradeLiveKicker">NEXT BEST ACTION</span><strong>{status?.live_auto_trade ? 'Auto Trade is actively monitoring approved markets.' : liveState === 'BLOCKED' ? 'LIVE is blocked until the backend recovery state is clear.' : !configured || !connected ? 'Connect and verify your LIVE API to continue.' : !readinessReady ? 'Complete the required safety checks before enabling Auto Trade.' : liveArmed ? 'LIVE is armed. Start supervised Auto Trade to continue.' : 'Everything is ready. Arm LIVE Auto Trade to continue.'}</strong><small>{status?.live_auto_trade ? 'STOP remains available at any time.' : blocker}</small></div></div>
+      {timeframeWarning}
       {status?.reconciliation_diagnostic && <div className="masterTradeLiveDiagnostic" role="alert"><span className="masterTradeLiveKicker">RECONCILIATION ERROR</span><small>Stage: {text(status.reconciliation_diagnostic.reconciliation_stage)}</small><small>Error: {text(status.reconciliation_diagnostic.exception_message)}</small><small>Source: {text(status.reconciliation_diagnostic.source)}:{text(status.reconciliation_diagnostic.line)}</small></div>}
       <div className="masterTradeLiveAssistantActions"><button type="button" className="masterTradeLivePrimary" onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{!status?.live_auto_trade && !autoReady ? <LockKeyhole aria-hidden="true"/> : <Power aria-hidden="true"/>}{status?.live_auto_trade ? ' STOP AUTO TRADE' : ' START LIVE AUTO TRADE'}</button><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW REQUIREMENTS</button></div>
     </div>
@@ -698,7 +708,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
         <header><div><span className="masterTradeLiveKicker">AUTO TRADE SETUP</span><h3>Core strategy settings</h3></div><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(value => !value)}>{advancedOpen ? 'HIDE ADVANCED' : 'ADVANCED SETTINGS'} <span>{advancedOpen ? '⌃' : '⌄'}</span></button></header>
         <div className="masterTradeLiveSetupGrid">
           <label>Strategy<strong>V25 SUPERVISED</strong></label>
-          <label>Timeframe<select value={String(policy.interval || '15m')} onChange={event => setPolicy('interval', event.target.value)}><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select></label>
+          <label>Timeframe<select value={selectedAutoTimeframe} onChange={event => setPolicy('interval', event.target.value)}><option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option></select></label>
           <label>Risk / trade<div className="masterTradeLiveUnitField"><input type="number" min="0.5" max="25" step="0.1" value={numericPolicy('max_loss_per_trade', 1)} onChange={event => setPolicy('max_loss_per_trade', Number(event.target.value))}/><span>USDT</span></div></label>
           <label>Max positions<input type="number" min="1" max="5" value={numericPolicy('max_positions', 2)} onChange={event => setPolicy('max_positions', Number(event.target.value))}/></label>
           <label>Max exposure<div className="masterTradeLiveUnitField"><input type="number" min="25" max="250" value={numericPolicy('max_total_exposure_usdt', 250)} onChange={event => setPolicy('max_total_exposure_usdt', Number(event.target.value))}/><span>USDT</span></div></label>
@@ -765,6 +775,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   </section></MasterTradeLiveLayout>
   return <section className="liveTradingPanel liveTerminal liveUx" aria-label={liveCopy.ariaLabel}>
     <header className="liveUxHero"><div><span className="liveKicker">{liveCopy.eyebrow}</span><h2>{liveCopy.title}</h2><p>{liveCopy.description}</p></div><div className={`liveUxState ${liveState.toLowerCase()}`}><ShieldAlert/><strong>{liveState === 'READY' ? liveCopy.ready : liveState === 'UNKNOWN' ? liveCopy.unknown : liveCopy.blocked}</strong><small>AUTO TRADE · {status?.live_auto_trade ? 'AÇIK' : 'KAPALI'}</small></div></header>
+    {timeframeWarning}
     <div className="liveUxStatus" aria-label="Canlı durum şeridi">{statusItems.map(([label, value]) => <div key={label} className={`liveStatusItem ${value.toLowerCase()}`}><i/><span>{label}</span><b>{value}</b></div>)}</div>
     <div className={`liveUxNow ${liveState.toLowerCase()}`}><div><small>{liveCopy.now}</small><strong>{ownershipUncertain ? 'SAHİPLİK BELİRSİZ' : liveState === 'BLOCKED' ? 'LIVE ENGELLENDİ' : liveState === 'READY' ? 'LIVE HAZIR' : 'LIVE KİLİTLİ'}</strong><p>{ownershipUncertain ? `${text(ownershipUncertain.symbol)} sahiplik kontrolü başarısız: ${ownershipUncertain.failures?.join(', ') || 'bilinmiyor'}.` : blocker}</p></div><div className="liveUxNowActions"><button type="button" className="liveCredentialCta" onClick={() => setCredentialModalOpen(true)}><KeyRound/> {liveCopy.configureCredentials}</button><button type="button" onClick={() => void refresh(false)} disabled={Boolean(busy) || refreshPending}>{refreshPending ? <RefreshCw className="spin"/> : <RefreshCw/>} {liveCopy.refreshStatus}</button></div></div>
 

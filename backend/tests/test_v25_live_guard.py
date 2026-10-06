@@ -1,5 +1,6 @@
 import asyncio
 import httpx
+import inspect
 import json
 import sys
 import time
@@ -1952,6 +1953,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=None))
         state["_app"] = application
         symbols_and_confidence = {"AAAUSDT": 72.5, "BBBUSDT": 77.5, "CCCUSDT": 83.0}
+        state["policy"]["allowed_symbols"] = list(symbols_and_confidence)
         candles = [{"time": index, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for index in range(220)]
 
         async def canonical_for_symbol(_application, _client, symbol, _interval, _candles, _policy):
@@ -2027,7 +2029,11 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("unknown_execution", EXECUTION_SOURCE)
         self.assertIn("origClientOrderId", EXECUTION_SOURCE)
         self.assertIn("find_order", EXECUTION_SOURCE)
-        self.assertNotIn("for attempt in", EXECUTION_SOURCE)
+        for submit in (v25_execution.submit_entry, v25_execution.post_algo):
+            source = inspect.getsource(submit)
+            self.assertNotIn("for attempt in", source)
+            self.assertNotIn("while ", source)
+            self.assertEqual(source.count('client.signed("POST"'), 1)
 
     def test_live_order_timeout_and_unknown_state_fail_closed(self):
         self.assertIn("except httpx.TimeoutException", EXECUTION_SOURCE)
@@ -2265,9 +2271,9 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn("LIVE_AUTO_SESSION_SECONDS = 60 * 60", EXECUTION_SOURCE)
         self.assertIn('state["policy"]["scan_seconds"]', EXECUTION_SOURCE)
 
-    def test_automatic_execution_uses_dynamic_top_three_not_btc_policy_defaults(self):
+    def test_automatic_execution_ranks_dynamic_top_three_within_registered_policy(self):
         self.assertIn("DEEP_ANALYSIS_LIMIT = 50", EXECUTION_SOURCE)
-        self.assertIn("candidates = await scan_market_candidates(client, snapshot)", EXECUTION_SOURCE)
+        self.assertIn("candidates = await scan_market_candidates(client, snapshot, allowed_symbols=allowed_symbols)", EXECUTION_SOURCE)
         self.assertIn("selected = signals[:3]", EXECUTION_SOURCE)
         self.assertIn('"scanned_symbol_count": len(candidates)', EXECUTION_SOURCE)
         self.assertIn('"selected_symbols": scan_stats.get', EXECUTION_SOURCE)
@@ -2275,7 +2281,8 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertIn('"executed_symbols"', EXECUTION_SOURCE)
         self.assertIn('"/fapi/v1/ticker/24hr"', EXECUTION_SOURCE)
         self.assertIn('"executed_symbols_count": scan_stats.get', EXECUTION_SOURCE)
-        self.assertNotIn("scan_market_candidates(client, snapshot, state[\"policy\"][\"allowed_symbols\"])", EXECUTION_SOURCE)
+        self.assertIn("allowed_symbols=set(symbol_scope)", EXECUTION_SOURCE)
+        self.assertNotIn("allowed_symbols=[symbol]", EXECUTION_SOURCE)
 
     def test_stop_failure_closes_with_reduce_only_and_emergency_is_scoped(self):
         self.assertIn('"reduceOnly": "true"', EXECUTION_SOURCE)

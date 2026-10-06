@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from urllib.parse import urlencode
 
 import httpx
@@ -66,6 +66,7 @@ from .execution_core import (
     V25_VERSION,
     credential_fingerprint,
     daily_execution_metrics,
+    directional_entry_gates,
     evaluate_entry_gates,
     policy_digest,
     release_gates,
@@ -76,6 +77,7 @@ from .execution_core import (
 from .exchange_connections import session_account_identity, session_credentials_for_identity, session_credentials_for_request, session_id
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .trade_review import write_trade_review
+from .trade_r_metrics import calculate_r_multiple, initial_entry_risk_usdt
 from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user, subscription_for_user
 from .error_monitoring import build_error_event, log_event, schedule_log_event
@@ -105,6 +107,8 @@ LIVE_CONSENT_SECONDS = 24 * 60 * 60
 LIVE_AUTO_SESSION_SECONDS = 60 * 60
 LIVE_CONSENT_GRACE_SECONDS = 15 * 60
 RECONCILE_SECONDS = 10
+STOP_INSTALL_MAX_ATTEMPTS = 3
+STOP_RETRY_BASE_SECONDS = 1
 MONITORING_CREDENTIALS_STALE_SECONDS = 90
 ANALYSIS_TIMEOUT_SECONDS = 15
 ADOPTION_PERSISTENCE_RETRY_BACKOFF_SECONDS = (5, 15, 60, 300, 900)
@@ -454,6 +458,8 @@ class PolicyUpdate(BaseModel):
     max_loss_per_trade: float | None = Field(default=None, ge=0.5, le=25)
     max_leverage: int | None = Field(default=None, ge=1, le=50)
     max_positions: int | None = Field(default=None, ge=1, le=5)
+    max_same_direction_positions: int | None = Field(default=None, ge=1, le=5)
+    max_direction_exposure_usdt: float | None = Field(default=None, gt=0, le=350, allow_inf_nan=False)
     max_total_exposure_usdt: float | None = Field(default=None, ge=25, le=250)
     daily_loss_limit: float | None = Field(default=None, ge=5, le=100)
     daily_trade_limit: int | None = Field(default=None, ge=1, le=12)
@@ -589,7 +595,7 @@ def initial_state() -> dict[str, Any]:
         "policy_ack_digest": None,
         "connected": False,
         "connection": {"last_checked": None, "last_error": None, "clock_offset_ms": None},
-        "heartbeat": {"last_heartbeat": None, "last_heartbeat_epoch": 0.0, "last_successful_order": None, "open_orders": 0, "open_positions": 0},
+        "heartbeat": {"last_heartbeat": None, "last_heartbeat_epoch": 0.0, "last_successful_cycle": None, "last_successful_cycle_epoch": 0.0, "last_successful_order": None, "open_orders": 0, "open_positions": 0},
         "stream": {
             "status": "ANAHTAR BEKLİYOR",
             "transport": "REST UZLAŞTIRMA",
@@ -643,7 +649,7 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
         )
     except (TypeError, ValueError):
         base["persistence_revision"] = 0
-    base["policy"] = sanitize_execution_policy(payload.get("policy"))
+    base["policy"] = sanitize_execution_policy(payload.get("policy"), preserve_empty_allowed_symbols=True)
     base["policy"]["mtf_allow_either_timeframe"] = configured_mtf_allow_either_timeframe()
     base["policy_ack_digest"] = payload.get("policy_ack_digest") if payload.get("policy_ack_digest") == policy_digest(base["policy"]) else None
     last_order_error = payload.get("last_order_error")
@@ -1563,11 +1569,45 @@ def rank_market_tickers(
     return ranked[:min(market_limit, candidate_limit)]
 
 
+def live_auto_symbol_scope(state: dict[str, Any]) -> list[str]:
+    symbols = state["policy"].get("allowed_symbols")
+    if not isinstance(symbols, list):
+        return []
+    return sanitize_execution_policy({"allowed_symbols": symbols}, preserve_empty_allowed_symbols=True)["allowed_symbols"]
+
+
+def record_auto_symbol_block(state: dict[str, Any], reason: str, symbol: str | None = None) -> str:
+    message = (
+        "İzinli parite listesi boş veya geçersiz; LIVE Auto Trade yeni emir açmaz."
+        if reason == "allowed_symbols_empty"
+        else f"{symbol} kayıtlı izinli parite listesinde değil; LIVE Auto Trade emri reddedildi."
+    )
+    if state["auto"].get("last_skip_reason") != reason or state["auto"].get("last_decision") != message:
+        add_event(state, "LIVE_AUTO_SYMBOL_BLOCKED", message, reason=reason, symbol=symbol)
+    state["auto"].update({"last_skip_reason": reason, "last_cycle_stage": "skipped", "last_decision": message, "last_error": message})
+    automation_telemetry(f"AUTOMATION_SKIP reason={reason} symbol={symbol or 'NONE'}", reason=reason)
+    persist_state(state)
+    return message
+
+
+def ensure_live_auto_symbol_allowed(state: dict[str, Any], symbol: str) -> None:
+    scope = live_auto_symbol_scope(state)
+    if not scope:
+        raise LiveExchangeError(record_auto_symbol_block(state, "allowed_symbols_empty"), http_status=423)
+    if symbol not in scope:
+        raise LiveExchangeError(record_auto_symbol_block(state, "symbol_not_allowed", symbol), http_status=422)
+
+
 async def scan_market_candidates(
     client: BinanceLiveClient,
     snapshot: dict[str, Any],
     allowed_symbols: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    symbol_scope = set(allowed_symbols or [])
+    if not symbol_scope:
+        client.last_scan_eligible_count = 0
+        logger.warning("LIVE_AUTO_SYMBOL_BLOCKED reason=allowed_symbols_empty scan skipped")
+        return []
     exchange_info, tickers = await asyncio.gather(
         client.public_get("/fapi/v1/exchangeInfo"),
         client.public_get("/fapi/v1/ticker/24hr"),
@@ -1584,8 +1624,9 @@ async def scan_market_candidates(
         and item.get("status") == "TRADING"
         and item.get("contractType") == "PERPETUAL"
         and item.get("quoteAsset") == "USDT"
+        and item.get("symbol") in symbol_scope
     ) if isinstance(exchange_info, dict) else 0
-    candidates = rank_market_tickers(exchange_info, tickers, excluded_symbols=occupied)
+    candidates = rank_market_tickers(exchange_info, tickers, excluded_symbols=occupied, allowed_symbols=set(symbol_scope))
     client.last_scan_eligible_count = eligible_count
     return candidates
 
@@ -1653,6 +1694,7 @@ async def build_live_spec(
         "targets": [decimal_text(value) for value in targets],
         "step": rules["step"],
         "min_qty": rules["min_qty"],
+        "min_notional": rules["min_notional"],
         "estimated_stop_loss_usdt": risk["estimated_stop_loss_usdt"],
     }
 
@@ -1737,7 +1779,7 @@ async def cancel_pending_owned_limit_entries(client: BinanceLiveClient, state: d
                 "symbol": symbol,
                 "side": "BUY" if str(plan.get("direction") or "").upper() == "LONG" else "SELL",
                 "order_type": "LIMIT",
-                "quantity": str(plan.get("quantity") or ""),
+                "quantity": str(plan.get("requested_quantity", plan.get("quantity")) or ""),
             }
             if not order_matches_spec(order, spec, client_id):
                 unresolved.append(f"{symbol}:{client_id[-8:]}")
@@ -1764,7 +1806,14 @@ async def cancel_pending_owned_limit_entries(client: BinanceLiveClient, state: d
     return cancelled, unresolved
 
 
-async def submit_entry(client: BinanceLiveClient, spec: dict[str, Any], client_id: str, *, test_only: bool) -> dict[str, Any]:
+async def submit_entry(
+    client: BinanceLiveClient,
+    spec: dict[str, Any],
+    client_id: str,
+    *,
+    test_only: bool,
+    before_submit: Callable[[], None] | None = None,
+) -> dict[str, Any]:
     params: dict[str, Any] = {
         "symbol": spec["symbol"], "side": spec["side"], "type": spec["order_type"],
         "quantity": spec["quantity"], "newClientOrderId": client_id, "newOrderRespType": "RESULT",
@@ -1778,6 +1827,8 @@ async def submit_entry(client: BinanceLiveClient, spec: dict[str, Any], client_i
             if not order_matches_spec(existing, spec, client_id):
                 raise LiveExchangeError("İlişkisiz veya uyuşmayan canlı emir bulundu; sahiplenilmedi.", unknown_execution=True)
             return {**existing, "recovered": True}
+    if before_submit is not None:
+        before_submit()
     try:
         payload = await client.signed("POST", path, params)
         if not test_only and (not isinstance(payload, dict) or not payload.get("orderId")):
@@ -1886,22 +1937,212 @@ async def cancel_owned_algos_for_symbol(client: BinanceLiveClient, rows: list[di
     return cancelled
 
 
-async def install_protection(client: BinanceLiveClient, state: dict[str, Any], plan: dict[str, Any]) -> None:
+def entry_remainder_needs_settlement(plan: dict[str, Any]) -> bool:
+    if plan.get("source") == "external_adoption" or plan.get("mutation_policy") == "READ_ONLY_EXTERNAL":
+        return False
+    if plan.get("entry_remainder_pending") or plan.get("entry_order_status") in {"NEW", "PARTIALLY_FILLED"}:
+        return True
+    if plan.get("entry_cancellation_state") in {"CANCELLED", "FILLED", "EXPIRED", "REJECTED", "EXPIRED_IN_MATCH"}:
+        return False
+    return Decimal(str(plan["quantity"])) < Decimal(str(plan.get("requested_quantity", plan["quantity"])))
+
+
+async def settle_live_entry_remainder(client: BinanceLiveClient, state: dict[str, Any], plan: dict[str, Any]) -> None:
+    symbol = plan["symbol"]
+    client_id = str(plan.get("entry_client_order_id") or "")
+    spec = {
+        "symbol": symbol,
+        "side": "BUY" if plan["direction"] == "LONG" else "SELL",
+        "order_type": plan["order_type"],
+        "quantity": plan.get("requested_quantity", plan["quantity"]),
+    }
+
+    def matches(order: dict[str, Any] | None) -> bool:
+        return bool(
+            client_id.startswith(LIVE_CLIENT_PREFIX)
+            and order is not None
+            and str(order.get("orderId")) == str(plan.get("entry_order_id"))
+            and order_matches_spec(order, spec, client_id)
+        )
+
+    order = await find_order(client, symbol, client_id)
+    if not matches(order):
+        raise LiveExchangeError("Kısmi giriş emrinin exact sahipliği doğrulanamadı; kalan miktar iptal edilmedi.", unknown_execution=True)
+    status = str((order or {}).get("status") or "").upper()
+    if status in {"NEW", "PARTIALLY_FILLED"}:
+        try:
+            await client.signed("DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": plan["entry_order_id"]})
+        except LiveExchangeError as exc:
+            if exc.exchange_code not in {-2011, -2013}:
+                raise
+        order = await find_order(client, symbol, client_id)
+        if not matches(order):
+            raise LiveExchangeError("Giriş iptali sonrası exact emir kimliği doğrulanamadı.", unknown_execution=True)
+        status = str((order or {}).get("status") or "").upper()
+    if status not in {"FILLED", "CANCELED", "EXPIRED", "REJECTED", "EXPIRED_IN_MATCH"}:
+        raise LiveExchangeError("Giriş emrinin kalan miktarı hâlâ açık veya belirsiz.", unknown_execution=True)
+    plan.update({
+        "entry_order_status": status,
+        "entry_cancellation_state": "CANCELLED" if status == "CANCELED" else status,
+        "entry_cancelled_at": now_iso() if status == "CANCELED" else plan.get("entry_cancelled_at"),
+    })
+    add_event(state, "LIVE_ENTRY_REMAINDER_SETTLED", f"{symbol} giriş emri {status}; son dolum miktarı yeniden doğrulanıyor.", symbol=symbol, plan_id=plan.get("id"), entry_status=status)
+    persist_state(state)
+
+
+def record_entry_remainder_uncertain(state: dict[str, Any], plan: dict[str, Any], exc: LiveExchangeError) -> None:
+    symbol = plan["symbol"]
+    plan["entry_remainder_pending"] = True
+    plan["entry_cancellation_state"] = "UNKNOWN"
+    plan["last_error"] = sanitized_exception_message(exc)
+    state["reconciliation_required"] = True
+    lock_live_execution(state, "LIVE_ENTRY_REMAINDER_UNKNOWN", unknown=True, symbol=symbol)
+    add_event(state, "LIVE_ENTRY_REMAINDER_UNCERTAIN", f"{symbol} giriş kalanının iptali/doğrulaması tamamlanamadı; yeni girişler kilitlendi.", symbol=symbol, plan_id=plan.get("id"), exchange_code=exc.exchange_code, reason=plan["last_error"])
+    persist_state(state)
+
+
+async def live_plan_position(client: BinanceLiveClient, symbol: str) -> dict[str, Any] | None:
+    positions = response_rows(await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol}))
+    live_positions = [item for item in positions if Decimal(str(item.get("positionAmt", "0"))) != 0]
+    if len(live_positions) != 1:
+        return None
+    position = live_positions[0]
+    amount = Decimal(str(position["positionAmt"]))
+    return {
+        "symbol": str(position.get("symbol") or "").upper(),
+        "direction": "LONG" if amount > 0 else "SHORT",
+        "quantity": decimal_text(abs(amount)),
+        "mark_price": position.get("markPrice"),
+    }
+
+
+async def confirmed_settled_position(client: BinanceLiveClient, state: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+    position = await live_plan_position(client, plan["symbol"])
+    if position is None or not confirm_live_plan_provenance(plan, position):
+        plan["provenance_state"] = "BROKEN"
+        plan["protection_state"] = "UNKNOWN"
+        add_event(state, "OWNERSHIP_UNCERTAIN", f"{plan['symbol']} giriş iptali sonrası miktar veya pozisyon kimliği eşleşmedi.", symbol=plan["symbol"], plan_id=plan.get("id"), failures=provenance_failure_details(plan, position))
+        raise LiveExchangeError("Giriş iptali sonrası canlı pozisyon sahipliği doğrulanamadı.", unknown_execution=True)
+    return position
+
+
+def existing_entry_protection_algo(
+    params: dict[str, Any],
+    existing_algos: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    matches = [
+        row for row in existing_algos or []
+        if row.get("client_algo_id") == params["clientAlgoId"]
+    ]
+    if not matches:
+        return None
+    row = matches[0]
+    try:
+        exact = (
+            len(matches) == 1
+            and row.get("symbol") == params["symbol"]
+            and row.get("side") == params["side"]
+            and row.get("type") == params["type"]
+            and row.get("status") in {"NEW", "WORKING", "PENDING_NEW", "PARTIALLY_FILLED"}
+            and protection_trigger_price(row) == Decimal(str(params["triggerPrice"]))
+            and _truthy(row.get("close_position", row.get("closePosition"))) == _truthy(params.get("closePosition"))
+            and ("quantity" not in params or Decimal(str(row.get("quantity"))) == Decimal(str(params["quantity"])))
+            and bool(row.get("algo_id"))
+        )
+    except (TypeError, ValueError, ArithmeticError) as exc:
+        raise LiveExchangeError("Mevcut giriş korumasının parametreleri okunamadı.", unknown_execution=True) from exc
+    if not exact:
+        raise LiveExchangeError("Mevcut giriş koruması exact parametrelerle eşleşmiyor.", unknown_execution=True)
+    return {"algoId": row["algo_id"]}
+
+
+async def post_entry_protection_algo(
+    client: BinanceLiveClient,
+    params: dict[str, Any],
+    existing_algos: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    existing = existing_entry_protection_algo(params, existing_algos)
+    return existing if existing is not None else await post_algo(client, params)
+
+
+async def install_verified_stop(
+    client: BinanceLiveClient,
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    params: dict[str, Any],
+    existing_algos: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    may_exist = False
+    can_submit = True
+    last_error = LiveExchangeError("Stop aktif emir kaydında doğrulanamadı.", unknown_execution=True)
+    for attempt in range(1, STOP_INSTALL_MAX_ATTEMPTS + 1):
+        plan["stop_install_attempts"] = attempt
+        persist_state(state)
+        if can_submit:
+            try:
+                await post_entry_protection_algo(client, params, existing_algos)
+                may_exist = True
+            except LiveExchangeError as exc:
+                last_error = exc
+                may_exist = exc.unknown_execution
+        try:
+            payload = await client.signed("GET", "/fapi/v1/openAlgoOrders", {"symbol": params["symbol"]})
+            if classify_algo_snapshot_payload(payload) == "UNKNOWN":
+                raise LiveExchangeError("Stop doğrulama snapshot'ı belirsiz.", unknown_execution=True)
+            rows = [{
+                "symbol": row.get("symbol"),
+                "algo_id": row.get("algoId"),
+                "client_algo_id": row.get("clientAlgoId"),
+                "side": row.get("side"),
+                "type": row.get("orderType", row.get("type")),
+                "status": row.get("algoStatus", row.get("status")),
+                "trigger_price": row.get("triggerPrice", row.get("stopPrice")),
+                "close_position": _truthy(row.get("closePosition")),
+            } for row in response_rows(payload) if isinstance(row, dict)]
+            verified = existing_entry_protection_algo(params, rows)
+            if verified is not None:
+                try:
+                    algo_id = int(verified["algoId"])
+                except (TypeError, ValueError, ArithmeticError) as exc:
+                    raise LiveExchangeError("Stop doğrulama kimliği okunamadı.", unknown_execution=True) from exc
+                if algo_id <= 0:
+                    raise LiveExchangeError("Stop doğrulama kimliği geçersiz.", unknown_execution=True)
+                plan["stop_algo_id"] = algo_id
+                plan["stop_verified_at"] = now_iso()
+                persist_state(state)
+                return verified
+            can_submit = not may_exist
+        except LiveExchangeError as exc:
+            last_error = exc
+            can_submit = False
+        safe_message = sanitized_exception_message(last_error)
+        logger.warning("LIVE Stop not verified symbol=%s attempt=%s/%s error=%s", params["symbol"], attempt, STOP_INSTALL_MAX_ATTEMPTS, safe_message)
+        add_event(state, "LIVE_STOP_VERIFICATION_RETRY", f"{params['symbol']} Stop doğrulanamadı; sınırlı yeniden deneme.", symbol=params["symbol"], attempt=attempt, maximum_attempts=STOP_INSTALL_MAX_ATTEMPTS, reason=safe_message)
+        if attempt < STOP_INSTALL_MAX_ATTEMPTS:
+            delay = STOP_RETRY_BASE_SECONDS * attempt
+            await asyncio.sleep(rate_limit_backoff_seconds(last_error, delay) if isinstance(last_error, LiveRateLimitError) else delay)
+    raise LiveExchangeError("Stop sınırlı denemeler sonunda doğrulanamadı.", exchange_code=last_error.exchange_code, unknown_execution=True) from last_error
+
+
+async def install_protection(
+    client: BinanceLiveClient,
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    *,
+    existing_algos: list[dict[str, Any]] | None = None,
+) -> None:
     symbol = plan["symbol"]
     plan.setdefault("protection_state", "UNKNOWN")
     if plan.get("provenance_state") not in {"PROVISIONAL", "CONFIRMED"}:
         plan["protection_state"] = "UNKNOWN"
         return
-    positions = response_rows(await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol}))
-    live_positions = [item for item in positions if Decimal(str(item.get("positionAmt", "0"))) != 0]
-    position = live_positions[0] if len(live_positions) == 1 else None
-    if position is None:
+    position_view = await live_plan_position(client, symbol)
+    if position_view is None:
         plan["protection_state"] = "MISSING"
         plan["status"] = "DOLUM BEKLİYOR"
         return
-    amount = Decimal(str(position["positionAmt"]))
-    direction = "LONG" if amount > 0 else "SHORT"
-    position_view = {"symbol": symbol, "direction": direction, "quantity": decimal_text(abs(amount))}
+    direction = position_view["direction"]
+    amount = Decimal(position_view["quantity"]) * (1 if direction == "LONG" else -1)
     if not live_plan_can_mutate(plan) and not confirm_live_plan_provenance(plan, position_view):
         plan["provenance_state"] = "BROKEN"
         plan["protection_state"] = "UNKNOWN"
@@ -1928,13 +2169,15 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
     common = {"algoType": "CONDITIONAL", "symbol": symbol, "side": "SELL" if amount > 0 else "BUY", "workingType": "MARK_PRICE", "priceProtect": "TRUE"}
     stop_client = plan.setdefault("stop_client_id", client_id_for("SL", plan["intent_id"]))
     try:
-        stop_result = await post_algo(client, {**common, "type": "STOP_MARKET", "triggerPrice": plan["stop_loss"], "closePosition": "true", "clientAlgoId": stop_client})
+        stop_result = await install_verified_stop(client, state, plan, {**common, "type": "STOP_MARKET", "triggerPrice": plan["stop_loss"], "closePosition": "true", "clientAlgoId": stop_client}, existing_algos)
         plan["stop_algo_id"] = int(stop_result.get("algoId") or 0) or None
+        if not plan["stop_algo_id"]:
+            raise LiveExchangeError("Stop yanıtında emir kimliği yok; koruma doğrulanamadı.", unknown_execution=True)
     except LiveExchangeError as exc:
         await log_event(getattr(client.application.state, "db_pool", None) if client.application is not None else None, build_error_event(
             source="backend", service="trading_engine", kind="ProtectionError", code="STOP_LOSS_FAILED", message=str(exc), severity="CRITICAL",
             user_id=((state.get("live_session_authorization") or {}).get("user_id")), context={"exchange":"BINANCE","symbol":symbol,"direction":direction,"order_type":"STOP_MARKET","quantity":decimal_text(abs(amount)),"price":plan.get("stop_loss"),"bot":"V25"},
-            details={"exchange_code":exc.exchange_code,"response_time_ms":None,"attempt":1,"order_id":stop_client},
+            details={"exchange_code":exc.exchange_code,"response_time_ms":None,"attempt":plan.get("stop_install_attempts", 1),"order_id":stop_client},
         ))
         plan["status"] = "STOP BAŞARISIZ · KAPATILIYOR"
         add_event(state, "PROTECTION_FAIL", f"{symbol} Stop kurulamadı; tracked pozisyon reduce-only kapatılıyor.", symbol=symbol)
@@ -1944,6 +2187,22 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
         if close_client_id not in close_ids:
             close_ids.append(close_client_id)
         persist_state(state)
+        cancellation_error = None
+        if entry_remainder_needs_settlement(plan):
+            plan["entry_remainder_pending"] = True
+            persist_state(state)
+            try:
+                await settle_live_entry_remainder(client, state, plan)
+            except LiveExchangeError as entry_exc:
+                cancellation_error = entry_exc
+                record_entry_remainder_uncertain(state, plan, entry_exc)
+            latest_position = await live_plan_position(client, symbol)
+            if latest_position is not None and not confirm_live_plan_provenance(plan, latest_position):
+                plan["provenance_state"] = "BROKEN"
+                plan["protection_state"] = "UNKNOWN"
+                ownership_error = LiveExchangeError("Stop hatası sonrası pozisyon sahipliği doğrulanamadı; belirsiz pozisyon kapatılmadı.", unknown_execution=True)
+                record_entry_remainder_uncertain(state, plan, ownership_error)
+                raise ownership_error
         close_result = await close_tracked_symbol(client, symbol, close_intent)
         if close_result and close_result.get("orderId"):
             order_id = int(close_result["orderId"])
@@ -1953,22 +2212,55 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
         plan["close_reason"] = close_reason_for_intent(close_intent)
         plan["status"] = "GÜVENLİK İÇİN KAPATILDI"
         plan["last_error"] = str(exc)[:240]
+        if cancellation_error is not None:
+            persist_state(state)
+            raise LiveExchangeError("Stop kurulamadı; reduce-only kapatma denendi ancak giriş kalanının iptali belirsiz.", unknown_execution=True) from cancellation_error
+        plan["entry_remainder_pending"] = False
+        persist_state(state)
         return
-    step, min_qty = Decimal(str(plan["step"])), Decimal(str(plan["min_qty"]))
+    if entry_remainder_needs_settlement(plan):
+        # closePosition protects late fills while the exact entry remainder is cancelled.
+        plan["entry_remainder_pending"] = True
+        plan["protection_ids"] = [plan["stop_algo_id"]] if plan.get("stop_algo_id") else []
+        persist_state(state)
+        try:
+            await settle_live_entry_remainder(client, state, plan)
+            position_view = await confirmed_settled_position(client, state, plan)
+            amount = Decimal(position_view["quantity"]) * (1 if direction == "LONG" else -1)
+        except LiveExchangeError as exc:
+            record_entry_remainder_uncertain(state, plan, exc)
+            raise LiveExchangeError("Giriş kalanının iptali/doğrulaması tamamlanamadı; yeni girişler kilitlendi.", exchange_code=exc.exchange_code, unknown_execution=True) from exc
+    try:
+        if plan.get("min_notional") is None or plan.get("order_type") == "LIMIT":
+            rules = await live_symbol_rules(client, symbol, "MARKET")
+            step, min_qty, min_notional = rules["step"], rules["min_qty"], rules["min_notional"]
+            if plan.get("order_type") != "LIMIT":
+                plan["min_notional"] = decimal_text(min_notional)
+        else:
+            step, min_qty, min_notional = (Decimal(str(plan[key])) for key in ("step", "min_qty", "min_notional"))
+        mark_price = Decimal(str(position_view.get("mark_price")))
+    except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+        raise LiveExchangeError("Canlı TP miktar/notional kuralları veya mark fiyatı okunamadı.", http_status=422) from exc
+    if not all(value.is_finite() for value in (step, min_qty, min_notional, mark_price)) or step <= 0 or min_qty < 0 or min_notional < 0 or mark_price <= 0:
+        raise LiveExchangeError("Canlı TP miktar/notional kuralları veya mark fiyatı geçersiz.", http_status=422)
     ids: list[int] = [plan["stop_algo_id"]] if plan.get("stop_algo_id") else []
     monitoring: list[str] = []
     combined_partial = floor_step(abs(amount) * Decimal("0.60"), step)
-    if combined_partial >= min_qty:
+    if combined_partial > 0 and combined_partial >= min_qty and combined_partial * mark_price >= min_notional:
         key = client_id_for("TP12", plan["intent_id"])
         try:
-            result = await post_algo(client, {**common, "type": "TAKE_PROFIT_MARKET", "triggerPrice": plan["targets"][0], "quantity": decimal_text(combined_partial), "reduceOnly": "true", "clientAlgoId": key})
+            result = await post_entry_protection_algo(client, {**common, "type": "TAKE_PROFIT_MARKET", "triggerPrice": plan["targets"][0], "quantity": decimal_text(combined_partial), "reduceOnly": "true", "clientAlgoId": key}, existing_algos)
             if result.get("algoId"):
                 ids.append(int(result["algoId"]))
                 plan["tp12_algo_id"] = int(result["algoId"])
                 plan["tp12_client_id"] = key
             else:
                 monitoring.extend(["TP1", "TP2"])
-        except LiveExchangeError:
+        except LiveExchangeError as exc:
+            if existing_algos is not None and exc.unknown_execution:
+                record_protection_ownership_uncertain(state, plan, "ENTRY_TP_IDENTITY_UNKNOWN")
+                persist_state(state)
+                raise
             await log_event(getattr(client.application.state, "db_pool", None) if client.application is not None else None, build_error_event(
                 source="backend", service="trading_engine", kind="ProtectionError", code="ORDER_REJECTED", message="Partial take-profit protection was rejected.", severity="ERROR",
                 user_id=((state.get("live_session_authorization") or {}).get("user_id")), context={"exchange":"BINANCE","symbol":symbol,"direction":direction,"order_type":"TAKE_PROFIT_MARKET","quantity":decimal_text(combined_partial),"price":plan["targets"][0],"bot":"V25"}, details={"attempt":1},
@@ -1977,10 +2269,14 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
     else:
         monitoring.extend(["TP1", "TP2"])
     try:
-        result = await post_algo(client, {**common, "type": "TAKE_PROFIT_MARKET", "triggerPrice": plan["targets"][2], "closePosition": "true", "clientAlgoId": client_id_for("TP3", plan["intent_id"])})
+        result = await post_entry_protection_algo(client, {**common, "type": "TAKE_PROFIT_MARKET", "triggerPrice": plan["targets"][2], "closePosition": "true", "clientAlgoId": client_id_for("TP3", plan["intent_id"])}, existing_algos)
         if result.get("algoId"):
             ids.append(int(result["algoId"]))
     except LiveExchangeError as exc:
+        if existing_algos is not None and exc.unknown_execution:
+            record_protection_ownership_uncertain(state, plan, "ENTRY_TP_IDENTITY_UNKNOWN")
+            persist_state(state)
+            raise
         await log_event(getattr(client.application.state, "db_pool", None) if client.application is not None else None, build_error_event(
             source="backend", service="trading_engine", kind="ProtectionError", code="ORDER_REJECTED", message=str(exc), severity="ERROR",
             user_id=((state.get("live_session_authorization") or {}).get("user_id")), context={"exchange":"BINANCE","symbol":symbol,"direction":direction,"order_type":"TAKE_PROFIT_MARKET","price":plan["targets"][2],"bot":"V25"}, details={"attempt":1},
@@ -1994,10 +2290,11 @@ async def install_protection(client: BinanceLiveClient, state: dict[str, Any], p
         "protected_at": now_iso(),
         "protection_state": "MATCHED" if plan.get("stop_algo_id") and not monitoring else "MISSING",
         "status": "KORUMA AKTİF" if not monitoring else "STOP AKTİF · HEDEF İZLEME",
+        "entry_remainder_pending": False,
     })
     add_event(state, "PROTECTION_ACTIVE", f"{symbol} canlı Stop ve TP koruma planı kuruldu.", symbol=symbol)
     if monitoring:
-        add_event(state, "TP_MONITORING_PERSISTED", f"{symbol} {','.join(monitoring)} Binance minimum miktarına ulaşamadı; kalıcı reconciliation takibine alındı.", symbol=symbol, plan_id=plan.get("id"), monitoring_targets=list(monitoring))
+        add_event(state, "TP_MONITORING_PERSISTED", f"{symbol} {','.join(monitoring)} Binance miktar/notional kuralları veya emir kabulünü karşılamadı; kalıcı reconciliation takibine alındı.", symbol=symbol, plan_id=plan.get("id"), monitoring_targets=list(monitoring))
     persist_state(state)
 
 
@@ -2346,6 +2643,7 @@ async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], p
             "exit_price": verified.get("exit_price"),
             "opened_at": verified.get("opened_at"),
             "close_reason": verified.get("close_reason") or plan.get("close_reason") or "UNKNOWN",
+            "r_multiple": calculate_r_multiple(verified.get("realized_pnl"), plan.get("initial_risk_usdt")),
         })
         review = write_trade_review(state)
         if review:
@@ -2354,7 +2652,7 @@ async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], p
     try:
         result = await verified_plan_pnl(client, plan)
     except LiveExchangeError as exc:
-        plan.update({"status": "PNL DOĞRULANIYOR", "pnl_verified": False, "pnl_verification_error": str(exc)[:220]})
+        plan.update({"status": "PNL DOĞRULANIYOR", "pnl_verified": False, "pnl_verification_error": str(exc)[:220], "r_multiple": None})
         state["armed_until"] = 0.0
         state["auto"]["enabled"] = False
         state["auto"]["session_until"] = 0.0
@@ -2368,7 +2666,8 @@ async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], p
             )
         return
     close_reason = plan.get("close_reason") or "UNKNOWN"
-    plan.update({"status": "KAPANDI", "closed_at": now_iso(), "pnl_verified": True, "close_reason": close_reason, **result})
+    r_multiple = calculate_r_multiple(result["realized_pnl"], plan.get("initial_risk_usdt"))
+    plan.update({"status": "KAPANDI", "closed_at": now_iso(), "pnl_verified": True, "close_reason": close_reason, **result, "r_multiple": r_multiple})
     add_event(
         state,
         "LIVE_POSITION_CLOSED",
@@ -2376,6 +2675,8 @@ async def settle_closed_plan(client: BinanceLiveClient, state: dict[str, Any], p
         symbol=plan["symbol"],
         plan_id=plan_id,
         close_reason=close_reason,
+        initial_risk_usdt=plan.get("initial_risk_usdt"),
+        r_multiple=r_multiple,
         **result,
     )
     review = write_trade_review(state)
@@ -2401,6 +2702,9 @@ def recover_plan_from_intent(intent_id: str, intent: dict[str, Any], order: dict
         "order_type": spec["order_type"],
         "entry_price": spec["entry_price"],
         "quantity": spec["quantity"],
+        "requested_quantity": spec["quantity"],
+        "initial_risk_usdt": spec.get("initial_risk_usdt"),
+        "r_multiple": None,
         "margin_usdt": spec.get("margin_usdt"),
         "notional_usdt": spec.get("notional_usdt"),
         "leverage": spec.get("leverage"),
@@ -2410,7 +2714,9 @@ def recover_plan_from_intent(intent_id: str, intent: dict[str, Any], order: dict
         "targets": list(spec["targets"]),
         "step": spec["step"],
         "min_qty": spec["min_qty"],
+        "min_notional": spec.get("min_notional"),
         "entry_order_id": order_id,
+        "entry_order_status": order["status"],
         "entry_client_order_id": intent.get("client_order_id"),
         "status": "KURTARILDI · KORUMA KONTROLÜ",
         "created_at": intent.get("created_at") or now_iso(),
@@ -2558,7 +2864,7 @@ def live_plan_can_mutate(plan: dict[str, Any]) -> bool:
 
 
 def confirm_live_plan_provenance(plan: dict[str, Any], position: dict[str, Any]) -> bool:
-    if plan.get("provenance_state") in {"BROKEN", "NO_PROVENANCE"}:
+    if plan.get("provenance_state") in {"BROKEN", "NO_PROVENANCE"} or plan.get("mutation_policy") == "READ_ONLY_EXTERNAL":
         return False
     if str(position.get("symbol") or "").upper() != str(plan.get("symbol") or "").upper():
         return False
@@ -2566,13 +2872,15 @@ def confirm_live_plan_provenance(plan: dict[str, Any], position: dict[str, Any])
         return False
     try:
         quantity = Decimal(str(position.get("quantity")))
-        expected = Decimal(str(plan.get("quantity")))
+        expected = Decimal(str(plan.get("requested_quantity", plan.get("quantity"))))
     except (TypeError, ValueError, ArithmeticError):
         return False
-    if not quantity.is_finite() or quantity <= 0 or quantity != expected:
+    if not quantity.is_finite() or not expected.is_finite() or quantity <= 0 or expected <= 0 or quantity > expected:
         return False
     if not plan.get("entry_order_id") or not plan.get("entry_client_order_id"):
         return False
+    plan.setdefault("requested_quantity", decimal_text(expected))
+    plan["quantity"] = decimal_text(quantity)
     plan["provenance_state"] = "CONFIRMED"
     return True
 
@@ -2587,8 +2895,8 @@ def provenance_failure_details(plan: dict[str, Any], position: dict[str, Any] | 
         failures.append("direction_mismatch")
     try:
         quantity = Decimal(str(position.get("quantity")))
-        expected = Decimal(str(plan.get("quantity")))
-        if not quantity.is_finite() or quantity <= 0 or quantity != expected:
+        expected = Decimal(str(plan.get("requested_quantity", plan.get("quantity"))))
+        if not quantity.is_finite() or not expected.is_finite() or quantity <= 0 or expected <= 0 or quantity > expected:
             failures.append("quantity_mismatch")
     except (TypeError, ValueError, ArithmeticError):
         failures.append("quantity_unreadable")
@@ -3039,8 +3347,11 @@ def verified_live_journal(state: dict[str, Any]) -> list[dict[str, Any]]:
             "opened_at": plan.get("opened_at"),
             "reason": plan.get("close_reason"),
             "source": "BINANCE LIVE",
+            "kind": "LIVE_POSITION_CLOSED",
             "verified_realized": True,
             "realized_pnl": pnl,
+            "initial_risk_usdt": plan.get("initial_risk_usdt"),
+            "r_multiple": calculate_r_multiple(pnl, plan.get("initial_risk_usdt")),
         })
     return rows
 
@@ -3187,6 +3498,7 @@ async def execute_live_order(
     allowed_symbols: list[str] | None = None,
     request: Request | None = None,
     credentials: tuple[str, str] | None = None,
+    cycle_candidates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     state = application.state.v25_execution
     if request is not None:
@@ -3211,6 +3523,9 @@ async def execute_live_order(
     submission_started = False
     async with state["lock"]:
         try:
+            if source == "V25_AUTO":
+                ensure_live_auto_symbol_allowed(state, normalize_symbol(body.symbol))
+            manual_symbol_scope = [] if source == "MANUAL" else live_auto_symbol_scope(state) if source == "V25_AUTO" else allowed_symbols
             client = client_for_with_credentials(application, credentials, request)
             snapshot = await account_snapshot(client)
             if source != "MANUAL" and state.get("real_trading_locked") is not False:
@@ -3222,7 +3537,6 @@ async def execute_live_order(
             symbol = normalize_symbol(body.symbol)
             daily = live_daily_metrics(state)
             manual_signal = {"direction": body.direction, "confidence": 100, "radar": {"trap_score": 0}}
-            manual_symbol_scope = [] if source == "MANUAL" else allowed_symbols
             current_spread = await spread_bps(client, symbol)
             if current_spread > float(state["policy"]["max_spread_bps"]):
                 await asyncio.sleep(0.25)
@@ -3238,9 +3552,12 @@ async def execute_live_order(
                 allowed_symbols=manual_symbol_scope,
                 active_plans=list(state.get("plans", {}).values()),
                 candidate_notional_usdt=body.margin_usdt * body.leverage,
+                cycle_candidates=cycle_candidates,
             )
             if not guard["passed"]:
-                raise LiveExchangeError(f"Canlı risk kapısı: {guard['reason']}", http_status=409)
+                failed = next(gate for gate in guard["gates"] if not gate["passed"])
+                prefix = "Canlı yön risk kapısı" if failed["key"] in {"same_direction_positions", "direction_exposure"} else "Canlı risk kapısı"
+                raise LiveExchangeError(f"{prefix}: {guard['reason']}", http_status=409)
             if float(snapshot.get("available_balance") or 0) < body.margin_usdt:
                 raise LiveExchangeError("Canlı hesap kullanılabilir bakiyesi seçilen marjinden düşük.", http_status=409)
             spec = await build_live_spec(client, body, state["policy"], allowed_symbols=manual_symbol_scope)
@@ -3269,6 +3586,8 @@ async def execute_live_order(
                 "leverage": spec["leverage"], "stop_loss": spec["stop_loss"],
                 "targets": list(spec["targets"]), "step": decimal_text(spec["step"]),
                 "min_qty": decimal_text(spec["min_qty"]),
+                "min_notional": decimal_text(spec["min_notional"]) if spec.get("min_notional") is not None else None,
+                "initial_risk_usdt": initial_entry_risk_usdt(spec),
             }
             audit_snapshot = MappingProxyType({
                 "decision_id": intent_id,
@@ -3311,15 +3630,34 @@ async def execute_live_order(
                 credentials = fresh_credentials
                 client = client_for_with_credentials(application, credentials, request)
             submission_started = True
-            result = await submit_entry(client, spec, client_id, test_only=False)
+            if source == "V25_AUTO":
+                ensure_live_auto_symbol_allowed(state, spec["symbol"])
+
+                def before_auto_submit() -> None:
+                    ensure_live_auto_symbol_allowed(state, spec["symbol"])
+                    checks = directional_entry_gates(
+                        symbol=spec["symbol"], direction=spec["direction"], snapshot=snapshot,
+                        policy=state["policy"], active_plans=list(state.get("plans", {}).values()),
+                        cycle_candidates=cycle_candidates, candidate_notional_usdt=spec["notional_usdt"],
+                    )
+                    failed = next((gate for gate in checks if not gate.passed), None)
+                    if failed is not None:
+                        raise LiveExchangeError(f"Canlı yön risk kapısı: {failed.detail}", http_status=409)
+
+                result = await submit_entry(client, spec, client_id, test_only=False, before_submit=before_auto_submit)
+            else:
+                result = await submit_entry(client, spec, client_id, test_only=False)
             plan_id = uuid.uuid4().hex[:16]
             plan = {
                 "id": plan_id, "intent_id": intent_id, "symbol": spec["symbol"], "direction": spec["direction"],
                 "order_type": spec["order_type"], "entry_price": spec["entry_price"], "quantity": spec["quantity"],
+                "requested_quantity": spec["quantity"],
+                "initial_risk_usdt": serializable_spec["initial_risk_usdt"], "r_multiple": None,
                 "margin_usdt": spec["margin_usdt"], "notional_usdt": spec["notional_usdt"], "leverage": spec["leverage"],
                 "applied_leverage": leverage_audit["applied_leverage"], "margin_type": leverage_audit["margin_type"],
                 "stop_loss": spec["stop_loss"], "targets": spec["targets"], "step": decimal_text(spec["step"]),
                 "min_qty": decimal_text(spec["min_qty"]), "entry_order_id": int(result.get("orderId") or 0) or None,
+                "min_notional": serializable_spec["min_notional"], "entry_order_status": result.get("status"),
                 "entry_client_order_id": client_id, "status": "DOLUM BEKLİYOR", "created_at": now_iso(),
                 "source": source, "live": True, "protection_ids": [],
                 "provenance_state": "PROVISIONAL", "protection_state": "UNKNOWN",
@@ -3394,6 +3732,10 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         state["auto"]["last_cycle_stage"] = "skipped"
         automation_telemetry(f"AUTOMATION_SKIP reason={reason}", reason=reason)
         return
+    allowed_symbols = live_auto_symbol_scope(state)
+    if not allowed_symbols:
+        record_auto_symbol_block(state, "allowed_symbols_empty")
+        return
     if credentials is None:
         credentials = await auto_session_credentials(application, state)
     if not usable_live_credentials(credentials):
@@ -3440,7 +3782,12 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         daily = live_daily_metrics(state)
         state["auto"]["last_skip_reason"] = None
         state["auto"]["last_cycle_stage"] = "scanning"
-        candidates = await scan_market_candidates(client, snapshot)
+        candidates = await scan_market_candidates(client, snapshot, allowed_symbols=allowed_symbols)
+        allowed_symbols = live_auto_symbol_scope(state)
+        if not allowed_symbols:
+            record_auto_symbol_block(state, "allowed_symbols_empty")
+            return
+        candidates = [candidate for candidate in candidates if candidate["symbol"] in allowed_symbols]
         logger.info(
             "MULTI_SYMBOL_SCAN started eligible symbols: %s top 100 selected deep analysis candidates: %s",
             getattr(client, "last_scan_eligible_count", 0),
@@ -3615,6 +3962,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         selected = signals[:3]
         selected_symbols = [item["candidate"]["symbol"] for item in selected]
         executed_symbols: list[str] = []
+        cycle_candidates: list[dict[str, Any]] = []
         logger.info(
             "MULTI_SYMBOL_SCAN deep analysis completed: %s symbols: %s",
             len(analyzed_symbols),
@@ -3660,16 +4008,31 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             signal = item["signal"]
             symbol = candidate["symbol"]
             intent_id = item["intent_id"]
+            allowed_symbols = live_auto_symbol_scope(state)
+            if not allowed_symbols:
+                record_auto_symbol_block(state, "allowed_symbols_empty")
+                return
+            if symbol not in allowed_symbols:
+                record_auto_symbol_block(state, "symbol_not_allowed", symbol)
+                continue
             try:
                 spread = await spread_bps(client, symbol)
             except LiveExchangeError as exc:
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · piyasa verisi reddedildi: {exc}"
                 continue
-            guard = evaluate_entry_gates(symbol=symbol, signal=signal, snapshot=snapshot, policy=state["policy"], daily=daily, spread_bps=spread, armed=True, allowed_symbols=[symbol])
+            guard = evaluate_entry_gates(
+                symbol=symbol, signal=signal, snapshot=snapshot, policy=state["policy"],
+                daily=daily, spread_bps=spread, armed=True, allowed_symbols=allowed_symbols,
+                active_plans=list(state.get("plans", {}).values()), cycle_candidates=cycle_candidates,
+            )
             if any(not gate["passed"] and gate["key"] == "spread" for gate in guard.get("gates", [])):
                 count_rejection("spread", "SPREAD_ABOVE_MAX")
             if not guard["passed"]:
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · {guard['reason']}"
+                for gate in guard.get("gates", []):
+                    if not gate["passed"] and gate["key"] in {"same_direction_positions", "direction_exposure"}:
+                        count_rejection("entry_ineligible", gate["key"].upper())
+                        add_event(state, "LIVE_DIRECTIONAL_ENTRY_BLOCKED", gate["detail"], symbol=symbol, direction=signal["direction"], gate=gate["key"])
                 continue
             try:
                 risk = risk_sized_order(float(signal["entry"]), float(signal["stop_loss"]), state["policy"], atr=signal.get("atr"))
@@ -3679,6 +4042,17 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
             if risk["margin_usdt"] < 5:
                 state["auto"]["last_decision"] = f"{symbol}: Binance minimum güvenli marjin eşiği altında; BEKLE."
                 continue
+            directional_checks = directional_entry_gates(
+                symbol=symbol, direction=signal["direction"], snapshot=snapshot, policy=state["policy"],
+                active_plans=list(state.get("plans", {}).values()), cycle_candidates=cycle_candidates,
+                candidate_notional_usdt=risk["margin_usdt"] * risk["leverage"],
+            )
+            directional_failed = next((gate for gate in directional_checks if not gate.passed), None)
+            if directional_failed is not None:
+                state["auto"]["last_decision"] = f"{symbol}: BEKLE · {directional_failed.detail}"
+                count_rejection("entry_ineligible", directional_failed.key.upper())
+                add_event(state, "LIVE_DIRECTIONAL_ENTRY_BLOCKED", directional_failed.detail, symbol=symbol, direction=signal["direction"], gate=directional_failed.key)
+                continue
             body = LiveOrderRequest(
                 symbol=symbol, direction=signal["direction"], order_type="MARKET",
                 margin_usdt=risk["margin_usdt"], leverage=risk["leverage"], stop_loss=signal["stop_loss"],
@@ -3686,10 +4060,28 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 atr=signal.get("atr"),
             )
             try:
-                await execute_live_order(application, body, source="V25_AUTO", allowed_symbols=[symbol], credentials=credentials)
+                result = await execute_live_order(application, body, source="V25_AUTO", credentials=credentials, cycle_candidates=list(cycle_candidates))
             except LiveExchangeError as exc:
                 state["auto"]["last_decision"] = f"{symbol}: BEKLE · emir risk kontrolünden geçmedi: {exc}"
                 continue
+            except HTTPException as exc:
+                if exc.status_code == 409 and str(exc.detail).startswith("Canlı yön risk kapısı:"):
+                    state["auto"]["last_decision"] = f"{symbol}: BEKLE · {exc.detail}"
+                    count_rejection("entry_ineligible", "DIRECTIONAL_LIMIT")
+                    continue
+                if exc.status_code not in {422, 423} or exc.detail != state["auto"].get("last_error") or state["auto"].get("last_skip_reason") not in {"allowed_symbols_empty", "symbol_not_allowed"}:
+                    raise
+                if state["auto"]["last_skip_reason"] == "allowed_symbols_empty":
+                    return
+                continue
+            plan = result.get("plan", {}) if isinstance(result, dict) else {}
+            actual_quantity = float(plan.get("quantity") or 0)
+            actual_entry = float(plan.get("entry_price") or 0)
+            cycle_candidates.append({
+                "symbol": symbol, "direction": signal["direction"],
+                "entry_price": actual_entry or float(signal["entry"]),
+                "notional_usdt": actual_quantity * actual_entry if actual_quantity > 0 and actual_entry > 0 else body.margin_usdt * body.leverage,
+            })
             executed_symbols.append(symbol)
             state["auto"]["last_decision"] = f"{symbol} {signal['direction']} canlı işlem açıldı; Stop/TP doğrulandı."
             snapshot = await account_snapshot(client)
@@ -3864,6 +4256,21 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
             )
             continue
         if position is None:
+            if plan.get("entry_remainder_pending"):
+                try:
+                    await settle_live_entry_remainder(client, state, plan)
+                    late_position = await live_plan_position(client, symbol)
+                    if late_position is not None:
+                        if not confirm_live_plan_provenance(plan, late_position):
+                            plan["provenance_state"] = "BROKEN"
+                            plan["protection_state"] = "UNKNOWN"
+                            raise LiveExchangeError("Geç dolum pozisyon sahipliği doğrulanamadı.", unknown_execution=True)
+                        await install_protection(client, state, plan, existing_algos=open_algos)
+                        continue
+                    plan["entry_remainder_pending"] = False
+                except LiveExchangeError as exc:
+                    record_entry_remainder_uncertain(state, plan, exc)
+                    raise
             if plan.get("status") == "DOLUM BEKLİYOR":
                 entry = await find_order(client, symbol, str(plan.get("entry_client_order_id") or ""))
                 entry_status = str((entry or {}).get("status") or "")
@@ -3913,9 +4320,34 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
             state["protection_repairs"] += 1
             add_event(state, "PROTECTION_REPAIR", f"{symbol} Stop eksik; koruma yeniden kuruluyor.", symbol=symbol)
             await install_protection(client, state, plan)
+        elif protection_state == "MATCHED" and entry_remainder_needs_settlement(plan):
+            await install_protection(client, state, plan, existing_algos=open_algos)
         elif protection_state == "MATCHED" and plan.get("status") == "DOLUM BEKLİYOR":
             plan["status"] = "KORUMA AKTİF"
     clear_clean_reconciliation_state(state, snapshot)
+    persist_state(state)
+
+
+def record_execution_loop_failure(application: Any, exc: Exception, reconciliation_stage: str) -> None:
+    automation_telemetry("AUTOMATION_SKIP reason=reconcile_failed", reason="reconcile_failed")
+    state = application.state.v25_execution
+    safe_message = sanitized_exception_message(exc)
+    logger.error("LIVE execution failure stage=%s type=%s error=%s", reconciliation_stage, type(exc).__name__, safe_message)
+    state["connected"] = False
+    state["connection"].update({"last_checked": now_iso(), "last_error": safe_message})
+    state["connection"]["retry_count"] = int(state["connection"].get("retry_count") or 0) + 1
+    if (isinstance(exc, LiveExchangeError) and exc.unknown_execution) or unresolved_execution_evidence(state):
+        lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
+    else:
+        lock_reconciliation_failure(state)
+    frame = traceback.extract_tb(exc.__traceback__)[-1] if exc.__traceback__ else None
+    add_event(
+        state, "RECONCILIATION_FAILURE_DIAGNOSTIC", "Reconciliation failure diagnostic metadata recorded.",
+        exception_type=type(exc).__name__, exception_message=safe_message,
+        source=os.path.basename(frame.filename) if frame else os.path.basename(__file__),
+        function=frame.name if frame else "execution_loop", line=frame.lineno if frame else 0,
+        reconciliation_stage=reconciliation_stage,
+    )
     persist_state(state)
 
 
@@ -3987,6 +4419,10 @@ async def execution_loop(application: Any) -> None:
                 await reconcile(application, credentials=credentials)
             reconciliation_stage = "automatic_cycle"
             await automatic_cycle(application, credentials=credentials)
+            state = application.state.v25_execution
+            if state["auto"].get("last_cycle_stage") != "error":
+                state["heartbeat"].update({"last_successful_cycle": now_iso(), "last_successful_cycle_epoch": time.time()})
+                persist_state(state)
             backoff = 5
             application.state.v25_execution["connection"]["retry_count"] = 0
             await asyncio.sleep(RECONCILE_SECONDS)
@@ -4003,7 +4439,7 @@ async def execution_loop(application: Any) -> None:
             await asyncio.sleep(rate_limit_backoff_seconds(exc, backoff))
             backoff = min(60, backoff * 2) if exc.retry_after is None else 5
         except LiveExchangeError as exc:
-            if exc.transient_read_failure:
+            if exc.transient_read_failure and not exc.unknown_execution:
                 state = application.state.v25_execution
                 if mark_transient_market_data_failure(state, exc):
                     state["connected"] = False
@@ -4011,33 +4447,45 @@ async def execution_loop(application: Any) -> None:
                     persist_state(state)
                     await asyncio.sleep(1)
                     continue
-            raise
-        except Exception as exc:
-            automation_telemetry("AUTOMATION_SKIP reason=reconcile_failed", reason="reconcile_failed")
-            state = application.state.v25_execution
-            safe_message = sanitized_exception_message(exc)
-            state["connected"] = False
-            state["connection"].update({"last_checked": now_iso(), "last_error": safe_message})
-            state["connection"]["retry_count"] = int(state["connection"].get("retry_count") or 0) + 1
-            if unresolved_execution_evidence(state):
-                lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
-            else:
-                lock_reconciliation_failure(state)
-            frame = traceback.extract_tb(exc.__traceback__)[-1] if exc.__traceback__ else None
-            add_event(
-                state,
-                "RECONCILIATION_FAILURE_DIAGNOSTIC",
-                "Reconciliation failure diagnostic metadata recorded.",
-                exception_type=type(exc).__name__,
-                exception_message=safe_message,
-                source=os.path.basename(frame.filename) if frame else os.path.basename(__file__),
-                function=frame.name if frame else "execution_loop",
-                line=frame.lineno if frame else 0,
-                reconciliation_stage=reconciliation_stage,
-            )
-            persist_state(state)
+            record_execution_loop_failure(application, exc, reconciliation_stage)
             await asyncio.sleep(backoff)
             backoff = min(60, backoff * 2)
+        except Exception as exc:
+            record_execution_loop_failure(application, exc, reconciliation_stage)
+            await asyncio.sleep(backoff)
+            backoff = min(60, backoff * 2)
+
+
+async def execution_supervisor(application: Any) -> None:
+    backoff = 5
+    while not getattr(application.state, "v25_execution_stopping", False):
+        worker = asyncio.create_task(execution_loop(application))
+        application.state.v25_execution_worker_task = worker
+        try:
+            try:
+                await worker
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if getattr(application.state, "v25_execution_stopping", False) or (current is not None and current.cancelling()):
+                    raise
+                failure = RuntimeError("LIVE execution worker unexpectedly cancelled.")
+            except Exception as exc:
+                failure = exc
+            else:
+                failure = RuntimeError("LIVE execution worker unexpectedly returned.")
+            if getattr(application.state, "v25_execution_stopping", False):
+                return
+            try:
+                record_execution_loop_failure(application, failure, "execution_task")
+                add_event(application.state.v25_execution, "LIVE_EXECUTION_RESTART", "Canlı yürütme görevi beklenmedik şekilde bitti; backoff sonrası yeniden başlatılıyor.", backoff_seconds=backoff)
+            except Exception as reporting_error:
+                logger.error("LIVE execution restart diagnostic failed: %s", sanitized_exception_message(reporting_error))
+            await asyncio.sleep(backoff)
+            backoff = min(60, backoff * 2)
+        finally:
+            if not worker.done():
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
 
 
 def init_v25_execution(application: Any) -> None:
@@ -4049,15 +4497,18 @@ def init_v25_execution(application: Any) -> None:
     state["recovery_error"] = None if state["recovery_ready"] else "PostgreSQL recovery pending."
     application.state.v25_execution = state
     add_event(state, "V25_START", "V25 Live Guard başladı; canlı giriş ve otomasyon güvenlik için kapalı.")
-    application.state.v25_execution_task = asyncio.create_task(execution_loop(application))
+    application.state.v25_execution_stopping = False
+    application.state.v25_execution_task = asyncio.create_task(execution_supervisor(application))
     application.state.v25_live_stream_task = asyncio.create_task(live_user_stream_loop(application))
 
 
 async def shutdown_v25_execution(application: Any) -> None:
+    application.state.v25_execution_stopping = True
     state = getattr(application.state, "v25_execution", None)
     tasks = [
         task for task in (
             getattr(application.state, "v25_execution_task", None),
+            getattr(application.state, "v25_execution_worker_task", None),
             getattr(application.state, "v25_live_stream_task", None),
         )
         if task is not None
@@ -4274,7 +4725,9 @@ async def v25_policy(request: Request, body: PolicyUpdate) -> dict[str, Any]:
     user = execution_owner(request)
     state = request.app.state.v25_execution
     updates = body.model_dump(exclude_none=True)
-    state["policy"] = sanitize_execution_policy({**state["policy"], **updates})
+    if "max_direction_exposure_usdt" in body.model_fields_set:
+        updates["max_direction_exposure_usdt"] = body.max_direction_exposure_usdt
+    state["policy"] = sanitize_execution_policy({**state["policy"], **updates}, preserve_empty_allowed_symbols=True)
     state["policy_ack_digest"] = None
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
@@ -4690,6 +5143,8 @@ async def v25_adopt_external_position(
             "symbol": candidate_plan["symbol"],
             "direction": candidate_plan["direction"],
             "order_type": "EXTERNAL",
+            "initial_risk_usdt": None,
+            "r_multiple": None,
             "entry_price": candidate_plan["entry_price"],
             "quantity": candidate_plan["quantity"],
             "margin_usdt": None,
@@ -4889,6 +5344,13 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     state = request.app.state.v25_execution
     if auto_session_is_active(state):
         raise HTTPException(409, "Canlı otomasyon zaten aktif; mevcut oturum uzatılmadı.")
+    if state["policy"].get("interval") != "15m":
+        logger.warning("LIVE_AUTO_TIMEFRAME_UNSUPPORTED: LIVE Auto Trade requires 15m")
+        raise HTTPException(422, detail={
+            "code": "LIVE_AUTO_TIMEFRAME_UNSUPPORTED",
+            "message": "LIVE Auto Trade yalnızca 15m zaman diliminde çalışır. Başlatmak için timeframe'i 15m seçip politikayı kaydedin.",
+            "required_interval": "15m",
+        })
     allowed, reason = live_auto_start_gate(request.app, state, request)
     if not allowed:
         raise HTTPException(423, reason)

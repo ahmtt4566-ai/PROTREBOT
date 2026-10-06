@@ -2,6 +2,115 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## LIVE entry partial fills
+
+Exact entry identity, symbol and direction remain mandatory. A positive actual
+position no larger than the original requested quantity confirms provenance;
+the plan keeps `requested_quantity` and updates `quantity` to the actual fill.
+Overfills, zero quantities and mismatched identities are not adopted.
+
+The existing `closePosition` Stop is installed before cancelling only the
+owned entry remainder. A fresh position read handles fills racing cancellation.
+TP1/TP2 retain the 60% split, rounded down to the market quantity step, with
+minimum quantity/notional checked using the current mark price. Below-minimum
+partial targets use the existing explicit monitoring fallback; Stop and TP3
+retain full-position close semantics. Uncertain cancellation locks new entries
+and raises an error without removing the installed Stop; reconciliation also
+settles remaining entries when an owned Stop is already present.
+
+Offline regressions: `backend/tests/test_v25_partial_fills.py`. No real exchange
+requests are needed for these tests.
+
+## LIVE Auto Trade symbol whitelist
+
+LIVE scanning and automatic candidate selection are restricted to the saved
+`policy.allowed_symbols`. The same registered list is mandatory at execution
+and immediately before the entry POST; a caller-provided list cannot override
+it. Explicitly empty LIVE policies stay empty when saved or restored: no scan
+or new automatic entry is allowed, with an event/log reason and a visible
+automation status message. Existing positions and protection management are
+unaffected. Manual entry retains its existing symbol behavior.
+
+Offline regressions: `backend/tests/test_v25_auto_symbol_scope.py`.
+
+LIVE Auto Trade requires the saved policy timeframe `15m`. The LIVE panel
+shows a warning for other selected/saved timeframes and blocks only starting
+Auto Trade; STOP and manual-order controls keep their existing behavior.
+Changing a draft back to `15m` is not enough when the saved policy still uses
+another timeframe: save the policy and complete the existing approval gates.
+`POST /api/v25/auto/start` rejects other timeframes with HTTP 422 and
+`detail.code=LIVE_AUTO_TIMEFRAME_UNSUPPORTED`, without enabling an auto session.
+The existing canonical-analysis WAIT rule is unchanged.
+Offline regressions: `backend/tests/test_v25_auto_timeframe.py` and
+`frontend/tests/live-trading-panel.spec.ts`.
+
+## LIVE execution recovery and Stop verification
+
+Exchange and unexpected loop errors are recorded and retried with bounded
+backoff (5 seconds, doubling to 60); existing rate-limit and transient-read
+handling remains in place. A supervisor restarts an unexpectedly returned,
+failed or independently cancelled worker without restoring trading approval.
+Normal application shutdown cancels both tasks and never restarts the worker.
+
+Status `heartbeat.last_successful_cycle` and `last_successful_cycle_epoch`
+advance only after successful reconciliation and an automation pass without
+an error status. Request-level heartbeat fields keep their existing meaning.
+
+Stop installation has at most three attempts with exact active-order
+verification (client identity, symbol, side, type, trigger and full-position
+close). Known rejections may be retried with the same client identity.
+Accepted or ambiguous submissions are only verified, not blindly reposted.
+If verification still fails, the existing owned-entry cancellation and
+reduce-only safety close path runs. This is an attempt bound, not a guaranteed
+millisecond deadline; exchange timeouts and rate-limit cooldowns still apply.
+Regression tests use mocked transport and no real exchange requests.
+
+## Directional entry limits
+
+`policy.max_same_direction_positions` defaults to 2 (range 1-5), independently
+for LONG and SHORT. Optional `policy.max_direction_exposure_usdt` applies the
+same USDT cap separately to each direction; omitted/null disables this cap.
+An explicit null in the policy update clears a previously configured cap.
+Policy changes retain the existing ownership checks and approval reset.
+
+Entry gates count open positions, unfilled entry orders, and candidates already
+accepted in the current automatic round. A position and pending entry for the
+same symbol/direction use one slot, but exposure includes both the position and
+the remaining entry quantity. Snapshot-visible reservations are not added a
+second time; the larger exposure is retained conservatively during snapshot
+lag. Reduce-only, close-position, and terminal orders do not consume entry
+capacity. Unpriced exposure blocks new entries when the optional cap is enabled;
+unknown directions are conservatively counted against either direction.
+Rejections appear in gate/status details and logs, without sending an entry.
+
+Offline regressions: `backend/tests/test_directional_entry_limits.py`.
+
+## Entry risk and verified R performance
+
+New DEMO and LIVE entry plans capture immutable `initial_risk_usdt` as
+`abs(planned_entry_price - initial_stop_price) * submitted_quantity`, after
+quantity/price rounding and risk adjustment. Stop moves and partial fills do
+not rewrite this baseline. LIVE intents persist it before submission and
+restore only the recorded value after a restart; legacy/external plans are
+not backfilled from their current Stop or position.
+
+Verified LIVE closures record `r_multiple = realized_pnl / initial_risk_usdt`.
+Here `realized_pnl` is the existing verified net trade PnL after USDT commission,
+with the existing funding/non-USDT commission limitations unchanged. Missing,
+zero, invalid, or non-finite initial risk produces null R.
+
+`performance_payload` adds `avg_r` and `expectancy_r` from R-eligible verified
+closures only, under the existing period and deduplication filters. Expectancy
+is win probability times mean winning R minus loss probability times absolute
+mean losing R; breakevens remain in the sample. With this same sample,
+expectancy equals mean R. Both fields are null when no eligible R exists.
+Unknown-risk trades still contribute to the existing USDT metrics, not R.
+
+DEMO and LIVE journal sources remain separate. DEMO's existing fill-level PnL
+is not relabelled as verified net position-close PnL; those entries have no R.
+This change does not introduce new DEMO closure accounting.
+Offline regressions: `backend/tests/test_trade_r_metrics.py`.
+
 ## Site favicon
 
 Both Vite entrypoints reference shared, same-origin site icons in

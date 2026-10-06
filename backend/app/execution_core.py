@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -39,6 +41,8 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "max_loss_per_trade": 3.0,
     "max_leverage": 30,
     "max_positions": 5,
+    "max_same_direction_positions": 2,
+    "max_direction_exposure_usdt": None,
     "max_total_exposure_usdt": 350.0,
     "daily_loss_limit": 10.0,
     "daily_trade_limit": 3,
@@ -95,7 +99,7 @@ def normalize_live_symbol(value: str) -> str:
     return symbol
 
 
-def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
+def sanitize_execution_policy(payload: Any, *, preserve_empty_allowed_symbols: bool = False) -> dict[str, Any]:
     source = payload if isinstance(payload, dict) else {}
     base = dict(DEFAULT_EXECUTION_POLICY)
     symbols: list[str] = []
@@ -108,7 +112,7 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
             symbols.append(symbol)
         if len(symbols) >= 8:
             break
-    base["allowed_symbols"] = symbols or list(DEFAULT_EXECUTION_POLICY["allowed_symbols"])
+    base["allowed_symbols"] = symbols if preserve_empty_allowed_symbols else symbols or list(DEFAULT_EXECUTION_POLICY["allowed_symbols"])
     interval = str(source.get("interval", base["interval"]))
     base["interval"] = interval if interval in {"1m", "5m", "15m", "1h", "4h"} else "15m"
     for name in ("allow_long", "allow_short", "require_one_way", "require_isolated", "stop_required"):
@@ -117,6 +121,18 @@ def sanitize_execution_policy(payload: Any) -> dict[str, Any]:
     base["max_loss_per_trade"] = _number(source.get("max_loss_per_trade"), 3, 0.5, 25)
     base["max_leverage"] = _integer(source.get("max_leverage"), 30, 1, HARD_MAX_LEVERAGE)
     base["max_positions"] = _integer(source.get("max_positions"), 5, 1, HARD_MAX_POSITIONS)
+    base["max_same_direction_positions"] = _integer(source.get("max_same_direction_positions"), 2, 1, HARD_MAX_POSITIONS)
+    direction_cap = source.get("max_direction_exposure_usdt")
+    if direction_cap is not None:
+        try:
+            direction_cap = float(direction_cap)
+        except (TypeError, ValueError) as exc:
+            logger.error("Invalid max_direction_exposure_usdt policy value")
+            raise ValueError("Invalid max_direction_exposure_usdt") from exc
+        if not math.isfinite(direction_cap) or not 0 < direction_cap <= HARD_MAX_TOTAL_EXPOSURE_USDT:
+            logger.error("max_direction_exposure_usdt outside policy bounds")
+            raise ValueError("max_direction_exposure_usdt must be positive and at most 350")
+    base["max_direction_exposure_usdt"] = direction_cap
     base["max_total_exposure_usdt"] = _number(source.get("max_total_exposure_usdt"), 350, 25, HARD_MAX_TOTAL_EXPOSURE_USDT)
     base["daily_loss_limit"] = _number(source.get("daily_loss_limit"), 10, 5, HARD_MAX_DAILY_LOSS_USDT)
     base["daily_trade_limit"] = _integer(source.get("daily_trade_limit"), 3, 1, HARD_MAX_DAILY_TRADES)
@@ -228,6 +244,115 @@ class GateResult:
         return {"passed": self.passed, "key": self.key, "label": self.label, "detail": self.detail}
 
 
+def _finite_value(row: dict[str, Any], *names: str) -> float | None:
+    for name in names:
+        if row.get(name) is None:
+            continue
+        try:
+            value = float(row[name])
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
+    return None
+
+
+def _closing_order(row: dict[str, Any]) -> bool:
+    return any(str(row.get(key, "")).lower() in {"true", "1"} for key in (
+        "reduce_only", "reduceOnly", "close_position", "closePosition",
+    ))
+
+
+def directional_entry_gates(
+    *,
+    symbol: str,
+    direction: str,
+    snapshot: dict[str, Any],
+    policy: dict[str, Any],
+    active_plans: list[dict[str, Any]] | None = None,
+    cycle_candidates: list[dict[str, Any]] | None = None,
+    candidate_notional_usdt: float = 0.0,
+) -> list[GateResult]:
+    settings = sanitize_execution_policy(policy)
+    positions = snapshot.get("positions") or []
+    orders = snapshot.get("open_orders") or []
+    reservations = cycle_candidates or []
+    prices: dict[str, float] = {}
+    for row in [*(active_plans or []), *reservations, *positions]:
+        price = _finite_value(row, "mark_price") or _finite_value(row, "entry_price", "entryPrice")
+        if price is not None and price > 0:
+            prices[str(row.get("symbol", "")).upper()] = price
+
+    physical: dict[str, float | None] = {}
+    reserved: dict[str, float | None] = {}
+    for rows, pending, target in ((positions, False, physical), (orders, True, physical), (reservations, False, reserved)):
+        for index, row in enumerate(rows):
+            if pending and (_closing_order(row) or str(row.get("status", "")).upper() in {
+                "FILLED", "CANCELED", "CANCELLED", "REJECTED", "EXPIRED", "EXPIRED_IN_MATCH",
+            }):
+                continue
+            row_direction = str(row.get("direction") or row.get("position_side") or "").upper()
+            if row_direction not in {"LONG", "SHORT"}:
+                side = str(row.get("side") or "").upper()
+                row_direction = {"BUY": "LONG", "SELL": "SHORT", "LONG": "LONG", "SHORT": "SHORT"}.get(side, "")
+                signed_quantity = _finite_value(row, "positionAmt")
+                if not row_direction and signed_quantity:
+                    row_direction = "LONG" if signed_quantity > 0 else "SHORT"
+            if row_direction and row_direction != direction:
+                continue
+            quantity = _finite_value(row, "quantity", "origQty", "positionAmt")
+            if quantity is not None:
+                quantity = abs(quantity)
+                if pending:
+                    executed = _finite_value(row, "executed_quantity", "executedQty")
+                    if executed is None and not any(key in row for key in ("executed_quantity", "executedQty")):
+                        executed = 0.0
+                    quantity = max(0.0, quantity - executed) if executed is not None and executed >= 0 else None
+                if quantity == 0:
+                    continue
+            row_symbol = str(row.get("symbol") or f"UNKNOWN_{id(rows)}_{index}").upper()
+            if pending:
+                price = _finite_value(row, "price")
+                if price is None or price <= 0:
+                    price = prices.get(row_symbol)
+                notional = quantity * price if quantity is not None and price is not None and price > 0 else None
+            else:
+                notional = _finite_value(row, "notional", "notional_usdt")
+                if notional is None or notional == 0:
+                    price = prices.get(row_symbol)
+                    notional = quantity * price if quantity is not None and price is not None else None
+                if notional is not None:
+                    notional = abs(notional)
+            previous = target.get(row_symbol, 0.0)
+            target[row_symbol] = previous + notional if previous is not None and notional is not None else None
+
+    # A reservation covers snapshot lag; once visible, it is not a second position.
+    slots = physical.keys() | reserved.keys()
+    amounts = [
+        None if physical.get(key, 0.0) is None or reserved.get(key, 0.0) is None
+        else max(physical.get(key, 0.0) or 0.0, reserved.get(key, 0.0) or 0.0)
+        for key in slots
+    ]
+    count = len(slots) + (str(symbol).upper() not in slots)
+    cap = settings["max_direction_exposure_usdt"]
+    candidate = _finite_value({"value": candidate_notional_usdt}, "value")
+    known = all(value is not None and math.isfinite(value) for value in amounts) and candidate is not None and candidate >= 0
+    projected = sum(value for value in amounts if value is not None) + (candidate or 0.0)
+    checks = [
+        GateResult(direction not in {"LONG", "SHORT"} or count <= settings["max_same_direction_positions"],
+                   "same_direction_positions", "Aynı yön pozisyon sınırı",
+                   f"{direction} aynı yön pozisyon sınırı: {count} / {settings['max_same_direction_positions']}"),
+        GateResult(cap is None or (known and math.isfinite(projected) and projected <= cap + 1e-9),
+                   "direction_exposure", "Yön başına maruziyet sınırı",
+                   "Yön başına maruziyet sınırı kapalı." if cap is None else
+                   f"{direction} maruziyeti doğrulanamadı; yeni giriş reddedildi." if not known else
+                   f"{direction} maruziyet sınırı: {projected:.2f} / {cap:.2f} USDT"),
+    ]
+    for gate in checks:
+        if not gate.passed:
+            logger.info("DIRECTIONAL_ENTRY_BLOCKED symbol=%s direction=%s gate=%s reason=%s", symbol, direction, gate.key, gate.detail)
+    return checks
+
+
 def evaluate_entry_gates(
     *,
     symbol: str,
@@ -240,6 +365,7 @@ def evaluate_entry_gates(
     allowed_symbols: list[str] | None = None,
     active_plans: list[dict[str, Any]] | None = None,
     candidate_notional_usdt: float = 0.0,
+    cycle_candidates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     settings = sanitize_execution_policy(policy)
     safe_symbol = normalize_live_symbol(symbol)
@@ -283,6 +409,11 @@ def evaluate_entry_gates(
         GateResult(int(daily.get("unverified_closures", 0)) == 0, "pnl_verified", "Kesinleşmiş PnL", f"Doğrulanmamış kapanış: {daily.get('unverified_closures', 0)}"),
         GateResult(int(daily.get("consecutive_losses", 0)) < settings["consecutive_loss_limit"], "consecutive_losses", "Ardışık kayıp kilidi", f"{daily.get('consecutive_losses', 0)} / {settings['consecutive_loss_limit']} kayıp"),
     ]
+    gates.extend(directional_entry_gates(
+        symbol=safe_symbol, direction=direction, snapshot=snapshot, policy=settings,
+        active_plans=plans, cycle_candidates=cycle_candidates,
+        candidate_notional_usdt=candidate_notional_usdt,
+    ))
     failed = [gate for gate in gates if not gate.passed]
     return {
         "passed": not failed,
@@ -320,3 +451,4 @@ def release_gates(
 
 def release_ready(gates: list[dict[str, Any]]) -> bool:
     return bool(gates) and all(bool(item.get("passed")) for item in gates)
+logger = logging.getLogger(__name__)
