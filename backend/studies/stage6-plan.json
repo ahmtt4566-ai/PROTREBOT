@@ -1,0 +1,63 @@
+{
+  "schema": "holdout-study-v1",
+  "registered_at": "2026-10-06",
+  "prior_stage_head": "c92a9b4e210fe996f3e88dbc3a35c0d3b4dfc692",
+  "stage5_plan_sha256": "7dbfe07f00f5843cddbd37b693bd1c78d4fbb6d3c0545158521657a0cb40be48",
+  "test": {"start": 1696118400, "end": 1719792000},
+  "warmup_first_month": "2023-06",
+  "test_last_month": "2024-06",
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"],
+  "candidates": [
+    {"name": "B", "exit": "stage4_B", "filter": "NONE"},
+    {"name": "B_ADX4H20", "exit": "stage4_B", "filter": "CLOSED_NATIVE_4H_ADX_GE_20"},
+    {"name": "B_NO_SHORT", "exit": "stage4_B", "filter": "LONG_ONLY"}
+  ],
+  "success": {"net_expectancy_r_strict_gt": 0, "usdt_profit_factor_strict_gt": 1.2, "complete_trades_min": 60},
+  "success_scope": "POINT_CRITERIA_PER_SCENARIO; PRIMARY_STOP_FIRST_SLIP3_SPREAD2; CI_NOT_EXTRA_SUCCESS_CRITERION",
+  "missing_accounting": "FAIL; no invented R or zero funding",
+  "unbounded_pf": "NO_LOSSES_WITH_POSITIVE_NET_PNL_COUNTS_AS_INFINITY; zero-gain/zero-loss is undefined and fails",
+  "primary": {"slippage_bps": 3, "spread_bps": 2, "intrabar": "STOP_FIRST"},
+  "costs": [
+    {"slippage_bps": 3, "spread_bps": 2},
+    {"slippage_bps": 6, "spread_bps": 2},
+    {"slippage_bps": 3, "spread_bps": 5},
+    {"slippage_bps": 6, "spread_bps": 5}
+  ],
+  "orderings": ["STOP_FIRST", "TP_FIRST"],
+  "entry_method": "RECOMPUTE_NATIVE_A_STOP_FIRST_GATES_PER_COST; B_FROZEN_ON_A; FILTERS_REMOVE_ONLY_NO_REFILL",
+  "ordering_method": "TP_FIRST_REUSES_EACH_COST_STOP_FIRST_ENTRY_SCHEDULE",
+  "fee_bps_per_side": 5,
+  "max_total_exposure_usdt": 350,
+  "initial_equity": 1000,
+  "indicator_window": 259,
+  "bootstrap": {"samples": 20000, "seed": 2026, "alpha": 0.05, "family_size": 3, "units": ["TRADE", "UTC_ENTRY_DAY"], "correction": "BONFERRONI"},
+  "seen_periods": [
+    {"stage": "3_INPUT_AND_4_REPLAY", "start": "2025-02-01T00:00:00+00:00", "end": "2026-10-01T00:00:00+00:00"}
+  ],
+  "clean_trade_rule": "ENTIRE_ENTRY_TO_CLOSE_LIFETIME_INSIDE_CLEAN_INTERVAL; CROSS_BOUNDARY_NOT_CLEAN; NO_SECOND_REPLAY",
+  "holdout_kind": "REVERSE_TIME_NOT_FORWARD_WALK_FORWARD",
+  "metadata_kind": "UNCHANGED_CONDITIONAL_CURRENT_STAGE5_SNAPSHOT",
+  "input_sha256": {
+    "stage5_lock": "e3027a169e290fa9e92b53125ecec3702e5dba378846a75fa090e42ca2274ca9",
+    "sealed_manifest": "4aad6d75d58d7bebd3786f378f101f8fed00962a6760a2e4a48ad9ec7a53be2d",
+    "metadata": "4153972de075f9372640632621a3153d50350d721f4efe979a869fe821a5ab57"
+  },
+  "protected_source_sha256": {
+    "app/analysis.py": "0cc3848923b35469dabc88c546f650cf8cc325ce6395e5570c6eb94b786f45cf",
+    "app/main.py": "4d10142a6b520c20f4e4df265e70d93e065005287b1d9f13495e7eeb09d09ac2",
+    "app/execution_core.py": "af7550b5e42044f20f3452ccda3d185332250c2a069f66af36fc3e493894d3e9",
+    "app/v25_execution.py": "46de2f1daa8d6623ef36a7425579af7a4bbf615c49c1fcaec332b937414b68e6",
+    "app/backtest_data.py": "198f8ae62568d80f9a551d7bdf7a599d76305ae60761ea92b70c291d9a3cff89",
+    "app/backtest_baseline.py": "7d9c2fed1ace32eeb80b6d7ddcbdcac37516737cad9d6f21a13a7868b5a77228",
+    "app/backtest_ablation.py": "abcd842cb3beea0f8e1464e63bb62abeb4763a10e3c78a88cde6910564fd937b",
+    "app/backtest_diagnostics.py": "72c029aa7c5e9be627069b6bf9aa89f803c8a81d26a906f16aa54532c0110467",
+    "app/regime_study.py": "592fbda56e54a59e6b6b4147fffe808bcc6241f59abae28c0468ee9e3dedad7c",
+    "app/regime_statistics.py": "daafbb58af6e7971814d2656a63fbf4595d944048d375e43eaec41390a816871",
+    "backtest_cli.py": "09ee34eb657352074bb243fe7bd1ac59021f9ae668ccd6ed78269670ed771379",
+    "regime_cli.py": "13c8e5310768e64db22416242f23254122c190e42b98c73233f160af2f552bca"
+  },
+  "one_bundle_only": true,
+  "rerun_after_result_or_failure": false,
+  "parameter_changes_after_results": false,
+  "stage7_authorized": false
+}

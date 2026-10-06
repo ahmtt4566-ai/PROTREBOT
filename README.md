@@ -725,6 +725,125 @@ observed ambiguous bars are zero, so this dataset cannot discriminate ordering.
 Eleven noncontrol configurations and both orderings (22 comparisons) were
 inspected, without tuning any threshold or opening TEST.
 
+## Offline stage 6 one-shot holdout
+
+The immutable preregistration is `backend/studies/stage6-plan.json`. Only three
+candidates are authorized: B (BE+fee), B with closed native 4h ADX >=20, and
+B with SHORT removed. No new strategy/threshold, LIVE edit or stage 7 is allowed.
+The stage 5 historical TEST is 2023-10-01 through 2024-07-01 exclusive;
+June-September 2023 is decision warmup, not scored outcomes.
+
+Point success requires **net expectancy R >0 AND USDT PF >1.2 AND at least
+60 complete net-R trades**. Otherwise the label is `BASARISIZ` (Turkish
+`BA\u015eARISIZ` in the machine report). Confidence bounds are descriptive,
+not an extra success criterion. Open/unverified/missing-R observations are
+disclosed and excluded, never fabricated or silently funded with zero.
+No-loss PF with positive monetary gains is explicitly unbounded; zero-gain
+zero-loss PF is undefined, not an invented numerical factor.
+
+```powershell
+$stage5 = 'C:\research\protrebot\stage5'
+$holdout = 'C:\research\protrebot\stage6'
+.\.venv\Scripts\python.exe backend\holdout_cli.py register --stage5-root $stage5 --output $holdout
+# Run only after offline synthetic regression gates pass.
+.\.venv\Scripts\python.exe backend\holdout_cli.py run --stage5-root $stage5 --output $holdout --workers 4
+```
+
+Registration hashes the protocol and checks the already-acquired sealed
+manifest/current metadata and unchanged native/prior-stage sources, without
+opening candle ZIPs. Output must be the fixed sibling `stage6` directory.
+`test-once.json` is exclusively created **before the first TEST candle read**.
+Once claimed, successful, failed or interrupted attempts all refuse another
+run. There is deliberately no reset/resume/override flag; changing output
+paths does not create another permitted run.
+The protocol also binds input/output paths and the run claim in Git's shared
+metadata directory (`protrebot-research/holdout`), not branch history or trading
+persistence. Another output, relocated copy or shared worktree cannot bypass
+that repository-level receipt. Synthetic tests isolate these receipts.
+
+One bundle contains four cost pairs (slippage/spread in bp: 3/2, 6/2, 3/5, 6/5)
+and both STOP_FIRST/TP_FIRST: eight scenarios, 24 candidate cells.
+The registered primary is STOP_FIRST, slippage3/spread2. As explicitly chosen
+by the user before TEST, native risk/cost gates are recomputed per cost.
+Within each cost, B follows the native A STOP_FIRST entry schedule; both
+filters delete B rows only, with no capacity refill. TP_FIRST retains that
+cost's STOP_FIRST schedule. Different cost cohorts are separately reported.
+All candidates use unchanged stage 4 B exits, 60% TP1 and no ATR trailing.
+
+Native canonical decisions are calculated once with the existing SHORT>=80
+gate enabled; no fourth candidate or SHORT-gate-OFF experiment is added.
+Source/protocol-stamped caches persist outside Git. Bootstrap uses 20,000
+draws, seed2026, complete candidate trades and UTC entry-day blocks including
+empty calendar days. Absolute expectancy-R and **monetary** PF have nominal95
+and Bonferroni-family95 (three candidates) bounds. Unbounded PF endpoints,
+undefined draws and insufficient day clusters are explicit. Bonferroni3 is
+the registered primary family, not simultaneous coverage of all sensitivity
+cells; sensitivity is not independent confirmation or a tuning opportunity.
+
+Seen overlap conservatively includes stage 3 input warmup from 2025-02-01
+through the stage 4 replay end 2026-10-01. It does not intersect this TEST.
+Full/clean/partly-seen reports derive from the same outcomes, not another
+replay; a trade crossing into a seen interval is not labelled clean.
+Partly-seen/cross-boundary groups retain their actual entry-day clusters on
+the full TEST calendar; entry dates are never moved into the seen interval.
+For this all-clean TEST, full and clean reports reuse identical statistics.
+Outputs include `holdout-results.json`, `comparison.csv`, per-scenario trade
+CSV/JSON, source-quality audit and the irreversible run receipt.
+
+Limitations: reverse-time historical holdout, **not forward walk-forward**;
+the stage 5 current exchange metadata/universe is held fixed historically.
+Frozen B/filter cohorts are not prospective capacity-refilled portfolios.
+Tests in `backend/tests/test_holdout_study.py` are synthetic/offline; they
+do not consume the real TEST claim.
+
+### Stage 6 single-attempt outcome: blocked by archival data gap
+
+The registered protocol SHA256 is
+`853dfa4714e8f9bf348350c3616666bafa172da660b383c15f67b86dd63fcc66`.
+The sole real invocation started on 2026-10-06 at 14:03:15 UTC. It failed
+at source-quality validation, before native signal preprocessing or any
+entry/exit replay. Both the external and repository-level receipts are
+`FAILED`, with `rerun_allowed=false`; the attempt has not been repeated.
+
+Every symbol (BTC, ETH, SOL, BNB, XRP, DOGE, ADA and AVAX) has the same
+missing 15m mark-price candle: **2023-11-10 03:45-04:00 UTC**.
+Direct inspection of all eight November ZIPs verified their registered
+SHA256 checksums, 2,879 rows instead of 2,880, the missing timestamp and
+both adjacent timestamps. This is an archival gap, not a loader inference.
+The audit read existing input rows only; it did not recompute decisions.
+
+| Source, per symbol | Expected TEST rows | Actual TEST rows | Missing |
+|---|---:|---:|---:|
+| Contract 15m | 26,304 | 26,304 | 0 |
+| Contract 1h | 6,576 | 6,576 | 0 |
+| Contract 4h | 1,644 | 1,644 | 0 |
+| Mark price 15m | 26,304 | 26,303 | 1 |
+
+No archives were missing, no duplicate candles were reported, and historical
+funding was present for all eight symbols with no reported gaps or trailing
+missing events. The strict mark-price coverage gate was not relaxed.
+No candle interpolation, replacement dataset, strategy/parameter change,
+network request or second TEST invocation was used.
+
+| Candidate | Holdout assessment |
+|---|---|
+| B, unfiltered | NOT EVALUATED: source-quality gate failed |
+| B + 4h ADX >=20 | NOT EVALUATED: source-quality gate failed |
+| B, SHORT removed | NOT EVALUATED: source-quality gate failed |
+
+Trade counts, R/PF/PnL/drawdown, direction/monthly statistics, sensitivity
+cells and confidence intervals are **unavailable**, not zero. Neither
+`BASARILI` nor `BASARISIZ` is a measured strategy verdict here: the research
+attempt failed before those criteria could be evaluated. The 24 registered
+cells remain unevaluated; no winner or deployment claim is made.
+The quality report and both irreversible receipts remain outside tracked
+source. Related pre-TEST offline gates passed 821 tests and 239 subtests
+(one optional skip, one previously proven stale baseline deselection).
+After the final source-verification guard change, the 27 holdout regressions
+and six subtests passed again; Pylance reported no CLI diagnostics.
+The final related synthetic suite also passed all 821 tests and 239 subtests
+with the same skip/deselection, without reopening the real TEST bundle.
+
 ## LIVE entry partial fills
 
 Exact entry identity, symbol and direction remain mandatory. A positive actual
