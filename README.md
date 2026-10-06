@@ -582,6 +582,149 @@ PostgreSQL skip and one previously proven stale-source baseline deselection.
 Regressions: `backend/tests/test_backtest_ablation.py` plus unchanged native
 baseline, diagnosis, causal-data, risk and accounting suites.
 
+## Offline stage 5 regime/entry study
+
+This is a separate offline module/CLI, not a LIVE strategy change. Earlier
+stage 3/3b/4 modules and `v25_execution.py` are unchanged. The study protocol
+is `backend/studies/stage5-plan.json`; the first command creates an exclusive,
+hashed `study-lock.json` outside Git. Mismatched reruns refuse to overwrite it.
+
+The user's revised holdout protocol reserves the **oldest unseen quarter**,
+2023-10-01 through 2024-07-01, exclusively for stage 6. TRAIN is
+2024-07-01 through 2025-12-31, VALIDATION 2025-12-31 through 2026-10-01;
+all bounds are UTC, end-exclusive. These are exact duration fractions
+25% / 50% / 25%. This is a **reverse-time holdout, not forward walk-forward**.
+The first 93 TRAIN days are embargo/warmup, so evaluation starts 2024-10-02.
+TEST/pre-TEST archives live in physically separate `sealed` storage and are
+only checksum/presence audited: no TEST CSV parsing, feature calculation,
+warmup, decisions, outcomes or price-gap reporting before stage 6.
+
+Research scope is BTC/ETH/SOL/BNB plus XRP/DOGE/ADA/AVAX. Eight instruments
+fit the unchanged native policy sanitizer; this never changes a user's
+production whitelist. Static archives cover June 2023 through September
+2026, with checksums. Original four-symbol metadata remains byte-provenanced
+from stage 3; extra four use explicitly conditional current public metadata.
+The original 18-month A/B comparison resets the original four-symbol account
+and restores the original warmup/prefix-sum scope using expanded verified rows.
+The expanded universe/stateful account is not claimed to have the old cohort.
+
+```powershell
+$study = 'C:\research\protrebot\stage5'
+$oldData = 'C:\research\protrebot\data'
+.\.venv\Scripts\python.exe backend\regime_download.py --output $study --previous-data $oldData
+.\.venv\Scripts\python.exe backend\regime_cli.py --output $study --reference-data $oldData --reference-a 'C:\research\protrebot\baseline\stop_first-spread2-slip3.json' --reference-b 'C:\research\protrebot\ablation\exits-and-direction\B-stop_first.json'
+.\.venv\Scripts\python.exe backend\regime_report.py --output $study
+```
+
+Acquisition permits only checksummed public archives and the same two fixed
+unauthenticated metadata GET endpoints. Replay blocks external sockets/DNS;
+loopback remains available for Windows asyncio. Standalone runtime persistence
+stays outside Git; no signed/order endpoint exists
+in the data command. Verified native decisions and causal feature caches
+persist outside Git with source/input/protocol fingerprints for fast reruns.
+
+Presets, registered before inspecting outcomes:
+
+| Preset | Closed-data condition |
+|---|---|
+| F1 | Native 1h ADX >= 20 / 25 |
+| F2 | Native 4h ADX >= 20 / 25 |
+| F3 | Native 15m ATR/price trailing-90-day percentile >= 30 / 50 |
+| F4 | 15m Bollinger width trailing-90-day percentile >= 30 / 50 |
+| Only combination | 1h ADX >= 20 AND ATR percentile >= 30 |
+| Direction combination | B exits, remove SHORT entries |
+| Separate experiment | Existing SHORT alignment >=80 rejection ON/OFF |
+
+ATR/ADX call unchanged native helpers on the same 259-closed-candle windows.
+BB width uses the native population-standard-deviation formula, regression
+checked against native analysis (there is no standalone native BB helper).
+Percentile ties use empirical CDF `<= current`, including the current closed
+decision observation. Every 90-day sample must be present; missing features
+are explicitly unknown, never silently imputed or selected.
+
+All ordinary filters only delete frozen B-entry rows; remaining exits, fees,
+funding and immutable initial risk are identical. They do not refill portfolio
+capacity or rerun daily gates. The SHORT>=80 OFF experiment is separate:
+the native canonical/helper functions are called with only this boolean
+disabled in an isolated offline worker, restored even after exceptions.
+Other quality/MTF/risk gates remain intact; its rescanned portfolio can add,
+remove or resize entries. STOP_FIRST is primary; TP_FIRST sensitivity uses
+the same frozen STOP_FIRST schedules, never newly selected entries.
+
+Reports include retained/eliminated sets, USDT PF/PnL and closed-equity DD,
+LONG/SHORT and UTC-close-month distributions. TRAIN-only descriptive metrics
+exclude trades closing across the validation boundary; combined development
+retains and counts them. Selection inference is **filtered mean R minus
+whole-cohort mean R**, with joint membership resampling, not an independently
+sampled or fictitious paired-exit delta. Common filter exits have exactly zero
+paired deltas. Trade and UTC entry-day bootstrap use 20,000 draws, seed 2026,
+empty calendar days and explicit undefined-resample/active-cluster counts.
+Fewer than two active selected/reference days gives no day CI.
+
+Eleven noncontrol comparisons: eight singles, one fixed combination,
+B+SHORT off, and SHORT>=80 OFF. Two orderings are inspected; TP_FIRST is a
+sensitivity check, not independent confirmation. Both nominal unadjusted 95%
+and Bonferroni family-95% intervals are provided. Fewer than 60 complete
+net-R trades is **YETERSIZ_ORNEKLEM (YETERSIZ ORNEKLEM)**, with interpretation
+disabled. There is no winner selection, new threshold, parameter tuning,
+TEST inspection, stage 6 or deployment authorization.
+
+The final report command reuses frozen outcomes only. It supplies the requested
+A-to-B paired exit improvement and A-LONG-to-B-LONG combination contrast through
+the unchanged stage 4 pairing/bootstrap helper (20,000 trade/day draws).
+Removed SHORTs are not fabricated paired outcomes; their selection effect is
+the separately reported B_NO_SHORT vs all-B contrast. A/B control intervals
+are descriptive nominal95, distinct from the corrected 11-filter family.
+
+### Stage 5 measured development results
+
+Measured on 2026-10-06, evaluated 2024-10-02 through 2026-10-01 exclusive,
+eight symbols, exposure 350 USDT, spread 2 bp, slippage 3 bp, STOP_FIRST.
+The original four-symbol 18-month reset matched A and B exactly (103 trades).
+All eight development symbols have zero contract/mark gaps, duplicate candles,
+missing archives or trailing missing funding events. Funding-null trades: zero.
+TEST archives were checksum/presence audited only, never parsed.
+
+| Configuration | Trades | Mean net R | USDT PF | Max DD USDT | Net PnL USDT |
+|---|---:|---:|---:|---:|---:|
+| A | 129 | 0.0331 | 1.0073 | 47.23 | 1.36 |
+| B | 129 | 0.0494 | 1.0437 | 21.19 | 7.32 |
+| F1 1h ADX >=20 * | 58 | -0.0050 | 0.9037 | 32.75 | -7.80 |
+| F1 1h ADX >=25 * | 41 | 0.1002 | 1.1205 | 19.06 | 6.46 |
+| F2 4h ADX >=20 | 66 | 0.0824 | 1.1386 | 14.52 | 11.47 |
+| F2 4h ADX >=25 * | 49 | 0.1098 | 1.1785 | 18.03 | 10.67 |
+| F3 ATR percentile >=30 * | 28 | 0.2244 | 1.4071 | 16.72 | 13.45 |
+| F3 ATR percentile >=50 * | 9 | 0.3958 | 2.4131 | 4.99 | 8.99 |
+| F4 BB percentile >=30 * | 47 | 0.1781 | 1.4345 | 11.53 | 19.85 |
+| F4 BB percentile >=50 * | 16 | 0.3490 | 2.3422 | 4.89 | 13.17 |
+| F1>=20 + F3>=30 * | 16 | 0.1882 | 1.3677 | 13.23 | 7.16 |
+| B, SHORT disabled | 87 | 0.0594 | 1.0633 | 15.04 | 6.82 |
+| SHORT alignment>=80 gate OFF, B exits | 164 | 0.0151 | 0.9903 | 36.28 | -2.18 |
+
+`*` = YETERSIZ_ORNEKLEM: fewer than 60 complete trades, no interpretation.
+Only F2>=20 and B_NO_SHORT meet that guard among the ordinary filters.
+All selection-difference trade/day nominal and Bonferroni intervals cross zero.
+No winner is selected; even configurations passing the count guard are not
+evidence of an out-of-sample edge.
+
+B minus A paired mean: +0.01634 R, trade95 [-0.08837, 0.11472],
+day95 [-0.08858, 0.11358], 129 matched entries. B-LONG minus A-LONG:
++0.01013 R, trade95 [-0.12547, 0.13692], day95 [-0.12613, 0.13578],
+87 matched entries. All use 20,000 draws. SHORT-gate OFF adds 56 and removes
+21 entries, with 108 unchanged common trades; it is not merely 35 added rows.
+
+B LONG: 87 trades, +0.05939 R; SHORT: 42, +0.02882 R (descriptive small
+subgroup only). TRAIN-only: 76 trades, +0.15740 R; VALIDATION-only: 52,
+-0.11666 R, YETERSIZ_ORNEKLEM. One boundary-crossing entry is retained
+combined but excluded from TRAIN-only metrics. Monthly and directional
+distributions for every preset, retained/eliminated expectancy and all
+nominal/corrected intervals are in `regime-study.json`; `comparison.csv`
+provides the filter table and `combination-comparisons.json` the paired controls.
+TP_FIRST has exactly the same four frozen financial cohorts as STOP_FIRST;
+observed ambiguous bars are zero, so this dataset cannot discriminate ordering.
+Eleven noncontrol configurations and both orderings (22 comparisons) were
+inspected, without tuning any threshold or opening TEST.
+
 ## LIVE entry partial fills
 
 Exact entry identity, symbol and direction remain mandatory. A positive actual
