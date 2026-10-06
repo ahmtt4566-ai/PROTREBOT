@@ -105,6 +105,31 @@ test('shows OFF when Auto Trade is disabled and the live lock is closed', async 
   await expect(page.getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
 })
 
+test('uses the shared exposure ceiling and configurable liquidation buffer without implicit mutations', async ({page}) => {
+  const mutations: string[] = []
+  await openPanelWithStatus(page, {
+    live_auto_trade: false, real_trading_locked: true, armed: false, readinessReady: false,
+  }, mutations)
+  const setup = page.locator('.masterTradeLiveSetup')
+  await page.locator('details').filter({has: setup}).locator('summary').click()
+  const exposure = setup.getByRole('spinbutton', {name: /^Max exposure/})
+  await expect(exposure).toHaveValue('350')
+  await expect(exposure).toHaveAttribute('max', '350')
+  await page.getByRole('button', {name: /ADVANCED SETTINGS/}).click()
+  const buffer = page.getByRole('spinbutton', {name: /Liquidation buffer/})
+  await expect(buffer).toHaveValue('0.5')
+  await expect(buffer).toHaveAttribute('min', '0.05')
+  await expect(buffer).toHaveAttribute('max', '5')
+  await buffer.fill('0.75')
+  await expect(buffer).toHaveValue('0.75')
+  expect(mutations).toEqual([])
+  const saving = page.waitForRequest(request => request.method() === 'PUT' && new URL(request.url()).pathname.endsWith('/v25/policy'))
+  await setup.getByRole('button', {name: 'SAVE SETUP', exact: true}).click()
+  const request = await saving
+  expect(request.postDataJSON().liquidation_buffer_pct).toBe(0.75)
+  expect(mutations.filter(path => !path.endsWith('/v25/policy'))).toEqual([])
+})
+
 test('keeps the consent action inactive while scoped authorization is valid', async ({page}) => {
   await openPanelWithStatus(page, {live_auto_trade: false, real_trading_locked: true, armed: false, readinessReady: false, authorizationValid: true})
 

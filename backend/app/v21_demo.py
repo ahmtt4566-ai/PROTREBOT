@@ -2279,7 +2279,7 @@ def certificate_payload(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def performance_payload(state: dict[str, Any], period: str = "all") -> dict[str, Any]:
+def performance_payload(state: dict[str, Any], period: str = "all", *, demo_only: bool = True) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     cutoff = {"daily": 1, "weekly": 7, "monthly": 31}.get(period)
     events = []
@@ -2365,7 +2365,7 @@ def performance_payload(state: dict[str, Any], period: str = "all") -> dict[str,
         "equity_curve": equity_curve if len(equity_curve) >= 2 else [],
         "directional": directional,
         "history_quality": "VERIFIED" if len(events) >= 2 else "INSUFFICIENT HISTORY",
-        "max_drawdown": round(max_drawdown, 4), "demo_only": True, "read_only": True,
+        "max_drawdown": round(max_drawdown, 4), "demo_only": demo_only, "read_only": True,
     }
 
 

@@ -2,6 +2,57 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## LIVE risk-gate repairs (stage 1)
+
+Total position exposure uses `abs(quantity) * mark_price`, including normalized
+positions without a pre-existing notional. Unknown/unpriced exposure blocks
+entry. The shared default and API/UI ceiling are 350 USDT. Current consecutive
+losses are counted newest-first; starting SHORT-only policies no longer probes
+a forbidden LONG. LIVE performance preserves direction and reports
+`demo_only=false`; DEMO defaults and immutable initial-risk/R accounting remain
+unchanged.
+
+Periodic Stop verification requires exact owned identity, planned trigger,
+symbol, closing side, STOP_MARKET type, full-position close, active status and
+MARK_PRICE working type. Mismatches are UNKNOWN and lock new entries; they are
+not treated as permission to cancel/replace an uncertain order.
+
+LIVE entry requires `require_isolated=true`, verified single-asset mode and a
+verified ISOLATED symbol configuration. Multi-assets/CROSSED configurations
+and Binance -4168 are rejected, never silently accepted. If account information
+does not include its asset mode, a separate signed read verifies it; unknown
+mode fails explicitly. Maintenance brackets are read before entry submission.
+`policy.liquidation_buffer_pct` defaults to 0.5 (range 0.05-5), measured as a
+percentage of the entry price, not of Stop distance. The conservative isolated
+estimate includes maintenance tiers/deductions and entry/exit fee reserves.
+The directional Stop must be before the estimated liquidation price by at
+least that buffer. Missing/inconsistent tiers, unsupported non-unit
+`notionalCoef`, or insufficient distance reject entry. The proof is persisted
+with the intent/plan and restored after restart.
+
+This is a pre-fill estimate, not an exchange liquidation guarantee: future
+funding, adverse gaps/slippage, fee differences and external account changes
+can invalidate the buffer. No liquidation/PnL data is invented. A Stop order
+also uses Binance's existing price-protection setting and may be delayed by
+extreme mark/contract divergence.
+
+TP monitoring has **no automatic market-close fallback**. Unbacked targets,
+including rejected/below-minimum targets or a TP response without an order ID,
+are explicitly `UNPROTECTED` / `TP KORUMASIZ (İZLEME)`. Entry/activity messages
+distinguish pending protection, verified Stop with exchange-installed TP,
+unprotected TP, safety-close submission and an authoritative no-position read.
+An accepted safety-close submission is not a verified closure.
+
+`PROTREBOT_LIVE_REQUIRE_DEMO_CERTIFICATE` can restore the advanced Demo
+certificate gate. Its default is false (existing waiver); true requires
+`DEMO SERTİFİKALI`. No credentials are needed for this configuration.
+The new policy field changes the policy digest: existing approvals/scoped
+authorizations may need renewal through the unchanged approval/2FA flow.
+No entry-strategy, BE/trailing or SHORT alignment filter changes are included.
+
+Offline regressions: `backend/tests/test_v25_risk_gate_repairs.py` plus the
+existing execution, partial-fill, ownership, scope, direction and R suites.
+
 ## LIVE entry partial fills
 
 Exact entry identity, symbol and direction remain mandatory. A positive actual
@@ -13,7 +64,8 @@ The existing `closePosition` Stop is installed before cancelling only the
 owned entry remainder. A fresh position read handles fills racing cancellation.
 TP1/TP2 retain the 60% split, rounded down to the market quantity step, with
 minimum quantity/notional checked using the current mark price. Below-minimum
-partial targets use the existing explicit monitoring fallback; Stop and TP3
+partial targets are explicitly TP-unprotected monitoring only (no fallback
+close); Stop and TP3
 retain full-position close semantics. Uncertain cancellation locks new entries
 and raises an error without removing the installed Stop; reconciliation also
 settles remaining entries when an owned Stop is already present.
@@ -58,7 +110,7 @@ an error status. Request-level heartbeat fields keep their existing meaning.
 
 Stop installation has at most three attempts with exact active-order
 verification (client identity, symbol, side, type, trigger and full-position
-close). Known rejections may be retried with the same client identity.
+close and MARK_PRICE working type). Known rejections may be retried with the same client identity.
 Accepted or ambiguous submissions are only verified, not blindly reposted.
 If verification still fails, the existing owned-entry cancellation and
 reduce-only safety close path runs. This is an attempt bound, not a guaranteed
@@ -79,7 +131,8 @@ same symbol/direction use one slot, but exposure includes both the position and
 the remaining entry quantity. Snapshot-visible reservations are not added a
 second time; the larger exposure is retained conservatively during snapshot
 lag. Reduce-only, close-position, and terminal orders do not consume entry
-capacity. Unpriced exposure blocks new entries when the optional cap is enabled;
+capacity. Unpriced positions always fail the mandatory global exposure gate;
+unpriced pending/directional exposure also blocks when the optional cap is enabled.
 unknown directions are conservatively counted against either direction.
 Rejections appear in gate/status details and logs, without sending an entry.
 

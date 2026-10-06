@@ -1913,6 +1913,7 @@ async def _account_snapshot(
             "quantity": abs(float(amount)),
             "entry_price": float(item.get("entryPrice", 0)),
             "mark_price": float(item.get("markPrice", 0)),
+            "notional": abs(float(amount)) * float(item.get("markPrice", 0)),
             "liquidation_price": float(item.get("liquidationPrice", 0)),
             "unrealized_pnl": float(item.get("unRealizedProfit", item.get("unrealizedProfit", 0))),
             "leverage": leverage,
@@ -1945,6 +1946,8 @@ async def _account_snapshot(
         "trigger_price": float(item.get("triggerPrice", item.get("stopPrice", 0))),
         "quantity": float(item.get("quantity", item.get("origQty", 0)) or 0),
         "close_position": str(item.get("closePosition", "false")).lower() == "true",
+        "working_type": str(item.get("workingType") or "").upper(),
+        "reduce_only": str(item.get("reduceOnly", "false")).lower() == "true",
     } for item in response_rows(algo_orders)]
     return {
         "account_identity": str(account.get("uid") or account.get("accountId") or account.get("accountAlias") or "")[:160],
@@ -1952,7 +1955,11 @@ async def _account_snapshot(
         "available_balance": float(account.get("availableBalance", 0)),
         "margin_balance": float(account.get("totalMarginBalance", 0)),
         "unrealized_pnl": float(account.get("totalUnrealizedProfit", 0)),
-        "multi_assets_mode": bool(account.get("multiAssetsMargin", False)),
+        "multi_assets_mode": (
+            True if str(account.get("multiAssetsMargin")).lower() == "true"
+            else False if str(account.get("multiAssetsMargin")).lower() == "false"
+            else None
+        ),
         "positions": open_positions,
         "_provenance_positions": provenance_positions,
         "open_orders": open_orders,

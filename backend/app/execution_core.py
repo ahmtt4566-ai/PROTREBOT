@@ -53,6 +53,7 @@ DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "max_spread_bps": 8.0,
     "max_stop_distance_pct": 5.0,
     "atr_stop_multiplier": 1.5,
+    "liquidation_buffer_pct": 0.5,
     "fee_bps_per_side": 5.0,
     "slippage_bps_per_side": 3.0,
     "minimum_net_reward_usdt": 0.25,
@@ -143,6 +144,7 @@ def sanitize_execution_policy(payload: Any, *, preserve_empty_allowed_symbols: b
     base["max_spread_bps"] = _number(source.get("max_spread_bps"), 8, 0.5, 25)
     base["max_stop_distance_pct"] = _number(source.get("max_stop_distance_pct"), 5.0, 0.25, 5)
     base["atr_stop_multiplier"] = _number(source.get("atr_stop_multiplier"), 1.5, 0.5, 3)
+    base["liquidation_buffer_pct"] = _number(source.get("liquidation_buffer_pct"), 0.5, 0.05, 5)
     base["fee_bps_per_side"] = _number(source.get("fee_bps_per_side"), 5, 0, 25)
     base["slippage_bps_per_side"] = _number(source.get("slippage_bps_per_side"), 3, 0, 30)
     base["minimum_net_reward_usdt"] = _number(source.get("minimum_net_reward_usdt"), 0.25, 0, 25)
@@ -179,9 +181,13 @@ def daily_execution_metrics(events: list[dict[str, Any]], now: datetime | None =
         str(item.get("plan_id")) for item in events
         if item.get("kind") == "LIVE_POSITION_CLOSED_UNVERIFIED" and item.get("plan_id")
     } - verified_plan_ids
-    closed_rows = [item for item in rows if item.get("kind") == "LIVE_POSITION_CLOSED"]
+    closed_rows = sorted(
+        (item for item in rows if item.get("kind") == "LIVE_POSITION_CLOSED"),
+        key=lambda item: str(item.get("created_at", "")),
+        reverse=True,
+    )
     consecutive_losses = 0
-    for item in reversed(closed_rows):
+    for item in closed_rows:
         if float(item.get("realized_pnl") or 0) < 0:
             consecutive_losses += 1
         else:
@@ -248,12 +254,33 @@ def _finite_value(row: dict[str, Any], *names: str) -> float | None:
     for name in names:
         if row.get(name) is None:
             continue
+        if isinstance(row[name], bool):
+            return None
         try:
             value = float(row[name])
         except (TypeError, ValueError):
             return None
         return value if math.isfinite(value) else None
     return None
+
+
+def position_notional_usdt(position: dict[str, Any]) -> float:
+    quantity = _finite_value(position, "quantity", "positionAmt")
+    if quantity == 0:
+        return 0.0
+    if any(key in position for key in ("quantity", "positionAmt", "mark_price", "markPrice")):
+        mark = _finite_value(position, "mark_price", "markPrice")
+        if quantity is None or mark is None or mark <= 0:
+            raise ValueError("Position quantity or mark price is unavailable")
+        notional = abs(quantity) * mark
+    else:
+        notional = _finite_value(position, "notional", "notional_usdt")
+        if notional is None:
+            raise ValueError("Position notional is unavailable")
+        notional = abs(notional)
+    if not math.isfinite(notional):
+        raise ValueError("Position notional is not finite")
+    return notional
 
 
 def _closing_order(row: dict[str, Any]) -> bool:
@@ -377,11 +404,16 @@ def evaluate_entry_gates(
     positions = snapshot.get("positions", []) if isinstance(snapshot.get("positions"), list) else []
     orders = snapshot.get("open_orders", []) if isinstance(snapshot.get("open_orders"), list) else []
     plans = active_plans if isinstance(active_plans, list) else []
-    existing_exposure = sum(
-        abs(float(item.get("notional") or item.get("notional_usdt") or 0))
-        for item in positions
-        if isinstance(item, dict)
-    )
+    exposure_known = True
+    existing_exposure = 0.0
+    try:
+        for item in positions:
+            if not isinstance(item, dict):
+                raise ValueError("Position payload is invalid")
+            existing_exposure += position_notional_usdt(item)
+    except ValueError as exc:
+        logger.error("LIVE_ENTRY_EXPOSURE_UNKNOWN: %s", exc)
+        exposure_known = False
     existing_plan_match = any(
         isinstance(item, dict)
         and item.get("symbol") == safe_symbol
@@ -402,7 +434,9 @@ def evaluate_entry_gates(
         GateResult(len(positions) < settings["max_positions"], "positions", "Pozisyon sınırı", f"{len(positions)} / {settings['max_positions']}"),
         GateResult(not any(item.get("symbol") == safe_symbol for item in positions + orders), "duplicate", "Yinelenen parite", "Aynı paritede açık pozisyon/emir bulunmamalı."),
         GateResult(not existing_plan_match, "active_plan", "Aktif plan çakışması", "Aynı parite ve yönde aktif plan bulunmamalı."),
-        GateResult(existing_exposure + max(0.0, float(candidate_notional_usdt)) <= float(settings["max_total_exposure_usdt"]), "exposure", "Toplam maruziyet sınırı", f"{existing_exposure + max(0.0, float(candidate_notional_usdt)):.2f} / {settings['max_total_exposure_usdt']:.2f} USDT"),
+        GateResult(exposure_known and existing_exposure + max(0.0, float(candidate_notional_usdt)) <= float(settings["max_total_exposure_usdt"]), "exposure", "Toplam maruziyet sınırı",
+                   f"{existing_exposure + max(0.0, float(candidate_notional_usdt)):.2f} / {settings['max_total_exposure_usdt']:.2f} USDT" if exposure_known else
+                   "Mevcut pozisyon maruziyeti doğrulanamadı; yeni giriş reddedildi."),
         GateResult(int(daily.get("entries", 0)) < settings["daily_trade_limit"], "daily_trades", "Günlük işlem sınırı", f"{daily.get('entries', 0)} / {settings['daily_trade_limit']}"),
         GateResult(float(daily.get("realized_pnl", 0)) > -float(settings["daily_loss_limit"]), "daily_loss", "Günlük kayıp kilidi", f"{daily.get('realized_pnl', 0):.2f} USDT"),
         GateResult(float(snapshot.get("unrealized_pnl") or 0) > -float(settings["daily_loss_limit"]), "open_loss", "Açık zarar kilidi", f"{float(snapshot.get('unrealized_pnl') or 0):.2f} USDT"),

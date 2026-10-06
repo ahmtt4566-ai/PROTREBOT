@@ -62,6 +62,7 @@ def complete_reconciliation_snapshot(**overrides):
         "open_algo_orders_available": True,
         "algo_orders_quality": "VALID_EMPTY",
         "hedge_mode": False,
+        "multi_assets_mode": False,
     }
     snapshot.update(overrides)
     return snapshot
@@ -164,7 +165,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
             async def signed(self, method, path, params=None):
                 if path == "/fapi/v3/account":
-                    return {}
+                    return {"multiAssetsMargin": False}
                 if path in {"/fapi/v3/positionRisk", "/fapi/v1/openOrders", "/fapi/v1/symbolConfig"}:
                     return []
                 if path == "/fapi/v1/openAlgoOrders":
@@ -679,6 +680,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
             "positions": [{"symbol": "RAYSOLUSDT", "direction": "LONG", "quantity": "1"}],
             "open_orders": [],
             "hedge_mode": False,
+            "multi_assets_mode": False,
         }
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
         with patch.object(v25_execution, "consent_status", return_value={"fingerprint": "fingerprint", "active": True}):
@@ -788,8 +790,8 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 423)
 
     def test_protection_classification_matches_exact_client_or_algo_identity(self):
-        plan = {"symbol": "BTCUSDT", "direction": "LONG", "stop_client_id": "PTB_SL_owned", "stop_algo_id": 101}
-        rows = [{"symbol": "BTCUSDT", "client_algo_id": "PTB_SL_owned", "algo_id": 101, "side": "SELL", "type": "STOP_MARKET", "status": "NEW"}]
+        plan = {"symbol": "BTCUSDT", "direction": "LONG", "stop_client_id": "PTB_SL_owned", "stop_algo_id": 101, "stop_loss": "99"}
+        rows = [{"symbol": "BTCUSDT", "client_algo_id": "PTB_SL_owned", "algo_id": 101, "side": "SELL", "type": "STOP_MARKET", "status": "NEW", "trigger_price": "99", "close_position": True, "working_type": "MARK_PRICE"}]
         status, matched, reason = classify_plan_protection(plan, rows)
         self.assertEqual((status, reason), ("MATCHED", "EXACT_IDENTITY"))
         self.assertEqual(matched, rows)
@@ -1434,13 +1436,14 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         with patch.multiple(
             v25_execution,
             client_for=lambda application, request=None: object(),
-            account_snapshot=AsyncMock(return_value={"available_balance": 100, "positions": [], "open_orders": [], "hedge_mode": False}),
+            account_snapshot=AsyncMock(return_value={"available_balance": 100, "positions": [], "open_orders": [], "hedge_mode": False, "multi_assets_mode": False}),
             spread_bps=AsyncMock(return_value=1.0),
             readiness=lambda application, state, request=None: {"ready": True},
             auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
             build_live_spec=AsyncMock(return_value=spec),
-            set_live_isolated_margin=AsyncMock(),
+            set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
+            live_liquidation_risk=AsyncMock(return_value={"verified": True, "model": "OFFLINE_FIXTURE"}),
             submit_entry=AsyncMock(side_effect=RuntimeError("synthetic submit failure")),
             persist_state=lambda state: None,
         ):
@@ -1806,7 +1809,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             time_offset_ms = 0
 
         snapshot = complete_reconciliation_snapshot()
-        snapshot["multi_assets_mode"] = True
+        snapshot["multi_assets_mode"] = False
         candles = [{"time": index, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000} for index in range(220)]
         spec = {
             "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "close_side": "SELL", "order_type": "MARKET",
@@ -1817,7 +1820,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         analysis = {"direction": "LONG", "confidence": 90, "radar": {"trap_score": 1}, "entry": 100, "stop_loss": 98, "tp1": 102, "tp2": 104, "tp3": 106}
         ready = {"ready": True, "score": 100, "gates": []}
         submit = AsyncMock(return_value={"status": "NEW", "orderId": 12345})
-        isolated_margin = AsyncMock()
+        isolated_margin = AsyncMock(return_value="ISOLATED")
         with patch.multiple(
             v25_execution,
             client_for_with_credentials=lambda application, credentials, request=None: FakeClient(),
@@ -1832,6 +1835,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             build_live_spec=AsyncMock(return_value=spec),
             set_live_isolated_margin=isolated_margin,
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 2, "margin_type": "isolated"}),
+            live_liquidation_risk=AsyncMock(return_value={"verified": True, "model": "OFFLINE_FIXTURE"}),
             submit_entry=submit,
             install_protection=AsyncMock(),
             persist_state=lambda current: None,
@@ -1839,7 +1843,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             asyncio.run(v25_execution.automatic_cycle(application, credentials=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")))
 
         submit.assert_awaited_once()
-        isolated_margin.assert_not_awaited()
+        isolated_margin.assert_awaited_once()
         self.assertEqual(state["auto"]["last_scan_stats"]["executed_symbols"], ["BTCUSDT"])
 
     def test_auto_trade_dry_run_reaches_submit_boundary_without_exchange_mutation(self):
@@ -1881,7 +1885,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         state["_app"] = application
         state["lock"] = asyncio.Lock()
         transport = FakeTransport()
-        snapshot = {"available_balance": 1000, "positions": [], "open_orders": [], "hedge_mode": False, "unrealized_pnl": 0}
+        snapshot = {"available_balance": 1000, "positions": [], "open_orders": [], "hedge_mode": False, "unrealized_pnl": 0, "multi_assets_mode": False}
         spec = {
             "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "close_side": "SELL", "order_type": "MARKET",
             "margin_usdt": 25.0, "leverage": 2, "notional_usdt": 50.0, "quantity": "0.500",
@@ -1902,8 +1906,9 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             readiness=lambda application, state, request=None: ready,
             auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
             build_live_spec=AsyncMock(return_value=spec),
-            set_live_isolated_margin=AsyncMock(),
+            set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 2, "margin_type": "isolated"}),
+            live_liquidation_risk=AsyncMock(return_value={"verified": True, "model": "OFFLINE_FIXTURE"}),
             install_protection=fake_install_protection,
             persist_state=lambda state: None,
         ):
@@ -2544,12 +2549,14 @@ class V25MarginModeCompatibilityTests(unittest.TestCase):
         )
         self.assertEqual(result["margin_type"], "crossed")
 
-    def test_multi_assets_margin_error_is_treated_as_non_applicable(self):
+    def test_multi_assets_margin_error_rejects_live_entry(self):
         client = SimpleNamespace(
             signed=AsyncMock(side_effect=LiveExchangeError("multi-assets", exchange_code=-4168))
         )
-        result = asyncio.run(v25_execution.set_live_isolated_margin(client, "BTCUSDT"))
-        self.assertEqual(result, "CROSSED")
+        with self.assertRaises(LiveExchangeError) as caught:
+            asyncio.run(v25_execution.set_live_isolated_margin(client, "BTCUSDT"))
+        self.assertEqual(caught.exception.exchange_code, -4168)
+        client.signed.assert_awaited_once()
 
     def test_unknown_margin_error_still_fails_closed(self):
         client = SimpleNamespace(

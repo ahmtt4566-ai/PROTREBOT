@@ -170,7 +170,10 @@ class DirectionalEntryLimitTests(unittest.TestCase):
                 result = gate_for(snapshot=snapshot, policy=exposure_policy(100))
                 self.assertIn("direction_exposure", failed_keys(result))
                 self.assertIn("doğrulanamadı", result["reason"])
-                self.assertTrue(gate_for(snapshot=snapshot)["passed"])
+                without_optional_cap = gate_for(snapshot=snapshot)
+                self.assertFalse(without_optional_cap["passed"])
+                self.assertIn("exposure", failed_keys(without_optional_cap))
+                self.assertNotIn("direction_exposure", failed_keys(without_optional_cap))
         orders = [{"symbol": "AAAUSDT", "side": "BUY", "quantity": 0.3, "price": 100,
                    "executed_quantity": "invalid"}]
         self.assertIn("direction_exposure", failed_keys(gate_for(
@@ -409,6 +412,7 @@ class DirectionalLiveIntegrationTests(unittest.TestCase):
                     build_live_spec=AsyncMock(return_value=spec_for("BTCUSDT")),
                     set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
                     apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
+                    live_liquidation_risk=AsyncMock(return_value={"verified": True, "model": "OFFLINE_FIXTURE"}),
                     fresh_auto_submission_credentials=AsyncMock(return_value=CREDENTIALS),
                     install_protection=AsyncMock(),
                 ):

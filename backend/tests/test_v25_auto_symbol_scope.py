@@ -49,6 +49,7 @@ def spec_for(symbol):
 SNAPSHOT = {
     "available_balance": 100, "wallet_balance": 100,
     "positions": [], "open_orders": [], "hedge_mode": False,
+    "multi_assets_mode": False,
 }
 CREDENTIALS = ("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")
 
@@ -87,6 +88,7 @@ class AutoSymbolScopeTests(unittest.TestCase):
             build_live_spec=AsyncMock(return_value=spec_for(symbol)),
             set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
+            live_liquidation_risk=AsyncMock(return_value={"verified": True, "model": "OFFLINE_FIXTURE"}),
             fresh_auto_submission_credentials=credential_refresh or AsyncMock(return_value=CREDENTIALS),
             submit_entry=submit,
             install_protection=AsyncMock(),

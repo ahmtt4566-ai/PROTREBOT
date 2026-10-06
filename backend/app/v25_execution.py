@@ -45,7 +45,7 @@ from .binance_rate_limit import (
 )
 from .binance_demo import (
     BinanceDemoError,
-    account_snapshot,
+    account_snapshot as exchange_account_snapshot,
     classify_algo_snapshot_payload,
     decimal_text,
     floor_step,
@@ -60,6 +60,7 @@ from .credential_store import load_live_consent
 from .maintenance import guard_new_entry
 from .execution_core import (
     DEFAULT_EXECUTION_POLICY,
+    HARD_MAX_TOTAL_EXPOSURE_USDT,
     configured_min_confidence,
     configured_mtf_allow_either_timeframe,
     LIVE_CLIENT_PREFIX,
@@ -69,6 +70,7 @@ from .execution_core import (
     directional_entry_gates,
     evaluate_entry_gates,
     policy_digest,
+    position_notional_usdt,
     release_gates,
     release_ready,
     risk_sized_order,
@@ -78,6 +80,8 @@ from .exchange_connections import session_account_identity, session_credentials_
 from .local_storage import DATA_DIR, migrate_legacy_files
 from .trade_review import write_trade_review
 from .trade_r_metrics import calculate_r_multiple, initial_entry_risk_usdt
+from .liquidation_risk import isolated_liquidation_risk
+from .web_security import env_flag
 from .v21_demo import certificate_payload
 from .v22_commercial import authenticated_user, subscription_for_user
 from .error_monitoring import build_error_event, log_event, schedule_log_event
@@ -146,6 +150,8 @@ PRIVATE_PATHS = {
     ("GET", "/fapi/v3/account"),
     ("GET", "/fapi/v3/positionRisk"),
     ("GET", "/fapi/v1/symbolConfig"),
+    ("GET", "/fapi/v1/leverageBracket"),
+    ("GET", "/fapi/v1/multiAssetsMargin"),
     ("GET", "/fapi/v1/openOrders"),
     ("GET", "/fapi/v1/order"),
     ("GET", "/fapi/v1/openAlgoOrders"),
@@ -382,6 +388,8 @@ TRANSIENT_READ_PATHS = PUBLIC_PATHS | {
     "/fapi/v3/account",
     "/fapi/v3/positionRisk",
     "/fapi/v1/symbolConfig",
+    "/fapi/v1/leverageBracket",
+    "/fapi/v1/multiAssetsMargin",
     "/fapi/v1/openOrders",
     "/fapi/v1/openAlgoOrders",
     "/fapi/v1/positionSide/dual",
@@ -460,7 +468,7 @@ class PolicyUpdate(BaseModel):
     max_positions: int | None = Field(default=None, ge=1, le=5)
     max_same_direction_positions: int | None = Field(default=None, ge=1, le=5)
     max_direction_exposure_usdt: float | None = Field(default=None, gt=0, le=350, allow_inf_nan=False)
-    max_total_exposure_usdt: float | None = Field(default=None, ge=25, le=250)
+    max_total_exposure_usdt: float | None = Field(default=None, ge=25, le=HARD_MAX_TOTAL_EXPOSURE_USDT)
     daily_loss_limit: float | None = Field(default=None, ge=5, le=100)
     daily_trade_limit: int | None = Field(default=None, ge=1, le=12)
     consecutive_loss_limit: int | None = Field(default=None, ge=1, le=10)
@@ -469,6 +477,7 @@ class PolicyUpdate(BaseModel):
     max_spread_bps: float | None = Field(default=None, ge=0.5, le=25)
     max_stop_distance_pct: float | None = Field(default=None, ge=0.25, le=5)
     atr_stop_multiplier: float | None = Field(default=None, ge=0.5, le=3)
+    liquidation_buffer_pct: float | None = Field(default=None, ge=0.05, le=5, allow_inf_nan=False)
     fee_bps_per_side: float | None = Field(default=None, ge=0, le=25)
     slippage_bps_per_side: float | None = Field(default=None, ge=0, le=30)
     minimum_net_reward_usdt: float | None = Field(default=None, ge=0, le=25)
@@ -1482,7 +1491,7 @@ async def set_live_isolated_margin(client: BinanceLiveClient, symbol: str) -> st
         if exc.exchange_code == -4046:
             return "ISOLATED"
         if exc.exchange_code == -4168:
-            return "CROSSED"
+            raise LiveExchangeError("LIVE giriş için isolated marjin zorunlu; CROSSED/multi-assets desteklenmiyor.", http_status=409, exchange_code=exc.exchange_code) from exc
         if exc.exchange_code is not None:
             raise
         raise
@@ -1498,6 +1507,38 @@ async def apply_live_verified_leverage(
     verify_leverage_response(response, symbol, requested)
     configuration = await client.signed("GET", "/fapi/v1/symbolConfig", {"symbol": symbol})
     return verify_symbol_configuration(configuration, symbol, requested, expected_margin_type=expected_margin_type)
+
+
+async def account_snapshot(
+    client: Any,
+    request_id: str | None = None,
+    evidence_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = await exchange_account_snapshot(client, request_id=request_id, evidence_state=evidence_state)
+    if result.get("multi_assets_mode") is None:
+        payload = await client.signed("GET", "/fapi/v1/multiAssetsMargin")
+        value = payload.get("multiAssetsMargin") if isinstance(payload, dict) else None
+        if str(value).lower() not in {"true", "false"}:
+            logger.error("LIVE_MULTI_ASSETS_MODE_UNKNOWN")
+            raise LiveExchangeError("Canlı hesabın multi-assets modu doğrulanamadı.", http_status=409)
+        result["multi_assets_mode"] = str(value).lower() == "true"
+    return result
+
+
+def validate_live_isolated_snapshot(snapshot: dict[str, Any], policy: dict[str, Any]) -> None:
+    if policy.get("require_isolated") is not True:
+        raise LiveExchangeError("LIVE giriş isolated marjin politikasını zorunlu tutar.", http_status=409)
+    if snapshot.get("multi_assets_mode") is not False:
+        raise LiveExchangeError("LIVE giriş için multi-assets kapalı ve isolated marjin doğrulanmış olmalı.", http_status=409)
+
+
+async def live_liquidation_risk(client: BinanceLiveClient, spec: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+    payload = await client.signed("GET", "/fapi/v1/leverageBracket", {"symbol": spec["symbol"]})
+    try:
+        return isolated_liquidation_risk(spec, payload, policy)
+    except ValueError as exc:
+        logger.warning("LIVE_LIQUIDATION_GATE_REJECTED symbol=%s reason=%s", spec["symbol"], exc)
+        raise LiveExchangeError(f"Likidasyon güvenliği doğrulanamadı: {exc}", http_status=409) from exc
 
 
 async def ticker_price(client: BinanceLiveClient, symbol: str) -> Decimal:
@@ -2046,7 +2087,9 @@ def existing_entry_protection_algo(
             and row.get("status") in {"NEW", "WORKING", "PENDING_NEW", "PARTIALLY_FILLED"}
             and protection_trigger_price(row) == Decimal(str(params["triggerPrice"]))
             and _truthy(row.get("close_position", row.get("closePosition"))) == _truthy(params.get("closePosition"))
+            and str(row.get("working_type") or row.get("workingType") or "").upper() == str(params.get("workingType") or "").upper()
             and ("quantity" not in params or Decimal(str(row.get("quantity"))) == Decimal(str(params["quantity"])))
+            and ("reduceOnly" not in params or _truthy(row.get("reduce_only", row.get("reduceOnly"))) == _truthy(params["reduceOnly"]))
             and bool(row.get("algo_id"))
         )
     except (TypeError, ValueError, ArithmeticError) as exc:
@@ -2098,6 +2141,7 @@ async def install_verified_stop(
                 "status": row.get("algoStatus", row.get("status")),
                 "trigger_price": row.get("triggerPrice", row.get("stopPrice")),
                 "close_position": _truthy(row.get("closePosition")),
+                "working_type": str(row.get("workingType") or "").upper(),
             } for row in response_rows(payload) if isinstance(row, dict)]
             verified = existing_entry_protection_algo(params, rows)
             if verified is not None:
@@ -2180,6 +2224,7 @@ async def install_protection(
             details={"exchange_code":exc.exchange_code,"response_time_ms":None,"attempt":plan.get("stop_install_attempts", 1),"order_id":stop_client},
         ))
         plan["status"] = "STOP BAŞARISIZ · KAPATILIYOR"
+        plan["stop_install_failed"] = True
         add_event(state, "PROTECTION_FAIL", f"{symbol} Stop kurulamadı; tracked pozisyon reduce-only kapatılıyor.", symbol=symbol)
         close_intent = f"protection-{plan['id']}"
         close_client_id = client_id_for("CLOSE", close_intent)
@@ -2210,7 +2255,8 @@ async def install_protection(
             if order_id not in known:
                 known.append(order_id)
         plan["close_reason"] = close_reason_for_intent(close_intent)
-        plan["status"] = "GÜVENLİK İÇİN KAPATILDI"
+        plan["safety_close_status"] = "SUBMITTED" if close_result is not None else "NO_POSITION"
+        plan["status"] = "GÜVENLİK KAPATMASI · DOĞRULAMA BEKLİYOR" if close_result is not None else "GÜVENLİK KONTROLÜ · POZİSYON YOK"
         plan["last_error"] = str(exc)[:240]
         if cancellation_error is not None:
             persist_state(state)
@@ -2272,6 +2318,8 @@ async def install_protection(
         result = await post_entry_protection_algo(client, {**common, "type": "TAKE_PROFIT_MARKET", "triggerPrice": plan["targets"][2], "closePosition": "true", "clientAlgoId": client_id_for("TP3", plan["intent_id"])}, existing_algos)
         if result.get("algoId"):
             ids.append(int(result["algoId"]))
+        else:
+            monitoring.append("TP3")
     except LiveExchangeError as exc:
         if existing_algos is not None and exc.unknown_execution:
             record_protection_ownership_uncertain(state, plan, "ENTRY_TP_IDENTITY_UNKNOWN")
@@ -2287,14 +2335,18 @@ async def install_protection(
         "monitoring_targets": monitoring,
         "monitoring_targets_persisted_at": now_iso() if monitoring else plan.get("monitoring_targets_persisted_at"),
         "monitoring_targets_exchange_backed": not monitoring,
+        "tp_protection_state": "UNPROTECTED" if monitoring else "EXCHANGE_BACKED",
         "protected_at": now_iso(),
         "protection_state": "MATCHED" if plan.get("stop_algo_id") and not monitoring else "MISSING",
-        "status": "KORUMA AKTİF" if not monitoring else "STOP AKTİF · HEDEF İZLEME",
+        "status": "KORUMA AKTİF" if not monitoring else "STOP AKTİF · TP KORUMASIZ (İZLEME)",
         "entry_remainder_pending": False,
     })
-    add_event(state, "PROTECTION_ACTIVE", f"{symbol} canlı Stop ve TP koruma planı kuruldu.", symbol=symbol)
+    add_event(state, "PROTECTION_ACTIVE", (
+        f"{symbol} Stop doğrulandı; TP emirleri borsada kuruldu." if not monitoring
+        else f"{symbol} Stop doğrulandı; TP KORUMASIZ (yalnız izleme)."
+    ), symbol=symbol)
     if monitoring:
-        add_event(state, "TP_MONITORING_PERSISTED", f"{symbol} {','.join(monitoring)} Binance miktar/notional kuralları veya emir kabulünü karşılamadı; kalıcı reconciliation takibine alındı.", symbol=symbol, plan_id=plan.get("id"), monitoring_targets=list(monitoring))
+        add_event(state, "TP_MONITORING_PERSISTED", f"{symbol} {','.join(monitoring)} TP KORUMASIZ: miktar/notional veya emir kabulü yetersiz. İzleme kaydı otomatik fallback kapanışı yapmaz; Stop korunuyor.", symbol=symbol, plan_id=plan.get("id"), monitoring_targets=list(monitoring))
     persist_state(state)
 
 
@@ -2704,6 +2756,7 @@ def recover_plan_from_intent(intent_id: str, intent: dict[str, Any], order: dict
         "quantity": spec["quantity"],
         "requested_quantity": spec["quantity"],
         "initial_risk_usdt": spec.get("initial_risk_usdt"),
+        "liquidation_guard": spec.get("liquidation_guard"),
         "r_multiple": None,
         "margin_usdt": spec.get("margin_usdt"),
         "notional_usdt": spec.get("notional_usdt"),
@@ -2818,10 +2871,13 @@ def demo_certificate(application: Any) -> dict[str, Any]:
     state = getattr(application.state, "v21_demo", None)
     if not state:
         return {}
+    certificate = certificate_payload(state)
+    required = env_flag("PROTREBOT_LIVE_REQUIRE_DEMO_CERTIFICATE", default=False)
+    certified = certificate.get("status") == "DEMO SERTİFİKALI"
     return {
-        **certificate_payload(state),
-        "live_allowed": True,
-        "live_allowance_status": "LIVE ALLOWED — DEMO CERTIFICATION WAIVED",
+        **certificate,
+        "live_allowed": not required or certified,
+        "live_allowance_status": "DEMO CERTIFICATION REQUIRED" if required else "LIVE ALLOWED — DEMO CERTIFICATION WAIVED",
     }
 
 
@@ -3115,17 +3171,27 @@ def classify_plan_protection(
         row_side = str(row.get("side") or "").upper()
         row_type = str(row.get("type") or "").upper()
         row_status = str(row.get("status") or "").upper()
-        if row_symbol != symbol or row_side != expected_side or row_type != "STOP_MARKET":
-            continue
-        if row_status not in active_statuses:
-            continue
-        same_shape.append(row)
         if (
             (stop_client_id and str(row.get("client_algo_id") or "") == stop_client_id)
             or (expected_algo_id and str(row.get("algo_id") or "") == expected_algo_id)
         ):
             exact.append(row)
+        if row_symbol == symbol and row_side == expected_side and row_type == "STOP_MARKET" and row_status in active_statuses:
+            same_shape.append(row)
     if len(exact) == 1:
+        row = exact[0]
+        planned_trigger = protection_trigger_price({"trigger_price": plan.get("stop_loss")})
+        parameters_match = (
+            str(row.get("symbol") or "").upper() == symbol
+            and str(row.get("side") or "").upper() == expected_side
+            and str(row.get("type") or "").upper() == "STOP_MARKET"
+            and str(row.get("status") or "").upper() in active_statuses
+            and planned_trigger > 0 and protection_trigger_price(row) == planned_trigger
+            and _truthy(row.get("close_position", row.get("closePosition")))
+            and str(row.get("working_type") or row.get("workingType") or "").upper() == "MARK_PRICE"
+        )
+        if not parameters_match:
+            return "UNKNOWN", exact, "EXACT_PARAMETERS_MISMATCH"
         return "MATCHED", exact, "EXACT_IDENTITY"
     if len(exact) > 1:
         return "UNKNOWN", exact, "DUPLICATE_EXACT_IDENTITY"
@@ -3141,6 +3207,8 @@ def record_protection_ownership_uncertain(
     plan: dict[str, Any],
     reason: str,
 ) -> None:
+    state["reconciliation_required"] = True
+    lock_live_execution(state, "PROTECTION_PARAMETERS_UNKNOWN", unknown=True, symbol=str(plan.get("symbol") or ""))
     plan_id = str(plan.get("id") or "")
     if any(
         isinstance(event, dict)
@@ -3165,11 +3233,36 @@ def reconcile_monitoring_targets(state: dict[str, Any], plan: dict[str, Any], ro
     targets = [str(value) for value in plan.get("monitoring_targets", []) if str(value)]
     if not targets:
         return
-    owned_ids = {str(row.get("client_algo_id") or "") for row in owned_protection_rows(plan, rows)}
-    combined_id = client_id_for("TP12", str(plan.get("intent_id") or ""))
-    exchange_backed = combined_id in owned_ids
+    exchange_backed = True
+    for target in targets:
+        try:
+            prices = plan.get("targets")
+            if target not in {"TP1", "TP2", "TP3"} or not isinstance(prices, list) or len(prices) != 3:
+                raise ValueError("Target prices are unavailable")
+            combined = target in {"TP1", "TP2"}
+            params = {
+                "symbol": plan["symbol"], "side": "SELL" if plan["direction"] == "LONG" else "BUY",
+                "type": "TAKE_PROFIT_MARKET", "workingType": "MARK_PRICE",
+                "triggerPrice": prices[0] if combined else prices[2],
+                "clientAlgoId": client_id_for("TP12" if combined else "TP3", str(plan.get("intent_id") or "")),
+            }
+            if combined:
+                params["quantity"] = decimal_text(floor_step(Decimal(str(plan["quantity"])) * Decimal("0.60"), Decimal(str(plan["step"]))))
+                params["reduceOnly"] = "true"
+            else:
+                params["closePosition"] = "true"
+            if existing_entry_protection_algo(params, rows) is None:
+                exchange_backed = False
+        except (KeyError, ValueError, ArithmeticError, LiveExchangeError) as exc:
+            logger.warning("TP_MONITORING_PARAMETERS_UNKNOWN symbol=%s target=%s reason=%s", plan.get("symbol"), target, exc)
+            exchange_backed = False
     previous = plan.get("monitoring_targets_exchange_backed")
     plan["monitoring_targets_exchange_backed"] = exchange_backed
+    plan["tp_protection_state"] = "EXCHANGE_BACKED" if exchange_backed else "UNPROTECTED"
+    if not exchange_backed:
+        plan["status"] = "STOP AKTİF · TP KORUMASIZ (İZLEME)" if plan.get("stop_algo_id") else "TP KORUMASIZ · STOP DOĞRULANIYOR"
+    elif plan.get("stop_algo_id"):
+        plan["status"] = "KORUMA AKTİF"
     plan["monitoring_targets_reconciled_at"] = now_iso()
     logger.warning(
         "TP_MONITORING_RECONCILED symbol=%s targets=%s exchange_backed=%s",
@@ -3280,6 +3373,10 @@ def live_auto_start_gate(application: Any, state: dict[str, Any], request: Reque
     snapshot = state.get("snapshot")
     if not isinstance(snapshot, dict):
         return False, "Canlı hesap snapshot'ı mevcut değil."
+    try:
+        validate_live_isolated_snapshot(snapshot, state["policy"])
+    except LiveExchangeError as exc:
+        return False, str(exc)
     active_plans = [plan for plan in state.get("plans", {}).values() if isinstance(plan, dict) and live_plan_is_active(plan)]
     if active_plans:
         return False, "Aktif LIVE plan varken otomasyon açılamaz."
@@ -3302,10 +3399,15 @@ def live_auto_start_gate(application: Any, state: dict[str, Any], request: Reque
     daily = live_daily_metrics(state)
     if int(daily.get("unverified_closures", 0)) != 0:
         return False, "Doğrulanmamış kapanış recovery gerektiriyor."
-    allowed_symbols = state["policy"].get("allowed_symbols") or ["BTCUSDT"]
+    allowed_symbols = live_auto_symbol_scope(state)
+    if not allowed_symbols:
+        return False, "Kayıtlı izinli parite listesi boş; otomasyon başlayamaz."
+    direction = "LONG" if state["policy"].get("allow_long") else "SHORT" if state["policy"].get("allow_short") else None
+    if direction is None:
+        return False, "Politika LONG veya SHORT yönüne izin vermeli."
     risk = evaluate_entry_gates(
         symbol=str(allowed_symbols[0]),
-        signal={"direction": "LONG", "confidence": 100, "radar": {"trap_score": 0}},
+        signal={"direction": direction, "confidence": 100, "radar": {"trap_score": 0}},
         snapshot=snapshot,
         policy=state["policy"],
         daily=daily,
@@ -3340,7 +3442,8 @@ def verified_live_journal(state: dict[str, Any]) -> list[dict[str, Any]]:
         rows.append({
             "id": plan["id"],
             "symbol": plan["symbol"],
-            "side": plan.get("side"),
+            "side": plan.get("side") or {"LONG": "BUY", "SHORT": "SELL"}.get(str(plan.get("direction") or "").upper()),
+            "direction": plan.get("direction"),
             "price": plan.get("exit_price"),
             "quantity": plan.get("quantity"),
             "created_at": plan.get("closed_at"),
@@ -3430,8 +3533,8 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "account": {"wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"), "unrealized_pnl": snapshot.get("unrealized_pnl"), "positions": snapshot.get("positions", []), "open_orders": snapshot.get("open_orders", []), "open_algo_orders": snapshot.get("open_algo_orders", []), "hedge_mode": snapshot.get("hedge_mode")},
         "daily": live_daily_metrics(state),
         "journal": journal,
-        "performance": performance_payload({"journal": journal}),
-        "daily_performance": performance_payload({"journal": journal}, "daily"),
+        "performance": performance_payload({"journal": journal}, demo_only=False),
+        "daily_performance": performance_payload({"journal": journal}, "daily", demo_only=False),
         "plans": list(state.get("plans", {}).values())[:50],
         "events": state.get("events", [])[:80],
         "emergency": state.get("emergency"),
@@ -3490,6 +3593,24 @@ async def canonical_live_decision(
     )
 
 
+def live_plan_execution_outcome(plan: dict[str, Any]) -> tuple[str, str]:
+    symbol = str(plan.get("symbol") or "LIVE")
+    status = str(plan.get("status") or "")
+    if plan.get("stop_install_failed") or status in {"STOP BAŞARISIZ · KAPATILIYOR", "GÜVENLİK İÇİN KAPATILDI"}:
+        if plan.get("safety_close_status") == "NO_POSITION":
+            return "SAFETY_CLOSE_NO_POSITION", f"{symbol}: Stop kurulamadı; güncel borsa okumasında açık pozisyon bulunmadı."
+        return "SAFETY_CLOSE_REQUESTED", f"{symbol}: Stop doğrulanamadı; reduce-only güvenlik kapatması ele alındı, kapanış doğrulaması bekleniyor."
+    if plan.get("protection_state") == "UNKNOWN" or plan.get("provenance_state") == "BROKEN":
+        return "PROTECTION_UNKNOWN", f"{symbol}: Pozisyon sahipliği veya koruma doğrulanamadı; durum UNKNOWN."
+    if not plan.get("stop_algo_id") or (not plan.get("stop_verified_at") and plan.get("protection_state") != "MATCHED"):
+        return "PROTECTION_PENDING", f"{symbol}: giriş kabul edildi; dolum/Stop doğrulaması bekleniyor."
+    if plan.get("tp_protection_state") == "UNPROTECTED" or plan.get("monitoring_targets"):
+        return "TP_UNPROTECTED", f"{symbol}: Stop doğrulandı; TP KORUMASIZ (izleme otomatik kapanış değildir)."
+    if plan.get("tp_protection_state") == "EXCHANGE_BACKED":
+        return "PROTECTED_ENTRY", f"{symbol} {plan.get('direction') or ''}: giriş kabul edildi; Stop doğrulandı ve TP emirleri borsada kuruldu."
+    return "TP_PENDING", f"{symbol}: Stop doğrulandı; TP koruması henüz doğrulanmadı."
+
+
 async def execute_live_order(
     application: Any,
     body: LiveOrderRequest,
@@ -3534,6 +3655,7 @@ async def execute_live_order(
                 raise LiveExchangeError("Canlı otomasyon açık değil; otomatik emir gönderilmedi.", http_status=423)
             if snapshot.get("hedge_mode"):
                 raise LiveExchangeError("Canlı hesap One-way / Tek Yön modunda olmalı.", http_status=409)
+            validate_live_isolated_snapshot(snapshot, state["policy"])
             symbol = normalize_symbol(body.symbol)
             daily = live_daily_metrics(state)
             manual_signal = {"direction": body.direction, "confidence": 100, "radar": {"trap_score": 0}}
@@ -3562,19 +3684,22 @@ async def execute_live_order(
                 raise LiveExchangeError("Canlı hesap kullanılabilir bakiyesi seçilen marjinden düşük.", http_status=409)
             spec = await build_live_spec(client, body, state["policy"], allowed_symbols=manual_symbol_scope)
             validate_protection_readiness(spec, state["policy"])
-            expected_margin_type = "CROSSED" if snapshot.get("multi_assets_mode", False) else "ISOLATED"
-            if expected_margin_type == "ISOLATED":
-                expected_margin_type = await set_live_isolated_margin(client, spec["symbol"])
+            expected_margin_type = await set_live_isolated_margin(client, spec["symbol"])
+            if expected_margin_type != "ISOLATED":
+                raise LiveExchangeError("Isolated marjin uygulanamadı; canlı giriş reddedildi.", http_status=409)
             leverage_audit = await apply_live_verified_leverage(
                 client,
                 spec["symbol"],
                 spec["leverage"],
                 expected_margin_type=expected_margin_type,
             )
+            if str(leverage_audit.get("margin_type") or "").upper() != "ISOLATED":
+                raise LiveExchangeError("Borsa isolated marjini doğrulamadı; canlı giriş reddedildi.", http_status=409)
+            spec["liquidation_guard"] = await live_liquidation_risk(client, spec, state["policy"])
             intent_id = body.intent_id or f"manual-{uuid.uuid4().hex}"
             client_id = client_id_for("ENTRY", intent_id)
             existing_exposure = sum(
-                abs(float(item.get("notional") or item.get("notional_usdt") or 0))
+                position_notional_usdt(item)
                 for item in snapshot.get("positions", [])
                 if isinstance(item, dict)
             )
@@ -3588,6 +3713,7 @@ async def execute_live_order(
                 "min_qty": decimal_text(spec["min_qty"]),
                 "min_notional": decimal_text(spec["min_notional"]) if spec.get("min_notional") is not None else None,
                 "initial_risk_usdt": initial_entry_risk_usdt(spec),
+                "liquidation_guard": spec["liquidation_guard"],
             }
             audit_snapshot = MappingProxyType({
                 "decision_id": intent_id,
@@ -3653,6 +3779,7 @@ async def execute_live_order(
                 "order_type": spec["order_type"], "entry_price": spec["entry_price"], "quantity": spec["quantity"],
                 "requested_quantity": spec["quantity"],
                 "initial_risk_usdt": serializable_spec["initial_risk_usdt"], "r_multiple": None,
+                "liquidation_guard": serializable_spec["liquidation_guard"],
                 "margin_usdt": spec["margin_usdt"], "notional_usdt": spec["notional_usdt"], "leverage": spec["leverage"],
                 "applied_leverage": leverage_audit["applied_leverage"], "margin_type": leverage_audit["margin_type"],
                 "stop_loss": spec["stop_loss"], "targets": spec["targets"], "step": decimal_text(spec["step"]),
@@ -3674,7 +3801,8 @@ async def execute_live_order(
                 await install_protection(client, state, plan)
             update_account_snapshot(state, await account_snapshot(client))
             persist_state(state)
-            return {"ok": True, "order": {"order_id": result.get("orderId"), "client_order_id": client_id, "status": result.get("status", plan["status"])}, "plan": plan, "risk_guard": guard, "profit_guaranteed": False}
+            outcome, message = live_plan_execution_outcome(plan)
+            return {"ok": True, "order": {"order_id": result.get("orderId"), "client_order_id": client_id, "status": result.get("status", plan["status"])}, "plan": plan, "risk_guard": guard, "execution_outcome": outcome, "message": message, "profit_guaranteed": False}
         except (LiveExchangeError, BinanceDemoError) as exc:
             if isinstance(exc, LiveExchangeError) and exc.unknown_execution:
                 lock_live_execution(
@@ -4083,7 +4211,8 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
                 "notional_usdt": actual_quantity * actual_entry if actual_quantity > 0 and actual_entry > 0 else body.margin_usdt * body.leverage,
             })
             executed_symbols.append(symbol)
-            state["auto"]["last_decision"] = f"{symbol} {signal['direction']} canlı işlem açıldı; Stop/TP doğrulandı."
+            _outcome, message = live_plan_execution_outcome(plan)
+            state["auto"]["last_decision"] = message
             snapshot = await account_snapshot(client)
             if len(snapshot.get("positions", [])) >= int(state["policy"]["max_positions"]):
                 break

@@ -325,7 +325,10 @@ class PartialFillTests(unittest.TestCase):
         self.assertEqual(closed_quantities, ["0.007"])
         self.assertEqual(Decimal(plan["quantity"]), Decimal("0.007"))
         self.assertEqual(plan["entry_cancellation_state"], "CANCELLED")
-        self.assertEqual(plan["status"], "GÜVENLİK İÇİN KAPATILDI")
+        self.assertEqual(plan["status"], "GÜVENLİK KAPATMASI · DOĞRULAMA BEKLİYOR")
+        self.assertEqual(plan["safety_close_status"], "SUBMITTED")
+        self.assertEqual(execution.live_plan_execution_outcome(plan)[0], "SAFETY_CLOSE_REQUESTED")
+        self.assertIsNot(plan.get("pnl_verified"), True)
         self.assertFalse(plan["entry_remainder_pending"])
         self.assertEqual(plan["stop_install_attempts"], 3)
         self.assertEqual(len([call for call in client.calls if call[:2] == ("GET", "/fapi/v1/openAlgoOrders")]), 3)
@@ -388,9 +391,9 @@ class PartialFillTests(unittest.TestCase):
         )
         client = PartialFillClient(plan)
         client.algos = [
-            {"symbol": "BTCUSDT", "side": "SELL", "type": "STOP_MARKET", "closePosition": "true", "triggerPrice": "49000", "clientAlgoId": execution.client_id_for("SL", plan["intent_id"])},
-            {"symbol": "BTCUSDT", "side": "SELL", "type": "TAKE_PROFIT_MARKET", "quantity": "0.003", "reduceOnly": "true", "triggerPrice": "51000", "clientAlgoId": execution.client_id_for("TP12", plan["intent_id"])},
-            {"symbol": "BTCUSDT", "side": "SELL", "type": "TAKE_PROFIT_MARKET", "closePosition": "true", "triggerPrice": "53000", "clientAlgoId": execution.client_id_for("TP3", plan["intent_id"])},
+            {"symbol": "BTCUSDT", "side": "SELL", "type": "STOP_MARKET", "closePosition": "true", "triggerPrice": "49000", "workingType": "MARK_PRICE", "clientAlgoId": execution.client_id_for("SL", plan["intent_id"])},
+            {"symbol": "BTCUSDT", "side": "SELL", "type": "TAKE_PROFIT_MARKET", "quantity": "0.003", "reduceOnly": "true", "triggerPrice": "51000", "workingType": "MARK_PRICE", "clientAlgoId": execution.client_id_for("TP12", plan["intent_id"])},
+            {"symbol": "BTCUSDT", "side": "SELL", "type": "TAKE_PROFIT_MARKET", "closePosition": "true", "triggerPrice": "53000", "workingType": "MARK_PRICE", "clientAlgoId": execution.client_id_for("TP3", plan["intent_id"])},
         ]
         plan.update({"stop_algo_id": 101, "stop_client_id": client.algos[0]["clientAlgoId"]})
         state = execution.initial_state()
@@ -416,6 +419,7 @@ class PartialFillTests(unittest.TestCase):
         client.algos = [{
             "symbol": "BTCUSDT", "side": "SELL", "type": "STOP_MARKET",
             "closePosition": "true", "triggerPrice": "49000",
+            "workingType": "MARK_PRICE",
             "clientAlgoId": execution.client_id_for("SL", plan["intent_id"]),
         }]
         plan.update({"stop_algo_id": 101, "stop_client_id": client.algos[0]["clientAlgoId"]})
