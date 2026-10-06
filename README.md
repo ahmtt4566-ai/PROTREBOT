@@ -302,6 +302,136 @@ Offline regressions: `backend/tests/test_backtest_baseline.py` plus the
 unchanged stage 1/2, canonical, scope, protection and accounting suites.
 Stage 4 variants and strategy tuning are deliberately absent.
 
+## Offline diagnosis (stage 3b)
+
+This is an opt-in **conditional diagnosis**, not a strategy change or a LIVE
+policy upgrade. The stage 3 engine, signals, sizing, exits and LIVE source stay
+unchanged. The separate command varies only total exposure **350 / 700 / 1050 /
+unlimited**. The LIVE sanitizer normally clamps values to 350. Inside each
+serial offline replay only, a scoped adapter replaces that one sanitized field
+and restores the original function even on exceptions. Unlimited uses infinity
+internally and NULL in exported policy; unknown position exposure is still
+rejected. No LIVE API/config limit is raised.
+
+```powershell
+$data = 'C:\research\protrebot\data'
+$output = 'C:\research\protrebot\diagnosis'
+.\.venv\Scripts\python.exe backend\backtest_diagnostics_cli.py --data $data --metadata "$data\current-metadata.json" --output $output --start 2025-04-01T00:00:00+00:00 --end 2026-10-01T00:00:00+00:00 --conditional-current-metadata --reference-baseline 'C:\research\protrebot\baseline\stop_first-spread2-slip3.json'
+```
+
+No download/network client is used. Closed-candle native decisions are computed
+once and reused across all caps. `--workers` accepts 1-4 spawned processes
+(default: at most four, no more than half the reported CPUs); serial and
+parallel native results are regression-tested. Workers compute only independent
+symbol signals, not portfolio/risk/order decisions. Replays are serial. The
+optional reference requires exact 350 parity for trades, policy, summary,
+bootstrap and rejection counts before any higher-cap result is accepted.
+
+Outputs are outside Git:
+
+- `diagnosis.json` and `exposure-comparison.csv`: counts, expectancy, USDT PF,
+  closed-curve drawdown in USDT/R, trade/day/week 95% bootstrap intervals.
+- Four `cap-*.json` / trade-CSV / monthly-CSV sets; complete funding/R and
+  inherited conditional-current-metadata assumptions remain explicit.
+- Added and removed trades versus 350 **and the preceding cap**, matched by
+  deterministic signal ID; common-trade changes are counted too. Higher caps
+  are not necessarily supersets: portfolio occupancy and daily gates alter
+  later eligibility. Added-trade expectancy is measured on those trades alone,
+  not inferred from subtracting aggregate expectancy.
+- Exit groups: Stop before TP1, TP1 then Stop, TP3, other/unclosed; counts,
+  eligible mean net R, MAE/MFE median and quartiles, including pre-Stop MFE.
+- LONG/SHORT totals and every UTC **closure month**, including empty months
+  with NULL expectancy/PF/PnL rather than fabricated results.
+
+**Excursion bounds:** MARK_PRICE price movement is scaled by original quantity
+over immutable initial risk, never using the TP1 remainder as the denominator.
+The actual modeled entry fill is the origin (including entry slippage);
+fees, funding and exit slippage are not included in price excursions.
+MAE is positive adverse movement and MFE positive favorable movement.
+`mae_r` / `mfe_r` are conservative lower bounds at the terminal candle;
+`*_upper` adds possible pre-exit extremes. With STOP_FIRST, the terminal high
+cannot be assumed to precede the Stop. TP3 censors movement beyond its trigger;
+opening-gap exits use only the open. No candle after closure is read. Missing
+marks, initial risk or verified closure produce explicit NULL/status values.
+These are not tick-level exact MAE/MFE or proof of the pre-Stop path.
+
+**Bootstrap:** unchanged paired-trade IID intervals are compared with whole
+UTC entry-day and Monday-week clusters. All calendar clusters, including empty
+days/weeks and partial boundary blocks, are sampled with replacement. Each draw
+uses every eligible trade within selected clusters; expectancy is trade-weighted,
+PF is resampled aggregate positive/negative net USDT PnL. Empty resamples are
+counted and omitted, not treated as zero; fewer than two active clusters returns
+NULL intervals. No-loss PF tails are explicitly unbounded and all-zero-PnL PF
+is undefined. Clustering preserves within-block, not cross-block dependence.
+Monthly differences describe temporal concentration; they do not establish
+ADX/trend/volatility regime causation. No Stage 4, tuning or walk-forward claim.
+
+### Measured conditional diagnosis
+
+BTCUSDT/ETHUSDT/SOLUSDT/BNBUSDT, 2025-04-01 through 2026-09-30 UTC;
+current metadata observed 2026-10-06, equity 1,000 USDT, fees 5 bp/side,
+slippage 3 bp/side, spread 2 bp, STOP_FIRST. The 350 replay matched the
+stage 3 trades/summary/bootstrap/gates exactly. Funding-null and remaining
+data-gap counts are zero. These are conditional historical results, not a
+verified historical-rules baseline or a prediction.
+
+| Exposure cap USDT | Trades | Mean net R | Net USDT PF | Closed DD USDT | Added vs 350 | Added mean net R | Removed vs 350 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 350 | 103 | -0.0999 | 0.7624 | 49.98 | 0 | NULL | 0 |
+| 700 | 178 | -0.0559 | 0.8755 | 102.33 | 104 | -0.0538 | 29 |
+| 1050 | 185 | -0.0563 | 0.8776 | 96.83 | 110 | -0.0446 | 28 |
+| Unlimited (offline) | 188 | -0.0547 | 0.8766 | 97.58 | 113 | -0.0422 | 28 |
+
+Every shared trade retained identical fill/quantity/closure/net R. Against the
+preceding cap, 1050 added 18 (mean +0.0023 R) and removed 11; unlimited added
+4 (mean +0.3910 R) and removed 1. Tiny incremental samples are not evidence
+of an improved strategy.
+
+Bootstrap: 2,000 draws, seed 2026; 548 calendar days / 79 Monday weeks.
+Baseline has 99 active days and 56 active weeks. No empty/no-loss resamples
+occurred in the actual clustered runs.
+
+| Cap | Sampling | Mean net R 95% CI | USDT PF 95% CI |
+|---|---|---|---|
+| 350 | Trade | [-0.3245, 0.1146] | [0.4495, 1.1672] |
+| 350 | Day | [-0.3253, 0.1369] | [0.4529, 1.2020] |
+| 350 | Week | [-0.3357, 0.1502] | [0.4346, 1.2155] |
+| 700 | Trade | [-0.2300, 0.1342] | [0.6140, 1.2407] |
+| 700 | Day | [-0.2398, 0.1459] | [0.6047, 1.2689] |
+| 700 | Week | [-0.2609, 0.1682] | [0.5718, 1.3100] |
+| 1050 | Trade | [-0.2313, 0.1243] | [0.6174, 1.2176] |
+| 1050 | Day | [-0.2392, 0.1421] | [0.6098, 1.2619] |
+| 1050 | Week | [-0.2572, 0.1777] | [0.5831, 1.3351] |
+| Unlimited | Trade | [-0.2238, 0.1152] | [0.6206, 1.1952] |
+| Unlimited | Day | [-0.2365, 0.1439] | [0.6169, 1.2603] |
+| Unlimited | Week | [-0.2568, 0.1793] | [0.5838, 1.3405] |
+
+Baseline exits: Stop before TP1 **43 / -1.1719 R**; TP1 then Stop
+**34 / -0.1817 R**; TP3 **26 / +1.7799 R** (count / mean net R).
+MFE quartiles before any TP1 on Stop trades: **0.1190 / 0.4155 / 0.6824 R**.
+Pre-Stop MFE on TP1-then-Stop trades: **1.1683 / 1.5005 / 2.0155 R**.
+All-trade MAE quartiles: **0.9641 / 1.0313 / 1.0330 R**; MFE:
+**0.5188 / 1.1370 / 2.8522 R**. Bound columns remain separate even though
+these aggregate quartiles coincide in this dataset.
+
+Baseline LONG: 69 trades, +0.0100 mean R, PF 0.9550, net -4.36 USDT;
+SHORT: 34 trades, -0.3231 mean R, PF 0.4683, net -33.78 USDT.
+Mean R weights trades equally; USDT PF/PnL weights their actual initial
+risks, so a slightly positive mean R need not imply positive USDT profit.
+Largest negative closure months were 2025-06 (-15.40), 2026-04 (-20.31)
+and 2026-09 (-22.18 USDT); 2026-02 had no trades. Monthly/direction details
+are retained in every scenario's JSON/monthly CSV. This temporal concentration
+does not establish a particular trend/volatility regime as its cause.
+
+All caps still have point PF below 1 and negative mean R; every displayed
+95% expectancy interval crosses zero. Relaxing exposure is not by itself a
+demonstrated profitability fix and roughly doubles closed-curve drawdown.
+
+Regressions: `backend/tests/test_backtest_diagnostics.py` and the unchanged
+stage 3/native risk/accounting suites: 20 new tests, 743 passed / 216 subtests;
+one optional PostgreSQL skip and one previously proven stale-source baseline
+deselection. No strategy, LIVE source or stage 4 change.
+
 ## LIVE entry partial fills
 
 Exact entry identity, symbol and direction remain mandatory. A positive actual
