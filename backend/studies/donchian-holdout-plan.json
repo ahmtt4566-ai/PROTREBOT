@@ -182,5 +182,5 @@
     "tests/test_offline_strategy_facade.py": "4a42f8abd87d34a11c9452956f3d1cbd87769ba5414b00180320984f488213b4",
     "tests/test_strategy_original_adapter.py": "27dde98a0dffdc7a7d56c3753f698b03084890105c005795260e8a1a7cf898c9"
   },
-  "sealed_test_archive_sha256": ""
+  "sealed_test_archive_sha256": "1891416dd161ca685b5e0ac9a86535c839f0e37dbac2dbed5ba8c5487a8b92d2"
 }
