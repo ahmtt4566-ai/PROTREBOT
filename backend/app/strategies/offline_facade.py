@@ -37,6 +37,17 @@ Offline-only gap exclusion:
 - gap_blackout is a separate data exclusion, not an added/relaxed native gate.
   Policy parameters and per-symbol inventory enter cache provenance. Unknown
   native gap trades are reported separately using unverified native events.
+- Funding gaps use the literal native elapsed > right interval * 3600 + 60
+  condition. Interval changes alone do not flag a gap; a transition with excess
+  elapsed time still does. The left event is the reported gap start, not an
+  inferred missing payment timestamp. No rounding, synthetic events or
+  head/tail/month gaps are added. Funding gaps use the same 72h pre-blackout,
+  labelled stream=funding, with no post-gap warmup or extra in-gap entry gate.
+- Funding affected trades use native right > opened and left < native end.
+  This conservative overlap need not prove an actual lost payment in a trade.
+  Native settlement, cash, funding_known, closure events and net R stay intact.
+  Funding-affected trades and incomplete funding are separate from verified N:
+  only CLOSED rows with complete funding/fees and finite net PnL/R count.
 Bu dışlama gelecekteki veri boşluklarının bilgisine dayanır; canlıda geçerli
 değildir; veri kalitesi dışlamasıdır.
 
@@ -52,6 +63,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -73,7 +85,7 @@ from ..backtest_baseline import (
 )
 from ..backtest_data import Dataset, Series
 from ..liquidation_risk import isolated_liquidation_risk
-from .contracts import StrategyInput, StrategyResult
+from .contracts import Number, StrategyInput, StrategyResult
 from .donchian_breakout import evaluate
 from .donchian_indicator import (
     INTERVAL_SECONDS,
@@ -85,9 +97,10 @@ from .offline_admission import AdmissionReport, admit, approved_params
 from .provenance import KAIS_ORIGINAL_ID, parameter_hash
 
 logger = logging.getLogger(__name__)
-CACHE_NAMESPACE = "offline_donchian_closed_contract_window_gap_v1"
+CACHE_NAMESPACE = "offline_donchian_closed_contract_window_gap_funding_v1"
 GAP_BLACKOUT_HOURS = 72
 GAP_BLACKOUT_BARS = GAP_BLACKOUT_HOURS * 3600 // INTERVAL_SECONDS
+FUNDING_GAP_TOLERANCE_SECONDS = 60
 CacheKey = tuple[str, str, str, str, str, str, int]
 
 
@@ -113,8 +126,8 @@ class _ClosedDataWindow:
 @dataclass(frozen=True)
 class _DataGap:
     stream: str
-    start: int
-    end_exclusive: int
+    start: Number
+    end_exclusive: Number
 
 
 def _series_gaps(series: Series, stream: str, config: Config) -> tuple[dict[str, int], tuple[_DataGap, ...]]:
@@ -133,6 +146,40 @@ def _series_gaps(series: Series, stream: str, config: Config) -> tuple[dict[str,
     if expected < end:
         gaps.append(_DataGap(stream, expected, end))
     return {"start_inclusive": start, "end_exclusive": end}, tuple(gaps)
+
+
+def _funding_gaps(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], tuple[_DataGap, ...]]:
+    schedule = []
+    for row in rows:
+        if "time" not in row or "interval_hours" not in row:
+            raise ValueError("Offline funding gap inventory lacks event time/interval")
+        at, hours = row["time"], row["interval_hours"]
+        if (
+            type(at) not in (int, float) or not math.isfinite(at)
+            or type(hours) not in (int, float) or not math.isfinite(hours) or hours <= 0
+            or not math.isfinite(hours * 3600 + FUNDING_GAP_TOLERANCE_SECONDS)
+        ):
+            raise ValueError("Offline funding gap inventory requires finite event time and positive interval")
+        schedule.append({"time": at, "interval_hours": hours})
+    gaps, details = [], []
+    for left, right in pairwise(schedule):
+        elapsed = right["time"] - left["time"]
+        if elapsed <= 0 or not math.isfinite(elapsed):
+            raise ValueError("Offline funding gap inventory requires strictly increasing finite timestamps")
+        limit = right["interval_hours"] * 3600 + FUNDING_GAP_TOLERANCE_SECONDS
+        if elapsed > limit:
+            gap = _DataGap("funding", left["time"], right["time"])
+            gaps.append(gap)
+            details.append({
+                **asdict(gap), "elapsed_seconds": elapsed,
+                "right_interval_hours": right["interval_hours"], "limit_seconds": limit,
+            })
+    return {
+        "event_count": len(schedule),
+        "first_event": schedule[0]["time"] if schedule else None,
+        "last_event": schedule[-1]["time"] if schedule else None,
+        "schedule_hash": parameter_hash(schedule), "gaps": details,
+    }, tuple(gaps)
 
 
 class DonchianOfflineEngine:
@@ -162,9 +209,11 @@ class DonchianOfflineEngine:
             for stream, series in (("contract", frames["15m"]), ("mark", data.marks[symbol])):
                 coverage[stream], missing = _series_gaps(series, stream, config)
                 gaps.extend(missing)
+            funding, missing = _funding_gaps(data.funding.get(symbol, []))
+            gaps.extend(missing)
             self._gaps[symbol] = tuple(gaps)
             self._gap_inventory[symbol] = {
-                "coverage": coverage, "gaps": [asdict(gap) for gap in gaps],
+                "coverage": coverage, "funding": funding, "gaps": [asdict(gap) for gap in gaps],
             }
 
     @property
@@ -180,9 +229,14 @@ class DonchianOfflineEngine:
             "gap_source": "LOADED_TIMESTAMPS_AND_REPLAY_BOUNDS",
             "contract_reentry": "W_CONTIGUOUS_CLOSED_BARS_AFTER_GAP",
             "mark_reentry": "NATIVE_CURRENT_BAR_NO_EXTRA_WARMUP",
+            "funding_gap_rule": "ELAPSED_GT_RIGHT_INTERVAL_HOURS_X_3600_PLUS_TOLERANCE",
+            "funding_gap_tolerance_seconds": FUNDING_GAP_TOLERANCE_SECONDS,
+            "funding_gap_start": "LEFT_EVENT_TIME",
+            "funding_reentry": "NATIVE_NO_EXTRA_WARMUP",
+            "verified_n": "CLOSED_COMPLETE_FUNDING_FEES_FINITE_NET_PNL_AND_R",
         }
         return {
-            "policy_id": "offline_future_gap_blackout_v1",
+            "policy_id": "offline_future_gap_blackout_funding_v1",
             "parameters": parameters, "parameter_hash": parameter_hash(parameters),
         }
 
@@ -315,6 +369,57 @@ class DonchianOfflineEngine:
                 "native_status": position.status, "missing_streams": missing,
             })
         return {"trade_count": len(rows), "trades": rows}
+
+    def _funding_data_gap_report(
+        self, rows: list[dict[str, Any]], unknown: dict[str, Any],
+    ) -> dict[str, Any]:
+        unknown_ends = {
+            row["signal_id"]: int(datetime.fromisoformat(row["detected_at"]).timestamp())
+            for row in unknown["trades"]
+        }
+        affected = []
+        for position, row in zip(self.state.trades, rows, strict=True):
+            if position.status == "CLOSED":
+                if position.closed_at is None:
+                    raise ValueError("Native CLOSED trade lacks a funding coverage end")
+                end = position.closed_at
+            elif position.status == "OPEN_AT_END":
+                end = self.state.config.end - 1
+            elif position.status == "UNKNOWN_DATA_GAP":
+                if position.signal_identifier not in unknown_ends:
+                    raise ValueError("Native unknown trade lacks a funding lifetime end")
+                end = unknown_ends[position.signal_identifier]
+            else:
+                raise ValueError("Native trade status is not final for funding gap reporting")
+            matched = [
+                gap for gap in self._gaps[position.symbol] if gap.stream == "funding"
+                and gap.end_exclusive > position.opened_at and gap.start < end
+            ]
+            if matched:
+                affected.append({
+                    "signal_id": position.signal_identifier, "symbol": position.symbol,
+                    "opened_at": row["opened_at"], "end_at": iso(end),
+                    "native_status": position.status, "funding_complete": row["funding_complete"],
+                    "net_r_known": row["net_r"] is not None, "gaps": [asdict(gap) for gap in matched],
+                })
+        return {"trade_count": len(affected), "trades": affected}
+
+    @staticmethod
+    def _measurement_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+        verified = sum(
+            row["status"] == "CLOSED" and row["funding_complete"] is True
+            and row["commission_complete"] is True
+            and row["net_pnl"] is not None and math.isfinite(row["net_pnl"])
+            and row["net_r"] is not None and math.isfinite(row["net_r"])
+            for row in rows
+        )
+        return {
+            "fully_verified_completed": verified,
+            "closed": sum(row["status"] == "CLOSED" for row in rows),
+            "open_at_end": sum(row["status"] == "OPEN_AT_END" for row in rows),
+            "unknown_data_gap": sum(row["status"] == "UNKNOWN_DATA_GAP" for row in rows),
+            "funding_incomplete": sum(row["funding_usdt"] is None for row in rows),
+        }
 
     async def enter(self, symbol: str, at: int) -> None:
         state = self.state
@@ -466,6 +571,7 @@ class DonchianOfflineEngine:
             direction: metrics([row for row in rows if row["direction"] == direction], state.config.initial_equity)
             for direction in ("LONG", "SHORT")
         }
+        unknown = self._unknown_data_gap_report()
         return {
             "label": "OFFLINE DONCHIAN ONLY / NOT LIVE OR DEMO",
             "strategy": asdict(self.params.provenance), "exit_policy_id": self.params.exit_policy_id,
@@ -473,7 +579,9 @@ class DonchianOfflineEngine:
             "gap_policy": self.gap_policy, "gap_inventory": self.gap_inventory,
             "gap_blackout_count": len(self.gap_blackouts), "gap_blackouts": deepcopy(self.gap_blackouts),
             "data_quality_rejections": deepcopy(self.data_quality_rejections),
-            "unknown_data_gaps": self._unknown_data_gap_report(),
+            "unknown_data_gaps": unknown,
+            "funding_data_gaps": self._funding_data_gap_report(rows, unknown),
+            "measurement_counts": self._measurement_counts(rows),
             "period": {"start_inclusive": iso(state.config.start), "end_exclusive": iso(state.config.end)},
             "intrabar": state.config.intrabar, "spread_bps": state.config.spread_bps,
             "slippage_bps": state.config.slippage_bps, "fee_bps_per_side": 5,
