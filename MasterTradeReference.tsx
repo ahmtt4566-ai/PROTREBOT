@@ -135,7 +135,7 @@ export default function MasterTradeReference(props: Props) {
         <article className="refCard"><small>SİNYAL / DURUM</small><strong className="refSignal" data-tone={directionTone(decision.direction)}>{available ? decision.status : 'Analiz yok'}</strong><span>{analysis?.trend ?? '—'}</span></article>
         <article className="refCard"><small>MTF / YÖN</small><strong><b className="refPill" data-tone={directionTone(decision.direction)}>{available ? decision.direction : '—'}</b></strong><span>{decision.mtfScore === null ? '—' : `${decision.mtfConfirmed} / ${decision.mtfTotal} teyit`}</span></article>
         <article className="refCard"><small>GÜVEN</small><strong><b className="refPill">{numeric(decision.confidenceScore, '%')}</b></strong><span>{decision.signalStrength ?? '—'}</span></article>
-        <article className="refCard"><small>RİSK / ÖDÜL</small><strong>{decision.riskReward === null ? '—' : `1 : ${numeric(decision.riskReward, '', 2)}`}</strong><span>{decision.entryQuality ?? '—'}</span></article>
+        <article className="refCard"><small>RİSK / ÖDÜL</small><strong>{decision.riskReward === null ? '—' : `1 : ${numeric(decision.riskReward, '', 2)}`}</strong><span>{decision.entryQuality ?? '—'} · Target R/R; LIVE: TP1 60%, remainder TP3.</span></article>
       </section>
       <section className="refCenter">
         <section className="refCard refChart">
@@ -181,7 +181,7 @@ export default function MasterTradeReference(props: Props) {
           <PremiumBoundary label="Trigger monitor" compact>
             <MasterTradeAccordions decision={decision} trigger={trigger} analysis={analysis} timeline={props.timeline}/>
           </PremiumBoundary>
-          <p className="refSafety">Final Decision does not send orders or grant Auto Trade eligibility.</p>
+          <p className="refSafety">Final Decision is a presentation score; it does not send orders or grant Auto Trade eligibility.</p>
         </section>
       </aside>
     </main>

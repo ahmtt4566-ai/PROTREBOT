@@ -890,12 +890,13 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
                 <div><span className="panelEyebrow">FINAL DECISION</span><h3>{analysis ? tradeDecision.status : 'Analiz yok'}</h3><small>{draft.market} · {interval} · {tradeDecision.marketRegime}</small></div>
                 <div className="decisionScore"><strong><MasterTradeValue>{fmtDecisionNumber(tradeDecision.opportunityScore)}</MasterTradeValue></strong><span>/ 100<br />OPPORTUNITY</span></div>
               </header>
+              <small>Presentation score only — not an order decision.</small>
               <div className="decisionMetricGrid">
                 <div><small>{masterLayoutV2 ? 'Güven' : 'CONFIDENCE'}</small><strong><MasterTradeValue>{tradeDecision.confidenceScore === null ? '--' : `${tradeDecision.confidenceScore}%`}</MasterTradeValue></strong></div>
                 <div><small>DIRECTION</small><strong><MasterTradeValue>{analysis ? tradeDecision.direction : '--'}</MasterTradeValue></strong></div>
                 <div><small>SIGNAL STRENGTH</small><strong><MasterTradeValue>{tradeDecision.signalStrength || '--'}</MasterTradeValue></strong></div>
                 <div><small>ENTRY QUALITY</small><strong><MasterTradeValue>{tradeDecision.entryQuality || '--'}</MasterTradeValue></strong></div>
-                <div><small>RISK / REWARD</small><strong><MasterTradeValue>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</MasterTradeValue></strong></div>
+                <div><small>RISK / REWARD</small><strong><MasterTradeValue>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</MasterTradeValue></strong><em>Target R/R; LIVE: TP1 60%, remainder TP3.</em></div>
                 <div><small>SIGNAL</small><strong><MasterTradeValue>{tradeDecision.freshness || '--'}</MasterTradeValue></strong><em>Age {fmtSignalAge(tradeDecision.signalAgeSeconds)}</em></div>
               </div>
               </div>

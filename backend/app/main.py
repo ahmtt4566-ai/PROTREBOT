@@ -329,6 +329,12 @@ def canonical_historical_decision(
     historical_policy_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate one deterministic decision from candles strictly before decision_time."""
+    try:
+        decision_timestamp = int(decision_time)
+        if not math.isfinite(decision_timestamp):
+            raise ValueError("Non-finite decision timestamp")
+    except (TypeError, ValueError, OverflowError):
+        return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "INVALID_CANDLE_DATA", "reasons": ["invalid decision timestamp"]}
     effective_policy = _resolve_historical_policy_override(historical_policy_override)
     intervals = required_intervals
     closed: dict[str, list[dict]] = {}
@@ -347,14 +353,16 @@ def canonical_historical_decision(
                 low = float(row["low"])
                 close = float(row["close"])
                 volume = float(row["volume"])
-            except (KeyError, TypeError, ValueError):
+                if not all(math.isfinite(value) for value in (timestamp, open_price, high, low, close, volume)):
+                    raise ValueError("Non-finite OHLCV")
+            except (KeyError, TypeError, ValueError, OverflowError):
                 return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "INVALID_CANDLE_DATA", "reasons": [f"{interval}: invalid OHLCV"]}
             if high < max(open_price, close) or low > min(open_price, close) or high < low or volume < 0:
                 return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "INVALID_CANDLE_DATA", "reasons": [f"{interval}: invalid OHLCV"]}
             interval_seconds = INTERVAL_SECONDS.get(interval)
             if interval_seconds is None:
                 return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "UNSUPPORTED_TIMEFRAME", "reasons": [interval]}
-            if timestamp + interval_seconds > int(decision_time):
+            if timestamp + interval_seconds > decision_timestamp:
                 continue
             if timestamps and timestamp <= timestamps[-1]:
                 return {"decision": "WAIT", "symbol": symbol, "signal_timestamp": None, "entry_eligible": False, "reason": "NON_CHRONOLOGICAL_CANDLES", "reasons": [f"{interval}: timestamps not strictly increasing"]}
@@ -438,7 +446,7 @@ def canonical_historical_decision(
         "decision": "BUY" if entry_eligible and analysis["direction"] == "LONG" else "SELL" if entry_eligible and analysis["direction"] == "SHORT" else "WAIT",
         "symbol": symbol,
         "signal_timestamp": closed["15m"][-1]["time"],
-        "decision_time": int(decision_time),
+        "decision_time": decision_timestamp,
         "latest_closed_timestamps": latest_closed_timestamps,
         "analysis": analysis,
         "regime": analysis.get("trend"),
