@@ -69,6 +69,7 @@ def research_path_guard():
 
 async def replay_counts(
     engine: Any, phase: Phase, progress: Callable[[dict], None] | None = None,
+    *, entry_data_exclusion: Callable[[str, int, str], bool] | None = None,
 ) -> dict[str, Any]:
     from app import v25_execution as live
     from app.strategies.original_offline_engine import trade_counts
@@ -89,6 +90,9 @@ async def replay_counts(
             decisions[engine.data.canonical(symbol, at, engine.policy)["decision"]] += 1
         tickers = []
         for symbol in symbols:
+            if (symbol not in engine.positions and entry_data_exclusion is not None
+                    and entry_data_exclusion(symbol, at, "before_market_ranking")):
+                continue
             ticker = engine.data.frames[symbol]["15m"].ticker(at, symbol)
             if ticker is not None:
                 tickers.append(ticker)
