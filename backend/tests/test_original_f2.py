@@ -192,6 +192,35 @@ def test_raw_verified_records_are_persisted_with_native_r_feature_and_hash(offli
     assert result["raw_trades"]["sha256"] == screen.sha256_file(raw_path)
     assert rows[0]["net_r"] == rows[0]["native_row"]["net_r"]
     assert rows[0]["f2"] == abs(rows[0]["ema20_15m"] - rows[0]["ema200_15m"]) / rows[0]["atr14_15m"]
+    assert rows[0]["canonical_analysis"]["ema"]["ema200"] == rows[0]["ema200_15m"]
+    for interval, context in rows[0]["closed_contract_context"].items():
+        assert 0 < len(context) <= 259
+        duration = {"15m": 900, "1h": 3600, "4h": 14400}[interval]
+        assert context[-1]["time"] <= rows[0]["opened_at_epoch"] - duration
+    assert rows[0]["native_accounting_decimal"]["commission"] == str(
+        screen.Decimal(rows[0]["native_accounting_decimal"]["commission"]))
+    entries = [json.loads(line) for line in (tmp_path / "entries-BASELINE.jsonl").read_text(
+        encoding="utf-8").splitlines()]
+    assert len(entries) == result["accepted_entry_records"]["N"] == 1
+    assert entries[0]["fully_verified"] is True and "net_r" not in entries[0]
+    assert result["accepted_entry_records"]["sha256"] == screen.sha256_file(tmp_path / "entries-BASELINE.jsonl")
+    initial = screen.Decimal(rows[0]["funding_initial_cashflow_decimal"])
+    changes = sum((screen.Decimal(row["cashflow_delta_decimal"])
+                   for row in rows[0]["funding_cashflow_trace"]), screen.Decimal(0))
+    assert initial + changes == screen.Decimal(rows[0]["native_accounting_decimal"]["funding_cashflow"])
+
+
+def test_unverified_entry_is_saved_without_pnl_or_r_and_excluded_from_verified_n(offline_only, tmp_path):
+    plan = screen.locked_plan()
+    plan["symbols"] = [fixtures.BTC]
+    result = offline_only.run_until_complete(screen.run_once(
+        fixtures.open_dataset(), plan, fixtures.phase(bars=2, name="BASELINE"), tmp_path, lambda value: None))
+    entries = [json.loads(line) for line in (tmp_path / "entries-BASELINE.jsonl").read_text().splitlines()]
+    assert result["metrics"]["N"] == 0
+    assert (tmp_path / "trades-BASELINE.jsonl").read_text() == ""
+    assert len(entries) == result["accepted_entry_records"]["N"] == 1
+    assert entries[0]["status"] == "OPEN_AT_END" and entries[0]["fully_verified"] is False
+    assert "net_r" not in entries[0] and "net_pnl" not in entries[0]
 
 
 def archive(month="2024-07", path=None):
@@ -265,3 +294,55 @@ def test_plan_locks_costs_sequence_cleanliness_and_no_runtime_permission():
     assert plan["network_or_trade"] is False and plan["sealed_registry_or_test_window_reads"] is False
     assert screen.PLAN_SHA == screen.sha256_file(screen.PLAN)
     assert json.loads(screen.PLAN.read_bytes()) == plan
+
+
+@pytest.mark.parametrize("status", ["run_started", "run_completed", "completed", "failed"])
+def test_status_emission_uses_real_stream_value_signature(status, capsys):
+    screen.emit_status({"status": status, "synthetic": True})
+    assert json.loads(capsys.readouterr().out) == {"status": status, "synthetic": True}
+
+
+def test_synthetic_startup_and_sequential_orchestration_emit_without_replay(offline_only, tmp_path, capsys):
+    plan, data, calls = screen.locked_plan(), fixtures.dataset(), []
+
+    async def synthetic_phase(loaded, configuration, phase, destination, progress):
+        assert loaded is data and configuration is plan and destination == tmp_path
+        calls.append(phase.name)
+        progress({"phase": phase.name, "synthetic_no_replay": True})
+        return {
+            "native_counts": {"canonical_distribution": {"BUY": 0, "SELL": 0, "WAIT": 0},
+                              "config_sha256": "synthetic", "policy_sha256": "synthetic"},
+            "metrics": {"N": 0, "mean_net_r": None, "usdt_pf": None},
+        }
+
+    result = offline_only.run_until_complete(screen.execute(
+        plan, tmp_path, _load_dataset=lambda value: data, _run_phase=synthetic_phase))
+    assert calls == ["BASELINE", "F2"]
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [(row["status"], row["run"]) for row in messages] == [
+        ("run_started", "BASELINE"), ("run_completed", "BASELINE"),
+        ("run_started", "F2"), ("run_completed", "F2"),
+    ]
+    for row in (messages[1], messages[3]):
+        assert row["report_sha256"] == screen.sha256_file(tmp_path / f"report-{row['run']}.json")
+    assert result["decision"]["value"] == "DUR"
+    assert result["input_metadata_snapshot"] == data.metadata
+    json.dumps(result, allow_nan=False)
+    progress = [json.loads(line) for line in (tmp_path / "progress.jsonl").read_text().splitlines()]
+    assert progress == [{"phase": name, "synthetic_no_replay": True} for name in calls]
+
+
+def test_synthetic_startup_failure_does_not_retry_or_start_second_phase(offline_only, tmp_path, capsys):
+    plan, data, calls = screen.locked_plan(), fixtures.dataset(), []
+
+    async def fail_once(loaded, configuration, phase, destination, progress):
+        calls.append(phase.name)
+        raise screen.MeasurementError("SYNTHETIC_STARTUP_FAILURE")
+
+    with pytest.raises(screen.MeasurementError, match="SYNTHETIC_STARTUP_FAILURE"):
+        offline_only.run_until_complete(screen.execute(
+            plan, tmp_path, _load_dataset=lambda value: data, _run_phase=fail_once))
+    assert calls == ["BASELINE"]
+    assert json.loads(capsys.readouterr().out) == {"status": "run_started", "run": "BASELINE"}
+    assert not (tmp_path / "report-BASELINE.json").exists()
+    assert not (tmp_path / "report-F2.json").exists()

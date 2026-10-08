@@ -3,6 +3,8 @@
 Fixed fourth trial, partly clean period: passing is only a Demo observation
 candidate, not verification. One process runs BASELINE then F2 once each.
 Existing real daily mark supplements are retained; no interpolation is used.
+Persist native entry analysis, closed contexts, specs and funding cashflow traces.
+Accepted-entry records include unverified entries without performance metrics.
 """
 
 from __future__ import annotations
@@ -13,13 +15,15 @@ import json
 import math
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
 from statistics import fmean
 
 import measure_original_f2_counts as driver
 import prescreen_original_v2 as parent
+from app.backtest_baseline import Position
 from app.backtest_data import Dataset, load_dataset
 from app.strategies.original_f2_engine import OriginalF2RiskEngine, f2_value
 from app.strategies.original_f2_risk import PARENT_HASH, PROFILE
@@ -64,6 +68,8 @@ class FeatureDiagnosisEngine(DiagnosisEngine):
     def __init__(self, data, config):
         super().__init__(data, config)
         self.entry_f2: dict[int, dict[str, float | None]] = {}
+        self.entry_context: dict[int, dict] = {}
+        self.funding_trace: dict[int, list[dict]] = {}
 
     async def _enter(self, symbol: str, signal: dict, at: int) -> None:
         before = len(self.trades)
@@ -75,10 +81,33 @@ class FeatureDiagnosisEngine(DiagnosisEngine):
                 "f2": value,
                 "ema200_15m": longest if type(longest) in (int, float) and math.isfinite(longest) else None,
             }
+            self.entry_context[id(self.trades[-1])] = {
+                "funding_initial_cashflow_decimal": str(self.trades[-1].funding_amount),
+                "canonical_analysis": deepcopy(signal),
+                "closed_contract_context": {
+                    interval: deepcopy(series.closed(at))
+                    for interval, series in self.data.frames[symbol].items()
+                },
+            }
+
+    def advance(self, position: Position, at: int, *, opening_only: bool) -> None:
+        before, known = position.funding_amount, position.funding_known
+        super().advance(position, at, opening_only=opening_only)
+        if position.funding_amount != before or position.funding_known != known:
+            self.funding_trace.setdefault(id(position), []).append({
+                "bar_open_epoch": at, "opening_only": opening_only,
+                "cashflow_delta_decimal": str(position.funding_amount - before),
+                "cashflow_total_decimal": str(position.funding_amount),
+                "funding_known": position.funding_known,
+            })
 
 
 class F2DiagnosisEngine(OriginalF2RiskEngine, FeatureDiagnosisEngine):
     """Compose admission with the existing accepted-entry/raw-trade recorder."""
+
+
+def emit_status(value: dict) -> None:
+    emit(sys.stdout, value)
 
 
 def decision(baseline: dict, filtered: dict) -> dict:
@@ -228,11 +257,48 @@ async def run_once(
     observations = parent.verified_observations(engine.trades)
     parent.require(len(observations) == counts["counts"]["fully_verified_completed"], "VERIFIED_N_MISMATCH")
     raw_path = output / f"trades-{phase.name}.jsonl"
+    entry_path = output / f"entries-{phase.name}.jsonl"
     paths = []
-    with raw_path.open("x", encoding="utf-8", newline="\n") as stream:
+    with (
+        raw_path.open("x", encoding="utf-8", newline="\n") as stream,
+        entry_path.open("x", encoding="utf-8", newline="\n") as entries,
+    ):
         for position in engine.trades:
+            context = {
+                **engine.entry_f2[id(position)], **engine.entry_context[id(position)],
+                "funding_cashflow_trace": engine.funding_trace.get(id(position), []),
+                "native_spec": {
+                    key: str(value) if isinstance(value, Decimal) else value
+                    for key, value in position.spec.items()
+                },
+            }
+            entries.write(json.dumps({
+                "symbol": position.symbol, "direction": position.direction,
+                "signal_id": position.signal_identifier, "opened_at_epoch": position.opened_at,
+                "closed_at_epoch": position.closed_at, "status": position.status,
+                "funding_known": position.funding_known, "fully_verified": fully_verified(position),
+                "initial_quantity_decimal": str(position.quantity),
+                "remaining_quantity_decimal": str(position.remaining),
+                "native_exits": position.exits, **context,
+            }, ensure_ascii=True, allow_nan=False) + "\n")
             if fully_verified(position):
-                record = {**trade_record(engine, position), **engine.entry_f2[id(position)]}
+                record = {
+                    **trade_record(engine, position), **context,
+                    "funding_source_events": [
+                        row for row in data.funding[position.symbol]
+                        if position.opened_at <= row["time"] <= position.closed_at
+                    ],
+                    "native_accounting_decimal": {
+                        "gross_pnl": str(position.gross), "commission": str(position.commission),
+                        "funding_cashflow": str(position.funding_amount),
+                        "actual_entry": str(position.actual_entry), "tp1_quantity": str(position.tp1_quantity),
+                        "mark_entry": str(position.mark_entry),
+                    },
+                }
+                initial = Decimal(context["funding_initial_cashflow_decimal"])
+                changes = sum((Decimal(row["cashflow_delta_decimal"])
+                               for row in context["funding_cashflow_trace"]), Decimal(0))
+                parent.require(initial + changes == position.funding_amount, "FUNDING_TRACE_PARITY_MISMATCH")
                 stream.write(json.dumps(record, ensure_ascii=True, allow_nan=False) + "\n")
                 paths.append({"path": record["path"], "net_r": record["net_r"]})
     parent.require(len(paths) == len(observations), "RAW_TRADE_N_MISMATCH")
@@ -266,11 +332,19 @@ async def run_once(
         "halves_midpoint_utc": parent.stamp((phase.start + phase.end) // 2),
         "f2_filter": filters,
         "raw_trades": {"path": str(raw_path), "N": len(paths), "sha256": sha256_file(raw_path)},
+        "accepted_entry_records": {
+            "path": str(entry_path), "N": len(engine.trades), "sha256": sha256_file(entry_path),
+            "unverified_records_have_no_performance_metrics": True,
+        },
     }
 
 
-async def execute(plan: dict, output: Path) -> dict:
-    data = load_registered_dataset(plan)
+async def execute(
+    plan: dict, output: Path, *,
+    _load_dataset: Callable[[dict], Dataset] = load_registered_dataset,
+    _run_phase: Callable[[Dataset, dict, Phase, Path, Callable[[dict], None]], Awaitable[dict]] = run_once,
+) -> dict:
+    data = _load_dataset(plan)
     results = {}
     start, end = epoch(plan["window"]["start"]), epoch(plan["window"]["end_exclusive"])
     with (output / "progress.jsonl").open("x", encoding="utf-8", newline="\n") as stream:
@@ -279,14 +353,14 @@ async def execute(plan: dict, output: Path) -> dict:
             stream.flush()
 
         for name in plan["run_sequence"]:
-            emit({"status": "run_started", "run": name})
+            emit_status({"status": "run_started", "run": name})
             with quiet_native():
-                result = await run_once(data, plan, Phase(name, start, end), output, progress)
+                result = await _run_phase(data, plan, Phase(name, start, end), output, progress)
             results[name] = result
             destination = output / f"report-{name}.json"
             with destination.open("x", encoding="utf-8", newline="\n") as report:
                 json.dump(result, report, ensure_ascii=True, allow_nan=False, indent=2)
-            emit({"status": "run_completed", "run": name, "report_sha256": sha256_file(destination)})
+            emit_status({"status": "run_completed", "run": name, "report_sha256": sha256_file(destination)})
     for key in ("canonical_distribution", "config_sha256", "policy_sha256"):
         parent.require(results["BASELINE"]["native_counts"][key] == results["F2"]["native_counts"][key],
                        "COMPARATOR_PARITY_CHANGED:" + key)
@@ -294,8 +368,17 @@ async def execute(plan: dict, output: Path) -> dict:
         "schema": SCHEMA, "plan_sha256": PLAN_SHA, "provenance": plan["provenance"],
         "ledger": plan["ledger"], "window": plan["window"], "rule": RULE,
         "definitions": parent.DEFINITIONS,
+        "raw_definitions": {
+            "entry_context": "NATIVE_CANONICAL_ANALYSIS_AND_DEFAULT_CLOSED_CONTRACT_WINDOWS_NO_NEW_FEATURE_SCAN",
+            "funding_source_events": "SOURCE_EVENTS_IN_HOLDING_INTERVAL_NOT_AN_APPLIED_EVENT_LEDGER",
+            "funding_cashflow_trace": "PASSIVE_BEFORE_AFTER_NATIVE_ADVANCE_CASHFLOW_AND_KNOWN_STATE_CHANGES",
+            "decimal_fields": "LOSSLESS_NATIVE_DECIMAL_STRINGS",
+            "accepted_entry_records": "ALL_ACCEPTED_ENTRIES_NO_UNVERIFIED_PNL_OR_R",
+            "unavailable_or_undefined_metrics": "EXPLICIT_NULL_NEVER_IMPUTED",
+        },
         "source_sha256": {name: sha256_file(BACKEND / name) for name in SOURCES},
         "input_manifest_sha256": plan["inputs"]["manifest_sha256"],
+        "input_metadata_snapshot": data.metadata,
         "runs": results, "decision": decision(results["BASELINE"]["metrics"], results["F2"]["metrics"]),
     }
 
@@ -316,8 +399,8 @@ def main() -> int:
         destination = args.output / "f2-test.json"
         with destination.open("x", encoding="utf-8", newline="\n") as stream:
             json.dump(result, stream, ensure_ascii=True, allow_nan=False, indent=2)
-        emit({"status": "completed", "result": str(destination), "sha256": sha256_file(destination),
-              "decision": result["decision"]})
+        emit_status({"status": "completed", "result": str(destination), "sha256": sha256_file(destination),
+                     "decision": result["decision"]})
     return 0
 
 
@@ -325,5 +408,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except MeasurementError as exc:
-        emit({"status": "failed", "code": str(exc)})
+        emit_status({"status": "failed", "code": str(exc)})
         raise SystemExit(2) from exc
