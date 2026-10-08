@@ -1,0 +1,31 @@
+{
+  "schema": "original-development-ledger-v1",
+  "trial_limit": null,
+  "trial_limit_removed_by": "EXPLICIT_USER_DECISION_2026_10_08",
+  "historical_locked_plans_and_results_changed": false,
+  "records": [
+    {"number": 1, "name": "gap18d", "kind": "DATA_GAP_EXCEPTION", "historical_record": true},
+    {"number": 2, "name": "trend100d", "kind": "TREND_FILTER_TRIAL", "historical_record": true},
+    {"number": 3, "name": "N threshold 100", "kind": "SAMPLE_SIZE_GATE_RELAXATION", "historical_record": true},
+    {"number": 4, "name": "F2", "kind": "FIXED_FILTER_TRIAL", "result": "DUR", "failed_condition": "USDT_PF_NOT_GT_1.15", "mean_net_r": 0.06692828501315004, "usdt_pf": 1.1322419979030849},
+    {"number": 5, "name": "Original component diagnosis", "kind": "DESCRIPTIVE_ONLY", "rule_changed": false, "replay": false, "plan_sha256": "0af053ea22a352f10dd63d424e6d12783472267402d11c741d8689593cba861f", "registered_component_exposures": 8, "registered_derived_score_exposures": 2, "registered_scalar_cells": 780}
+  ],
+  "counter": {
+    "records_to_date": 5,
+    "historical_complete": false,
+    "historical_exact_feature_and_cell_count": null,
+    "known_prior_feature_exposures_lower_bound": 6,
+    "known_prior_scalar_cells_lower_bound": 342,
+    "known_prior_scope": [
+      {"report": "original-v2-diagnosis\\diagnosis.json", "feature_exposures": 2, "scalar_cells": 246},
+      {"report": "original-v2-feature-diagnosis\\feature-diagnosis.json", "feature_exposures": 4, "scalar_cells": 96}
+    ],
+    "current_registered_component_exposures": 8,
+    "current_registered_derived_score_exposures": 2,
+    "current_registered_scalar_cells": 780,
+    "known_cumulative_feature_exposures_lower_bound": 16,
+    "known_cumulative_scalar_cells_lower_bound": 1122,
+    "definition": "FEATURE_EXPOSURES_NOT_UNIQUE_LIFETIME_FEATURES; SCALAR_CELLS_ARE_VALUE_N_RELIABILITY_LEAVES",
+    "warning": "INCOMPLETE_HISTORICAL_COUNTER; MULTIPLE_COMPARISONS; DESCRIPTIVE_ONLY; NO_RULE_SELECTION"
+  }
+}
