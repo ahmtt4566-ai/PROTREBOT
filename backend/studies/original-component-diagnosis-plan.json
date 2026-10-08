@@ -1,0 +1,112 @@
+{
+  "schema": "original-component-diagnosis-plan-v1",
+  "purpose": "DESCRIPTIVE_ONLY_NO_REPLAY_NO_RULE_OR_PARAMETER_CHANGE",
+  "profile_sha256": "b21a9fbf7916808c6b0b9b26e6700725defe38dc4fb6a0151731deab8b251d81",
+  "analysis_source_sha256": "0cc3848923b35469dabc88c546f650cf8cc325ce6395e5570c6eb94b786f45cf",
+  "phases": {
+    "TRAIN": {"start": "2020-10-01", "end_exclusive": "2022-01-01", "fully_verified_N": 364},
+    "VALIDATION": {"start": "2022-01-01", "end_exclusive": "2022-09-01", "fully_verified_N": 156},
+    "NEW_WINDOW": {"start": "2024-07-01", "end_exclusive": "2026-10-01", "fully_verified_N": 555}
+  },
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"],
+  "inputs": {
+    "trades_TRAIN": {"path": "C:\\Users\\ahmtt\\kaistrade-data\\original-v2-diagnosis\\trades-TRAIN.jsonl", "sha256": "689dd4139fe4b776cd44e78187469a1b7e42021b4cadaa710ec8e9b09a875938"},
+    "trades_VALIDATION": {"path": "C:\\Users\\ahmtt\\kaistrade-data\\original-v2-diagnosis\\trades-VALIDATION.jsonl", "sha256": "87c42fbd75b44b2473b08c8fbe99e2fce9241639b23182bb8b63eab964aa2134"},
+    "trades_NEW_WINDOW": {"path": "C:\\Users\\ahmtt\\kaistrade-data\\original-v2-f2-test-run2\\trades-BASELINE.jsonl", "sha256": "ffc734e921d97afdade2cd0a81cfbe87ffb8ee39769624791f959f80c6871748"},
+    "entries_NEW_WINDOW": {"path": "C:\\Users\\ahmtt\\kaistrade-data\\original-v2-f2-test-run2\\entries-BASELINE.jsonl", "sha256": "26d72c23057d387750fe461ff80f8dfc7e94aadc4bf6cd8b7415db38a3c8f91d"},
+    "measurement_manifest_sha256": "23e8d8b55a3a12ed76d562eb072a440115d3a2aeaefe6571e2c155c15f316a6e",
+    "metadata_sha256": "4153972de075f9372640632621a3153d50350d721f4efe979a869fe821a5ab57"
+  },
+  "context": {
+    "timeframe": "15m",
+    "window": 259,
+    "source": "CLOSED_CONTRACT_CANDLES_AT_SAVED_ENTRY",
+    "TRAIN_VALIDATION": "EXPLICIT_USER_AUTHORIZED_READ_ONLY_MEASUREMENT_VIEW_RECONSTRUCTION",
+    "NEW_WINDOW": "SAVED_CLOSED_CONTRACT_CONTEXT",
+    "calculation": "APP_ANALYSIS_ANALYZE_WITH_OBSERVATION_SCORES_NO_CANONICAL_OR_ENGINE_CALL",
+    "exact_parity": ["direction", "confidence", "entry", "ema20", "atr"],
+    "new_window_extra_parity": "EVERY_STORED_CANONICAL_ANALYSIS_FIELD",
+    "recorded_raw_totals_available": false,
+    "total_parity": "SUM_BASE25_AND_EIGHT_POINT_COMPONENTS_EQUALS_NATIVE_OBSERVATION_LONG_AND_SHORT_SCORES",
+    "mismatch_missing_duplicate_or_N_change": "STOP_NO_DROPPING_NO_IMPUTATION"
+  },
+  "components": [
+    {"id": "C1_PRICE_EMA20", "points": 10, "LONG": "price > ema20", "SHORT": "price < ema20"},
+    {"id": "C2_EMA20_EMA50", "points": 12, "LONG": "ema20 > ema50", "SHORT": "ema20 < ema50"},
+    {"id": "C3_EMA50_EMA200", "points": 14, "LONG": "ema50 > ema200", "SHORT": "ema50 < ema200"},
+    {"id": "C4_MACD", "points": 10, "LONG": "macd_hist > 0", "SHORT": "macd_hist < 0"},
+    {"id": "C5_RSI", "points": 9, "LONG": "52 <= rsi <= 72", "SHORT": "28 <= rsi <= 48"},
+    {"id": "C6_BOLLINGER_MID", "points": 6, "LONG": "price > bollinger.middle", "SHORT": "price < bollinger.middle"},
+    {"id": "C7_ADX_EMA", "points": 8, "LONG": "adx >= 20 and ema20 > ema50", "SHORT": "adx >= 20 and ema20 < ema50"},
+    {"id": "C8_VOLUME", "points": 6, "LONG": "volume_ratio >= 1.05", "SHORT": "volume_ratio >= 1.05"}
+  ],
+  "scores": {
+    "base_points": 25,
+    "component_alignment": "SAVED_TRADE_DIRECTION_LONG_OR_SHORT",
+    "raw_total": "25 + SUM_OF_EIGHT_DIRECTIONAL_POINT_COMPONENTS",
+    "confidence": "NATIVE_ANALYZE_CONFIDENCE_WITH_CAP95_NOT_A_PROBABILITY",
+    "tertile_variables": ["raw_total", "confidence"],
+    "cut_source": "TRAIN_FULLY_VERIFIED_ONLY",
+    "fractions": [0.333, 0.667],
+    "percentile": "NATIVE_LINEAR_INTERPOLATED_PERCENTILE",
+    "buckets": ["LOW", "MIDDLE", "HIGH"],
+    "membership": ["value <= cut1", "cut1 < value <= cut2", "value > cut2"],
+    "ties": "LOWER_BUCKET_NO_FORCED_EQUAL_COUNTS"
+  },
+  "dependence": {
+    "binary": "DIRECTION_ALIGNED_EXISTING_COMPONENT_ON_OFF",
+    "numeric": "EXISTING_COMPONENT_POINTS_0_OR_LOCKED_WEIGHT",
+    "agreement": "MEAN_OF_BINARY_EQUALITY",
+    "phi": "(n11*n00-n10*n01)/sqrt(n1dot*n0dot*ndot1*ndot0)",
+    "spearman": "PEARSON_OF_AVERAGE_TIE_RANKS",
+    "constant_component": "NULL_CORRELATION_WITH_EXPLICIT_REASON_NO_ZERO_IMPUTATION",
+    "effective_count_matrix": "PHI_SUBMATRIX_OF_NONCONSTANT_COMPONENTS",
+    "eigenvalues": "SYMMETRIC_JACOBI_DIAGONALIZATION_NO_NEW_DEPENDENCY",
+    "participation_ratio": "(SUM(lambda))^2 / SUM(lambda^2)",
+    "no_nonconstant_components": "NULL_EFFECTIVE_COUNT_EXPLICIT_REASON",
+    "interpretation": "DESCRIPTIVE_EFFECTIVE_DIMENSION_NOT_PROOF_OF_STATISTICAL_OR_CAUSAL_INDEPENDENCE",
+    "selection_scope": "FULLY_VERIFIED_ACCEPTED_TRADES_ONLY_NOT_ALL_MARKET_CANDIDATES",
+    "direction_pooling": "LONG_AND_SHORT_COMPONENTS_ALIGNED_TO_THE_SAVED_TRADE_SIDE_WITHIN_EACH_PHASE",
+    "cross_phase_pooling": false
+  },
+  "tables": {
+    "component_states": [0, 1],
+    "columns": ["N", "mean_net_r", "stop_before_tp1_share_pct", "tp3_share_pct"],
+    "small_cell_N": 30,
+    "small_cell_label": "guvenilmez",
+    "empty_cell": "N0_NULL_METRICS_EXPLICIT_REASON",
+    "matrix_cell_N": "FULL_PHASE_N_WITH_UNDEFINED_CONSTANT_CORRELATIONS_LABELLED",
+    "recommendations_candidate_selection_threshold_scan_or_significance_claim": false
+  },
+  "counter": {
+    "trial_limit_removed_by_user": true,
+    "current_ledger_record": 5,
+    "historical_complete": false,
+    "historical_exact_features_and_cells": null,
+    "historical_known_feature_exposures_lower_bound": 6,
+    "historical_known_scalar_cells_lower_bound": 342,
+    "historical_scope": [
+      {"report": "original-v2-diagnosis/diagnosis.json", "sha256": "4d3df44cc8dbb82e092b58ee0d4e8bcb2a6e770c0c9299aec1f258a3cf99f5e2", "feature_exposures": 2, "scalar_cells": 246},
+      {"report": "original-v2-feature-diagnosis/feature-diagnosis.json", "sha256": "9a44c497799372c4c8269eb282c0ea99b3f4cc009bf38fd4ecc92c8d147f3f56", "feature_exposures": 4, "scalar_cells": 96}
+    ],
+    "historical_count_method": "RECURSIVE_COUNT_OF_VALUE_N_RELIABILITY_LEAVES_IN_THE_REGISTERED_TABLE_SUBTREES",
+    "feature_count_semantics": "FEATURE_EXPOSURES_NOT_DISTINCT_LIFETIME_FEATURES",
+    "current_primary_component_exposures": 8,
+    "current_derived_score_exposures": 2,
+    "current_reported_scalar_cells": 780,
+    "current_cell_breakdown": {"matrix_cells_with_diagonals_and_symmetric_duplicates": 576, "component_outcome_cells": 144, "score_tertile_outcome_cells": 54, "phase_mean_cells": 3, "effective_count_cells": 3},
+    "current_unique_off_diagonal_dependency_cells": 252,
+    "current_outcome_groups": 66,
+    "cumulative_known_feature_exposures_lower_bound": 16,
+    "cumulative_known_scalar_cells_lower_bound": 1122,
+    "warning": "MULTIPLE_COMPARISONS_DESCRIPTIVE_ONLY_NO_WINNER_SELECTION_OR_RULE_INFERENCE",
+    "partial_history_explicitly_user_approved": true
+  },
+  "output_directory": "C:\\Users\\ahmtt\\kaistrade-data\\original-component-diagnosis",
+  "output_exists_action": "STOP",
+  "raw_component_files": ["components-TRAIN.jsonl", "components-VALIDATION.jsonl", "components-NEW_WINDOW.jsonl"],
+  "ledger_file": "original-development-ledger.json",
+  "network_trade_replay_production_change": false,
+  "protected_sealed_or_registry_reads": false,
+  "sleep_confirmation_required": false
+}
