@@ -8,6 +8,7 @@ import re
 from email.message import EmailMessage
 from email.utils import parseaddr
 from html import escape
+from urllib.parse import urlsplit
 
 import httpx
 from google.auth.exceptions import GoogleAuthError
@@ -15,7 +16,10 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from .web_security import production_or_hosted_environment
+
 logger = logging.getLogger(__name__)
+CANONICAL_EMAIL_ORIGIN = "https://kaistrade.com"
 VERIFY_SUBJECT = "KaisTrade hesabını doğrula"
 RESET_SUBJECT = "KaisTrade parolanı yenile"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
@@ -29,6 +33,51 @@ class EmailDeliveryError(RuntimeError):
         self.code = code
 
 
+def validate_app_base_url() -> str:
+    if production_or_hosted_environment():
+        value = os.getenv("APP_BASE_URL", "").strip()
+        if value != CANONICAL_EMAIL_ORIGIN:
+            logger.error("Production APP_BASE_URL must be https://kaistrade.com; mail disabled")
+            raise EmailDeliveryError(
+                "Production ortamında APP_BASE_URL yalnız https://kaistrade.com olmalıdır.",
+                provider="configuration", code="app_base_url",
+            )
+        return value
+    value = os.getenv("APP_BASE_URL", "http://localhost:5173").strip().rstrip("/")
+    try:
+        parsed = urlsplit(value)
+        valid = parsed.scheme in {"http", "https"} and bool(parsed.netloc) and not parsed.query and not parsed.fragment
+    except ValueError:
+        valid = False
+    if not valid:
+        logger.error("APP_BASE_URL must be a safe absolute URL; mail disabled")
+        raise EmailDeliveryError(
+            "APP_BASE_URL güvenli bir mutlak URL olarak yapılandırılmalı",
+            provider="configuration", code="app_base_url",
+        )
+    return value
+
+
+def validate_action_url(action_url: str) -> None:
+    if not production_or_hosted_environment():
+        return
+    try:
+        parsed = urlsplit(action_url)
+        valid = (
+            parsed.scheme == "https" and parsed.netloc == "kaistrade.com"
+            and (action_url == CANONICAL_EMAIL_ORIGIN or action_url.startswith(CANONICAL_EMAIL_ORIGIN + "/"))
+            and not any(ord(character) <= 32 for character in action_url)
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        logger.error("Production mail action URL must use https://kaistrade.com; mail disabled")
+        raise EmailDeliveryError(
+            "Production ortamında e-posta bağlantıları yalnız https://kaistrade.com adresini kullanmalıdır.",
+            provider="configuration", code="action_url",
+        )
+
+
 def provider() -> str:
     value = os.getenv("EMAIL_PROVIDER", "").strip().lower() or "smtp"
     if value not in {"smtp", "resend"}:
@@ -37,6 +86,7 @@ def provider() -> str:
 
 
 def validate_configuration() -> str:
+    validate_app_base_url()
     selected = provider()
     required = ("RESEND_API_KEY", "EMAIL_FROM") if selected == "resend" else (
         "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN",
@@ -143,6 +193,7 @@ def send_auth_email(*, to_email: str, display_name: str, subject: str, title: st
     selected = provider()
     try:
         validate_configuration()
+        validate_action_url(action_url)
         expiry_notice = "" if information_only else f"Bağlantı veya kod {expiry} içinde geçerliliğini yitirir.\n"
         text = (f"KaisTrade\n\n{title}\n\nMerhaba {display_name},\n"
                 f"KaisTrade hesabındaki işlemi tamamla: {action_label}\n\n{action_url}\n\n"

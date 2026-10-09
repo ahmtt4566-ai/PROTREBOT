@@ -30,6 +30,7 @@ from .browser_security import (
 )
 from .google_oauth import CALLBACK_PATH as GOOGLE_CALLBACK_PATH, callback_query as google_callback_query, router as google_oauth_router
 from .premium_access import public_projection, requires_premium
+from .email_service import validate_app_base_url
 from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .market_universe import MarketUniverseCache, active_usdt_perpetual
 from .exchange_connections import (
@@ -1070,6 +1071,7 @@ async def ensure_http_client(application: FastAPI) -> httpx.AsyncClient:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_auth_security_configuration()
+    validate_app_base_url()
     # Exchange signatures and API-key traffic must not silently inherit an
     # unrelated system proxy. This also avoids optional SOCKS dependencies
     # preventing the local API from starting.

@@ -137,11 +137,10 @@ def gmail_configured() -> bool:
 
 
 def app_base_url() -> str:
-    value = os.getenv("APP_BASE_URL", "http://localhost:5173").strip().rstrip("/")
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
-        raise HTTPException(503, "APP_BASE_URL güvenli bir mutlak URL olarak yapılandırılmalı")
-    return value
+    try:
+        return email_service.validate_app_base_url()
+    except email_service.EmailDeliveryError as exc:
+        raise HTTPException(503, str(exc)) from None
 
 
 def issue_one_time_token(state: dict[str, Any], user: dict[str, Any], secret: bytes, *, kind: str) -> str:

@@ -2,6 +2,22 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Production e-posta bağlantısı kısıtı
+
+Production veya barındırılan ortamda `APP_BASE_URL` tam olarak
+`https://kaistrade.com` olmalıdır. Boş değer, HTTP, başka alan adı, port,
+sondaki `/` dahil ek yol, query veya fragment kabul edilmez. Yanlış ayar
+uygulama başlangıcını durdurur; gönderim öncesinde de yeniden kontrol edilir.
+Ortak gönderici doğrulama, şifre sıfırlama, e-posta değiştirme ve bilgilendirme
+maillerindeki bağlantının aynı HTTPS alan adını kullandığını doğrular.
+Hata günlüklerine bağlantı, token veya yapılandırmanın ham değeri yazılmaz.
+
+Ortam tespiti mevcut güvenlik kontrolüyle ortaktır: production/prod ortam
+işaretleri veya Render/Vercel/Heroku barındırma işaretleri kısıtı açar.
+Barındırılmayan yerel geliştirmede `http://localhost:5173` varsayılanı ve
+localhost portları çalışmaya devam eder. Mail sağlayıcısı, gönderen adresi
+ve e-posta doğrulama bayrağı bu kısıt nedeniyle değiştirilmez.
+
 ## E-posta doğrulama v2 (varsayılan kapalı)
 
 Backend ayarı `PROTREBOT_EMAIL_VERIFICATION_V2_ENABLED=true` yeni doğrulama
