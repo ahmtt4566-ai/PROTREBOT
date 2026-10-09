@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom'
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { Activity, ArrowRight, BarChart3, Bitcoin, CircleDollarSign, Coins, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, LogOut, Mail, MailCheck, Pause, Play, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
 import { API_BASE, COOKIE_SESSION_PREFIX, USER_SESSION_KEY, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
+import {withRequestDeadline} from './browser-request'
 import AdminPanel from './AdminPanel'
 import ProfileSettings, {AccountRecoveryScreen} from './ProfileSettings'
 import { AUTH_PANEL_MARKETS, LIVE_MARKET_CONFIG } from './live-market-config'
@@ -79,19 +80,21 @@ function TermsConsent({accepted,error,onChange}:{accepted:boolean;error:string;o
 }
 
 async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
-  const headers = new Headers(options.headers)
-  if (options.body) headers.set('Content-Type','application/json')
-  const response = await fetch(`${API_BASE}/v22${path}`, {...options, headers})
-  const payload = await response.json().catch(() => null)
-  if (!response.ok) {
-    const retryHeader = Number(response.headers.get('Retry-After'))
-    const retryAfter = Number.isFinite(retryHeader) && retryHeader > 0 ? Math.min(Math.ceil(retryHeader),86400) : 0
-    if (response.headers.get('X-Email-Delivery-Error') === '1') throw new AuthRequestError(detail(payload), response.status, retryAfter, true)
-    if (response.status === 409) throw new AuthRequestError('Bu e-posta adresiyle zaten bir hesap bulunuyor.', response.status)
-    if (response.status >= 500) throw new AuthRequestError('Sunucuda geçici bir sorun oluştu. Lütfen biraz sonra tekrar deneyin.', response.status)
-    throw new AuthRequestError(detail(payload), response.status, retryAfter)
-  }
-  return payload as T
+  return withRequestDeadline(async signal => {
+    const headers = new Headers(options.headers)
+    if (options.body) headers.set('Content-Type','application/json')
+    const response = await fetch(`${API_BASE}/v22${path}`, {...options, headers, signal})
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      const retryHeader = Number(response.headers.get('Retry-After'))
+      const retryAfter = Number.isFinite(retryHeader) && retryHeader > 0 ? Math.min(Math.ceil(retryHeader),86400) : 0
+      if (response.headers.get('X-Email-Delivery-Error') === '1') throw new AuthRequestError(detail(payload), response.status, retryAfter, true)
+      if (response.status === 409) throw new AuthRequestError('Bu e-posta adresiyle zaten bir hesap bulunuyor.', response.status)
+      if (response.status >= 500) throw new AuthRequestError('Sunucuda geçici bir sorun oluştu. Lütfen biraz sonra tekrar deneyin.', response.status)
+      throw new AuthRequestError(detail(payload), response.status, retryAfter)
+    }
+    return payload as T
+  },{signal:options.signal ?? undefined})
 }
 
 function strength(password:string):{label:string;score:number} {
@@ -135,6 +138,9 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [ownerSetupAvailable,setOwnerSetupAvailable] = useState(false)
   const [busy,setBusy] = useState(true)
   const [sessionLoading,setSessionLoading] = useState(true)
+  const [sessionUnavailable,setSessionUnavailable] = useState(false)
+  const sessionRequest = useRef<AbortController|null>(null)
+  const sessionSequence = useRef(0)
   const [submitFailed,setSubmitFailed] = useState(false)
   const [message,setMessage] = useState('Oturum doğrulanıyor…')
   const [showPassword,setShowPassword] = useState(false)
@@ -260,19 +266,31 @@ export default function AuthGate({children}:{children:ReactNode}) {
   },[memberMenuOpen])
 
   const loadSession = async (value:string, persist?:boolean) => {
+    sessionRequest.current?.abort()
+    const controller = new AbortController()
+    sessionRequest.current = controller
+    const sequence = ++sessionSequence.current
+    setBusy(true); setSessionUnavailable(false)
     try {
-      const current = await request<Session>('/session', value ? {headers:{Authorization:`Bearer ${value}`}} : {})
+      const current = await request<Session>('/session', {...(value ? {headers:{Authorization:`Bearer ${value}`}} : {}),signal:controller.signal})
+      if (controller.signal.aborted || sequence !== sessionSequence.current) return
       const marker = `${COOKIE_SESSION_PREFIX}${current.user.id}`
       saveUserSessionToken(marker, persist ?? Boolean(localStorage.getItem(USER_SESSION_KEY)))
       setToken(marker)
       setSession(current); setMessage('')
     } catch (error) {
-      clearUserSessionToken(); setToken(''); setSession(null)
+      if (controller.signal.aborted || sequence !== sessionSequence.current) return
+      const unavailable = !(error instanceof AuthRequestError && [401,403].includes(error.status))
+      if (!unavailable) { clearUserSessionToken(); setToken('') }
+      setSession(null); setSessionUnavailable(unavailable); setSubmitFailed(unavailable)
       setMessage(error instanceof Error ? error.message : 'Oturum açmak için devam edin.')
-    } finally { setBusy(false); setSessionLoading(false) }
+    } finally {
+      if (!controller.signal.aborted && sequence === sessionSequence.current) { setBusy(false); setSessionLoading(false) }
+    }
   }
 
   useEffect(() => {
+    const controller = new AbortController()
     const parameters = new URLSearchParams(window.location.search)
     const googleResult = googleReturn.result
     const googleRemember = googleReturn.remember
@@ -286,16 +304,18 @@ export default function AuthGate({children}:{children:ReactNode}) {
       if (mfaChallenge) {setMode('mfa'); setRemember(googleRemember); setBusy(false); setSessionLoading(false); return}
       if (googleResult === 'consent') {
         try {
-          const pending = await request<{email:string;display_name:string}>('/auth/google/pending')
+          const pending = await request<{email:string;display_name:string}>('/auth/google/pending',{signal:controller.signal})
+          if (controller.signal.aborted) return
           setRegister({display_name:pending.display_name,email:pending.email,password:'',confirm_password:'',terms_accepted:false})
           setMode('google-consent'); setMessage('Google hesabınız doğrulandı. Kaydı tamamlamak için koşulları kabul edin.')
         } catch (error) {
+          if (controller.signal.aborted) return
           setSubmitFailed(true); setMessage(error instanceof Error ? error.message : 'Google kayıt isteği doğrulanamadı.')
-        } finally { setBusy(false); setSessionLoading(false) }
+        } finally { if (!controller.signal.aborted) { setBusy(false); setSessionLoading(false) } }
         return
       }
       await loadSession(token,googleResult === 'success' ? googleRemember : undefined)
-      if (googleResult && googleResult !== 'success') {
+      if (!controller.signal.aborted && googleResult && googleResult !== 'success') {
         const errors:Record<string,string> = {
           invalid_attempt:'Google giriş isteği geçersiz, kullanılmış veya süresi dolmuş. Yeniden deneyin.',
           cancelled:'Google girişi iptal edildi.',
@@ -307,6 +327,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
       }
     }
     void restore()
+    return () => { controller.abort(); sessionRequest.current?.abort() }
   }, [])
 
   useEffect(() => { sessionRoleRef.current = session?.user.role ?? null; sessionMaintenanceRef.current = session?.maintenance?.mode ?? null }, [session])
@@ -314,10 +335,20 @@ export default function AuthGate({children}:{children:ReactNode}) {
   // An expired member can keep the maintenance screen, but never the private session.
   useEffect(() => {
     if (!token) return
+    const controller = new AbortController()
+    let polling = false
     const pollMaintenance = async () => {
       if (document.visibilityState === 'hidden') return
+      if (polling) return
+      polling = true
+      const sequence = sessionSequence.current
       try {
-        const response = await fetch(`${API_BASE}/v22/session`,{headers:{Authorization:`Bearer ${token}`}})
+        const {response,current} = await withRequestDeadline(async signal => {
+          const response = await fetch(`${API_BASE}/v22/session`,{headers:{Authorization:`Bearer ${token}`},signal})
+          const current = response.ok ? await response.json() as Session : null
+          return {response,current}
+        },{signal:controller.signal})
+        if (controller.signal.aborted || sequence !== sessionSequence.current) return
         if (response.status === 401) {
           const mode = sessionMaintenanceRef.current
           if (sessionRoleRef.current !== 'OWNER' && (mode === 'MAINTENANCE' || mode === 'EMERGENCY')) setExpiredMemberMaintenance(mode)
@@ -325,14 +356,16 @@ export default function AuthGate({children}:{children:ReactNode}) {
           return
         }
         if (!response.ok) { console.warn('Session refresh failed:', response.status); return }
-        const current = await response.json() as Session
-        setSession(previous => previous ? {...previous,maintenance:current.maintenance} : previous)
+        if (current) setSession(previous => previous ? {...previous,maintenance:current.maintenance} : previous)
       } catch (error) {
+        if (controller.signal.aborted || sequence !== sessionSequence.current) return
         console.warn('Session refresh failed:', error instanceof Error ? error.name : 'SessionRefreshError')
+      } finally {
+        polling = false
       }
     }
     const timer = window.setInterval(() => void pollMaintenance(),45000)
-    return () => window.clearInterval(timer)
+    return () => { controller.abort(); window.clearInterval(timer) }
   },[token])
 
   useEffect(() => {
@@ -468,6 +501,9 @@ export default function AuthGate({children}:{children:ReactNode}) {
   }
 
   const finishSession = () => {
+    sessionSequence.current++
+    sessionRequest.current?.abort()
+    setSessionUnavailable(false)
     clearDemoCredentials(token)
     setLogin({email:'',password:''}); setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
     setEmail(''); setResetToken(''); setResetPassword({password:'',confirm_password:'',totp_code:''}); setMfaChallenge(''); setMfaCode('')
@@ -479,7 +515,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
     let vaultProblem = ''
     if (sessionToken) {
       try {
-        const response = await fetch(`${API_BASE}/exchange-connections/session`,{method:'DELETE',headers:{Authorization:`Bearer ${sessionToken}`}})
+        const response = await withRequestDeadline(signal => fetch(`${API_BASE}/exchange-connections/session`,{method:'DELETE',headers:{Authorization:`Bearer ${sessionToken}`},signal}))
         if (!response.ok) vaultProblem = 'Borsa oturumunun temizlenmesi doğrulanamadı.'
       } catch (error) {
         vaultProblem = 'Borsa oturumunun temizlenmesi doğrulanamadı.'
@@ -538,6 +574,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
           {mode === 'verify' && <button type="button" className="authGoogle" disabled={busy} onClick={() => void startGoogle()}>Google ile devam et</button>}
         </div>}
         {message && message !== 'Oturum doğrulanıyor…' && <p className={`authMessage${submitFailed ? ' authMessageError' : ''}`} role={submitFailed ? 'alert' : 'status'}>{message}</p>}
+        {sessionUnavailable && <button type="button" className="authGoogle" disabled={busy} onClick={() => void loadSession(token)}>Oturumu yeniden kontrol et</button>}
         <div className={`authLinks${mode === 'register' ? ' authRegisterLinks' : ''}`}>{mode === 'login' && <><button onClick={() => setMode('forgot')}>Parolamı unuttum</button><button onClick={() => setMode('register')}>Yeni hesap oluştur</button></>}{mode === 'register' ? <><span>Zaten hesabın var mı?</span><button type="button" onClick={() => setMode('login')}>Giriş yap</button></> : mode !== 'login' && <button onClick={() => setMode('login')}>Giriş ekranına dön</button>}</div>
         {mode === 'login' && LOCAL_OWNER_SETUP_PAGE && ownerSetupAvailable && <div className="authLinks"><button type="button" onClick={() => {setRegister(current => ({...current,email:login.email,password:'',confirm_password:''}));setMessage('');setFieldErrors({});setTermsError('');setMode('bootstrap')}}><ShieldCheck aria-hidden="true"/> İlk yönetici kurulumu</button></div>}
         {mode === 'login' && <section className="authMobileMarkets" aria-label="Canlı fiyatlar"><AuthCoinScreen data={market.data} status={market.status}/></section>}

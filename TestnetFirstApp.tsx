@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries, type IPriceLine } from 'lightweight-charts'
 import { Activity, BarChart3, Bell, BrainCircuit, CheckCircle2, CircleDollarSign, Cloud, CloudCog, Home, KeyRound, LockKeyhole, Menu, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2, X } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
+import {loadWorkspaceWithDeadline, withRequestDeadline} from './browser-request'
 import BackButton from './BackButton'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 import ScannerCenter from './ScannerCenter'
@@ -10,37 +11,25 @@ import ComplianceContent from './ComplianceContent'
 import {useKaisErrorReaction, useKaisWorkspaceReaction} from './useKaisPageReactions'
 import {useTradingPreferences} from './useTradingPreferences'
 
-function BinanceDemoLoadRecovery() {
-  useEffect(() => {
-    const timer = window.setTimeout(() => window.dispatchEvent(new CustomEvent('protrebot-navigate',{detail:'dashboard'})),0)
-    return () => window.clearTimeout(timer)
-  },[])
-  return null
-}
-
-const retryImport = async <T,>(load:() => Promise<T>,retry:() => Promise<T>,fallback:() => T):Promise<T> => {
+const retryImport = async <T,>(load:() => Promise<T>,retry:() => Promise<T>):Promise<T> => {
   try {
     return await load()
-  } catch {
+  } catch (error) {
+    console.warn('Workspace import failed; retrying once:',error)
     await new Promise<void>(resolve => window.setTimeout(resolve,250))
-    try {
-      return await retry()
-    } catch {
-      return fallback()
-    }
+    return retry()
   }
 }
 
-const BinanceDemo = lazy(() => retryImport(
+const BinanceDemo = lazy(() => loadWorkspaceWithDeadline(() => retryImport(
   () => import('./BinanceDemo'),
   () => import.meta.env.DEV ? import(/* @vite-ignore */ `/BinanceDemo.tsx?retry=${Date.now()}`) : import('./BinanceDemo'),
-  () => ({default:BinanceDemoLoadRecovery}) as typeof import('./BinanceDemo'),
-))
-const LiveTradingPanel = lazy(() => import('./frontend/src/LiveTradingPanel'))
-const CommercialHub = lazy(() => import('./CommercialHub'))
-const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
-const SubscriptionCenter = lazy(() => import('./SubscriptionCenter'))
-const MasterTrade = lazy(() => import('./MasterTrade'))
+)))
+const LiveTradingPanel = lazy(() => loadWorkspaceWithDeadline(() => import('./frontend/src/LiveTradingPanel')))
+const CommercialHub = lazy(() => loadWorkspaceWithDeadline(() => import('./CommercialHub')))
+const CloudOpsCenter = lazy(() => loadWorkspaceWithDeadline(() => import('./CloudOpsCenter')))
+const SubscriptionCenter = lazy(() => loadWorkspaceWithDeadline(() => import('./SubscriptionCenter')))
+const MasterTrade = lazy(() => loadWorkspaceWithDeadline(() => import('./MasterTrade')))
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT
 type View = 'dashboard'|'trading'|'risk'|'analyst'|'scanner'|'performance'|'testnet'|'ops'|'live'|'setup'|'pricing'|'billing'|'master-trade'
 type Market = {symbol:string;display:string;price:number;change:number;volume:number}
@@ -458,7 +447,9 @@ export default function TestnetFirstApp() {
   },[])
   const initialView = ():View => window.location.pathname === '/pricing' ? 'pricing' : window.location.pathname === '/billing' ? 'billing' : window.location.pathname === '/master-trade' ? 'master-trade' : 'dashboard'
   const [view,setView] = useState<View>(initialView)
-  const [masterTradeAccess,setMasterTradeAccess] = useState<'loading'|'granted'|'locked'|'unauthenticated'>('loading')
+  const [masterTradeAccess,setMasterTradeAccess] = useState<'loading'|'granted'|'locked'|'unauthenticated'|'unavailable'>('loading')
+  const [accessAttempt,setAccessAttempt] = useState(0)
+  const [accessError,setAccessError] = useState('')
   const [markets,setMarkets] = useState<Market[]>([])
   const [symbol,setSymbol] = useState('BTCUSDT')
   const [marketQuery,setMarketQuery] = useState('')
@@ -553,20 +544,29 @@ export default function TestnetFirstApp() {
       return
     }
     let active = true
+    const controller = new AbortController()
     setMasterTradeAccess('loading')
+    setAccessError('')
     const headers = new Headers({Authorization: `Bearer ${token}`})
-    fetch(`${API_BASE}/v22/profile`, { headers })
-      .then(async response => {
-        if (!response.ok) throw new Error('Unauthorized')
+    withRequestDeadline(async signal => {
+        const response = await fetch(`${API_BASE}/v22/profile`, {headers,signal})
+        if ([401,403].includes(response.status)) return false
+        if (!response.ok) throw new Error('Sunucu erişim bilgisini doğrulayamadı.')
         const payload = await response.json() as { access?: {canAccessMasterTrade?: boolean} }
-        if (!active) return
-        setMasterTradeAccess(payload.access?.canAccessMasterTrade === true ? 'granted' : 'locked')
+        if (typeof payload.access?.canAccessMasterTrade !== 'boolean') throw new Error('Sunucu geçerli erişim bilgisi döndürmedi.')
+        return payload.access.canAccessMasterTrade
+      },{signal:controller.signal})
+      .then(granted => {
+        if (active) setMasterTradeAccess(granted ? 'granted' : 'locked')
       })
-      .catch(() => {
-        if (active) setMasterTradeAccess('locked')
+      .catch(error => {
+        if (active) {
+          setMasterTradeAccess('unavailable')
+          setAccessError(error instanceof Error ? error.message : 'Sunucu yanıtı doğrulanamadı.')
+        }
       })
-    return () => { active = false }
-  }, [view])
+    return () => { active = false; controller.abort() }
+  }, [view,accessAttempt])
 
   const refresh = async () => {
     setLoading(true)
@@ -853,6 +853,7 @@ export default function TestnetFirstApp() {
 
     {view === 'master-trade' && (
       masterTradeAccess === 'loading' ? <div className="v26Loading"><RefreshCw className="spin"/>Master Trade erişim kontrol ediliyor…</div> :
+      masterTradeAccess === 'unavailable' ? <section className="v26MarketError" role="alert"><span>Erişim doğrulanamadı. {accessError}</span><button type="button" onClick={() => setAccessAttempt(attempt => attempt + 1)}>Erişimi yeniden kontrol et</button></section> :
       masterTradeAccess === 'locked' ? <section className="premiumGatePanel" style={{margin:'1.5rem auto',maxWidth:'900px',padding:'2rem',background:'rgba(15,23,42,0.9)',border:'1px solid rgba(148,163,184,0.26)',borderRadius:'18px',boxShadow:'0 18px 45px rgba(15,23,42,0.35)'}}>
         <div style={{display:'grid',gap:'0.75rem',justifyItems:'flex-start'}}>
           <span style={{display:'inline-flex',alignItems:'center',gap:'0.5rem',padding:'0.35rem 0.8rem',borderRadius:'999px',border:'1px solid rgba(251,191,36,0.4)',background:'rgba(251,191,36,0.08)',color:'#fcd34d',fontWeight:700,fontSize:'0.72rem',letterSpacing:'0.12em'}}>PREMIUM</span>

@@ -2,6 +2,26 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Browser entry and session recovery
+
+Owner verification, authentication and Master Trade access reads have a
+15-second deadline covering the response body as well as connection headers.
+Lazy workspace downloads, including the Live screen, are also bounded;
+stalled or failed downloads reach the existing safe recovery screen rather
+than an indefinite spinner or a silent blank fallback.
+Timeouts show an explicit retryable error and never grant access. Authentication
+POSTs are not automatically retried. Navigation/unmount cancels stale session
+reads; earlier responses cannot clear a newer verified session.
+Temporary session failures preserve only the existing public cookie-session
+hint, not authenticated access. Use **Oturumu yeniden kontrol et** to verify
+again. An owner denial unlocks the form without waiting for a stalled logout;
+logout failures remain logged. A Master Trade verification outage is shown as
+unavailable rather than an invented subscription denial.
+
+Local preview URLs require a running preview server; they are not deployment
+addresses. These client changes do not alter exchange order paths, LIVE safety
+gates or the default-off Original Demo flags.
+
 ## Offline backend regression tests
 
 Native Windows spawn/asyncio tests run their unchanged assertions in a

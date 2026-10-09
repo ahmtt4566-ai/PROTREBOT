@@ -2,12 +2,13 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries, type IPriceLine } from 'lightweight-charts'
 import { Activity, ArrowUp, CircleDollarSign, Cloud, KeyRound, LockKeyhole, RadioTower, RefreshCw, ShieldCheck, TestTube2 } from 'lucide-react'
 import { API_BASE } from './api'
+import {loadWorkspaceWithDeadline} from '../../browser-request'
 
-const BinanceDemo = lazy(() => import('./BinanceDemo'))
-const LiveTradingPanel = lazy(() => import('./LiveTradingPanel'))
-const ExecutionCenter = lazy(() => import('./ExecutionCenter'))
-const CloudOpsCenter = lazy(() => import('./CloudOpsCenter'))
-const ExchangeConnections = lazy(() => import('./ExchangeConnections'))
+const BinanceDemo = lazy(() => loadWorkspaceWithDeadline(() => import('./BinanceDemo')))
+const LiveTradingPanel = lazy(() => loadWorkspaceWithDeadline(() => import('./LiveTradingPanel')))
+const ExecutionCenter = lazy(() => loadWorkspaceWithDeadline(() => import('./ExecutionCenter')))
+const CloudOpsCenter = lazy(() => loadWorkspaceWithDeadline(() => import('./CloudOpsCenter')))
+const ExchangeConnections = lazy(() => loadWorkspaceWithDeadline(() => import('./ExchangeConnections')))
 
 type View = 'testnet'|'ops'|'live'|'setup'
 type Market = {symbol:string;display:string;price:number;change:number;volume:number}

@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { LockKeyhole, ShieldCheck } from 'lucide-react'
 import { clearOwnerAccessToken, ownerAccessToken, saveOwnerAccessToken, userSessionToken, verifyOwnerAccess } from './api'
 import './web-access.css'
@@ -13,6 +13,7 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
   const [status,setStatus] = useState<'CHECKING'|'LOCKED'|'OPEN'>(ACCESS_REQUIRED ? 'CHECKING' : 'OPEN')
   const [message,setMessage] = useState('Güvenli yönetici oturumu doğrulanıyor…')
   const [memberSession,setMemberSession] = useState(Boolean(userSessionToken()))
+  const requestController = useRef<AbortController|null>(null)
 
   useEffect(() => {
     const refresh = () => setMemberSession(Boolean(userSessionToken()))
@@ -23,15 +24,18 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
 
   useEffect(() => {
     if (!ACCESS_REQUIRED) return
-    verifyOwnerAccess(token)
-      .then(() => { setStatus('OPEN'); setMessage('') })
-      .catch(async error => {
-        try { await clearOwnerAccessToken() }
-        catch (logoutError) { console.warn('Owner cookie logout failed:', logoutError instanceof Error ? logoutError.message : 'LogoutError') }
+    const controller = new AbortController()
+    requestController.current = controller
+    verifyOwnerAccess(token,controller.signal)
+      .then(() => { if (!controller.signal.aborted) { setStatus('OPEN'); setMessage('') } })
+      .catch(error => {
+        if (controller.signal.aborted) return
         setToken('')
         setStatus('LOCKED')
         setMessage(error instanceof Error ? error.message : 'Erişim doğrulanamadı.')
+        void clearOwnerAccessToken().catch(logoutError => console.warn('Owner cookie logout failed:', logoutError instanceof Error ? logoutError.message : 'LogoutError'))
       })
+    return () => { controller.abort(); requestController.current?.abort() }
   }, [])
 
   const submit = async (event:FormEvent) => {
@@ -42,17 +46,21 @@ export default function WebAccessGate({children}:{children:ReactNode}) {
     }
     setStatus('CHECKING')
     setMessage('Sunucu kilidi doğrulanıyor…')
+    requestController.current?.abort()
+    const controller = new AbortController()
+    requestController.current = controller
     try {
-      await verifyOwnerAccess(token)
+      await verifyOwnerAccess(token,controller.signal)
+      if (controller.signal.aborted) return
       saveOwnerAccessToken(token)
       setToken(ownerAccessToken())
       setStatus('OPEN')
       setMessage('')
     } catch (error) {
-      try { await clearOwnerAccessToken() }
-      catch (logoutError) { console.warn('Owner cookie logout failed:', logoutError instanceof Error ? logoutError.message : 'LogoutError') }
+      if (controller.signal.aborted) return
       setStatus('LOCKED')
       setMessage(error instanceof Error ? error.message : 'Erişim doğrulanamadı.')
+      void clearOwnerAccessToken().catch(logoutError => console.warn('Owner cookie logout failed:', logoutError instanceof Error ? logoutError.message : 'LogoutError'))
     }
   }
 

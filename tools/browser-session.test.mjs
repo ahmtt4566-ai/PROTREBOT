@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs'
 import {test} from 'node:test'
 import {runInNewContext} from 'node:vm'
 import {stripTypeScriptTypes} from 'node:module'
+import {withRequestDeadline} from '../browser-request.ts'
 
 function storage() {
   const values = new Map()
@@ -16,6 +17,7 @@ function storage() {
 function browser(mode = 'production') {
   const source = readFileSync(new URL('../api.ts', import.meta.url), 'utf8')
     .replace(/^import .*kais-chat-storage'.*$/m, '')
+    .replace(/^import .*browser-request'.*$/m, '')
     .replaceAll('import.meta.env', `(${JSON.stringify({PROD: mode === 'production', DEV: false, MODE: mode})})`)
   const calls = []
   const exports = {}
@@ -33,6 +35,7 @@ function browser(mode = 'production') {
     '\nObject.assign(exports, {API_BASE, USER_SESSION_KEY, userSessionToken, saveUserSessionToken, ownerAccessToken, saveOwnerAccessToken, clearOwnerAccessToken, verifyOwnerAccess, installAuthorizedFetch})'
   runInNewContext(code, {
     exports, window, localStorage, sessionStorage, URL, Request, Headers, Event, atob, console,
+    withRequestDeadline,
     clearKaisChatHistory() {}, clearLegacyChatHistory() {},
   })
   return {api: exports, calls, window, localStorage, sessionStorage}

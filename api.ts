@@ -1,4 +1,5 @@
 import {clearKaisChatHistory, clearLegacyChatHistory} from './frontend/src/kais-chat-storage'
+import {withRequestDeadline} from './browser-request'
 
 const TOKEN_KEY = 'protrebot.web.owner-access'
 export const USER_SESSION_KEY = 'protrebot-v25-session'
@@ -29,10 +30,12 @@ export async function clearOwnerAccessToken(): Promise<void> {
   clearKaisChatHistory()
   clearLegacyChatHistory()
   sessionStorage.removeItem(TOKEN_KEY)
-  const response = await originalFetch(`${API_BASE}/web/access/logout`, {
-    method: 'POST', credentials: 'include', headers: {'X-Requested-With': 'XMLHttpRequest'},
+  await withRequestDeadline(async signal => {
+    const response = await originalFetch(`${API_BASE}/web/access/logout`, {
+      method: 'POST', credentials: 'include', headers: {'X-Requested-With': 'XMLHttpRequest'}, signal,
+    })
+    if (!response.ok) throw new Error('Yönetici oturumu sunucuda kapatılamadı.')
   })
-  if (!response.ok) throw new Error('Yönetici oturumu sunucuda kapatılamadı.')
 }
 
 export function userSessionToken(): string {
@@ -173,14 +176,17 @@ export function installErrorMonitoring(): void {
   window.addEventListener('unhandledrejection', event => reportClientError(event.reason, {type:'unhandledrejection'}))
 }
 
-export async function verifyOwnerAccess(token: string): Promise<{authorized: boolean}> {
-  const response = await originalFetch(`${API_BASE}/web/access/check`, {
-    credentials: 'include',
-    headers: {'X-Requested-With': 'XMLHttpRequest', ...(token.trim() && token !== OWNER_COOKIE_MARKER ? {'X-ProTreBot-Owner': token.trim()} : {})},
-  })
-  const payload = await response.json().catch(() => null) as {authorized?: boolean;detail?: string}|null
-  if (!response.ok || !payload?.authorized) {
-    throw new Error(payload?.detail || 'Yönetici erişimi doğrulanamadı.')
-  }
-  return {authorized: true}
+export async function verifyOwnerAccess(token: string, signal?:AbortSignal): Promise<{authorized: boolean}> {
+  return withRequestDeadline(async deadlineSignal => {
+    const response = await originalFetch(`${API_BASE}/web/access/check`, {
+      credentials: 'include',
+      signal: deadlineSignal,
+      headers: {'X-Requested-With': 'XMLHttpRequest', ...(token.trim() && token !== OWNER_COOKIE_MARKER ? {'X-ProTreBot-Owner': token.trim()} : {})},
+    })
+    const payload = await response.json().catch(() => null) as {authorized?: boolean;detail?: string}|null
+    if (!response.ok || !payload?.authorized) {
+      throw new Error(payload?.detail || 'Yönetici erişimi doğrulanamadı.')
+    }
+    return {authorized: true}
+  },{signal})
 }
