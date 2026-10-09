@@ -219,17 +219,18 @@ async def consume_action_token(request, token, user, kind):
     pool = getattr(request.app.state, "db_pool", None)
     try:
         if pool is not None:
-            row = await pool.fetchrow("""UPDATE commercial_account_tokens SET used=TRUE
+            db = active_connection(request, user["id"]) or pool
+            row = await db.fetchrow("""UPDATE commercial_account_tokens SET used=TRUE
                 WHERE token_hash=$1 AND user_id=$2 AND kind=$3 AND auth_version=$4
                   AND email=$5 AND expires>$6 AND used=FALSE RETURNING token_hash""", *values)
             if row is None:
-                exists = await pool.fetchrow("SELECT token_hash FROM commercial_account_tokens WHERE token_hash=$1", values[0])
+                exists = await db.fetchrow("SELECT token_hash FROM commercial_account_tokens WHERE token_hash=$1", values[0])
                 # Pre-migration links retain their existing local one-use guard.
                 # Atomically claim their hash too, so stale worker snapshots
                 # cannot replay a grandfathered link.
                 if exists is None:
                     payload = auth.consume_one_time_token(auth.runtime(request)["state"], token, auth.runtime(request)["secret"], kind=kind)
-                    row = await pool.fetchrow("""INSERT INTO commercial_account_tokens
+                    row = await db.fetchrow("""INSERT INTO commercial_account_tokens
                         (token_hash,user_id,kind,auth_version,email,expires,used)
                         VALUES ($1,$2,$3,$4,$5,$6,TRUE) ON CONFLICT (token_hash) DO NOTHING
                         RETURNING token_hash""", *values[:5], float(payload["exp"]))
@@ -237,7 +238,8 @@ async def consume_action_token(request, token, user, kind):
                         return payload
                 raise HTTPException(400, "Güvenlik bağlantısı geçersiz veya kullanılmış")
         else:
-            db = connection(request)
+            active = active_local_connection(request, user["id"])
+            db = active or connection(request)
             try:
                 result = db.execute("""UPDATE commercial_account_tokens SET used=TRUE
                     WHERE token_hash=? AND user_id=? AND kind=? AND auth_version=?
@@ -254,7 +256,8 @@ async def consume_action_token(request, token, user, kind):
                             return payload
                     raise HTTPException(400, "Güvenlik bağlantısı geçersiz veya kullanılmış")
             finally:
-                db.close()
+                if active is None:
+                    db.close()
         return auth.verify_token(token, auth.runtime(request)["secret"], expected_kind=kind)
     except HTTPException:
         raise

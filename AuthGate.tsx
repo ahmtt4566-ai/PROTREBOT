@@ -17,7 +17,7 @@ import './auth.css'
 type User = { id:string; email:string; display_name:string; role:string; active:boolean; email_verified?:boolean }
 type Session = { user:User; maintenance?:{mode:string} }
 type Mode = 'login'|'register'|'bootstrap'|'forgot'|'reset'|'verify'|'google-consent'|'mfa'
-type AuthResult = {token: string; user: User; remember?: boolean} | {mfa_required: true; challenge_id: string}
+type AuthResult = {token: string; user: User; remember?: boolean; email_verification_v2_enabled?: boolean} | {mfa_required: true; challenge_id: string}
 
 
 // Only Playwright's dedicated `--mode test` run bypasses login (it mocks every API response).
@@ -141,7 +141,11 @@ export default function AuthGate({children}:{children:ReactNode}) {
     const parameters = new URLSearchParams(window.location.search)
     return {result:parameters.get('google_login'),remember:parameters.get('google_remember') === '1'}
   })
-  const [login,setLogin] = useState({email:'',password:''})
+  const [login,setLogin] = useState(() => {
+    const email = sessionStorage.getItem('kaistrade-verification-login-email') || ''
+    return {email,password:''}
+  })
+  useEffect(() => {sessionStorage.removeItem('kaistrade-verification-login-email')}, [])
   const [mfaChallenge,setMfaChallenge] = useState(() => new URLSearchParams(location.search).get('mfa_challenge') || '')
   const [mfaCode,setMfaCode] = useState('')
   const [enrollmentRecoveryCodes,setEnrollmentRecoveryCodes] = useState<string[]>([])
@@ -455,6 +459,11 @@ export default function AuthGate({children}:{children:ReactNode}) {
         if ('mfa_required' in result) {
           setMfaChallenge(result.challenge_id); setMfaCode(''); setMode('mfa'); setMessage('Girişi tamamlamak için iki aşamalı doğrulama kodunuzu girin.')
         } else if (result.user.role !== 'OWNER' && result.user.email_verified === false) {
+          if (result.email_verification_v2_enabled) {
+            history.pushState(null,'','/verify-email')
+            window.dispatchEvent(new Event('protrebot-email-verification'))
+            return
+          }
           setEmail(result.user.email); setResetToken(''); setMode('verify'); setMessage('Önce e-posta adresinizi doğrulayın. Doğrulama kodunu e-postanızdan alın.')
         } else {
           saveUserSessionToken(result.token,remember); setMemberMenuOpen(false); setToken(result.token); setSession({user:result.user})
@@ -476,7 +485,13 @@ export default function AuthGate({children}:{children:ReactNode}) {
         saveUserSessionToken(result.token,remember); setMemberMenuOpen(false); setToken(result.token); setSession({user:result.user}); setOwnerSetupAvailable(false)
         setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
       } else if (mode === 'register') {
-        const result = await request<{verification_status_token?:string;message:string}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
+        const result = await request<{verification_status_token?:string;message:string;email_verification_v2_enabled?:boolean}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
+        if (result.email_verification_v2_enabled) {
+          setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
+          history.pushState(null,'','/verify-email')
+          window.dispatchEvent(new Event('protrebot-email-verification'))
+          return
+        }
         setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setVerificationNotice(true); setVerificationMailFailed(false); setResendSeconds(60); setMode('verify'); setMessage(result.message)
         setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
       } else if (mode === 'forgot') {

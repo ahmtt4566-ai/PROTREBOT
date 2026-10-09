@@ -8,6 +8,7 @@ from .web_security import env_flag
 
 USER_SESSION_COOKIE = "protrebot_session"
 OWNER_ACCESS_COOKIE = "protrebot_owner"
+REGISTRATION_PENDING_COOKIE = "__Secure-kaistrade_registration"
 COOKIE_SESSION_PREFIX = "cookie-session:"
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "testclient"})
 
@@ -43,7 +44,9 @@ def clear_browser_cookie(response: Response, request: Request, name: str) -> Non
 def validate_browser_request(request: Request, allowed_origins: Collection[str]) -> None:
     if request.method.upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
         return
-    uses_cookie = USER_SESSION_COOKIE in request.cookies or OWNER_ACCESS_COOKIE in request.cookies
+    uses_cookie = any(name in request.cookies for name in (
+        USER_SESSION_COOKIE, OWNER_ACCESS_COOKIE, REGISTRATION_PENDING_COOKIE,
+    ))
     if not uses_cookie and not browser_request(request):
         return
     if not browser_request(request):

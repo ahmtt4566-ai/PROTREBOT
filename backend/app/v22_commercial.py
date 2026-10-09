@@ -27,7 +27,7 @@ from google.auth.exceptions import GoogleAuthError, RefreshError
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel, ConfigDict, Field
 from .error_monitoring import build_error_event, schedule_log_event
-from . import email_service
+from . import email_service, email_verification
 from .auth_failures import login_failure_limits
 from .password_policy import validate_new_password
 from .email_service import auth_email_html, send_auth_email, VERIFY_SUBJECT, RESET_SUBJECT
@@ -95,7 +95,7 @@ AUTH_LIMITS = {
     "reset": (8, 900), "verify": (12, 300), "verify-status": (120, 60),
     "verification-resend": (1, 60), "verification-resend-hour": (5, 3600),
 }
-AUTH_SECURITY_FIELDS = ("password", "active", "role", "email_verified", "email", "display_name", "password_changed_at", "closed_at")
+AUTH_SECURITY_FIELDS = ("password", "active", "role", "email_verified", "email", "display_name", "password_changed_at", "closed_at", "email_verified_at")
 STANDARD_SESSION_SECONDS = 8 * 60 * 60
 REMEMBER_SESSION_SECONDS = 30 * 24 * 60 * 60
 DUMMY_PASSWORD_RECORD = hash_password(uuid.uuid4().hex)
@@ -578,7 +578,8 @@ def runtime(request: Request) -> dict[str, Any]:
 
 
 def auth_security(user: dict[str, Any]) -> dict[str, Any]:
-    return {key: copy.deepcopy(user.get(key)) for key in AUTH_SECURITY_FIELDS}
+    return {key: copy.deepcopy(user.get(key)) for key in AUTH_SECURITY_FIELDS
+            if key != "email_verified_at" or key in user}
 
 
 async def persist_auth_security(application: Any) -> None:
@@ -599,7 +600,7 @@ async def persist_auth_security(application: Any) -> None:
             uid, current["auth_version"], json.dumps(auth_security(user)),
         )
         if previous is not None and previous != current:
-            changes = {key: current[key] for key in AUTH_SECURITY_FIELDS if current[key] != previous[key]}
+            changes = {key: current.get(key) for key in AUTH_SECURITY_FIELDS if current.get(key) != previous.get(key)}
             delta = max(0, current["auth_version"] - previous["auth_version"])
             row = await pool.fetchrow(
                 """UPDATE commercial_auth_users
@@ -607,7 +608,7 @@ async def persist_auth_security(application: Any) -> None:
                    WHERE user_id = $1 AND auth_version = $4 AND security = $5::jsonb
                    RETURNING auth_version, security""",
                 uid, delta, json.dumps(changes), previous["auth_version"],
-                json.dumps({key: previous[key] for key in AUTH_SECURITY_FIELDS}),
+                json.dumps({key: previous[key] for key in AUTH_SECURITY_FIELDS if key in previous}),
             )
             if row is None:
                 raise RuntimeError("Authentication state changed concurrently; retry required")
@@ -800,6 +801,13 @@ async def authenticated_user_async(request: Request, *, owner: bool = False) -> 
     if user is None:
         from .google_oauth import hydrate_user
         user = await hydrate_user(request, user_id=payload["sub"])
+        if user is None and getattr(request.app.state, "db_pool", None) is None:
+            from .account_store import read
+            doc = await read(request, payload["sub"])
+            security = (doc or {}).get("auth_overlay")
+            if security:
+                user = {"id": payload["sub"], **copy.deepcopy(security)}
+                rt["state"]["users"].append(user)
         if user is None and getattr(request.app.state, "db_pool", None) is not None:
             try:
                 row = await request.app.state.db_pool.fetchrow(
@@ -1231,6 +1239,7 @@ async def v22_public(request: Request):
         "security": state["security"],
         "account_storage": "WINDOWS_LOCAL_APP_DATA" if os.name == "nt" else rt.get("storage_status", "YEREL_YEDEK"),
         "message": "Üyelik, lisans, yerel ajan, satış ve müşteri kurulum altyapısı tek Demo/Paper paketinde; gerçek para ve gerçek emir yok.",
+        **({"email_verification_v2_enabled": True} if email_verification.enabled() else {}),
     }
 
 
@@ -1397,21 +1406,22 @@ async def v22_login(payload: LoginRequest, request: Request, response: Response 
     token = browser_session_response_token(
         token, user, request, response, browser_session=payload.browser_session, remember=payload.remember,
     )
-    return {"token": token, "user": public_user(user), "license": active_license(rt["state"], user["id"]), "demo_only": True}
+    return {"token": token, "user": public_user(user), "license": active_license(rt["state"], user["id"]), "demo_only": True,
+            **({"email_verification_v2_enabled": True} if email_verification.enabled() else {})}
 
 
 @router.post("/auth/register")
-async def v22_register(payload: RegisterRequest, request: Request):
+async def v22_register(payload: RegisterRequest, request: Request, response: Response = None):
     from .google_oauth import registration_guard
     started = time.monotonic()
     try:
         async with registration_guard(request, payload.email):
-            return await register_password_user(payload, request)
+            return await register_password_user(payload, request, response)
     finally:
         await asyncio.sleep(max(0.0, REGISTRATION_RESPONSE_SECONDS - (time.monotonic() - started)))
 
 
-async def register_password_user(payload: RegisterRequest, request: Request):
+async def register_password_user(payload: RegisterRequest, request: Request, browser_response: Response = None):
     await enforce_auth_limit(request, "register", payload.email)
     if not payload.terms_accepted:
         raise HTTPException(422, "Kullanım koşullarını kabul etmelisiniz")
@@ -1463,9 +1473,13 @@ async def register_password_user(payload: RegisterRequest, request: Request):
             state["users"].append(user)
             state["profiles"].append({"id": uuid.uuid4().hex, "user_id": user_id, "full_name": user["display_name"], "avatar_url": None, "role": "user", "preferences": {}, "created_at": user["created_at"], "updated_at": user["created_at"]})
             state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": user_id, "plan": "FREE", "status": "inactive", "started_at": user["created_at"], "expires_at": None, "created_at": user["created_at"], "updated_at": user["created_at"]})
-            verification_token = issue_one_time_token(state, user, rt["secret"], kind="EMAIL_VERIFY")
-            from .account_store import save_action_token
-            await save_action_token(request, verification_token, user, "EMAIL_VERIFY")
+            if email_verification.enabled():
+                user["email_verified_at"] = None
+                verification_token = await email_verification.registration_link(request, user)
+            else:
+                verification_token = issue_one_time_token(state, user, rt["secret"], kind="EMAIL_VERIFY")
+                from .account_store import save_action_token
+                await save_action_token(request, verification_token, user, "EMAIL_VERIFY")
             verification_status_token = issue_token(user_id, user["role"], rt["secret"], kind="EMAIL_STATUS", ttl_seconds=24 * 60 * 60)
             add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
             save_state(state)
@@ -1475,6 +1489,9 @@ async def register_password_user(payload: RegisterRequest, request: Request):
             mail = {"to_email": email, "display_name": user["display_name"], "subject": VERIFY_SUBJECT,
                     "title": "Hesabını doğrula", "action_url": f"{app_base_url()}/verify-email?token={verification_token}",
                     "action_label": "E-posta adresimi doğrula"}
+            if email_verification.enabled():
+                mail.update(title="E-posta adresini onayla", action_label="E-postamı doğrula",
+                            expiry="30 dakika", verification_v2=True)
     persisted = await persist_v22_commercial(request.app)
     if DURABLE_AUTH_REQUIRED and not persisted:
         if created_user:
@@ -1488,6 +1505,9 @@ async def register_password_user(payload: RegisterRequest, request: Request):
             if created_user:
                 await rollback_password_registration(request, created_user["id"])
             raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.", headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
+    if email_verification.enabled():
+        await email_verification.complete_registration(request, browser_response, created_user or synthetic)
+        response["email_verification_v2_enabled"] = True
     return response
 
 
@@ -1498,12 +1518,19 @@ async def rollback_password_registration(request: Request, user_id: str) -> None
             rt["state"][key] = [item for item in rt["state"].get(key, []) if item.get(field) != user_id]
         save_state(rt["state"])
     await persist_v22_commercial(request.app)
+    if email_verification.enabled():
+        await email_verification.rollback_registration(request, user_id)
 
 
 @router.post("/auth/verify-email")
 async def v22_verify_email(payload: EmailTokenRequest, request: Request):
     rt = runtime(request)
-    await enforce_auth_limit(request, "verify", token_limit_account(payload.token, rt["secret"], "EMAIL_VERIFY"))
+    account = (await email_verification.find_link_user(request, email_verification.digest(payload.token))
+               if payload.token.startswith(email_verification.PREFIX)
+               else token_limit_account(payload.token, rt["secret"], "EMAIL_VERIFY"))
+    await enforce_auth_limit(request, "verify", account or "invalid-token")
+    if email_verification.enabled() or payload.token.startswith(email_verification.PREFIX):
+        return await email_verification.verify_link(request, payload.token)
     try:
         token = verify_token(payload.token, rt["secret"], expected_kind="EMAIL_VERIFY")
     except ValueError:
@@ -1536,6 +1563,13 @@ async def v22_resend_verification(payload: EmailTokenRequest, request: Request):
         raise HTTPException(400, "Doğrulama isteği geçersiz veya süresi dolmuş.") from None
     if not gmail_configured():
         raise HTTPException(503, email_service.unavailable_message(), headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"})
+    if email_verification.enabled():
+        try:
+            return await email_verification.send_link(request, proof["sub"])
+        except email_service.EmailDeliveryError as exc:
+            log_gmail_failure(exc, request.app)
+            raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene.",
+                                headers={"Retry-After": "60"}) from None
     user = next((row for row in rt["state"]["users"] if row.get("id") == proof["sub"]), None)
     if user is None and getattr(request.app.state, "db_pool", None) is not None:
         from .google_oauth import hydrate_user
@@ -1568,6 +1602,32 @@ async def v22_resend_verification(payload: EmailTokenRequest, request: Request):
         raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.",
                             headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
     return result
+
+
+class RegistrationResendRequest(BaseModel):
+    token: str | None = Field(default=None, min_length=20, max_length=600)
+
+
+@router.get("/auth/registration/status")
+async def registration_status(request: Request):
+    return await email_verification.pending_status(request)
+
+
+@router.post("/auth/registration/resend")
+async def registration_resend(request: Request, payload: RegistrationResendRequest | None = None):
+    email_verification.require_enabled()
+    await enforce_auth_limit(request, "verification-resend", None)
+    try:
+        return await email_verification.pending_resend(request, payload.token if payload else None)
+    except email_service.EmailDeliveryError as exc:
+        log_gmail_failure(exc, request.app)
+        raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene.",
+                            headers={"Retry-After": "60"}) from None
+
+
+@router.post("/auth/registration/exchange")
+async def registration_exchange(request: Request, response: Response):
+    return await email_verification.exchange_pending(request, response)
 
 
 @router.get("/auth/verification-status")

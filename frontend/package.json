@@ -11,6 +11,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@fontsource/manrope": "^5.2.0",
+    "@fontsource/sora": "^5.2.0",
     "@vitejs/plugin-react": "6.0.3",
     "lightweight-charts": "5.2.0",
     "lucide-react": "1.25.0",

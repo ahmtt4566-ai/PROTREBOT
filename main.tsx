@@ -4,6 +4,7 @@ import TestnetFirstApp from './TestnetFirstApp'
 import AppErrorBoundary from './AppErrorBoundary'
 import WebAccessGate from './WebAccessGate'
 import AuthGate from './AuthGate'
+import EmailVerificationRoute from './EmailVerificationRoute'
 import PublicPolicyPage from './PublicPolicyPage'
 import { publicPolicyForPath } from './compliance-content'
 import CopyProtection from './CopyProtection'
@@ -28,4 +29,4 @@ const publicPolicy = publicPolicyForPath(window.location.pathname)
 const application = publicPolicy
   ? <PublicPolicyPage policy={publicPolicy}/>
   : <><CopyProtection/><BackToTop/><WebAccessGate><AuthGate><MemberAccessProvider><TestnetFirstApp/></MemberAccessProvider></AuthGate></WebAccessGate></>
-ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary>{application}</AppErrorBoundary></React.StrictMode>)
+ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><AppErrorBoundary><EmailVerificationRoute>{application}</EmailVerificationRoute></AppErrorBoundary></React.StrictMode>)

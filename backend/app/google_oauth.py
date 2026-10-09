@@ -290,7 +290,8 @@ def merge_user(rt: dict[str, Any], row: Any) -> dict[str, Any]:
     if current is None:
         rt["state"]["users"].append(user)
     else:
-        current.update({key: user[key] for key in (*auth.AUTH_SECURITY_FIELDS, "auth_version")})
+        current.update({key: user[key] for key in (*auth.AUTH_SECURITY_FIELDS, "auth_version")
+                        if key != "email_verified_at" or key in user})
         user = current
     rt.setdefault("auth_baseline", {})[user["id"]] = {"auth_version": user["auth_version"], **auth.auth_security(user)}
     for collection in ("profiles", "subscriptions", "acceptances"):
@@ -371,7 +372,8 @@ async def resolve_identity(request: Request, identity: dict[str, str], *, create
                 created = auth.now_iso()
                 user = {"id": uid, "email": identity["email"], "display_name": identity["display_name"],
                         "role": "CUSTOMER", "active": True, "auth_version": 1, "email_verified": True,
-                        "password": {}, "auth_provider": "google", "created_at": created}
+                        "password": {}, "auth_provider": "google", "created_at": created,
+                        "email_verified_at": created}
                 state["users"].append(user)
                 state["profiles"].append({"id": uuid.uuid4().hex, "user_id": uid, "full_name": user["display_name"],
                                           "avatar_url": None, "role": "user", "preferences": {},

@@ -1231,6 +1231,8 @@ MEMBER_PUBLIC_PATHS = frozenset({
     "/api/v22/auth/verification-status", "/api/v22/auth/resend-verification", "/api/v22/auth/forgot-password", "/api/v22/auth/reset-password", "/api/v22/subscription/webhook",
     "/api/v22/auth/google/start", "/api/v22/auth/google/callback",
     "/api/v22/auth/google/pending", "/api/v22/auth/google/complete",
+    "/api/v22/auth/registration/status", "/api/v22/auth/registration/resend",
+    "/api/v22/auth/registration/exchange",
 })
 
 

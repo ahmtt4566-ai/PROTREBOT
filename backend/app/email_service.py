@@ -112,8 +112,34 @@ def auth_email_html(title: str, display_name: str, action_url: str, action_label
 </td></tr></table></td></tr></table></body></html>"""
 
 
+def verification_email(action_url: str) -> tuple[str, str]:
+    link = escape(action_url, quote=True)
+    text = (
+        "KaisTrade\n\nE-posta adresini onayla\n\n"
+        "KaisTrade hesabını doğrulamak için aşağıdaki bağlantıyı aç. "
+        "Bağlantı tek kullanımlıktır ve 30 dakika geçerlidir.\n\n"
+        f"{action_url}\n\n"
+        "KaisTrade hesabı sen açmadıysan bu e-postayı görmezden gelebilirsin. "
+        "Şifreni veya API anahtarlarını asla e-postayla istemeyiz."
+    )
+    html = f"""<!doctype html><html lang="tr"><body style="margin:0;background:#0B0E0C;color:#E6ECE8;font-family:Arial,sans-serif">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0B0E0C"><tr><td align="center" style="padding:36px 16px">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:480px;background:#121714;border:1px solid #1F2823;border-radius:18px"><tr><td style="padding:32px">
+<p style="margin:0 0 28px;font-size:22px;font-weight:700;color:#F2F6F3">Kais<span style="color:#5FCB8E">Trade</span></p>
+<p style="font-size:32px;color:#5FCB8E" aria-hidden="true">&#9993;</p>
+<h1 style="font-size:25px;color:#F2F6F3">E-posta adresini onayla</h1>
+<p style="font-size:15px;line-height:1.7">KaisTrade hesabını doğrulamak için aşağıdaki butona dokun. Bağlantı tek kullanımlıktır ve 30 dakika geçerlidir.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" style="margin:28px 0"><tr><td bgcolor="#5FCB8E" style="border-radius:14px"><a href="{link}" style="display:inline-block;padding:16px 24px;color:#06120C;font-size:15px;font-weight:700;text-decoration:none">E-postamı doğrula</a></td></tr></table>
+<p style="font-size:13px;color:#A3B0A9;line-height:1.6">Buton çalışmıyor mu? Bu bağlantıyı tarayıcına yapıştır:</p>
+<p style="font-size:13px;overflow-wrap:anywhere;word-break:break-all"><a href="{link}" style="color:#7FD8A6">{link}</a></p>
+<p style="margin-top:28px;font-size:12px;line-height:1.7;color:#8E9C95">KaisTrade hesabı sen açmadıysan bu e-postayı görmezden gelebilirsin. Şifreni veya API anahtarlarını asla e-postayla istemeyiz.</p>
+</td></tr></table></td></tr></table></body></html>"""
+    return text, html
+
+
 def send_auth_email(*, to_email: str, display_name: str, subject: str, title: str,
-                    action_url: str, action_label: str, expiry: str = "24 saat", information_only: bool = False) -> None:
+                    action_url: str, action_label: str, expiry: str = "24 saat", information_only: bool = False,
+                    verification_v2: bool = False) -> None:
     selected = provider()
     try:
         validate_configuration()
@@ -124,6 +150,8 @@ def send_auth_email(*, to_email: str, display_name: str, subject: str, title: st
                 "Bu işlemi sen yapmadıysan bu maili yok sayabilirsin.\n"
                 "KaisTrade parolanı veya borsa API anahtarını e-posta ile istemez.")
         html = auth_email_html(title, display_name, action_url, action_label, expiry, information_only=information_only)
+        if verification_v2:
+            text, html = verification_email(action_url)
         reply_to = os.getenv("EMAIL_REPLY_TO", "").strip()
         if selected == "resend":
             payload = {"from": f"KaisTrade <{parseaddr(os.environ['EMAIL_FROM'])[1]}>", "to": [to_email],

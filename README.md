@@ -2,6 +2,70 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## E-posta doğrulama v2 (varsayılan kapalı)
+
+Backend ayarı `PROTREBOT_EMAIL_VERIFICATION_V2_ENABLED=true` yeni doğrulama
+katmanını açar. Ayar eksik veya `false` olduğunda eski kayıt, 24 saatlik bağlantı,
+e-posta şablonu ve doğrulama ekranı korunur. Ayrı Supabase Auth sistemi yoktur;
+frontend özelliğin durumunu mevcut `/api/v22/public` yanıtından öğrenir.
+
+### Önce migration, sonra bayrak
+
+1. Backend kodunu bayrak kapalıyken dağıt. Mevcut hesap deposunun yedeğini al.
+2. Backend ortamında `DATABASE_URL` tanımlıyken depo kökünde çalıştır:
+
+   ```powershell
+   .venv\Scripts\python.exe -B -m backend.tools.migrate_email_verification_v2
+   ```
+
+   Alternatif olarak PostgreSQL konsolunda
+   [migration dosyasını](backend/migrations/20261009_001_email_verification_v2.sql)
+   çalıştır (`psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f
+   backend\migrations\20261009_001_email_verification_v2.sql`).
+3. `commercial_feature_migrations` tablosundaki tek seferlik kayıt yalnız migration
+   sırasında var olan, silinmemiş hesapları doğrular. Tekrar çalıştırmak daha
+   sonra açılmış hesapları doğrulamaz; `active`, rol veya oturum sürümü değişmez.
+   `email_verified_at` mevcut canonical kullanıcı kaydının `security` JSONB
+   alanında saklanır. Google ile oluşturulan yeni hesaplarda da yazılır.
+4. Backend ortamında `PROTREBOT_EMAIL_VERIFICATION_V2_ENABLED=true` tanımlayıp
+   yeniden dağıt/başlat. `APP_BASE_URL` gerçek site adresi olmalı; bağlantı
+   `/verify-email?token=...` biçiminde kalır. Frontend için ikinci bayrak yoktur.
+5. Mevcut Gmail/Resend sağlayıcısını koru. Resend kullanılıyorsa `EMAIL_PROVIDER=resend`,
+   `RESEND_API_KEY` ve doğrulanmış `EMAIL_FROM`; eski Gmail yolu için mevcut
+   `GMAIL_*` ayarları gerekir. Bu değerleri `VITE_` değişkenlerine koyma.
+
+Yerel SQLite hesabında açıkça belirtilmiş dosyalarla aynı tek seferlik geçiş:
+
+```powershell
+.venv\Scripts\python.exe -B -m backend.tools.migrate_email_verification_v2 --sqlite "<account_settings.sqlite3 yolu>" --snapshot "<v22_commercial_state.json yolu>"
+```
+
+Yeni 32 bayt rastgele bağlantılar 30 dakika geçerli; yalnız SHA-256 özetleri
+mevcut hesap deposunda tutulur. `used_at`, iptal ve doğrulama kaydı aynı
+transaction'da yazılır. Yeni bağlantı öncekileri iptal eder; bayrak öncesindeki
+24 saatlik bağlantılar yeni bir bağlantı istenmediği sürece eski son kullanma
+zamanına kadar çalışır. Yeniden gönderim yolları tek kalıcı kullanıcı sayacını
+paylaşır: 60 saniye bekleme, ilk gönderim dahil kayan bir saatte en fazla beş mail.
+
+E-posta bağlantısı tek başına oturum açmaz. Yeni kayıt yapılan cihaza 30 dakikalık
+HttpOnly, Secure, SameSite=Lax bekleyen kayıt çerezi verilir. Bu yetki yalnız
+durum/yeniden gönderim ve doğrulandıktan sonra tek seferlik oturum çevirme içindir;
+2FA veya değişmiş kimlik doğrulama sürümü normal girişe yönlendirir. Farklı cihaz
+yalnız doğrulama başarısını ve e-postası doldurulmuş giriş ekranını görür.
+Doğrulanmamış müşteri için mevcut 403, OWNER istisnası, abonelik/arm/consent/2FA
+ve LIVE/Demo yürütme kuralları değişmez.
+
+`/verify-email` sunucudan durumu okur; dört saniyede bir ve görünür sekmeye
+dönüşte sorgular, aynı anda sorguları çoğaltmaz. Başarı sadece sunucu onayıyla
+gösterilir. Sora/Manrope npm paketlerinden yalnız lazy doğrulama ekranında yüklenir;
+Google Fonts isteği yoktur. Yeni koyu HTML/text şablonu yalnız doğrulama mailinde
+kullanılır; diğer mail türleri korunur.
+
+Regresyonlar: [backend lifecycle testleri](backend/tests/test_email_verification_v2.py)
+ve [iki frontend için tarayıcı testleri](frontend/tests/email-verification-v2.spec.ts).
+Migration ve mail teslimatı bu belgede bir talimattır; geliştirme testleri gerçek
+veritabanına, e-posta sağlayıcısına veya borsaya istek göndermez.
+
 ## Authentication security
 
 - Password login keeps the existing request limiter and adds durable failure-only

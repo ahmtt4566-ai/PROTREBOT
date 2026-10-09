@@ -589,6 +589,13 @@ async def email_confirm(payload: Token, request: Request, response: Response):
 @router.post("/account/verification/resend")
 async def verification_resend(request: Request):
     user = await member(request)
+    if auth.email_verification.enabled():
+        try:
+            return await auth.email_verification.send_link(request, user["id"])
+        except auth.email_service.EmailDeliveryError as exc:
+            auth.log_gmail_failure(exc, request.app)
+            raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene.",
+                                headers={"Retry-After": "60"}) from None
     if user.get("email_verified"):
         return {"ok": True}
     await auth.enforce_auth_limit(request, "account-mail", user["id"])
