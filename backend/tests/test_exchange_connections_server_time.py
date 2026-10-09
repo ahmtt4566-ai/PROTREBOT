@@ -163,6 +163,44 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertNotIn(api_key, str(context.exception))
         self.assertNotIn(secret_key, str(context.exception))
 
+    def test_proxy_failure_is_explicit_and_does_not_send_credentials_or_leak_proxy_url(self):
+        secret_url = "http://synthetic-user:synthetic-password@proxy.invalid:9293"
+        http = FakeBinanceHttp(time_error=httpx.ProxyError(secret_url))
+        with self.assertRaisesRegex(exchange_connections.VaultError, "proxy bağlantısı") as context:
+            asyncio.run(exchange_connections.test_binance_credentials(http, "TESTNET", "api-key-safe", "secret-safe"))
+        self.assertNotIn(secret_url, str(context.exception))
+        self.assertNotIn("synthetic-password", str(context.exception))
+        self.assertEqual(http.paths, ["/fapi/v1/time"])
+
+    def test_owner_time_diagnostic_needs_no_api_keys_and_creates_no_order(self):
+        request = self._request()
+        request.app.state.http = FakeBinanceHttp()
+        result = asyncio.run(exchange_connections.exchange_server_time_status(request, "TESTNET"))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "TESTNET")
+        self.assertEqual(request.app.state.http.paths, ["/fapi/v1/time"])
+        request.app.state.db_pool.execute.assert_not_called()
+
+    def test_time_diagnostic_preserves_safe_proxy_failure_type(self):
+        request = self._request()
+        request.app.state.http = FakeBinanceHttp(time_error=httpx.ProxyError("synthetic-secret"))
+        with self.assertRaises(exchange_connections.HTTPException) as context:
+            asyncio.run(exchange_connections.exchange_server_time_status(request, "TESTNET"))
+        self.assertEqual(context.exception.status_code, 502)
+        self.assertEqual(context.exception.detail["error_type"], "ProxyError")
+        self.assertNotIn("synthetic-secret", str(context.exception.detail))
+        self.assertEqual(request.app.state.http.paths, ["/fapi/v1/time"])
+
+    def test_time_diagnostic_rejects_non_owner_before_any_exchange_call(self):
+        for member, status in [(None, 401), ({"id": "customer", "role": "CUSTOMER"}, 403)]:
+            request = self._request()
+            request.state.member = member
+            request.app.state.http = FakeBinanceHttp()
+            with self.assertRaises(exchange_connections.HTTPException) as context:
+                asyncio.run(exchange_connections.exchange_server_time_status(request, "TESTNET"))
+            self.assertEqual(context.exception.status_code, status)
+            self.assertEqual(request.app.state.http.paths, [])
+
     def _request(self):
         pool = AsyncMock()
         pool.fetch.return_value = []

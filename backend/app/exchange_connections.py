@@ -631,6 +631,9 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
             raise VaultError("Binance saat servisine ulaşırken zaman aşımı oluştu.") from exc
         except httpx.TimeoutException as exc:
             raise VaultError("Binance saat servisine ulaşırken zaman aşımı oluştu.") from exc
+        except httpx.ProxyError as exc:
+            logger.warning("Binance server-time proxy failed: mode=%s error_type=%s", normalized, type(exc).__name__)
+            raise VaultError("Binance saat servisine proxy bağlantısı kurulamadı. Sunucunun sabit IP proxy ayarını kontrol edin.") from exc
         except httpx.ConnectError as exc:
             raise VaultError("Binance saat servisine bağlantı veya DNS kurulamadı.") from exc
         except httpx.NetworkError as exc:
@@ -653,6 +656,7 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
                 )
             raise error from exc
         except httpx.HTTPError as exc:
+            logger.warning("Binance server-time transport failed: mode=%s error_type=%s", normalized, type(exc).__name__)
             raise VaultError("Binance saat servisi HTTP isteği başarısız oldu.") from exc
 
         try:
@@ -876,6 +880,29 @@ async def exchange_connection_status(request: Request) -> dict[str, Any]:
     await ensure_exchange_vault(request.app)
     await ensure_session_cache(request)
     return session_public_status(request.app, request)
+
+
+@router.get("/time-status")
+async def exchange_server_time_status(request: Request, mode: Mode = "TESTNET") -> dict[str, Any]:
+    _require_owner_member(request)
+    try:
+        offset = await _server_time_offset(request.app.state.http, mode)
+    except VaultError as exc:
+        error = _exchange_test_http_exception(exc)
+        detail = error.detail if isinstance(error.detail, dict) else {"detail": error.detail}
+        error.detail = {
+            **detail,
+            "mode": mode,
+            "error_type": type(exc.__cause__).__name__ if exc.__cause__ is not None else type(exc).__name__,
+            "proxy_configured": bool(os.getenv("QUOTAGUARD_URL", "").strip()),
+        }
+        raise error from exc
+    return {
+        "ok": True,
+        "mode": mode,
+        "offset_ms": offset,
+        "proxy_configured": bool(os.getenv("QUOTAGUARD_URL", "").strip()),
+    }
 
 
 @router.post("/test")

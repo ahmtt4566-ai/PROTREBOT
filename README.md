@@ -171,6 +171,11 @@ passed to the settings parser by the template regression test.
 ## Kais Original v2 Demo controls
 
 Public market reads use a single bounded request budget across upstream hosts.
+Owners can diagnose the original signed-request transport without entering
+credentials via `GET /api/exchange-connections/time-status?mode=TESTNET` (or
+`LIVE`). This reads only server time, preserves clock/rate-limit rejection,
+and reports safe failure types without proxy URLs or API keys. It never saves,
+activates, arms or starts a connection and never creates an order.
 A failed static-IP proxy can recover through a separate direct, read-only
 client; a 30-second circuit prevents every poll from retrying the broken proxy.
 Signed Demo/LIVE traffic retains its original proxy and never uses this fallback.
