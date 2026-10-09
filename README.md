@@ -170,6 +170,23 @@ passed to the settings parser by the template regression test.
 
 ## Kais Original v2 Demo controls
 
+Both frontend entrypoints validate Demo status, account and summary responses
+before storing them. Missing limits, HTML/proxy fallback bodies and malformed
+summaries produce a recoverable in-panel error, not a workspace crash or
+invented trading limits. Account snapshots cannot replace verified status
+limits. Demo requests have a 30-second deadline and never retry mutations.
+
+For the production UI, enter the Demo API Key and Secret Key and click
+**Demo bağlantısını hazırla**. This explicit action tests/saves only TESTNET
+credentials, activates/connects Demo and obtains the existing temporary Demo
+arm grant; it sends no order. **Demo'yu hazırla ve otomasyonu başlat** in
+Automation additionally provides explicit Demo automation consent. The
+compatibility UI uses its already-saved Demo credentials for these shortcuts.
+The old separate controls remain available. Neither shortcut changes LIVE,
+session/owner checks, exchange permissions, balance or risk limits, or server
+feature flags. A failed step stops the sequence; an uncertain timeout is not
+automatically resubmitted.
+
 Both `PROTREBOT_BINANCE_DEMO_KAIS_ORIGINAL_V2_ENABLED` and
 `PROTREBOT_BINANCE_DEMO_KAIS_ORIGINAL_V2_SEND_ORDERS` default to **false**.
 Restart the backend after changing its process environment. The Demo

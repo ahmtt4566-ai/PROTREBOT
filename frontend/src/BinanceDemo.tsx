@@ -1,7 +1,9 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, BarChart3, Bell, Calculator, CircleDollarSign, ClipboardList, Crosshair, Gauge, History, LockKeyhole, Play, Radio, RefreshCw, Save, Send, Settings2, ShieldCheck, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, Zap } from 'lucide-react'
 import { API_BASE } from './api'
-import OriginalDemoControls, {ORIGINAL_DEMO_ID, type DemoStrategy} from '../../OriginalDemoControls'
+import OriginalDemoControls, {checkedOriginalStatus, ORIGINAL_DEMO_ID, type DemoStrategy} from '../../OriginalDemoControls'
+import {checkDemoResponse, demoRequest, prepareDemoTrading, startDemoAutomation} from '../../demo-request'
+import '../../demo-recovery.css'
 
 const API = `${API_BASE}/binance-demo`
 const V21_API = `${API_BASE}/v21`
@@ -116,7 +118,8 @@ type DemoPlan = {
   monitoring_targets?:string[]
 }
 
-type DemoAccount = DemoStatus & {
+type DemoAccount = Omit<DemoStatus,'limits'> & {
+  limits?:DemoStatus['limits']
   wallet_balance:number
   available_balance:number
   margin_balance:number
@@ -223,17 +226,11 @@ function apiErrorMessage(detail:unknown):string {
 }
 
 async function apiCall<T>(path:string, options?:RequestInit):Promise<T> {
-  const response = await fetch(`${API}${path}`, options)
-  const payload:unknown = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(apiErrorMessage((payload as {detail?:unknown})?.detail))
-  return payload as T
+  return demoRequest<T>(API,path,options,apiErrorMessage)
 }
 
 async function v21Call<T>(path:string, options?:RequestInit):Promise<T> {
-  const response = await fetch(`${V21_API}${path}`, options)
-  const payload:unknown = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(apiErrorMessage((payload as {detail?:unknown})?.detail))
-  return payload as T
+  return demoRequest<T>(V21_API,path,options,apiErrorMessage)
 }
 
 function PositionMap({position,plan}:{position:DemoPosition;plan?:DemoPlan}) {
@@ -268,6 +265,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const [busy,setBusy] = useState(false)
   const [message,setMessage] = useState('Önce bağlantıyı test edin; ardından analiz planını doğrulayın.')
   const [messageKind,setMessageKind] = useState<'info'|'ok'|'error'>('info')
+  const [readError,setReadError] = useState('')
   const [orderPreview,setOrderPreview] = useState<DemoRiskPreview|null>(null)
   const [confirmation,setConfirmation] = useState<DemoConfirmation|null>(null)
   const [confirmationText,setConfirmationText] = useState('')
@@ -285,42 +283,58 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const [scannerBusy,setScannerBusy] = useState(false)
   const [backtestSymbol,setBacktestSymbol] = useState(symbol)
   const accountRefreshId = useRef(0)
+  const quickDemoInFlight = useRef(false)
   const v21RequestId = useRef(0)
   const initialScanRequested = useRef(false)
   const lastNotificationId = useRef<string|null>(null)
 
-  const refreshStatus = async () => {
+  const refreshStatus = async (signal?:AbortSignal) => {
     try {
-      const payload = await apiCall<DemoStatus>('/status')
+      const payload = await apiCall<DemoStatus>('/status',{signal})
+      if (signal?.aborted) return null
       setStatus(payload)
       if (!payload.configured) setAccount(null)
       return payload
-    } catch { setStatus(null); return null }
+    } catch (error) {
+      if (signal?.aborted) return null
+      setStatus(null);setReadError(error instanceof Error ? error.message : 'Demo durumu alınamadı.');return null
+    }
   }
-  const refreshAccount = async (quiet=true) => {
+  const refreshAccount = async (quiet=true,signal?:AbortSignal) => {
     const requestId = ++accountRefreshId.current
     try {
-      const payload = await apiCall<DemoAccount>('/account')
-      if (requestId !== accountRefreshId.current) return
-      setAccount(payload); setStatus(payload)
+      const payload = await apiCall<DemoAccount>('/account',{signal})
+      if (requestId !== accountRefreshId.current || signal?.aborted) return null
+      setAccount(payload);setStatus(current => current ? {...current,...payload,limits:current.limits} : current)
+      return payload
     } catch (error) {
-      if (requestId !== accountRefreshId.current) return
+      if (requestId !== accountRefreshId.current || signal?.aborted) return null
       setAccount(null)
+      setReadError(error instanceof Error ? error.message : 'Demo hesap okunamadı.')
       if (!quiet) { setMessage(error instanceof Error ? error.message : 'Demo hesap okunamadı.'); setMessageKind('error') }
     }
   }
-  const refreshV21 = async (quiet=true) => {
+  const refreshV21 = async (quiet=true,signal?:AbortSignal) => {
     const requestId = ++v21RequestId.current
     try {
-      const payload = await v21Call<V21Summary>('/summary')
-      if (requestId !== v21RequestId.current) return null
+      const payload = await v21Call<V21Summary>('/summary',{signal})
+      if (requestId !== v21RequestId.current || signal?.aborted) return null
       setV21(payload)
       setSettingsDraft(current => current || normalizeV21Settings(payload.settings))
       return payload
     } catch (error) {
+      if (requestId !== v21RequestId.current || signal?.aborted) return null
+      setReadError(error instanceof Error ? error.message : 'Demo merkezi okunamadı.')
       if (!quiet) { setMessage(error instanceof Error ? error.message : 'V21 merkezi okunamadı.');setMessageKind('error') }
       return null
     }
+  }
+
+  const retryDemoReads = async () => {
+    setReadError('')
+    const payload = await refreshStatus()
+    if (payload?.configured) await refreshAccount(false)
+    await refreshV21(false)
   }
 
   const runScanner = async () => {
@@ -339,21 +353,28 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   useEffect(() => {
     if (!active) return
     let mounted = true
+    let refreshing = false
+    const controller = new AbortController()
     const refresh = async () => {
-      const payload = await refreshStatus()
-      if (mounted && payload?.configured) await refreshAccount(true)
-      if (mounted) {
-        const summary = await refreshV21(true)
-        if (summary?.scanner && !summary.scanner.last_scan_at && !initialScanRequested.current) {
-          initialScanRequested.current = true
-          void runScanner()
+      if (refreshing) return
+      refreshing = true
+      try {
+        const payload = await refreshStatus(controller.signal)
+        const accountReady = !payload?.configured || Boolean(mounted && await refreshAccount(true,controller.signal))
+        if (mounted) {
+          const summary = await refreshV21(true,controller.signal)
+          if (mounted && payload && accountReady && summary) setReadError('')
+          if (summary?.scanner && !summary.scanner.last_scan_at && !initialScanRequested.current) {
+            initialScanRequested.current = true
+            void runScanner()
+          }
         }
-      }
+      } finally { refreshing = false }
     }
     refresh()
     const timer = window.setInterval(refresh,3500)
     const ticker = window.setInterval(() => setClock(Date.now()),1000)
-    return () => { mounted=false;window.clearInterval(timer);window.clearInterval(ticker) }
+    return () => { mounted=false;controller.abort();window.clearInterval(timer);window.clearInterval(ticker) }
   },[active])
 
   useEffect(() => { setBacktestSymbol(symbol) },[symbol])
@@ -499,6 +520,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
     try {
       const result = await action()
       if (result && typeof result === 'object' && 'settings' in result) {
+        checkDemoResponse(result,'summary')
         const summary = result as V21Summary;setV21(summary);setSettingsDraft(normalizeV21Settings(summary.settings))
       } else await refreshV21(true)
       setMessage(success);setMessageKind('ok')
@@ -539,6 +561,23 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       if (!result.auto.enabled || result.auto.last_error) throw new Error(result.auto.last_error || result.auto.last_decision || 'Demo otomasyonu başlatılamadı.')
       return result
     },'Kontrollü V21 Demo otomasyonu başlatıldı.')
+  }
+  const quickDemo = async (startAutomation=false) => {
+    if (!status?.configured) { setMessage('Önce Demo API Key ve Secret Key bağlantısını kaydedin.');setMessageKind('error');return }
+    if (busy || v21Busy || quickDemoInFlight.current) return
+    quickDemoInFlight.current = true;setBusy(true);setMessageKind('info');setMessage('Demo bağlantısı ve süreli emir izni hazırlanıyor…')
+    try {
+      if (startAutomation) {
+        const original = checkedOriginalStatus(await v21Call('/original-v2/status'))
+        const result = await startDemoAutomation<DemoStatus,V21Summary>(API_BASE,null,
+          demoStrategy === ORIGINAL_DEMO_ID ? ORIGINAL_DEMO_ID : undefined,original.flags,apiErrorMessage)
+        setStatus(result.status);setV21(result.summary);setSettingsDraft(normalizeV21Settings(result.summary.settings))
+      } else setStatus(await prepareDemoTrading<DemoStatus>(API_BASE,null,apiErrorMessage))
+      setMessage(startAutomation ? 'Demo otomasyonu başlatıldı. Live kanalı değiştirilmedi.' : 'Demo işlem için hazır. Emir gönderilmedi; Live kanalı değiştirilmedi.')
+      setMessageKind('ok')
+      await refreshAccount(false)
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Demo hazırlanamadı.');setMessageKind('error') }
+    finally { quickDemoInFlight.current = false;setBusy(false) }
   }
   const runBacktest = () => runV21(
     async () => { const result = await v21Call<V21Backtest>('/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:backtestSymbol,interval:'15m',limit:1000})});await refreshV21(true);return result },
@@ -1018,7 +1057,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
 
     {!status?.configured && <section className="demoSetupCard">
       <div><LockKeyhole/><span><b>Testnet anahtarı şifreli kasada bekleniyor</b><p>Üst menüdeki <strong>BORSA BAĞLANTILARI</strong> sekmesine girin. TESTNET kartında anahtarı test edin, şifreli kaydedin ve aktifleştirin; başka bir siteye veya siyah pencereye gitmeniz gerekmez.</p></span></div>
-      <button onClick={refreshStatus}><RefreshCw/> KASAYI YENİDEN KONTROL ET</button>
+      <button onClick={() => void refreshStatus()}><RefreshCw/> KASAYI YENİDEN KONTROL ET</button>
     </section>}
 
     <section className={`demoCommandBar ${tab !== 'trade' ? 'demoTabHidden' : ''}`}>
@@ -1027,13 +1066,14 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       <button className="demoEmergency" disabled={busy || !status?.configured} onClick={emergency}><TriangleAlert/> ACİL DEMO DURDUR</button>
     </section>
 
-    <div className={`demoMessage demoMessage-${messageKind}`}>{messageKind === 'error' ? <TriangleAlert/> : messageKind === 'ok' ? <ShieldCheck/> : <Activity/>}<span>{message}</span></div>
+    <div className={`demoMessage demoMessage-${readError ? 'error' : messageKind}`} role={readError ? 'alert' : undefined}>{readError || messageKind === 'error' ? <TriangleAlert/> : messageKind === 'ok' ? <ShieldCheck/> : <Activity/>}<span>{readError || message}</span>{readError && <button type="button" onClick={() => void retryDemoReads()}>Demo verilerini yeniden getir</button>}</div>
+    <div className="demoCredentialActions"><button type="button" disabled={busy || v21Busy || !status?.configured} onClick={() => void quickDemo()}>Demo bağlantısını hazırla</button><p>Yalnız Demo bağlantısını ve süreli emir iznini hazırlar. Emir göndermez; Live değişmez.</p></div>
 
     <section className={`demoAccountStrip ${tab !== 'trade' ? 'demoTabHidden' : ''}`}>
       <article><Wallet/><span><small>SANAL CÜZDAN</small><b>{fmt(account?.wallet_balance)} USDT</b></span></article>
       <article><CircleDollarSign/><span><small>KULLANILABİLİR</small><b>{fmt(account?.available_balance)} USDT</b></span></article>
       <article><Activity/><span><small>AÇIK PnL</small><b className={(account?.unrealized_pnl || 0) >= 0 ? 'demoProfit' : 'demoLoss'}>{(account?.unrealized_pnl || 0) >= 0 ? '+' : ''}{fmt(account?.unrealized_pnl)} USDT</b></span></article>
-      <article><Crosshair/><span><small>POZİSYON</small><b>{account?.reconciliation?.reconciled_active_positions ?? 0} / {status?.limits.max_open_positions ?? 3}</b></span></article>
+      <article><Crosshair/><span><small>POZİSYON</small><b>{account?.reconciliation?.reconciled_active_positions ?? 0} / {status?.limits?.max_open_positions ?? '—'}</b></span></article>
       <article><Target/><span><small>AÇIK EMİRLER</small><b>{(account?.open_orders.length || 0)+(account?.open_algo_orders.length || 0)}</b></span></article>
       <article className={account?.hedge_mode ? 'demoModeBad' : 'demoModeGood'}><ShieldCheck/><span><small>POZİSYON MODU</small><b>{account ? account.hedge_mode ? 'HEDGE · DEĞİŞTİR' : 'ONE-WAY · UYGUN' : '—'}</b></span></article>
     </section>
@@ -1129,6 +1169,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
     {tab === 'auto' && <section className="v21Workspace" data-original-profile={demoStrategy === ORIGINAL_DEMO_ID ? 'true' : undefined}>
       <OriginalDemoControls strategy={demoStrategy} onStrategyChange={setDemoStrategy} request={v21Call} armed={Boolean(status?.armed)}
         enabled={Boolean(v21?.auto.enabled)} confirmation={autoConfirm} busy={busy || v21Busy} onRecorded={() => refreshV21(true)}/>
+      {!v21?.auto.enabled && <div className="demoCredentialActions"><button type="button" disabled={busy || v21Busy} onClick={() => void quickDemo(true)}>Demo'yu hazırla ve otomasyonu başlat</button><p>Bu düğmeye basmak yalnız Demo otomasyonuna onay verir. Live değişmez.</p></div>}
       <header className="v21WorkspaceHead"><div><span>ÇİFT ONAY · DEMO ARM + DEMO OTOMATİK</span><h2>Kontrollü Demo Otopilot</h2><p>{demoStrategy === ORIGINAL_DEMO_ID ? 'Original: sabit 8 sembol ve sabit politika. Sunucu bayrakları, owner/session, arm ve kullanıcı onayı emir iznini ayrı ayrı sınırlar.' : 'İzin listesi, yön, saat, güven, volatilite, korelasyon, günlük kayıp ve pozisyon kapıları birlikte geçmeden emir göndermez.'}</p></div><b className={v21?.auto.enabled ? 'v21Running' : 'v21Stopped'}><Zap/> {v21?.auto.enabled ? 'ÇALIŞIYOR' : 'GÜVENLİ KAPALI'}</b></header>
       <div className="v21AutoLayout"><article className="v21Card v21AutoControl"><header><Zap/><div><small>İKİLİ GÜVENLİK KAPISI</small><h3>Demo Emir Kilidi</h3></div></header><div className="v21AutoDecision"><small>DEMO ARM</small><b>{status?.armed ? 'AÇIK' : 'KAPALI'}</b><span>{status?.armed ? `Kalan süre ${Math.floor(armSeconds / 60)} dk ${armSeconds % 60} sn` : 'Yeni Demo girişleri kilitli.'}</span></div>{!status?.armed && <label><span>Başlatmak için yaz</span><input value={armText} onChange={event => setArmText(event.target.value)} placeholder="DEMO"/></label>}<button disabled={busy || !status?.connected || (!status?.armed && armText.trim().toUpperCase() !== 'DEMO')} onClick={status?.armed ? disarm : arm}>{status?.armed ? <TriangleAlert/> : <UnlockKeyhole/>}{status?.armed ? ' DEMO ARM KAPAT' : ' DEMO ARM AÇ'}</button><p>Bu kilit yalnızca Binance Futures Demo giriş emirlerini süreli olarak açar; Live kanalını etkilemez.</p></article><article className="v21Card v21AutoControl"><header><Zap/><div><small>İKİNCİ KULLANICI ONAYI</small><h3>Demo Otomasyon Motoru</h3></div></header><div className="v21AutoDecision"><small>SON KARAR</small><b>{v21?.auto.last_decision || 'Bekleniyor'}</b><span>{v21?.auto.last_scan ? `Son tarama ${stamp(v21.auto.last_scan)} · ${v21.auto.cycles} tur` : 'Henüz tarama yapılmadı.'}</span></div>{!v21?.auto.enabled && <label><span>Başlatmak için yaz</span><input value={autoConfirm} onChange={event => setAutoConfirm(event.target.value)} placeholder="DEMO OTOMATİK"/></label>}<button className={v21?.auto.enabled ? 'stop' : ''} disabled={v21Busy || (!v21?.auto.enabled && !status?.armed)} onClick={toggleAuto}>{v21?.auto.enabled ? <TriangleAlert/> : <Play/>}{v21?.auto.enabled ? ' YENİ GİRİŞLERİ DURDUR' : ' KONTROLLÜ DEMO OTOMASYONU BAŞLAT'}</button><p>Uygulama yeniden açıldığında daima kapalı başlar. Stop/TP koruması motor dursa bile Binance Demo hesabında kalır.</p></article>
         {demoStrategy !== ORIGINAL_DEMO_ID && <article className="v21Card v21AutoRules"><header><Settings2/><div><small>OTOMASYON EVRENİ</small><h3>İzinler ve Piyasa Kapıları</h3></div></header>{settingsDraft && <div>

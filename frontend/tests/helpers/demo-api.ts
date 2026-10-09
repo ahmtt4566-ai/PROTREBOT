@@ -26,12 +26,12 @@ export const demoSummary = {
   scanner: {
     active: false, scan_status: 'IDLE', scan_interval_seconds: 60, coins_scanned: 0, selected_count: 0,
     eligible_count: 0, last_scan_at: timestamp, next_scan_at: null, last_error: null,
-    top_candidates: [], selected_symbols: [], last_stage: 'WAIT',
+    top_candidates: [], all_candidates: [], selected_symbols: [], last_stage: 'WAIT',
   },
   stream: {status: 'DISCONNECTED', transport: 'NONE', last_event: null, last_sync: null, reconnect_count: 0, error_count: 0, last_error: null},
   daily: {date: '2026-10-03', auto_entries: 0, events: 0, realized_pnl: 0, remaining_loss_budget: 30},
   account: {wallet_balance: null, available_balance: null, unrealized_pnl: null, positions: 0, reconciled_active_positions: 0, normal_orders: 0, algo_orders: 0},
-  protection: {repairs: 0, duplicate_blocks: 0}, journal: [], backtest: null,
+  protection: {repairs: 0, duplicate_blocks: 0}, journal: [], automation_trades: [], backtest: null,
   certificate: {version: 'V21', status: 'UNKNOWN', score: 0, passed_gates: 0, total_gates: 0, gates: [], reason: 'Read-only UI fixture', generated_at: timestamp},
 }
 

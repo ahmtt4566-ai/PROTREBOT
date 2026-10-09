@@ -21,7 +21,7 @@ function validPlan(plan:DryPlan):boolean {
     && plan.strategy_id === ORIGINAL_DEMO_ID && plan.order_authorized === false && plan.execution_connected === false)
 }
 
-function checkedStatus(payload:OriginalStatus):OriginalStatus {
+export function checkedOriginalStatus(payload:OriginalStatus):OriginalStatus {
   if (payload?.strategy_id !== ORIGINAL_DEMO_ID || typeof payload.flags?.enabled !== 'boolean'
     || typeof payload.flags?.send_orders !== 'boolean' || !Array.isArray(payload.dry_run_plans)
     || typeof payload.profile_hash !== 'string' || typeof payload.policy_hash !== 'string'
@@ -42,7 +42,7 @@ export default function OriginalDemoControls({strategy,onStrategyChange,request,
   const [running,setRunning] = useState(false)
   const [result,setResult] = useState('')
   const refresh = useCallback(async () => {
-    try { const value = checkedStatus(await request<OriginalStatus>('/original-v2/status'));setStatus(value);setError('');return value }
+    try { const value = checkedOriginalStatus(await request<OriginalStatus>('/original-v2/status'));setStatus(value);setError('');return value }
     catch (failure) { setStatus(null);setError(failure instanceof Error ? failure.message : 'Original Demo durumu alınamadı.');return null }
   },[request])
   useEffect(() => { void refresh(); const timer = setInterval(() => { void refresh() },10000);return () => clearInterval(timer) },[refresh])

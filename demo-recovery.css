@@ -1,0 +1,53 @@
+.v26App.workspaceRoute .binanceDemoDeck > .demoRecoveryArea {
+  grid-area: message;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+#root .v26App.workspaceRoute .demoRecoveryArea .demoSetupCard {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  height: auto !important;
+  max-height: none !important;
+  box-sizing: border-box;
+}
+
+#root .v26App.workspaceRoute .demoRecoveryArea .demoSetupCard.demoTabHidden,
+#root .v26App.workspaceRoute .demoRecoveryArea .demoCommandBar.demoTabHidden {
+  display: none !important;
+}
+
+#root .v26App.workspaceRoute .demoRecoveryArea .demoCredentialFields {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+#root .v26App.workspaceRoute .demoRecoveryArea .demoCredentialFields input {
+  min-width: 0;
+  min-height: 44px !important;
+}
+
+#root .v26App.workspaceRoute .demoRecoveryArea .demoCredentialActions {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+#root .v26App.workspaceRoute .demoRecoveryArea .demoSetupCard p {
+  display: block !important;
+}
+
+.binanceDemoDeck .demoMessage {
+  flex-wrap: wrap;
+}
+
+.binanceDemoDeck .demoMessage button,
+.binanceDemoDeck .demoCredentialActions button {
+  min-height: 44px !important;
+}
