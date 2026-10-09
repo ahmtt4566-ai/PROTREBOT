@@ -1,0 +1,92 @@
+{
+  "schema": "kais-original-v2-demo-fixed-policy-v1",
+  "stage": "A_DECISION_ONLY",
+  "strategy_id": "kais-original-v2-demo-v1",
+  "feature_flag": "PROTREBOT_BINANCE_DEMO_KAIS_ORIGINAL_V2_ENABLED",
+  "feature_default": false,
+  "source_profile_id": "original-fixed-cap6-lev3-gap18d-v1",
+  "source_profile_sha256": "b21a9fbf7916808c6b0b9b26e6700725defe38dc4fb6a0151731deab8b251d81",
+  "reference": {
+    "report": "original-v2-f2-test-run2/report-BASELINE.json",
+    "report_sha256": "4b83f6433b954e3a9ae4e7b09a5d960e8b2611cf731d4b1459c9fe9ff41557e0",
+    "resolved_policy_sha256": "8196421755c55ec40b1f180eda31813f9a6d19f539b9058a46456c69b2a7bc48"
+  },
+  "required_intervals": ["15m", "1h", "4h"],
+  "closed_window": 259,
+  "canonical_policy": {
+    "confidence_threshold": 80,
+    "breakout_quality_threshold": 50,
+    "mtf_allow_either_timeframe": 0
+  },
+  "execution_policy": {
+    "allowed_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"],
+    "interval": "15m",
+    "allow_long": true,
+    "allow_short": true,
+    "max_margin_per_trade": 25.0,
+    "max_loss_per_trade": 3.0,
+    "max_leverage": 3,
+    "max_positions": 5,
+    "max_same_direction_positions": 2,
+    "max_direction_exposure_usdt": null,
+    "max_total_exposure_usdt": 350.0,
+    "daily_loss_limit": 10.0,
+    "daily_trade_limit": 3,
+    "consecutive_loss_limit": 3,
+    "min_confidence": 80,
+    "mtf_allow_either_timeframe": false,
+    "max_trap_score": 35,
+    "max_spread_bps": 8.0,
+    "max_stop_distance_pct": 5,
+    "atr_stop_multiplier": 1.5,
+    "liquidation_buffer_pct": 0.5,
+    "fee_bps_per_side": 5.0,
+    "slippage_bps_per_side": 3.0,
+    "minimum_net_reward_usdt": 0.25,
+    "scan_seconds": 120,
+    "require_one_way": true,
+    "require_isolated": true,
+    "stop_required": true
+  },
+  "offline_risk": {
+    "stop_mode": "FIXED_CAP",
+    "stop_cap_pct": 6.0,
+    "risk_budget_usdt": 3.0,
+    "leverage": 3,
+    "max_margin_usdt": 25.0,
+    "min_margin_usdt": 5.0,
+    "liquidation_buffer_pct": 0.5,
+    "exposure_usdt": 350.0,
+    "gap_blackout_seconds": 1555200
+  },
+  "model": {
+    "initial_equity_usdt": 1000,
+    "decision_step_seconds": 900,
+    "entry": "NEXT_CONTRACT_OPEN_WITH_ADVERSE_SLIPPAGE",
+    "spread_bps": 2,
+    "slippage_bps": 3,
+    "intrabar": "STOP_FIRST",
+    "exit_policy_id": "original-v2-tp60-tp3-fixed-stop-v1",
+    "tp1_fraction": 0.6,
+    "tp2_fraction": 0,
+    "stop_movement": "NONE",
+    "funding": "HISTORICAL_NATIVE",
+    "gap18d": "HISTORICAL_FUTURE_GAP_INVENTORY_ONLY",
+    "cost_ledger": "MODEL_SEPARATE_FROM_ACTUAL_EXECUTION"
+  },
+  "parity_window": {
+    "start": "2024-09-01T00:00:00Z",
+    "end_exclusive": "2024-09-03T00:00:00Z",
+    "absolute_serialization_tolerance": 1e-10,
+    "decision_difference_tolerance": 0,
+    "rounded_decimal_difference_tolerance": 0
+  },
+  "notes": [
+    "No order client, runtime route, automation activation, protection or journal integration in stage A.",
+    "The inherited execution-policy stop value 5 is preserved for reference-hash parity; fixed-cap admission uses offline_risk.stop_cap_pct=6, not dynamic_stop_distance_pct.",
+    "The inherited scan_seconds=120 is policy provenance, not this model's 900-second decision grid.",
+    "F2, trend filters and confidence>90 are absent.",
+    "Canonical eligibility is not account admission or order authorization.",
+    "Real Testnet fills, funding and future gaps cannot be certified identical by model parity."
+  ]
+}
