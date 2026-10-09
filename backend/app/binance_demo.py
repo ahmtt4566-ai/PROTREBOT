@@ -26,7 +26,7 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from enum import Enum
 from pathlib import Path
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode
 from .web_security import env_flag
 
@@ -39,6 +39,9 @@ from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .maintenance import guard_new_entry
 from .stop_evidence import observe_position_snapshot
 from .trade_r_metrics import initial_entry_risk_usdt
+
+if TYPE_CHECKING:
+    from .strategies.contracts import StrategyResult
 
 
 DEMO_REST_BASE = "https://demo-fapi.binance.com"
@@ -1180,6 +1183,12 @@ def _state_from_demo_payload(
     normalize_plans: bool = True,
 ) -> dict[str, Any]:
     plans = payload.get("plans", {}) if isinstance(payload.get("plans"), dict) else {}
+    if any(isinstance(plan, dict) and plan.get("strategy_id") is not None for plan in plans.values()):
+        from .original_v2_demo_execution import original_plan
+
+        for plan in plans.values():
+            if isinstance(plan, dict):
+                original_plan(plan)
     if normalize_plans:
         for plan in plans.values():
             if isinstance(plan, dict):
@@ -2010,6 +2019,11 @@ def enrich_snapshot_with_plans(snapshot: dict[str, Any], state: dict[str, Any]) 
                 and str(position.get("margin_type") or "").lower() == "isolated"
             )
         )
+        if plan.get("strategy_id") is not None:
+            from .original_v2_demo_execution import IDENTITY_FIELDS, original_plan
+
+            if original_plan(plan) and can_mutate_lifecycle(plan):
+                position.update({key: plan[key] for key in IDENTITY_FIELDS})
     return snapshot
 
 
@@ -2302,6 +2316,12 @@ def inspect_protection_state(
     for plan_key, plan in plans.items():
         if not isinstance(plan, dict):
             continue
+        if plan.get("strategy_id") is not None:
+            from .original_v2_demo_execution import original_plan
+
+            original_plan(plan)
+            if plan.get("tp1_fill_confirmed") is True:
+                continue
         try:
             tp1_quantity = Decimal(str(plan["tp1_quantity"]))
             tp2_quantity = Decimal(str(plan["tp2_quantity"]))
@@ -3168,6 +3188,10 @@ async def install_protection(
     entry_context: object | None = None,
     state_lock: asyncio.Lock | None = None,
 ) -> None:
+    if plan.get("strategy_id") is not None:
+        from .original_v2_demo_execution import original_plan
+
+        original_plan(plan)
     if not _has_protection_identity(plan):
         return
     entry_context_valid = _valid_entry_installation_context(entry_context, plan)
@@ -3336,13 +3360,24 @@ async def _install_protection(
     step = Decimal(str(plan["step"]))
     min_qty = Decimal(str(plan["min_qty"]))
     total_qty = abs(amount)
-    partial_qty = floor_step(total_qty * Decimal("0.30"), step)
+    original_exit = plan.get("strategy_id") is not None
+    if original_exit:
+        from .original_v2_demo_execution import tp1_quantity
+
+        if "original_mark_entry" not in plan:
+            plan["original_mark_entry"] = str(position.get("markPrice") or plan["entry_price"])
+        partial_qty = tp1_quantity(
+            plan, total_qty, Decimal(str(plan["original_mark_entry"])),
+        )
+        plan["tp2_quantity"] = "0"
+    else:
+        partial_qty = floor_step(total_qty * Decimal("0.30"), step)
     tp_quantity = decimal_text(partial_qty)
     update_position_lifecycle(plan, amount)
     targets = plan["targets"]
     monitoring_targets: list[str] = []
-    if partial_qty >= min_qty:
-        for index, trigger in enumerate(targets[:2], start=1):
+    if partial_qty >= min_qty and (not original_exit or partial_qty > 0):
+        for index, trigger in enumerate(targets[:1] if original_exit else targets[:2], start=1):
             client_key = f"tp{index}_client_id"
             algo_client_id = plan.get(client_key) or new_client_id(f"TP{index}")
             params = {
@@ -3381,7 +3416,11 @@ async def _install_protection(
                     entry_context=entry_context,
                 )
     else:
-        monitoring_targets.extend(["TP1", "TP2"])
+        if original_exit:
+            plan["tp1_quantity"] = "0"
+            plan["tp1_status"] = "UNPROTECTED_MINIMUM"
+        else:
+            monitoring_targets.extend(["TP1", "TP2"])
 
     tp3_client_id = plan.get("tp3_client_id") or new_client_id("TP3")
     tp3_started = time.monotonic()
@@ -3404,6 +3443,8 @@ async def _install_protection(
         if algo_id is None:
             raise BinanceDemoError("Binance Demo TP3 koruma kimliği doğrulanamadı.", http_status=409)
         plan["tp3_client_id"] = tp3_client_id
+        if original_exit:
+            plan["tp3_algo_id"] = algo_id
         protection_ids.append(algo_id)
         plan["protection_ids"] = list(protection_ids)
         trace_log("protection.TP3.end", correlation_id, duration_ms=round((time.monotonic() - tp3_started) * 1000, 2), success=True, http_status=getattr(client, "last_status_code", None))
@@ -3879,6 +3920,7 @@ async def execute_demo_order(
     request: Request | None = None,
     demo_state: dict[str, Any] | None = None,
     v21_state: dict[str, Any] | None = None,
+    strategy_result: StrategyResult | None = None,
 ) -> dict[str, Any]:
     """Submit one hard-capped Demo order for the manual or V21 automation path."""
     state = demo_state if demo_state is not None else (state_for(request) if request is not None else application.state.binance_demo)
@@ -3889,6 +3931,34 @@ async def execute_demo_order(
 
         resolved_v21_state = v21_state_for(request)
     _validate_execution_context(request, state, resolved_v21_state)
+    original_execution = None
+    if strategy_result is not None:
+        from . import original_v2_demo_execution as original_execution
+
+        original_execution.validate_result(strategy_result)
+        if (
+            not state.get("_user_id")
+            or not resolved_v21_state
+            or not resolved_v21_state.get("auto", {}).get("enabled")
+            or not resolved_v21_state.get("auto", {}).get("user_confirmed")
+            or not armed(state)
+        ):
+            original_execution.fail("ORIGINAL_OWNER_CONFIRMATION_ARM_REQUIRED")
+        signal = strategy_result.legacy.get("analysis")
+        if not strategy_result.signal.strategy_eligible or not isinstance(signal, dict):
+            original_execution.fail("CANONICAL_ENTRY_NOT_ELIGIBLE")
+        if (
+            body.symbol != strategy_result.signal.symbol or body.direction != signal["direction"]
+            or body.order_type != "MARKET" or body.leverage != 3
+            or [body.stop_loss, body.tp1, body.tp2, body.tp3]
+            != [signal[key] for key in ("stop_loss", "tp1", "tp2", "tp3")]
+        ):
+            original_execution.fail("ORIGINAL_ORDER_CANONICAL_MISMATCH")
+        if not (
+            original_execution.strategy.feature_enabled()
+            and original_execution.send_orders_enabled()
+        ):
+            return original_execution.record_dry_run(strategy_result, state, resolved_v21_state)
     request_id = request_correlation_id(request)
     total_started = time.monotonic()
     trace_log("start", request_id, symbol=body.symbol, side="BUY" if body.direction == "LONG" else "SELL")
@@ -3927,41 +3997,65 @@ async def execute_demo_order(
                     f"Entry blocked: confirmed provenance slot already exists for {symbol}.",
                     http_status=409,
                 )
-            spec = await traced_stage("build_order_spec", request_id, build_order_spec(client, body), client=client)
+            spec = await traced_stage(
+                "build_order_spec", request_id,
+                original_execution.build_spec(client, strategy_result)
+                if original_execution is not None and strategy_result is not None else build_order_spec(client, body),
+                client=client,
+            )
             if resolved_v21_state is not None:
                 policy = resolved_v21_state.get("settings", {})
             else:
                 policy = getattr(application.state, "v21_demo", {}).get("settings", {})
             risk_state = resolved_v21_state or getattr(application.state, "v21_demo", {})
-            if source == "MANUAL":
+            if original_execution is not None and strategy_result is not None:
+                policy = original_execution.strategy.fixed_profile()["execution_policy"]
+            elif source == "MANUAL":
                 adjust_manual_spec_to_risk(spec, policy)
             else:
                 spec["risk_per_trade"] = entry_risk(spec)
                 spec["risk_adjusted"] = False
-            validate_entry_risk(
-                snapshot, body, spec, policy,
-                daily_realized_pnl=verified_realized_pnl(risk_state),
-                paper_positions=risk_state.get("paper_positions", []),
-                use_auto_universe=source != "MANUAL",
-            )
+            if original_execution is not None and strategy_result is not None:
+                original_execution.validate_gates(
+                    strategy_result, snapshot, risk_state, state, spec["notional_usdt"],
+                    margin_usdt=spec["margin_usdt"],
+                )
+            else:
+                validate_entry_risk(
+                    snapshot, body, spec, policy,
+                    daily_realized_pnl=verified_realized_pnl(risk_state),
+                    paper_positions=risk_state.get("paper_positions", []),
+                    use_auto_universe=source != "MANUAL",
+                )
             await traced_stage("set_isolated_margin", request_id, set_isolated_margin(client, spec["symbol"]), client=client)
             leverage_audit = await traced_stage("apply_verified_leverage", request_id, apply_verified_leverage(client, spec["symbol"], spec["leverage"]), client=client)
-            spec = await traced_stage("second_build_order_spec", request_id, build_order_spec(client, body), client=client)
-            if source == "MANUAL":
+            spec = await traced_stage(
+                "second_build_order_spec", request_id,
+                original_execution.build_spec(client, strategy_result)
+                if original_execution is not None and strategy_result is not None else build_order_spec(client, body),
+                client=client,
+            )
+            if original_execution is None and source == "MANUAL":
                 adjust_manual_spec_to_risk(spec, policy)
-            else:
+            elif original_execution is None:
                 spec["risk_per_trade"] = entry_risk(spec)
                 spec["risk_adjusted"] = False
             snapshot = await traced_stage("second_account_snapshot", request_id, account_snapshot(client, request_id), client=client)
             stale_reason = stale_protection_entry_reason(snapshot, state, body.symbol)
             if stale_reason:
                 raise BinanceDemoError(stale_reason, http_status=409)
-            validate_entry_risk(
-                snapshot, body, spec, policy,
-                daily_realized_pnl=verified_realized_pnl(risk_state),
-                paper_positions=risk_state.get("paper_positions", []),
-                use_auto_universe=source != "MANUAL",
-            )
+            if original_execution is not None and strategy_result is not None:
+                original_execution.validate_gates(
+                    strategy_result, snapshot, risk_state, state, spec["notional_usdt"],
+                    margin_usdt=spec["margin_usdt"],
+                )
+            else:
+                validate_entry_risk(
+                    snapshot, body, spec, policy,
+                    daily_realized_pnl=verified_realized_pnl(risk_state),
+                    paper_positions=risk_state.get("paper_positions", []),
+                    use_auto_universe=source != "MANUAL",
+                )
             plan_id = uuid.uuid4().hex[:12]
             client_order_id = new_client_id("ENTRY")
             plan = {
@@ -4003,6 +4097,9 @@ async def execute_demo_order(
                 "risk_adjusted": bool(spec.get("risk_adjusted")),
             }
             plan.update(provenance_entry_fields(expected_quantity=spec["quantity"]))
+            if original_execution is not None and strategy_result is not None:
+                plan.update(original_execution.identity(strategy_result, plan_id))
+                plan["min_notional"] = decimal_text(spec["min_notional"])
             state.setdefault("plans", {})[plan_id] = plan
             await persist_runtime_and_wait(state)
             submit_started = time.monotonic()
@@ -4046,6 +4143,15 @@ async def execute_demo_order(
             ))
             plan["status"] = "DOLUM BEKLİYOR"
             await persist_runtime_and_wait(state)
+            if original_execution is not None and strategy_result is not None:
+                from .v21_demo import persist_state, record_event
+
+                record_event(
+                    risk_state, "ORIGINAL_ENTRY", "Original Demo entry submitted.",
+                    symbol=spec["symbol"], quantity=float(spec["quantity"]),
+                    event_id=f"original-entry-{plan_id}", source="ORIGINAL_V2", plan=plan,
+                )
+                persist_state(risk_state)
             add_event(
                 state,
                 "KALDIRAÇ DOĞRULANDI",

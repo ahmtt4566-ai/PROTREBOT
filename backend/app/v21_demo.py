@@ -163,6 +163,7 @@ class RiskSizeRequest(BaseModel):
 
 class AutoStartRequest(BaseModel):
     confirmation: str = Field(min_length=1, max_length=40)
+    strategy_id: str | None = None
 
 
 class BacktestRequest(BaseModel):
@@ -298,7 +299,7 @@ def load_state() -> dict[str, Any]:
 
 
 def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
         "schema_version": 1,
         "settings": state["settings"],
         "journal": state["journal"][:JOURNAL_LIMIT],
@@ -321,6 +322,9 @@ def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
         "reconciliation": state.get("reconciliation", {}),
         "saved_at": now_iso(),
     }
+    if "original_v2" in state:
+        payload["original_v2"] = state["original_v2"]
+    return payload
 
 
 def _v21_snapshot_key(user_id: str) -> str:
@@ -334,6 +338,7 @@ def _state_from_payload(payload: dict[str, Any], user_id: str, application: Any 
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades",
         "paper_positions", "risk", "notifications", "snapshot", "reconciliation",
         "evidence_sequence", "evidence_status", "evidence_observations", "stop_correlations",
+        "original_v2",
     ):
         if key in payload:
             state[key] = payload[key]
@@ -525,6 +530,7 @@ def record_event(
     source: str = "SYSTEM",
     reduce_only: bool = False,
     verified_realized: bool = False,
+    plan: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     stable_id = event_id or uuid.uuid4().hex
     seen = state.setdefault("seen_event_ids", [])
@@ -549,6 +555,10 @@ def record_event(
         "verified_realized": verified_realized,
         "demo_only": True,
     }
+    if plan is not None:
+        from .original_v2_demo_execution import IDENTITY_FIELDS
+
+        item.update({key: plan[key] for key in IDENTITY_FIELDS})
     state.setdefault("journal", []).insert(0, item)
     del state["journal"][JOURNAL_LIMIT:]
     return item
@@ -1230,8 +1240,18 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_st
     event = payload.get("o") if isinstance(payload.get("o"), dict) else payload.get("a", {})
     if not isinstance(event, dict):
         event = {}
+    original_match = None
+    original_net = None
+    if demo_state is not None and any(
+        plan.get("strategy_id") is not None for plan in demo_state.get("plans", {}).values()
+    ):
+        from .original_v2_demo_execution import match_plan
+
+        original_match = match_plan(demo_state, event)
     if event_type == "ORDER_TRADE_UPDATE":
         stream_event_id = f"order-{event_time}-{event.get('i') or event.get('c')}-{event.get('x')}-{event.get('X')}"
+        if original_match is not None and event.get("x") == "TRADE":
+            stream_event_id += f"-trade-{event.get('t')}"
     elif event_type == "ALGO_UPDATE":
         stream_event_id = f"algo-{event_time}-{event.get('aid', event.get('algoId', ''))}-{event.get('X', event.get('algoStatus', event.get('status', 'UPDATE')))}"
     if stream_event_id and stream_event_id in state.get("seen_event_ids", []):
@@ -1263,7 +1283,14 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_st
             if recorded_plan is not None:
                 persist_runtime(demo_state)
         if demo_state is not None and execution.upper() == "TRADE" and order_id:
+            if original_match is not None:
+                from .original_v2_demo_execution import observe_fill
+
+                original_net = observe_fill(original_match, order)
+                persist_runtime(demo_state)
             for plan in demo_state.get("plans", {}).values():
+                if plan.get("strategy_id") is not None:
+                    continue
                 if plan.get("symbol") != symbol or not can_mutate_lifecycle(plan):
                     continue
                 matches_tp1 = order_id == str(plan.get("tp1_actual_order_id") or "")
@@ -1281,9 +1308,14 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_st
             state, kind, f"{symbol} {execution or 'EMİR'} · {status}", symbol=symbol,
             status=status, side=order.get("S"), price=float(order.get("ap") or order.get("L") or order.get("p") or 0),
             quantity=float(order.get("z") or order.get("l") or order.get("q") or 0),
-            realized_pnl=realized, reason=str(order.get("er") or "") or None,
-            event_id=f"order-{event_time}-{order_id or client_order_id}-{execution}-{status}", source="USER_STREAM",
-            reduce_only=bool(order.get("R", False)), verified_realized=execution == "TRADE" and bool(order.get("R", False)),
+            realized_pnl=original_net if original_net is not None else realized,
+            reason=str(order.get("er") or "") or None,
+            event_id=stream_event_id if original_match is not None else
+            f"order-{event_time}-{order_id or client_order_id}-{execution}-{status}",
+            source="USER_STREAM",
+            reduce_only=bool(order.get("R", False)),
+            verified_realized=execution == "TRADE" and (original_match is not None or bool(order.get("R", False))),
+            plan=original_match,
         ) is not None
     if event_type == "ALGO_UPDATE":
         order = payload.get("o") if isinstance(payload.get("o"), dict) else payload.get("a", {})
@@ -1296,6 +1328,8 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_st
         actual_client_order_id = str(order.get("ac") or order.get("actualClientAlgoId") or "")
         if demo_state is not None and status.upper() in {"TRIGGERED", "FILLED", "EXECUTED"}:
             for plan in demo_state.get("plans", {}).values():
+                if plan.get("strategy_id") is not None:
+                    continue
                 if plan.get("symbol") != symbol or not can_mutate_lifecycle(plan):
                     continue
                 if client_algo_id == str(plan.get("tp1_client_id") or "") or algo_id == str(plan.get("tp1_algo_id") or ""):
@@ -1307,10 +1341,22 @@ def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_st
                         plan["tp1_execution_pending"] = True
                     persist_runtime(demo_state)
                     break
+            if original_match is not None:
+                for label in ("stop", "tp1", "tp3"):
+                    if (
+                        algo_id and algo_id == str(original_match.get(f"{label}_algo_id") or "")
+                        or client_algo_id and client_algo_id == str(original_match.get(f"{label}_client_id") or "")
+                    ):
+                        if actual_order_id:
+                            original_match[f"{label}_actual_order_id"] = actual_order_id
+                        if actual_client_order_id:
+                            original_match[f"{label}_actual_client_order_id"] = actual_client_order_id
+                        persist_runtime(demo_state)
         return record_event(
             state, "ALGO_UPDATE", f"{symbol} koşullu koruma · {status}", symbol=symbol or None,
             status=status, price=float(order.get("sp") or order.get("triggerPrice") or 0),
             event_id=f"algo-{event_time}-{order.get('aid', order.get('algoId', ''))}-{status}", source="USER_STREAM",
+            plan=original_match,
         ) is not None
     if event_type == "listenKeyExpired":
         record_event(state, "STREAM_EXPIRED", "Binance Demo kullanıcı akışı süresi doldu; güvenli yeniden bağlantı başlatıldı.", source="USER_STREAM")
@@ -1571,6 +1617,11 @@ async def improve_dynamic_stops(application: Any, snapshot: dict[str, Any], *, d
     for position in snapshot.get("positions", []):
         symbol = str(position.get("symbol"))
         plan = active_plan(application, symbol, demo_state)
+        if plan and plan.get("strategy_id") is not None:
+            from .original_v2_demo_execution import original_plan
+
+            original_plan(plan)
+            continue
         if not plan or not can_mutate_lifecycle(plan) or time.time() - float(plan.get("last_dynamic_update_epoch", 0)) < 30:
             continue
         entry = float(position.get("entry_price") or 0)
@@ -1837,6 +1888,19 @@ async def _automatic_cycle_impl(
     auto["last_scan"] = now_iso()
     if not armed(demo_state):
         _set_rejection(state, "DEMO_ARM", "10 dakikalık DEMO emir kilidi kapalı; otomasyon bekliyor.")
+        return
+    from .strategies.original_v2_demo import STRATEGY_ID, feature_enabled
+
+    selected_strategy = auto.get("strategy_id")
+    if selected_strategy not in {None, STRATEGY_ID}:
+        raise BinanceDemoError("UNKNOWN_DEMO_STRATEGY_ID", http_status=409)
+    if feature_enabled() or selected_strategy == STRATEGY_ID:
+        from .original_v2_demo_execution import automatic_cycle as original_cycle
+
+        await original_cycle(
+            application, request=request, user_id=user_id,
+            demo_state=demo_state, state=state,
+        )
         return
     if not in_schedule(settings):
         _set_rejection(state, "MARKET_HOURS", "İzin verilen çalışma saatleri dışında; yeni giriş yok.")
@@ -2610,6 +2674,11 @@ async def v21_demo_smoke_test(request: Request) -> dict[str, Any]:
 @router.post("/auto/start")
 async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, Any]:
     state = state_for(request)
+    if body.strategy_id is not None:
+        from .strategies.original_v2_demo import STRATEGY_ID
+
+        if body.strategy_id != STRATEGY_ID:
+            raise HTTPException(422, "UNKNOWN_DEMO_STRATEGY_ID")
     confirmation = body.confirmation.strip().upper()
     if confirmation != "DEMO OTOMATİK":
         _set_rejection(state, "CONFIRMATION", "Otomasyonu açmak için DEMO OTOMATİK yazın.")
@@ -2643,6 +2712,12 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
         "last_decision": "Kontrollü Demo taraması başlatıldı.",
         "last_error": None,
     })
+    from .strategies.original_v2_demo import STRATEGY_ID, feature_enabled
+
+    if feature_enabled() or body.strategy_id == STRATEGY_ID:
+        state["auto"]["strategy_id"] = STRATEGY_ID
+    else:
+        state["auto"].pop("strategy_id", None)
     record_event(state, "AUTO_START", "V21 kontrollü otomasyon kullanıcı onayıyla açıldı.", source="USER")
     emit_notification(state, "AUTO_STARTED", "Demo Auto Trade başlatıldı.", event_id=f"{today()}-auto-start-{int(time.time())}")
     persist_state(state)
