@@ -2,6 +2,41 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Kais Original v2 Demo controls
+
+Both `PROTREBOT_BINANCE_DEMO_KAIS_ORIGINAL_V2_ENABLED` and
+`PROTREBOT_BINANCE_DEMO_KAIS_ORIGINAL_V2_SEND_ORDERS` default to **false**.
+Restart the backend after changing its process environment. The Demo
+Automation screen shows these server settings read-only; it cannot enable
+them. Select **Kais Original v2** explicitly to send
+`strategy_id=kais-original-v2-demo-v1`. The existing server-default selection
+retains its behavior: feature flag on selects Original, flag off selects legacy.
+Already-open Original plans retain their fixed-stop exit policy after flag-off.
+
+For the first no-order check, set ENABLED=true and SEND_ORDERS=false.
+Sign in with your own user session, save/verify only Demo/Testnet credentials
+through the existing connection screen, then open Demo > Automation.
+Stop any automation, arm with `DEMO`, and type `DEMO OTOMATİK` in the second
+confirmation field. Click **Emirsiz tek karar döngüsü**, not the automation
+start button. This explicit endpoint cannot call the entry executor, including
+when both server flags are true. It records eight canonical decisions in the
+owner's dry-run plans/journal, creates no exchange position, does not enable
+automation and reuses the same candle's records on repeated clicks.
+Failed status/data/authorization checks are explicit errors, not permission
+to send. Do not use the legacy smoke-test button as an Original parity test.
+
+The fixed profile ignores editable legacy settings: eight symbols,
+leverage 3, risk 3 USDT, five positions / two per direction, UTC three entries,
+10 USDT daily loss and three consecutive losses. TP1 is minimum-aware
+floor(quantity * 0.60), no TP2 exit; the remainder uses TP3 or the initial stop.
+No BE/trailing. Native next-open/STOP_FIRST/funding/future-gap modeling is not
+a guarantee about actual Testnet execution.
+
+Only a later, deliberate change to SEND_ORDERS=true permits Original orders,
+and existing owner/session, arm and explicit automation confirmation checks
+still apply. A no-order check does **not** certify actual venue fills,
+credentials, funding or profitability. LIVE settings and defaults are unchanged.
+
 ## LIVE risk-gate repairs (stage 1)
 
 Total position exposure uses `abs(quantity) * mark_price`, including normalized

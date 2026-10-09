@@ -1,6 +1,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, BarChart3, Bell, Calculator, CircleDollarSign, ClipboardList, Crosshair, Gauge, History, LockKeyhole, Play, Radio, RefreshCw, Save, Send, Settings2, ShieldCheck, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, Zap } from 'lucide-react'
 import { API_BASE } from './api'
+import OriginalDemoControls, {ORIGINAL_DEMO_ID, type DemoStrategy} from '../../OriginalDemoControls'
 
 const API = `${API_BASE}/binance-demo`
 const V21_API = `${API_BASE}/v21`
@@ -280,6 +281,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
   const [riskPreview,setRiskPreview] = useState<V21RiskPreview|null>(null)
   const [historyPayload,setHistoryPayload] = useState<{orders:Record<string,unknown>[];algo_orders:Record<string,unknown>[];trades:Record<string,unknown>[]} | null>(null)
   const [autoConfirm,setAutoConfirm] = useState('')
+  const [demoStrategy,setDemoStrategy] = useState<DemoStrategy>('default')
   const [scannerBusy,setScannerBusy] = useState(false)
   const [backtestSymbol,setBacktestSymbol] = useState(symbol)
   const accountRefreshId = useRef(0)
@@ -526,8 +528,17 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
     if (!status?.configured) {
       setMessage('Demo API bağlantısı yok. Önce demo/testnet credential kaydedin ve doğrulayın.'); setMessageKind('error'); return
     }
-    const confirmation = (autoConfirm || 'DEMO OTOMATİK').trim()
-    runV21(() => v21Call<V21Summary>('/auto/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmation})}),'Kontrollü V21 Demo otomasyonu başlatıldı.')
+    const confirmation = autoConfirm.trim()
+    if (confirmation.toUpperCase() !== 'DEMO OTOMATİK') {
+      setMessage('Otomasyonu başlatmak için DEMO OTOMATİK yazın.');setMessageKind('error');return
+    }
+    runV21(async () => {
+      const result = await v21Call<V21Summary>('/auto/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        confirmation,...(demoStrategy === ORIGINAL_DEMO_ID ? {strategy_id:ORIGINAL_DEMO_ID} : {}),
+      })})
+      if (!result.auto.enabled || result.auto.last_error) throw new Error(result.auto.last_error || result.auto.last_decision || 'Demo otomasyonu başlatılamadı.')
+      return result
+    },'Kontrollü V21 Demo otomasyonu başlatıldı.')
   }
   const runBacktest = () => runV21(
     async () => { const result = await v21Call<V21Backtest>('/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:backtestSymbol,interval:'15m',limit:1000})});await refreshV21(true);return result },
@@ -1115,10 +1126,12 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       </div>
     </section>}
 
-    {tab === 'auto' && <section className="v21Workspace">
-      <header className="v21WorkspaceHead"><div><span>ÇİFT ONAY · DEMO ARM + DEMO OTOMATİK</span><h2>Kontrollü Demo Otopilot</h2><p>İzin listesi, yön, saat, güven, volatilite, korelasyon, günlük kayıp ve pozisyon kapıları birlikte geçmeden emir göndermez.</p></div><b className={v21?.auto.enabled ? 'v21Running' : 'v21Stopped'}><Zap/> {v21?.auto.enabled ? 'ÇALIŞIYOR' : 'GÜVENLİ KAPALI'}</b></header>
+    {tab === 'auto' && <section className="v21Workspace" data-original-profile={demoStrategy === ORIGINAL_DEMO_ID ? 'true' : undefined}>
+      <OriginalDemoControls strategy={demoStrategy} onStrategyChange={setDemoStrategy} request={v21Call} armed={Boolean(status?.armed)}
+        enabled={Boolean(v21?.auto.enabled)} confirmation={autoConfirm} busy={busy || v21Busy} onRecorded={() => refreshV21(true)}/>
+      <header className="v21WorkspaceHead"><div><span>ÇİFT ONAY · DEMO ARM + DEMO OTOMATİK</span><h2>Kontrollü Demo Otopilot</h2><p>{demoStrategy === ORIGINAL_DEMO_ID ? 'Original: sabit 8 sembol ve sabit politika. Sunucu bayrakları, owner/session, arm ve kullanıcı onayı emir iznini ayrı ayrı sınırlar.' : 'İzin listesi, yön, saat, güven, volatilite, korelasyon, günlük kayıp ve pozisyon kapıları birlikte geçmeden emir göndermez.'}</p></div><b className={v21?.auto.enabled ? 'v21Running' : 'v21Stopped'}><Zap/> {v21?.auto.enabled ? 'ÇALIŞIYOR' : 'GÜVENLİ KAPALI'}</b></header>
       <div className="v21AutoLayout"><article className="v21Card v21AutoControl"><header><Zap/><div><small>İKİLİ GÜVENLİK KAPISI</small><h3>Demo Emir Kilidi</h3></div></header><div className="v21AutoDecision"><small>DEMO ARM</small><b>{status?.armed ? 'AÇIK' : 'KAPALI'}</b><span>{status?.armed ? `Kalan süre ${Math.floor(armSeconds / 60)} dk ${armSeconds % 60} sn` : 'Yeni Demo girişleri kilitli.'}</span></div>{!status?.armed && <label><span>Başlatmak için yaz</span><input value={armText} onChange={event => setArmText(event.target.value)} placeholder="DEMO"/></label>}<button disabled={busy || !status?.connected || (!status?.armed && armText.trim().toUpperCase() !== 'DEMO')} onClick={status?.armed ? disarm : arm}>{status?.armed ? <TriangleAlert/> : <UnlockKeyhole/>}{status?.armed ? ' DEMO ARM KAPAT' : ' DEMO ARM AÇ'}</button><p>Bu kilit yalnızca Binance Futures Demo giriş emirlerini süreli olarak açar; Live kanalını etkilemez.</p></article><article className="v21Card v21AutoControl"><header><Zap/><div><small>İKİNCİ KULLANICI ONAYI</small><h3>Demo Otomasyon Motoru</h3></div></header><div className="v21AutoDecision"><small>SON KARAR</small><b>{v21?.auto.last_decision || 'Bekleniyor'}</b><span>{v21?.auto.last_scan ? `Son tarama ${stamp(v21.auto.last_scan)} · ${v21.auto.cycles} tur` : 'Henüz tarama yapılmadı.'}</span></div>{!v21?.auto.enabled && <label><span>Başlatmak için yaz</span><input value={autoConfirm} onChange={event => setAutoConfirm(event.target.value)} placeholder="DEMO OTOMATİK"/></label>}<button className={v21?.auto.enabled ? 'stop' : ''} disabled={v21Busy || (!v21?.auto.enabled && !status?.armed)} onClick={toggleAuto}>{v21?.auto.enabled ? <TriangleAlert/> : <Play/>}{v21?.auto.enabled ? ' YENİ GİRİŞLERİ DURDUR' : ' KONTROLLÜ DEMO OTOMASYONU BAŞLAT'}</button><p>Uygulama yeniden açıldığında daima kapalı başlar. Stop/TP koruması motor dursa bile Binance Demo hesabında kalır.</p></article>
-        <article className="v21Card v21AutoRules"><header><Settings2/><div><small>OTOMASYON EVRENİ</small><h3>İzinler ve Piyasa Kapıları</h3></div></header>{settingsDraft && <div>
+        {demoStrategy !== ORIGINAL_DEMO_ID && <article className="v21Card v21AutoRules"><header><Settings2/><div><small>OTOMASYON EVRENİ</small><h3>İzinler ve Piyasa Kapıları</h3></div></header>{settingsDraft && <div>
           <label className="wide"><span>İzinli USDT pariteleri</span><input value={settingsDraft.allowed_symbols.join(', ')} onChange={event => setSettingsDraft({...settingsDraft,allowed_symbols:event.target.value.toUpperCase().split(',').map(value => value.trim()).filter(Boolean)})}/></label>
           <label><span>Maks. volatilite</span><input type="number" value={settingsDraft.max_volatility_pct} onChange={event => setSettingsDraft({...settingsDraft,max_volatility_pct:Number(event.target.value)})}/><em>%</em></label>
           <label><span>Maks. BTC korelasyonu</span><input type="number" value={settingsDraft.max_correlation_pct} onChange={event => setSettingsDraft({...settingsDraft,max_correlation_pct:Number(event.target.value)})}/><em>%</em></label>
@@ -1126,7 +1139,8 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
           <label><span>Bitiş saati</span><input type="number" min="1" max="24" value={settingsDraft.schedule_end_hour} onChange={event => setSettingsDraft({...settingsDraft,schedule_end_hour:Number(event.target.value)})}/></label>
           <label className="v21Switch"><input type="checkbox" checked={settingsDraft.allow_long} onChange={event => setSettingsDraft({...settingsDraft,allow_long:event.target.checked})}/><span><b>LONG izinli</b></span></label>
           <label className="v21Switch"><input type="checkbox" checked={settingsDraft.allow_short} onChange={event => setSettingsDraft({...settingsDraft,allow_short:event.target.checked})}/><span><b>SHORT izinli</b></span></label>
-        </div>}<button disabled={v21Busy || !settingsDraft} onClick={saveSettings}><Save/> OTOMASYON KAPILARINI KAYDET</button></article></div>
+        </div>}<button disabled={v21Busy || !settingsDraft} onClick={saveSettings}><Save/> OTOMASYON KAPILARINI KAYDET</button></article>}</div>
+      {demoStrategy !== ORIGINAL_DEMO_ID && <>
       <div className="v21GateStrip"><span className={status?.armed ? 'passed' : ''}><b>1</b><em>DEMO ARM</em><small>{status?.armed ? 'GEÇTİ' : 'KAPALI'}</small></span><span className={status?.connected ? 'passed' : ''}><b>2</b><em>DEMO API</em><small>{status?.connected ? 'BAĞLI' : 'BEKLİYOR'}</small></span><span className={(v21?.daily.auto_entries || 0) < (v21?.settings.daily_trade_limit || 0) ? 'passed' : ''}><b>3</b><em>GÜNLÜK LİMİT</em><small>{v21?.daily.auto_entries ?? 0}/{v21?.settings.daily_trade_limit ?? 0}</small></span><span className={(v21?.daily.remaining_loss_budget || 0) > 0 ? 'passed' : ''}><b>4</b><em>ZARAR KASASI</em><small>{fmt(v21?.daily.remaining_loss_budget)} USDT</small></span><span className={(v21?.account.positions || 0) < (v21?.settings.max_positions || 0) ? 'passed' : ''}><b>5</b><em>POZİSYON</em><small>{v21?.account.positions ?? 0}/{v21?.settings.max_positions ?? 0}</small></span><span><b>6</b><em>SİNYAL KAPILARI</em><small>Her taramada</small></span></div>
       <div className="v21AutoFlow">
         <div className="v21AutoFlowHeader"><span>OTOMASYON DURUMU</span><h3>İşlem Açma Akışı</h3></div>
@@ -1137,6 +1151,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
           <article className={v21?.auto.last_decision ? 'passed' : ''}><b>04</b><div><strong>Signal decision</strong><small>{v21?.auto.last_decision || 'Henüz karar alınmadı.'}</small></div></article>
         </div>
       </div>
+      </>}
     </section>}
 
     {tab === 'backtest' && <section className="v21Workspace">

@@ -2515,6 +2515,39 @@ async def v21_summary(request: Request) -> dict[str, Any]:
     return summary_payload(state_for(request))
 
 
+@router.get("/original-v2/status")
+async def v21_original_status(request: Request) -> dict[str, Any]:
+    from .original_v2_demo_execution import status_payload
+
+    if not _original_owner(request):
+        raise HTTPException(401, "A verified owner session is required for Original status.")
+    return status_payload(state_for(request))
+
+
+def _original_owner(request: Request) -> str:
+    user = getattr(request.state, "member", None) or getattr(request.state, "user", None)
+    return str((user or {}).get("id") or "").strip()
+
+
+@router.post("/original-v2/dry-run")
+async def v21_original_dry_run(request: Request, body: AutoStartRequest) -> dict[str, Any]:
+    from .original_v2_demo_execution import dry_run_cycle
+    from .strategies.original_v2_demo import STRATEGY_ID
+
+    if not _original_owner(request):
+        raise HTTPException(401, "A verified owner session is required for Original dry-run.")
+    if body.strategy_id != STRATEGY_ID:
+        raise HTTPException(422, "UNKNOWN_DEMO_STRATEGY_ID")
+    if body.confirmation.strip().upper() != "DEMO OTOMATİK":
+        raise HTTPException(422, "Dry-run için DEMO OTOMATİK yazın.")
+    try:
+        return await dry_run_cycle(
+            request.app, request=request, demo_state=demo_state_for(request), state=state_for(request),
+        )
+    except BinanceDemoError as exc:
+        raise HTTPException(exc.http_status, str(exc)) from exc
+
+
 @router.get("/notifications")
 async def v21_notifications(request: Request, limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
     state = state_for(request)

@@ -237,6 +237,64 @@ def record_dry_run(
     return {"ok": True, "dry_run": True, "plan": plan, "order": None}
 
 
+def status_payload(state: dict[str, Any]) -> dict[str, Any]:
+    profile = strategy.fixed_profile()
+    return {
+        "strategy_id": strategy.STRATEGY_ID,
+        "flags": {"enabled": strategy.feature_enabled(), "send_orders": send_orders_enabled()},
+        "selected_strategy_id": state["auto"].get("strategy_id"),
+        "profile_hash": profile["source_profile_sha256"],
+        "policy_hash": strategy.EXECUTION_POLICY_SHA256,
+        "policy": profile["execution_policy"],
+        "offline_risk": profile["offline_risk"],
+        "dry_run_plans": list(state.get("original_v2", {}).get("dry_run_plans", {}).values())[-8:],
+    }
+
+
+async def dry_run_cycle(
+    application: Any, *, request: Any, demo_state: dict[str, Any], state: dict[str, Any],
+) -> dict[str, Any]:
+    from . import v21_demo as control
+    from .maintenance import guard_new_entry
+
+    guard_new_entry(getattr(application.state, "maintenance", None))
+    demo._validate_execution_context(request, demo_state, state)
+    if not demo._request_user_id(request):
+        raise HTTPException(401, "A verified owner session is required for Original dry-run.")
+    if not demo.armed(demo_state):
+        raise HTTPException(423, "Önce DEMO emir kilidini açın.")
+    if state["auto"].get("enabled") or state["auto"].get("busy"):
+        raise HTTPException(409, "Dry-run için önce otomasyonu durdurun.")
+    demo.bind_demo_grant(request, demo_state)
+    demo.bind_demo_grant(request, state)
+    at = int(datetime.now(timezone.utc).timestamp()) // 900 * 900
+    async with demo_state["lock"]:
+        if state["auto"].get("enabled") or state["auto"].get("busy"):
+            raise HTTPException(409, "Dry-run için önce otomasyonu durdurun.")
+        runs = state.get("original_v2", {}).get("dry_run_plans", {})
+        symbols = strategy.fixed_profile()["execution_policy"]["allowed_symbols"]
+        existing = [runs.get(f"{symbol}:{at}") for symbol in symbols]
+        if all(plan is not None for plan in existing):
+            return {
+                "ok": True, "dry_run": True, "order": None, "orders_sent": 0,
+                "decision_time": at, "plans": existing,
+            }
+        # This path never calls the entry executor, even with both flags on.
+        client = control.market_client_for(application)
+        occupied = {
+            plan["symbol"] for plan in demo_state.get("plans", {}).values()
+            if plan.get("position_status") != "CLOSED"
+        }
+        _eligible, results = await candidates(client, at, occupied)
+        if state["auto"].get("enabled") or state["auto"].get("busy"):
+            raise HTTPException(409, "Dry-run sırasında otomasyon açıldı; önce durdurun.")
+        plans = [record_dry_run(result, demo_state, state)["plan"] for result in results.values()]
+    return {
+        "ok": True, "dry_run": True, "order": None, "orders_sent": 0,
+        "decision_time": at, "plans": plans,
+    }
+
+
 def match_plan(demo_state: dict[str, Any], order: dict[str, Any]) -> dict[str, Any] | None:
     order_id = str(order.get("i") or order.get("ai") or order.get("actualOrderId") or "")
     client_id = str(order.get("c") or order.get("ac") or order.get("actualClientAlgoId") or "")
