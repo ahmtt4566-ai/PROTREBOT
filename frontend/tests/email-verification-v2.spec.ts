@@ -14,7 +14,7 @@ async function prepare(page: Page, baseURL: string) {
     }
   })
   const calls: {path: string; method: string}[] = []
-  const state = {verified: false, canExchange: true, authenticated: false, pending: true,
+  const state = {verified: false, canExchange: true, authenticated: false, pending: true, email,
     retryAfter: 60, confirmationError: '', exchangeError: 0, hold: null as Promise<void> | null,
     statusHold: null as Promise<void> | null}
   await page.route('**/api/v22/public', route => route.fulfill({json: {auth_available: true, setup_required: false, email_verification_v2_enabled: true}}))
@@ -33,7 +33,7 @@ async function prepare(page: Page, baseURL: string) {
     if (path.endsWith('/status')) {
       if (state.statusHold) await state.statusHold
       return state.pending || state.authenticated
-        ? route.fulfill({json: {verified: state.verified, email, can_exchange: state.canExchange, already_authenticated: state.authenticated, retry_after: state.retryAfter}})
+        ? route.fulfill({json: {verified: state.verified, email: state.email, can_exchange: state.canExchange, already_authenticated: state.authenticated, retry_after: state.retryAfter, can_change_email: !state.verified && state.pending}})
         : route.fulfill({status: 401, json: {detail: {code: 'pending', message: 'Bekleyen kayıt oturumu gerekli'}}})
     }
     if (path.endsWith('/exchange')) {
@@ -45,10 +45,32 @@ async function prepare(page: Page, baseURL: string) {
       return route.fulfill({json: state.canExchange ? {requires_login: false, token: 'cookie-session:offline-user'} : {requires_login: true, email}})
     }
     if (path.endsWith('/resend')) return route.fulfill({json: {ok: true, message: 'Yeni bağlantı gönderildi — gelen kutunu kontrol et', retry_after: 60}})
+    if (path.endsWith('/email')) {
+      const body = request.postDataJSON()
+      expect(body.current_password).toBe('Offline-Password1!')
+      state.email = body.new_email
+      return route.fulfill({json: {ok: true, email: state.email, retry_after: 60}})
+    }
     return route.fulfill({status: 404, json: {detail: 'Bilinmeyen doğrulama isteği'}})
   })
+
   return {state, calls, goto: (path: string) => page.goto(baseURL + path)}
 }
+
+test('Waiting screen corrects the same pending account email with password and a fresh cooldown', async ({page, baseURL}) => {
+  const mock = await prepare(page, baseURL!)
+  mock.state.retryAfter = 0
+  await mock.goto('/verify-email')
+  await page.getByRole('button', {name: 'E-postanı mı yanlış yazdın? Değiştir'}).click()
+  await page.getByLabel('Yeni e-posta').fill('corrected@example.test')
+  await page.getByLabel('Parolan', {exact: true}).fill('Offline-Password1!')
+  await page.getByRole('button', {name: 'Adresi değiştir ve gönder'}).click()
+  await expect(page.getByText('corrected@example.test', {exact: true})).toBeVisible()
+  await expect(page.getByRole('button', {name: 'Tekrar gönder'})).toBeDisabled()
+  expect(mock.calls.filter(call => call.path.endsWith('/email'))).toHaveLength(1)
+  expect(mock.calls.filter(call => call.path.endsWith('/exchange'))).toHaveLength(0)
+  expect(await page.evaluate(() => JSON.stringify({...localStorage, ...sessionStorage}))).not.toContain('Offline-Password1!')
+})
 
 test('Registration navigates via History API; reload resumes server-side pending state', async ({page, baseURL}) => {
   const mock = await prepare(page, baseURL!)
@@ -61,9 +83,10 @@ test('Registration navigates via History API; reload resumes server-side pending
   await page.getByRole('button', {name: 'HESAP OLUŞTUR', exact: true}).click()
   await expect(page).toHaveURL(baseURL + '/verify-email')
   await expect(page.getByRole('heading', {name: 'E-postanı doğrula'})).toBeVisible()
-  await expect(page.getByText('Doğrulama bağlantısını gönderdik: ' + email)).toBeVisible()
+  await expect(page.getByText('E-postana bir doğrulama bağlantısı gönderdik.')).toBeVisible()
+  await expect(page.getByText(email, {exact: true})).toBeVisible()
   await page.reload()
-  await expect(page.getByText('Doğrulama bağlantısını gönderdik: ' + email)).toBeVisible()
+  await expect(page.getByText('E-postana bir doğrulama bağlantısı gönderdik.')).toBeVisible()
   expect(mock.calls.filter(call => call.path.endsWith('/exchange'))).toHaveLength(0)
 })
 
@@ -77,7 +100,7 @@ test('Waiting polls every four seconds, refreshes on focus and stops after verif
   await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000))
   release?.()
   mock.state.statusHold = null
-  await expect(page.getByText('Doğrulama bağlantısını gönderdik: ' + email)).toBeVisible()
+  await expect(page.getByText('E-postana bir doğrulama bağlantısı gönderdik.')).toBeVisible()
   const count = () => mock.calls.filter(call => call.path.endsWith('/status')).length
   const initial = count()
   await page.clock.runFor(3999)
@@ -168,13 +191,16 @@ test('Countdown is server-backed, resend stays disabled until sixty seconds', as
   const mock = await prepare(page, baseURL!)
   await page.clock.install()
   await mock.goto('/verify-email')
-  const button = page.getByRole('button', {name: /Yeniden gönder/})
+  const button = page.getByRole('button', {name: /Tekrar gönder/})
   await expect(button).toContainText('1:00')
   await expect(button).toBeDisabled()
+  await expect(page.getByText(email, {exact: true})).toBeVisible()
+  await page.evaluate(() => {Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'hidden'})})
   mock.state.retryAfter = 0
   await page.clock.runFor(60000)
   await expect(button).toBeEnabled()
   await button.click()
+  await expect(page.getByRole('status')).toHaveText('Yeni bağlantı gönderildi — gelen kutunu kontrol et')
   await expect(button).toBeDisabled()
   expect(mock.calls.filter(call => call.path.endsWith('/resend'))).toHaveLength(1)
 })
@@ -189,13 +215,13 @@ for (const width of [1440, 390]) {
     const dimensions = await page.evaluate(() => ({
       width: document.documentElement.scrollWidth, viewport: innerWidth,
       button: document.querySelector('.ev-primary')!.getBoundingClientRect().height,
-      motion: getComputedStyle(document.querySelector('.ev-envelope')!).animationName,
+      motion: getComputedStyle(document.querySelector('.verificationSymbol')!).animationName,
       font: getComputedStyle(document.querySelector('#ev-title')!).fontFamily,
     }))
     expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport)
     expect(dimensions.button).toBeGreaterThanOrEqual(44)
     expect(dimensions.motion).toBe('none')
-    expect(dimensions.font).toContain('Sora')
+    expect(dimensions.font).toContain('Plus Jakarta Sans')
     await page.screenshot({path: testInfo.outputPath(`verification-${width}.png`), fullPage: true})
   })
 }

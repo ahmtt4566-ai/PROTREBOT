@@ -29,6 +29,64 @@ SECRET = b"offline-account-security-fixture-secret"
 PASSWORD = "Offline-account-password-123!"
 
 
+def test_two_factor_notifications_only_follow_confirmed_changes_and_never_include_secrets(setup):
+    client = setup.runtime()
+    h = headers("customer")
+    response = client.post("/api/v22/account/2fa/setup", headers=h, json={"current_password": PASSWORD})
+    secret = response.json()["secret"]
+    assert not get_doc(setup)["two_factor_enabled"]
+    setup.mail.assert_not_called()
+    invalid = client.post("/api/v22/account/2fa/enable", headers=h, json={"code": "not-a-code"})
+    assert invalid.status_code in (401, 422)
+    setup.mail.assert_not_called()
+    success = client.post("/api/v22/account/2fa/enable", headers=h, json={"code": pyotp.TOTP(secret).now()})
+    assert success.status_code == 200
+    assert success.json()["notification_sent"] is True
+    codes = success.json()["recovery_codes"]
+    assert len(codes) == 10
+    message = setup.mail.call_args.kwargs
+    assert message["security_notice"] == "İki aşamalı doğrulama etkinleştirildi."
+    assert secret not in str(message) and not any(code in str(message) for code in codes)
+    setup.mail.reset_mock()
+    renewed = {"Authorization": "Bearer " + success.json()["token"]}
+    denied = client.post("/api/v22/account/2fa/disable", headers=renewed, json={"current_password": PASSWORD})
+    assert denied.status_code == 401
+    setup.mail.assert_not_called()
+    disabled = client.post("/api/v22/account/2fa/disable", headers=renewed, json={"current_password": PASSWORD, "totp_code": codes[0]})
+    assert disabled.status_code == 200
+    assert disabled.json()["notification_sent"] is True
+    assert setup.mail.call_args.kwargs["security_notice"] == "İki aşamalı doğrulama kapatıldı."
+
+
+def test_two_factor_delivery_failure_reports_committed_state_without_losing_backup_codes(setup):
+    from app.email_service import EmailDeliveryError
+    client = setup.runtime()
+    response = client.post("/api/v22/account/2fa/setup", headers=headers("customer"), json={"current_password": PASSWORD})
+    setup.mail.side_effect = EmailDeliveryError("Offline failure", provider="resend")
+    enabled = client.post("/api/v22/account/2fa/enable", headers=headers("customer"),
+                          json={"code": pyotp.TOTP(response.json()["secret"]).now()})
+    assert enabled.status_code == 200
+    assert enabled.json()["notification_sent"] is False
+    assert len(enabled.json()["recovery_codes"]) == 10
+    assert get_doc(setup)["two_factor_enabled"] is True
+    code = enabled.json()["recovery_codes"][0]
+    disabled = client.post("/api/v22/account/2fa/disable", headers={"Authorization": "Bearer " + enabled.json()["token"]},
+                           json={"current_password": PASSWORD, "totp_code": code})
+    assert disabled.status_code == 200
+    assert disabled.json()["notification_sent"] is False
+    assert not get_doc(setup)["two_factor_enabled"]
+
+
+def test_two_factor_notification_timeout_is_explicit_and_bounded(setup, caplog):
+    req = SimpleNamespace(app=setup.runtime().app)
+    with patch.object(account.asyncio, "to_thread", AsyncMock(side_effect=TimeoutError)), \
+            patch.object(account.asyncio, "wait_for", AsyncMock(wraps=asyncio.wait_for)) as bounded:
+        assert asyncio.run(account.notify_two_factor(req, setup.users[0], active=True)) is False
+    assert bounded.call_args.kwargs["timeout"] == 5.0
+    assert "notification delivery was not confirmed" in caplog.text
+    assert setup.users[0]["email"] not in caplog.text
+
+
 @pytest.fixture
 def setup():
     # Scratch artifacts stay in the project, never in OS temporary directories.

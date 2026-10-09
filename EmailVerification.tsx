@@ -1,15 +1,11 @@
 import {useCallback, useEffect, useRef, useState} from 'react'
-import {ShieldCheck} from 'lucide-react'
+import {Mail} from 'lucide-react'
 import {saveUserSessionToken} from './api'
 import {withRequestDeadline} from './browser-request'
-import '@fontsource/sora/500.css'
-import '@fontsource/sora/600.css'
-import '@fontsource/manrope/400.css'
-import '@fontsource/manrope/500.css'
-import '@fontsource/manrope/600.css'
+import {VerificationSymbol} from './verification-ui'
 import './email-verification.css'
 
-type Status = {verified: boolean; email: string; can_exchange: boolean; already_authenticated: boolean; retry_after: number}
+type Status = {verified: boolean; email: string; can_exchange: boolean; already_authenticated: boolean; retry_after: number; can_change_email: boolean}
 type Outcome = {email: string; target: 'dashboard' | 'login'; animate: boolean}
 class VerificationError extends Error {
   constructor(message: string, readonly status: number, readonly code: string, readonly retryAfter = 0) {super(message)}
@@ -40,21 +36,12 @@ function status(value: unknown): Status {
       || typeof value.can_exchange !== 'boolean' || typeof value.already_authenticated !== 'boolean'
       || typeof value.retry_after !== 'number') throw new Error('Doğrulama durumu okunamadı.')
   return {verified: value.verified, email: value.email, can_exchange: value.can_exchange,
-    already_authenticated: value.already_authenticated, retry_after: value.retry_after}
+    already_authenticated: value.already_authenticated, retry_after: value.retry_after, can_change_email: value.can_change_email === true}
 }
 function login(email: string) {
   if (email) sessionStorage.setItem('kaistrade-verification-login-email', email)
   window.location.assign('/login')
 }
-function Symbol({phase}: {phase: string}) {
-  return <svg className={`ev-symbol ph-${phase}`} width="120" height="120" viewBox="0 0 120 120" aria-hidden="true">
-    <circle className="ev-track" cx="60" cy="60" r="52"/>
-    <circle className="ev-ring" cx="60" cy="60" r="52"/>
-    <g className="ev-envelope"><rect x="34" y="43" width="52" height="36" rx="5"/><path className="ev-flap" d="M36 46 60 64 84 46"/><path d="m36 76 17-14m14 0 17 14"/></g>
-    <path className="ev-check" d="m40 61 13 13 28-29"/>
-  </svg>
-}
-
 export default function EmailVerification() {
   const [linkToken] = useState(() => new URLSearchParams(window.location.search).get('token') || '')
   const [phase, setPhase] = useState<'waiting' | 'verifying' | 'success' | 'error'>(linkToken ? 'verifying' : 'waiting')
@@ -66,6 +53,10 @@ export default function EmailVerification() {
   const [sending, setSending] = useState(false)
   const [retry, setRetry] = useState(0)
   const [ready, setReady] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [newEmail, setNewEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [canChangeEmail, setCanChangeEmail] = useState(false)
   const initial = useRef<Promise<Status | Outcome> | null>(null)
   const confirmedResult = useRef<{email: string; already: boolean} | null>(null)
   const exchanging = useRef<Promise<Outcome> | null>(null)
@@ -123,13 +114,13 @@ export default function EmailVerification() {
     void initial.current.then(value => {
       if (!active) return
       if ('target' in value) showSuccess(value)
-      else {setEmail(value.email); setSeconds(value.retry_after); setPhase('waiting'); setReady(true)}
+      else {setEmail(value.email); setSeconds(value.retry_after); setCanChangeEmail(value.can_change_email); setPhase('waiting'); setReady(true)}
     }).catch(reason => {if (active) showError(reason)})
     return () => {active = false}
   }, [linkToken, finish, showSuccess, showError, retry])
 
   useEffect(() => {
-    if (!ready || phase !== 'waiting' || finished.current) return
+    if (!ready || phase !== 'waiting' || finished.current || editing) return
     let active = true
     const check = async () => {
       if (checking.current || finished.current || document.visibilityState === 'hidden') return
@@ -153,7 +144,7 @@ export default function EmailVerification() {
       active = false; window.clearInterval(timer)
       window.removeEventListener('focus', focus); document.removeEventListener('visibilitychange', focus)
     }
-  }, [ready, phase, finish, showSuccess, showError])
+  }, [ready, phase, editing, finish, showSuccess, showError])
   useEffect(() => {
     if (seconds <= 0) return
     const timer = window.setInterval(() => setSeconds(value => Math.max(0, value - 1)), 1000)
@@ -177,6 +168,19 @@ export default function EmailVerification() {
       setNotice(reason instanceof Error ? reason.message : 'Bağlantı gönderilemedi.')
     } finally {setSending(false)}
   }
+  const changeEmail = async () => {
+    if (sending) return
+    setSending(true); setNotice('')
+    try {
+      const value = await request('/auth/registration/email', {new_email: newEmail, current_password: password})
+      if (!object(value) || value.ok !== true || typeof value.retry_after !== 'number' || typeof value.email !== 'string') throw new Error('Adres değişikliği yanıtı okunamadı.')
+      setEmail(value.email); setSeconds(value.retry_after); setEditing(false); setPassword(''); setNewEmail('')
+      setNotice('Yeni adresine bir doğrulama bağlantısı gönderdik.')
+    } catch (reason) {
+      if (reason instanceof VerificationError && reason.retryAfter) setSeconds(reason.retryAfter)
+      setNotice(reason instanceof Error ? reason.message : 'E-posta adresi değiştirilemedi.')
+    } finally {setSending(false)}
+  }
   const isError = phase === 'error'
   const success = phase === 'success'
   const title = success ? 'E-posta Doğrulandı' : isError
@@ -185,15 +189,22 @@ export default function EmailVerification() {
   const explanation = success ? outcome?.target === 'dashboard' ? 'Hesabın güvende. Panele yönlendiriliyorsun…' : 'Hesabın doğrulandı. Devam etmek için giriş yap.'
     : isError ? error.code === 'expired' ? 'Güvenliğin için doğrulama bağlantıları tek kullanımlıktır ve 30 dakika geçerlidir.'
       : error.code === 'used' ? 'Her bağlantı yalnızca bir kez çalışır. Devam etmek için yenisini iste.' : error.message
-    : phase === 'verifying' ? 'Bağlantını güvenli şekilde kontrol ediyoruz.' : `Doğrulama bağlantısını gönderdik: ${email || 'e-posta adresin'}`
+    : phase === 'verifying' ? 'Bağlantını güvenli şekilde kontrol ediyoruz.' : 'E-postana bir doğrulama bağlantısı gönderdik.'
 
-  return <main className="ev-page"><section className={`ev-card ${success && outcome?.animate ? 'ev-animated' : 'ev-still'}`} aria-labelledby="ev-title">
-    <div className="ev-brand"><ShieldCheck size={16}/><span>KaisTrade · Güvenli doğrulama</span></div>
-    <Symbol phase={success ? 'success' : phase === 'verifying' ? 'verifying' : 'waiting'}/>
+  return <main className="ev-page"><section className={`ev-card verificationCard ${success && outcome?.animate ? 'ev-animated' : 'ev-still'}`} aria-labelledby="ev-title">
+    <div className="ev-brand"><Mail size={16}/><span>KaisTrade · Güvenli doğrulama</span></div>
+    <VerificationSymbol kind="mail" success={success}/>
     <div className="ev-copy" aria-live="polite"><h1 id="ev-title">{title}</h1><p>{explanation}</p></div>
-    {phase === 'waiting' && <><p className="ev-wait"><i/>Onay bekleniyor — sayfa kendiliğinden güncellenir</p>
-      <button className="ev-primary" disabled={sending || seconds > 0} onClick={() => void resend()}>Yeniden gönder{seconds > 0 ? ` (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')})` : ''}</button>
-      <p className="ev-footnote">30 dk geçerli · tek kullanımlık</p><a className="ev-link" href="/register">E-postayı değiştir</a></>}
+    {phase === 'waiting' && <><p className="ev-notice">{email}</p><p className="ev-wait">Onay bekleniyor — sayfa kendiliğinden güncellenir</p>
+      {!editing ? <><button className="ev-primary" disabled={sending || seconds > 0} onClick={() => void resend()}>Tekrar gönder{seconds > 0 ? ` (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')})` : ''}</button>
+        <p className="ev-footnote">30 dk geçerli · tek kullanımlık</p>{canChangeEmail && <button className="ev-link" onClick={() => {setEditing(true); setNewEmail(email); setNotice('')}}>E-postanı mı yanlış yazdın? Değiştir</button>}</>
+        : <form className="ev-email-form" onSubmit={event => {event.preventDefault(); void changeEmail()}}>
+          <label>Yeni e-posta<input type="email" autoComplete="email" required maxLength={180} value={newEmail} onChange={event => setNewEmail(event.target.value)} disabled={sending}/></label>
+          <label>Parolan<input type="password" autoComplete="current-password" data-private="true" required value={password} onChange={event => setPassword(event.target.value)} disabled={sending}/></label>
+          <p className="ev-footnote">Hesabını korumak için parolanı doğruluyoruz. Önceki bağlantı geçersizleşir.</p>
+          <button className="ev-primary" disabled={sending || seconds > 0}>Adresi değiştir ve gönder{seconds > 0 ? ` (${seconds} sn)` : ''}</button>
+          <button type="button" className="ev-link" disabled={sending} onClick={() => {setEditing(false); setPassword(''); setNotice('')}}>Vazgeç</button>
+        </form>}</>}
     {phase === 'verifying' && <p className="ev-footnote" role="status">Sunucu onayı bekleniyor</p>}
     {success && outcome && <>{outcome.target === 'dashboard' && <div className={`ev-progress ${outcome.animate ? 'is-running' : 'is-complete'}`} role="progressbar" aria-label="Panele yönlendirme"><i/></div>}
       <button className="ev-primary" onClick={() => outcome.target === 'dashboard' ? window.location.assign('/dashboard') : login(outcome.email)}>{outcome.target === 'dashboard' ? 'Panele geç' : 'Giriş yap'}</button></>}

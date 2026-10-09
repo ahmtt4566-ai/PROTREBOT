@@ -297,6 +297,42 @@ async def delivery(request, user, *, email=None, title, action_url, label, expir
         raise HTTPException(503, "E-posta gönderilemedi") from None
 
 
+async def notify_two_factor(request, user, *, active):
+    title = "İki aşamalı doğrulama etkinleştirildi" if active else "İki aşamalı doğrulama kapatıldı"
+    try:
+        await asyncio.wait_for(asyncio.to_thread(
+            auth.send_auth_email, to_email=user["email"], display_name=user.get("display_name", ""),
+            subject="KaisTrade · " + title, title=title,
+            action_url=auth.app_base_url() + "/settings", action_label="Hesabımı kontrol et",
+            information_only=True, security_notice=title + "."), timeout=5.0)
+    except TimeoutError:
+        auth.logger.warning("Two-factor security notification delivery was not confirmed before its deadline")
+        return False
+    except auth.GMAIL_DELIVERY_ERRORS as exc:
+        auth.log_gmail_failure(exc, request.app)
+        # The security change is committed; report delivery separately, never undo it.
+        return False
+    return True
+
+
+async def require_available_email(request, user_id, email):
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is not None:
+        db = store.active_connection(request, user_id) or pool
+        duplicate = await db.fetchrow(
+            "SELECT user_id FROM commercial_auth_users WHERE lower(security->>'email') = $1 AND user_id <> $2",
+            email, user_id)
+        if duplicate:
+            raise HTTPException(409, "E-posta kullanılamıyor")
+    else:
+        db = store.active_local_connection(request, user_id)
+        for other_id, body in db.execute("SELECT user_id,payload FROM commercial_account_settings WHERE user_id <> ?", (user_id,)):
+            if json.loads(body).get("auth_overlay", {}).get("email") == email:
+                raise HTTPException(409, "E-posta kullanılamıyor")
+    if any(other["id"] != user_id and other.get("email") == email for other in auth.runtime(request)["state"]["users"]):
+        raise HTTPException(409, "E-posta kullanılamıyor")
+
+
 async def rotate(request, user, doc, updates=None, *, preserve_current=False):
     payload = token_payload(request) if preserve_current else None
     if payload and payload["sub"] != user["id"]:
@@ -559,18 +595,7 @@ async def email_confirm(payload: Token, request: Request, response: Response):
             if not challenge_valid(row, user, "email-change") or not pending or pending["token_hash"] != digest(payload.token):
                 raise HTTPException(400, "E-posta doğrulama isteği geçersiz")
             email = row["new_email"]
-            pool = getattr(request.app.state, "db_pool", None)
-            if pool is not None:
-                duplicate = await pool.fetchrow("SELECT user_id FROM commercial_auth_users WHERE lower(security->>'email') = $1 AND user_id <> $2", email, user["id"])
-                if duplicate:
-                    raise HTTPException(409, "E-posta kullanılamıyor")
-            else:
-                db = store.active_local_connection(request, user["id"])
-                for other_id, body in db.execute("SELECT user_id,payload FROM commercial_account_settings WHERE user_id <> ?", (user["id"],)):
-                    if json.loads(body).get("auth_overlay", {}).get("email") == email:
-                        raise HTTPException(409, "E-posta kullanılamıyor")
-            if any(other["id"] != user["id"] and other.get("email") == email for other in auth.runtime(request)["state"]["users"]):
-                raise HTTPException(409, "E-posta kullanılamıyor")
+            await require_available_email(request, user["id"], email)
             row["used"] = True
             doc.pop("pending_email", None)
             await rotate(request, user, doc, {"email": email, "email_verified": True})
@@ -659,7 +684,8 @@ async def enable_totp(payload: Code, request: Request, response: Response):
         raise HTTPException(401, "İki aşamalı doğrulama kodu geçersiz veya süresi dolmuş")
     await persist_projection(request)
     marker = refreshed_session_response(request, response, user, token)
-    return {"recovery_codes": codes, "reauthenticate": False, "token": marker}
+    notification_sent = await notify_two_factor(request, user, active=True)
+    return {"recovery_codes": codes, "reauthenticate": False, "token": marker, "notification_sent": notification_sent}
 
 
 @router.post("/account/2fa/disable")
@@ -675,7 +701,8 @@ async def disable_totp(payload: Proof, request: Request, response: Response):
         activity(doc, "TWO_FACTOR_DISABLED", "İki aşamalı doğrulama kapatıldı")
     await persist_projection(request)
     marker = refreshed_session_response(request, response, user, token)
-    return {"ok": True, "reauthenticate": False, "token": marker}
+    notification_sent = await notify_two_factor(request, user, active=False)
+    return {"ok": True, "reauthenticate": False, "token": marker, "notification_sent": notification_sent}
 
 
 async def login_challenge(request, user, *, remember=False, browser_session=False, google=False):

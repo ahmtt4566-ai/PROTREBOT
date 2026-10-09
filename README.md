@@ -65,7 +65,12 @@ paylaşır: 60 saniye bekleme, ilk gönderim dahil kayan bir saatte en fazla be�
 
 E-posta bağlantısı tek başına oturum açmaz. Yeni kayıt yapılan cihaza 30 dakikalık
 HttpOnly, Secure, SameSite=Lax bekleyen kayıt çerezi verilir. Bu yetki yalnız
-durum/yeniden gönderim ve doğrulandıktan sonra tek seferlik oturum çevirme içindir;
+durum/yeniden gönderim ve doğrulandıktan sonra tek seferlik oturum çevirme içindir.
+Henüz doğrulanmamış yeni müşteri kaydında, aynı çerez ve doğru parola ile
+`POST /api/v22/auth/registration/email` adres düzeltmeye de izin verir.
+Bu işlem aynı hesabı korur, eski bağlantıları ve bekleyen kayıt çerezlerini
+geçersizleştirir; yeni bağlantı gönderilemezse adres değişikliği geri alınır.
+Doğrulanmış hesap, OWNER ve etkin 2FA bu dar kapsamlı yolu kullanamaz.
 2FA veya değişmiş kimlik doğrulama sürümü normal girişe yönlendirir. Farklı cihaz
 yalnız doğrulama başarısını ve e-postası doldurulmuş giriş ekranını görür.
 Doğrulanmamış müşteri için mevcut 403, OWNER istisnası, abonelik/arm/consent/2FA
@@ -73,9 +78,11 @@ ve LIVE/Demo yürütme kuralları değişmez.
 
 `/verify-email` sunucudan durumu okur; dört saniyede bir ve görünür sekmeye
 dönüşte sorgular, aynı anda sorguları çoğaltmaz. Başarı sadece sunucu onayıyla
-gösterilir. Sora/Manrope npm paketlerinden yalnız lazy doğrulama ekranında yüklenir;
-Google Fonts isteği yoktur. Yeni koyu HTML/text şablonu yalnız doğrulama mailinde
-kullanılır; diğer mail türleri korunur.
+gösterilir. Doğrulama ekranları mevcut Plus Jakarta Sans fontunu ve ortak
+koyu/tek yeşil vurgulu kart, simge ve tik görünümünü kullanır; yeni font veya
+Google Fonts isteği yoktur. Tekrar gönderme 60 saniyelik sunucu sınırına bağlıdır.
+Yeni koyu HTML/text şablonu doğrulama mailinde kullanılır; 2FA değişikliği
+bildirimleri ayrı bilgilendirme şablonuyla gönderilir.
 
 Regresyonlar: [backend lifecycle testleri](backend/tests/test_email_verification_v2.py)
 ve [iki frontend için tarayıcı testleri](frontend/tests/email-verification-v2.spec.ts).
@@ -1473,6 +1480,24 @@ Google girişinde ikinci aşama tamamlanmadan oturum açılmaz. Oturum yönetimi
 gerçek sunucu oturumlarını kapatır; parola/e-posta değişikliği yeniden giriş
 gerektirir. Bu hesap 2FA'sı Canlı İşlem'in ayrı ARM, step-up, Premium ve
 consent kapılarının yerine geçmez.
+
+Kurulum üç ayrı adımdır: uygulamayı bağla, kodu doğrula ve yedek kodları
+kaydet. Mevcut parola/Google e-posta koduyla yeniden doğrulama korunur.
+Kurulum anahtarı masaüstünde gizli, mobilde görünürdür. Altı rakam kutusu
+yapıştırmayı ve otomatik doldurmayı destekler; tamamlanan kod tek istekle
+doğrulanır. Yanlış kod alanları temizler, 429 yanıtındaki bekleme süresi
+arayüzde uygulanır. Sunucu doğru kodu doğrulamadan 2FA etkinleşmez.
+On adet yedek kod hashlenir ve yalnız bir kez kullanılabilir; kopyalama ve
+yerel metin dosyası indirme vardır. Kaydetme kutusu işaretlenmeden Bitir
+ve yedek kod penceresini kapatma çalışmaz. Hareket azaltma tercihinde
+animasyonlar kapatılır.
+
+2FA açma/kapatma sonrasında mevcut posta sağlayıcısından anahtar veya yedek
+kod içermeyen güvenlik bildirimi gönderilir. Teslimat hatası loglanır ve
+`notification_sent: false` olarak açıkça gösterilir. Bildirim beklemesi beş
+saniyeyle sınırlıdır; zaman aşımında gönderim doğrulanamadığı belirtilir ve
+yedek kod yanıtı bekletilmez. Tamamlanmış güvenlik
+değişikliği geri alınmaz ve tekrar etkinleştirme istenmez.
 
 İşlem tercihleri sunucuda kullanıcıya bağlı saklanır: bölüm, zaman dilimi,
 Binance, %0.1–1 risk ve USDT sembolleri. Varsayılanlar ilk yüklemede uygulanır;

@@ -208,7 +208,7 @@ async def pending_status(request) -> dict:
         doc = await store.read(request, user["id"]) or {}
         return {"verified": bool(user.get("email_verified")), "email": user["email"],
                 "can_exchange": False, "already_authenticated": bool(user.get("email_verified")),
-                "retry_after": retry_after(doc)}
+                "retry_after": retry_after(doc), "can_change_email": False}
     token, proof = pending_proof(request)
     async with store.edit(request, proof["sub"]) as doc:
         user = await load_user(request, proof["sub"], doc)
@@ -219,7 +219,8 @@ async def pending_status(request) -> dict:
         can_exchange = bool(verified and not doc.get("two_factor_enabled")
                             and row["version"] == int(user.get("auth_version", 1)))
         return {"verified": verified, "email": proof["email"], "can_exchange": can_exchange,
-                "already_authenticated": False, "retry_after": retry_after(doc)}
+                "already_authenticated": False, "retry_after": retry_after(doc),
+                "can_change_email": not verified}
 
 
 async def send_link(request, user_id: str, *, pending: tuple[str, dict] | None = None) -> dict:
@@ -266,6 +267,45 @@ async def pending_resend(request, link_token: str | None = None) -> dict:
         return {"ok": True, "message": "Yeni bağlantı gönderildi — gelen kutunu kontrol et", "retry_after": 60}
     user = await session_user(request)
     return await send_link(request, user["id"])
+
+
+async def change_pending_email(request, response, email: str, password: str) -> dict:
+    require_enabled()
+    from . import account_settings as account
+    from . import v22_commercial as auth
+    from .commercial_core import verify_password
+    from .google_oauth import registration_guard
+    token, proof = pending_proof(request)
+    await auth.enforce_auth_limit(request, "account", proof["sub"])
+    async with registration_guard(request, email), store.edit(request, proof["sub"]) as doc:
+        user = await load_user(request, proof["sub"], doc)
+        row = doc.get("registration_pending", {}).get(digest(token))
+        if (not pending_valid(row, proof, user) or not user or user.get("role") != "CUSTOMER" or not user.get("active")
+                or user.get("email_verified") or doc.get("two_factor_enabled")
+                or row["version"] != int(user.get("auth_version", 1))):
+            raise HTTPException(401, "Parola doğrulanamadı veya kayıt oturumunun süresi doldu.")
+        if not user.get("password") or not verify_password(password, user["password"]):
+            raise HTTPException(401, "Parola doğrulanamadı veya kayıt oturumunun süresi doldu.")
+        if email == user["email"]:
+            raise HTTPException(422, "Farklı bir e-posta adresi yaz.")
+        await account.require_available_email(request, user["id"], email)
+        reserve_send(doc)
+        await auth.update_auth_security(request, user, {"email": email, "email_verified": False, "email_verified_at": None})
+        for pending in doc.get("registration_pending", {}).values():
+            pending["used_at"] = iso()
+        link = create_link(doc, user)
+        await complete_registration(request, response, user)
+        try:
+            await asyncio.to_thread(
+                auth.send_auth_email, to_email=email, display_name=user["display_name"],
+                subject=auth.VERIFY_SUBJECT, title="E-posta adresini onayla",
+                action_url=auth.app_base_url() + "/verify-email?token=" + link,
+                action_label="E-postamı doğrula", expiry="30 dakika", verification_v2=True)
+        except auth.GMAIL_DELIVERY_ERRORS as exc:
+            auth.log_gmail_failure(exc, request.app)
+            raise HTTPException(503, "Adres değiştirilemedi; e-posta gönderilemedi. Lütfen tekrar dene.",
+                                headers={"Retry-After": "60"}) from None
+    return {"ok": True, "email": email, "retry_after": 60}
 
 
 async def find_link_user(request, token_hash: str) -> str | None:

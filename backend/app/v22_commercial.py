@@ -25,11 +25,11 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from google.auth.exceptions import GoogleAuthError, RefreshError
 from googleapiclient.errors import HttpError
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .error_monitoring import build_error_event, schedule_log_event
 from . import email_service, email_verification
 from .auth_failures import login_failure_limits
-from .password_policy import validate_new_password
+from .password_policy import MAX_LENGTH as PASSWORD_MAX_LENGTH, validate_new_password
 from .email_service import auth_email_html, send_auth_email, VERIFY_SUBJECT, RESET_SUBJECT
 from .browser_security import (
     COOKIE_SESSION_PREFIX as BROWSER_SESSION_MARKER_PREFIX,
@@ -1607,6 +1607,18 @@ class RegistrationResendRequest(BaseModel):
     token: str | None = Field(default=None, min_length=20, max_length=600)
 
 
+class RegistrationEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    new_email: str = Field(min_length=5, max_length=180)
+    current_password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
+
+    @field_validator("new_email")
+    @classmethod
+    def valid_email(cls, value):
+        from . import account_settings
+        return account_settings.EmailChange.valid_email(value)
+
+
 @router.get("/auth/registration/status")
 async def registration_status(request: Request):
     return await email_verification.pending_status(request)
@@ -1627,6 +1639,11 @@ async def registration_resend(request: Request, payload: RegistrationResendReque
 @router.post("/auth/registration/exchange")
 async def registration_exchange(request: Request, response: Response):
     return await email_verification.exchange_pending(request, response)
+
+
+@router.post("/auth/registration/email")
+async def registration_email(payload: RegistrationEmailRequest, request: Request, response: Response):
+    return await email_verification.change_pending_email(request, response, payload.new_email, payload.current_password)
 
 
 @router.get("/auth/verification-status")

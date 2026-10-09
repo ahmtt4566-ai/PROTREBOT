@@ -68,6 +68,28 @@ def test_resend_turkish_template_sender_and_plain_text(monkeypatch):
     assert "E-posta adresimi doğrula" in payload["html"]
 
 
+@pytest.mark.parametrize("notice", ["İki aşamalı doğrulama etkinleştirildi.", "İki aşamalı doğrulama kapatıldı."])
+def test_security_notification_is_informational_and_does_not_tell_user_to_ignore_it(monkeypatch, notice):
+    resend_configuration(monkeypatch)
+    payloads = []
+
+    def accept(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "offline-security-notice"})
+
+    with mocked_https(accept):
+        mail.send_auth_email(
+            to_email="sample@icloud.com", display_name="Ada", subject="KaisTrade · Güvenlik",
+            title=notice, action_url="https://kaistrade.com/settings", action_label="Hesabımı kontrol et",
+            information_only=True, security_notice=notice)
+    assert len(payloads) == 1
+    for body in (payloads[0]["html"], payloads[0]["text"]):
+        assert notice in body
+        assert "hesabını hemen kontrol et" in body
+        assert "https://kaistrade.com/settings" in body
+        assert "yok say" not in body and "geçerliliğini yitirir" not in body
+
+
 def test_absent_provider_preserves_gmail_even_with_resend_configuration(monkeypatch):
     for name in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"):
         monkeypatch.setenv(name, "offline-google-fixture")

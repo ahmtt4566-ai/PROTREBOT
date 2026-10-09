@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode} from 'react'
 import {Activity, ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown, Copy, KeyRound, LoaderCircle, LockKeyhole, LogOut, Mail, Monitor, Pencil, Save, ShieldCheck, Trash2, UserRound, X} from 'lucide-react'
-import {QRCodeSVG} from 'qrcode.react'
+import TwoFactorSetup, {type EnrollmentResult} from './TwoFactorSetup'
+import {RecoveryCodes, VerificationSymbol} from './verification-ui'
 import {accountDate, accountInitials, accountRequest, TRADING_TIMEFRAMES, type AccountMutation, type AccountOverview, type SensitiveProof, type TradingPreferences} from './account-settings-api'
 import './profile-settings.css'
 import {PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordPolicyError, passwordRules} from './password-policy'
@@ -23,7 +24,11 @@ function SettingsDialog({title, children, onClose, busy}: {title: string; childr
 }
 
 export function AccountRecoveryScreen({codes, onSaved}: {codes: string[]; onSaved: () => void}) {
-  return <main className="accountSettings"><div className="accountWorkspace"><section className="accountCard accountRecovery"><ShieldCheck/><h1>2FA etkinleştirildi</h1><p>Eski oturumlar kapatıldı. Tek kullanımlık kurtarma kodlarını güvenli bir yere kaydedin; sonra 2FA ile yeniden giriş yapın.</p><p>Kurulumda kullandığınız kod tekrar kullanılamaz. Girişte sonraki Authenticator kodunu veya bir kurtarma kodunu kullanın.</p><ul data-private="true">{codes.map(value => <li key={value}>{value}</li>)}</ul><button className="accountPrimary" onClick={onSaved}>Kodları kaydettim</button></section></div></main>
+  const [complete, setComplete] = useState(false)
+  return <main className="accountSettings"><div className="accountWorkspace"><section className="accountCard accountRecovery">
+    {complete ? <div className="verificationFlow"><VerificationSymbol success/><h1 role="status">İki aşamalı doğrulama başarıyla etkinleştirildi.</h1><button className="verificationPrimary" onClick={onSaved}>Giriş yap</button></div>
+      : <><p>Diğer oturumlar kapatıldı. Devam etmek için yeniden giriş yap. Kurulumda kullandığın kod yerine uygulamadaki sonraki kodu veya bir yedek kodu kullan.</p><RecoveryCodes codes={codes} onSaved={() => setComplete(true)}/></>}
+  </section></div></main>
 }
 
 export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentComplete}: {onLogout: () => void; onSessionEnded: () => void; onEnrollmentComplete: (codes: string[]) => void}) {
@@ -40,7 +45,6 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
   const [confirmPassword, setConfirmPassword] = useState('')
   const [proof, setProof] = useState<SensitiveProof>({})
   const [enrollment, setEnrollment] = useState<{secret: string; otpauth_uri: string} | null>(null)
-  const [code, setCode] = useState('')
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
   const [confirmation, setConfirmation] = useState('')
   const [symbolInput, setSymbolInput] = useState('')
@@ -66,7 +70,7 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
   }, [emailToken])
   const closeDialog = () => {
     setDialog(null); setProof({}); setNewPassword(''); setConfirmPassword('')
-    setEnrollment(null); setCode(''); setRecoveryCodes([]); setConfirmation('')
+    setEnrollment(null); setRecoveryCodes([]); setConfirmation('')
   }
   const openDialog = (kind: DialogKind) => {
     closeDialog(); setDialog(kind); setNotice(null)
@@ -83,7 +87,8 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
     const result = await accountRequest<AccountMutation>(path, {method, body: JSON.stringify(body)})
     if (result.reauthenticate) {closeDialog(); onSessionEnded(); return}
     await refresh(undefined, path === '/account/preferences')
-    setNotice({kind: 'success', text: message})
+    setNotice({kind: result.notification_sent === false ? 'error' : 'success', text: result.notification_sent === false
+      ? `${message} Bilgilendirme e-postasının gönderimi doğrulanamadı.` : message})
   }
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -103,13 +108,15 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
         else if (!enrollment) {
           setEnrollment(await accountRequest<{secret: string; otpauth_uri: string}>('/account/2fa/setup', {method: 'POST', body: JSON.stringify(proof)}))
           setProof({})
-        } else {
-          const result = await accountRequest<{recovery_codes: string[]; reauthenticate?: boolean}>('/account/2fa/enable', {method: 'POST', body: JSON.stringify({code})})
-          if (result.reauthenticate) {onEnrollmentComplete(result.recovery_codes); return}
-          setRecoveryCodes(result.recovery_codes); setEnrollment(null); setCode(''); await refresh()
         }
       }
     })
+  }
+  const enabledEnrollment = (result: EnrollmentResult) => {
+    if (result.reauthenticate) {onEnrollmentComplete(result.recovery_codes); return}
+    setRecoveryCodes(result.recovery_codes); setEnrollment(null)
+    if (result.notification_sent === false) setNotice({kind: 'error', text: 'İki aşamalı doğrulama etkin. Bilgilendirme e-postasının gönderimi doğrulanamadı.'})
+    void refresh().catch(error => setNotice({kind: 'error', text: failureMessage(error)}))
   }
   const requestReauthEmail = () => void run(async () => {
     const result = await accountRequest<{challenge_id: string}>('/account/reauth/email', {method: 'POST', body: '{}'})
@@ -174,19 +181,20 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
         </div>
       </>}
     </div>
-    {dialog && data && <SettingsDialog title={titles[dialog]} busy={busy} onClose={closeDialog}>
+    {dialog && data && <SettingsDialog title={dialog === 'two-factor' && (!data.security.two_factor_enabled || recoveryCodes.length > 0) ? 'Hesabını koru' : titles[dialog]} busy={busy || recoveryCodes.length > 0} onClose={closeDialog}>
       {notice && <p className={`accountNotice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.text}</p>}
       {dialog === 'sessions' ? <><p>Diğer oturumları kapatmak bu cihazdaki oturumunuzu korur.</p><button disabled={busy} onClick={() => void run(() => mutate('/account/sessions/revoke-others', {}, 'Diğer oturumlar kapatıldı.'))}>Diğer oturumları kapat</button><ul className="accountSessions">{data.sessions.map(session => <li key={session.id}><Monitor/><div><b>{session.device} · {session.browser}{session.current && ' · Bu cihaz'}</b><small>Son etkinlik: {accountDate(session.last_seen_at)}</small><small>Başlangıç: {accountDate(session.created_at)} · Bitiş: {accountDate(session.expires_at)}</small></div><button disabled={busy} onClick={() => void run(() => mutate('/account/sessions/revoke', {session_id: session.id}, 'Oturum kapatıldı.'))}>Oturumu kapat</button></li>)}</ul>{!data.sessions.length && <p>Kayıtlı aktif oturum yok.</p>}</>
         : dialog === 'activity' ? <>{data.activity.length ? activity(true) : <p>Kayıtlı hesap aktivitesi yok.</p>}</>
-        : recoveryCodes.length ? <div className="accountRecovery"><ShieldCheck/><h3>2FA etkinleştirildi</h3><p>Bu tek kullanımlık kurtarma kodlarını güvenli bir yere kaydedin. Bu pencere kapandıktan sonra tekrar gösterilmez.</p><ul data-private="true">{recoveryCodes.map(value => <li key={value}>{value}</li>)}</ul><button onClick={closeDialog}>Kodları kaydettim</button></div>
+        : recoveryCodes.length ? <RecoveryCodes codes={recoveryCodes} onSaved={() => {closeDialog(); setNotice({kind: 'success', text: 'İki aşamalı doğrulama başarıyla etkinleştirildi.'})}}/>
+        : dialog === 'two-factor' && !data.security.two_factor_enabled ? <TwoFactorSetup enrollment={enrollment} onBusyChange={setBusy} onEnabled={enabledEnrollment}
+          setupForm={<form onSubmit={submit} className="accountForm">{proofFields()}<button className="verificationPrimary" disabled={busy}>{busy ? <LoaderCircle/> : <ShieldCheck/>}Kurulumu başlat</button></form>}/>
         : <form onSubmit={submit} className="accountForm">
           {dialog === 'profile' && <label>Ad soyad<input autoComplete="name" minLength={2} maxLength={80} required value={name} onChange={event => setName(event.target.value)}/></label>}
           {dialog === 'email' && <label>Yeni e-posta<input type="email" autoComplete="email" required maxLength={180} value={newEmail} onChange={event => setNewEmail(event.target.value)}/></label>}
           {dialog === 'password' && <><label>Yeni parola<input data-private="true" aria-label="Yeni parola" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} required value={newPassword} onChange={event => setNewPassword(event.target.value)}/><div className="passwordRules">{passwordRules(newPassword).map(([label,passed]) => <span className={passed ? 'passed' : 'missing'} key={label}>{passed ? '✓' : '•'} {label}</span>)}</div></label><label>Yeni parola tekrar<input data-private="true" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} required value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)}/></label><p>Bu cihazdaki oturumunuz korunur; yalnızca hesabınızın diğer cihazlardaki oturumları kapanır.</p><a href="/forgot-password">Parolamı unuttum</a></>}
           {dialog === 'close' && <><p>Hesabınız kapatılacak; verileriniz yönetici panelinde kalacaktır.</p><label>Onay için HESABI KAPAT yazın<input required pattern="HESABI KAPAT" value={confirmation} onChange={event => setConfirmation(event.target.value)}/></label></>}
-          {dialog === 'two-factor' && enrollment ? <div className="accountEnrollment" data-private="true"><QRCodeSVG value={enrollment.otpauth_uri} size={180}/><p>Authenticator uygulamanızla tarayın veya anahtarı girin:</p><code>{enrollment.secret}</code><label>Authenticator kodu<input data-private="true" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" required value={code} onChange={event => setCode(event.target.value)}/></label></div>
-            : dialog !== 'profile' && proofFields()}
-          <button className="accountPrimary" disabled={busy}>{busy ? <LoaderCircle className="spin"/> : <Check/>}{dialog === 'two-factor' ? data.security.two_factor_enabled ? '2FA devre dışı bırak' : enrollment ? 'Kodu doğrula ve etkinleştir' : 'Kurulumu başlat' : dialog === 'close' ? 'Hesabı kapat' : dialog === 'email' ? 'Doğrulama gönder' : 'Kaydet'}</button>
+          {dialog !== 'profile' && proofFields()}
+          <button className="accountPrimary" disabled={busy}>{busy ? <LoaderCircle className="spin"/> : <Check/>}{dialog === 'two-factor' ? '2FA devre dışı bırak' : dialog === 'close' ? 'Hesabı kapat' : dialog === 'email' ? 'Doğrulama gönder' : 'Kaydet'}</button>
         </form>}
     </SettingsDialog>}
   </main>

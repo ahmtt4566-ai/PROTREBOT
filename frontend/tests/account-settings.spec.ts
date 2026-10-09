@@ -44,7 +44,7 @@ async function prepare(page: Page, options: {width?: number; owner?: boolean; go
     if (path.endsWith('/sessions/revoke')) {data.sessions = data.sessions.filter(session => session.id !== body.session_id); data.security.active_sessions = data.sessions.length}
     if (path.endsWith('/reauth/email')) {await route.fulfill({json: {challenge_id: 'email-challenge', expires_at: '2026-10-05T13:00:00Z'}}); return}
     if (path.endsWith('/2fa/setup')) {await route.fulfill({json: {secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://totp/KaisTrade:ada%40example.test?secret=JBSWY3DPEHPK3PXP&issuer=KaisTrade'}}); return}
-    if (path.endsWith('/2fa/enable')) {data.security.two_factor_enabled = true; data.sessions = data.sessions.filter(session => session.current); data.security.active_sessions = 1; await route.fulfill({json: {recovery_codes: ['OFFLINE-CODE-1', 'OFFLINE-CODE-2'], reauthenticate: false, token: `cookie-session:${data.user.id}`}}); return}
+    if (path.endsWith('/2fa/enable')) {data.security.two_factor_enabled = true; data.sessions = data.sessions.filter(session => session.current); data.security.active_sessions = 1; await route.fulfill({json: {recovery_codes: Array.from({length: 10}, (_, index) => `OFFLINE-CODE-${index + 1}`), reauthenticate: false, token: `cookie-session:${data.user.id}`}}); return}
     if (path.endsWith('/2fa/disable')) data.security.two_factor_enabled = false
     if (path.endsWith('/password') || path.endsWith('/2fa/disable')) {data.sessions = data.sessions.filter(session => session.current); data.security.active_sessions = 1; await route.fulfill({json: {ok: true, reauthenticate: false, token: `cookie-session:${data.user.id}`}}); return}
     if (path.endsWith('/close') || path.endsWith('/email/confirm')) {authenticated = false; await route.fulfill({json: {ok: true, reauthenticate: true}}); return}
@@ -202,11 +202,12 @@ test('Google-only changes require email reauthentication and mail-unavailable UI
   await page.getByRole('button', {name: 'Parola oluştur'}).click()
   await expect(page.getByLabel('Mevcut parola')).toHaveCount(0)
   await page.getByRole('button', {name: 'Doğrulama kodu gönder'}).click()
+  await expect(page.getByRole('dialog').getByRole('status')).toContainText('Mevcut doğrulanmış adresinize doğrulama kodu gönderildi.')
   await page.getByLabel('E-posta kodu').fill('123456')
   await page.getByLabel('Yeni parola', {exact: true}).fill('Offline-NewPassword1!')
   await page.getByLabel('Yeni parola tekrar').fill('Offline-NewPassword1!')
   await page.getByRole('dialog').getByRole('button', {name: 'Kaydet', exact: true}).click()
-  expect(mutations.find(item => item.path.endsWith('/password'))?.body).toMatchObject({challenge_id: 'email-challenge', email_code: '123456'})
+  await expect.poll(() => mutations.find(item => item.path.endsWith('/password'))?.body).toMatchObject({challenge_id: 'email-challenge', email_code: '123456'})
 })
 
 test('Unavailable mail and protected OWNER closure never pretend to work', async ({page}) => {
@@ -225,16 +226,21 @@ test('TOTP enrollment displays real QR, validates code and shows recovery codes 
   await page.getByRole('button', {name: '2FA etkinleştir'}).click()
   await page.getByLabel('Mevcut parola').fill('Offline-Password1!')
   await page.getByRole('button', {name: 'Kurulumu başlat'}).click()
-  await expect(page.locator('.accountEnrollment svg')).toHaveCount(1)
-  await expect(page.locator('.accountEnrollment code')).toHaveText('JBSWY3DPEHPK3PXP')
-  await page.getByLabel('Authenticator kodu').fill('123456')
-  await page.getByRole('button', {name: 'Kodu doğrula ve etkinleştir'}).click()
-  await expect(page.locator('.accountRecovery')).toContainText('OFFLINE-CODE-1')
+  await expect(page.locator('.verificationQR svg')).toHaveCount(1)
+  await expect(page.locator('.verificationKey code')).not.toHaveText('JBSWY3DPEHPK3PXP')
+  await page.getByRole('button', {name: 'Göster', exact: true}).click()
+  await expect(page.locator('.verificationKey code')).toHaveText('JBSWY3DPEHPK3PXP')
+  await page.getByRole('button', {name: 'Devam et', exact: true}).click()
+  await page.getByLabel('Doğrulama kodu 1. rakam').fill('123456')
+  await expect(page.locator('.verificationRecoveryCodes')).toContainText('OFFLINE-CODE-1')
+  await expect(page.locator('.verificationRecoveryCodes li')).toHaveCount(10)
   expect(await page.evaluate(() => localStorage.getItem('protrebot-v25-session'))).toBe('cookie-session:account-test-user')
   await page.clock.runFor(46000)
-  await expect(page.locator('.accountRecovery')).toContainText('OFFLINE-CODE-1')
+  await expect(page.locator('.verificationRecoveryCodes')).toContainText('OFFLINE-CODE-1')
   await expect(page.getByRole('heading', {name: 'Profil & Ayarlar'})).toBeVisible()
-  await page.getByRole('button', {name: 'Kodları kaydettim'}).click()
+  await expect(page.getByRole('button', {name: 'Bitir', exact: true})).toBeDisabled()
+  await page.getByRole('checkbox', {name: 'Kodları güvenli bir yere kaydettim'}).check()
+  await page.getByRole('button', {name: 'Bitir', exact: true}).click()
   await expect(page.getByText('OFFLINE-CODE-1')).toHaveCount(0)
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(page.getByRole('heading', {name: 'Profil & Ayarlar'})).toBeVisible()
@@ -251,6 +257,154 @@ test('Session management revokes other sessions without losing current session',
   expect(data.sessions[0].id).toBe('current-session')
   expect(mutations[0].path).toBe('/api/v22/account/sessions/revoke-others')
   expect(await page.evaluate(() => localStorage.getItem('protrebot-v25-session'))).toBe('cookie-session:account-test-user')
+})
+
+async function openVerificationCode(page: Page, width = 1440) {
+  const mock = await prepare(page, {width})
+  await page.goto(`${base}/settings`)
+  await page.getByRole('button', {name: '2FA etkinleştir'}).click()
+  await page.getByLabel('Mevcut parola').fill('Offline-Password1!')
+  await page.getByRole('button', {name: 'Kurulumu başlat'}).click()
+  await expect(page.locator('.verificationQR svg')).toBeVisible()
+  return mock
+}
+
+test('Desktop enrollment hides its key, copies explicitly and remains inactive when abandoned', async ({page, context}, testInfo) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const {data, mutations} = await openVerificationCode(page)
+  await expect(page.locator('.verificationKey code')).toHaveAttribute('aria-label', 'Kurulum anahtarı gizli')
+  expect(await page.locator('.verificationQR svg').evaluate(element => Math.round(element.getBoundingClientRect().width))).toBe(180)
+  await page.screenshot({path: testInfo.outputPath('two-factor-desktop-connect.png'), animations: 'disabled'})
+  const primary = page.getByRole('button', {name: 'Devam et', exact: true})
+  await primary.hover()
+  await expect(primary).toHaveCSS('background-color', 'rgb(55, 201, 138)')
+  const copy = page.getByRole('button', {name: 'Kopyala', exact: true})
+  await copy.hover()
+  await expect(copy).toHaveCSS('border-color', 'rgb(55, 201, 138)')
+  await copy.focus()
+  await copy.press('Tab')
+  await expect(primary).toBeFocused()
+  await expect(primary).toHaveCSS('outline-color', 'rgb(55, 201, 138)')
+  await page.getByRole('button', {name: 'Kopyala', exact: true}).click()
+  await expect(page.getByRole('status')).toContainText('Kopyalandı')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('JBSWY3DPEHPK3PXP')
+  await page.getByRole('button', {name: 'Pencereyi kapat'}).click()
+  expect(data.security.two_factor_enabled).toBe(false)
+  expect(mutations.map(item => item.path)).toEqual(['/api/v22/account/2fa/setup'])
+  expect(await page.evaluate(() => JSON.stringify({...localStorage, ...sessionStorage}))).not.toContain('JBSWY3DPEHPK3PXP')
+})
+
+test('Mobile digit entry supports focus, backspace, six-digit paste and invalid-code recovery', async ({page}, testInfo) => {
+  const {data} = await openVerificationCode(page, 390)
+  await expect(page.locator('.verificationKey code')).toHaveText('JBSWY3DPEHPK3PXP')
+  const dialog = page.getByRole('dialog')
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect(await dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(900)
+  await page.screenshot({path: testInfo.outputPath('two-factor-mobile-connect.png'), animations: 'disabled'})
+  await page.route('**/api/v22/account/2fa/enable', route => route.fulfill({status: 401, json: {detail: 'Geçersiz kod'}}))
+  await page.getByRole('button', {name: 'Devam et', exact: true}).click()
+  const inputs = page.locator('.verificationDigits input')
+  await expect(inputs.nth(0)).toBeFocused()
+  await page.screenshot({path: testInfo.outputPath('two-factor-mobile-code.png'), animations: 'disabled'})
+  await inputs.nth(0).press('1')
+  await expect(inputs.nth(1)).toBeFocused()
+  await inputs.nth(1).press('Backspace')
+  await expect(inputs.nth(0)).toBeFocused()
+  await expect(inputs.nth(0)).toHaveValue('')
+  await inputs.nth(0).evaluate(element => {
+    const clipboard = new DataTransfer(); clipboard.setData('text', '123456')
+    element.dispatchEvent(new ClipboardEvent('paste', {clipboardData: clipboard, bubbles: true}))
+  })
+  await expect(dialog.getByRole('alert')).toHaveText('Kod hatalı. Telefonunun saatinin otomatik ayarda olduğundan emin ol.')
+  for (let index = 0; index < 6; index++) await expect(inputs.nth(index)).toHaveValue('')
+  await expect(inputs.nth(0)).toBeFocused()
+  expect(data.security.two_factor_enabled).toBe(false)
+})
+
+test('Complete code submits once, waits for server success and gates saving all ten backup codes', async ({page}, testInfo) => {
+  const {mutations} = await openVerificationCode(page)
+  let release: (() => void) | undefined
+  const hold = new Promise<void>(resolve => {release = resolve})
+  let requests = 0
+  await page.route('**/api/v22/account/2fa/enable', async route => {
+    requests++
+    await hold
+    await route.fallback()
+  })
+  await page.getByRole('button', {name: 'Devam et', exact: true}).click()
+  const first = page.getByLabel('Doğrulama kodu 1. rakam')
+  await first.fill('12345')
+  expect(requests).toBe(0)
+  await page.getByLabel('Doğrulama kodu 6. rakam').fill('6')
+  await expect(page.getByRole('status')).toContainText('Kod doğrulanıyor')
+  await expect(page.getByRole('button', {name: 'Pencereyi kapat'})).toBeDisabled()
+  expect(requests).toBe(1)
+  await expect(page.locator('.verificationRecoveryCodes')).toHaveCount(0)
+  release?.()
+  await expect(page.locator('.verificationRecoveryCodes li')).toHaveCount(10)
+  await expect(page.locator('.verificationQR')).toHaveCount(0)
+  await expect(page.locator('.verificationDigits')).toHaveCount(0)
+  await expect(page.getByRole('button', {name: 'Bitir', exact: true})).toBeDisabled()
+  await page.screenshot({path: testInfo.outputPath('two-factor-desktop-backup.png'), animations: 'disabled'})
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', {name: 'İndir', exact: true}).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('kaistrade-yedek-kodlar.txt')
+  const stream = await download.createReadStream()
+  const chunks: Buffer[] = []
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk))
+  const text = Buffer.concat(chunks).toString('utf8')
+  for (let index = 1; index <= 10; index++) expect(text).toContain(`OFFLINE-CODE-${index}`)
+  await expect(page.getByRole('button', {name: 'Bitir', exact: true})).toBeDisabled()
+  await page.getByRole('checkbox', {name: 'Kodları güvenli bir yere kaydettim'}).check()
+  await page.getByRole('button', {name: 'Bitir', exact: true}).click()
+  await expect(page.getByRole('status')).toHaveText('İki aşamalı doğrulama başarıyla etkinleştirildi.')
+  expect(mutations.filter(item => item.path.endsWith('/enable'))).toHaveLength(1)
+  expect(await page.evaluate(() => JSON.stringify({...localStorage, ...sessionStorage}))).not.toContain('OFFLINE-CODE-')
+})
+
+test('Server waiting period is respected and reduced motion disables verification animations', async ({page}) => {
+  await page.emulateMedia({reducedMotion: 'reduce'})
+  await openVerificationCode(page)
+  await page.clock.install()
+  let requests = 0
+  await page.route('**/api/v22/account/2fa/enable', route => {
+    requests++
+    return requests === 1
+      ? route.fulfill({status: 429, headers: {'Retry-After': '5'}, json: {detail: 'Çok fazla deneme. Lütfen bekle.'}})
+      : route.fulfill({status: 401, json: {detail: 'Oturum gerekli.'}})
+  })
+  await page.getByRole('button', {name: 'Devam et', exact: true}).click()
+  const inputs = page.locator('.verificationDigits input')
+  await inputs.nth(0).fill('123456')
+  await expect(page.getByRole('status')).toContainText('Yeni deneme için 5 saniye bekle.')
+  await expect(inputs.nth(0)).toHaveAttribute('readonly', '')
+  expect(await page.locator('.verificationSymbol').evaluate(element => getComputedStyle(element).animationName)).toBe('none')
+  expect(await page.locator('.verificationSteps li').first().evaluate(element => getComputedStyle(element, '::before').transitionDuration)).toBe('0s')
+  await page.clock.runFor(5000)
+  await expect(inputs.nth(0)).not.toHaveAttribute('readonly', '')
+  expect(requests).toBe(1)
+  await inputs.nth(0).fill('123456')
+  await expect(page.getByRole('dialog').getByRole('alert')).toHaveText('Oturum gerekli.')
+  expect(requests).toBe(2)
+})
+
+test('Enrollment requiring a new session still gates backup saving and announces completion before login', async ({page}) => {
+  const {setAuthenticated} = await openVerificationCode(page)
+  await page.route('**/api/v22/account/2fa/enable', route => {
+    setAuthenticated(false)
+    return route.fulfill({json: {recovery_codes: Array.from({length: 10}, (_, index) => `REAUTH-CODE-${index + 1}`), reauthenticate: true}})
+  })
+  await page.getByRole('button', {name: 'Devam et', exact: true}).click()
+  await page.getByLabel('Doğrulama kodu 1. rakam').fill('123456')
+  await expect(page.locator('.verificationRecoveryCodes li')).toHaveCount(10)
+  await expect(page.getByRole('button', {name: 'Bitir', exact: true})).toBeDisabled()
+  await page.getByRole('checkbox', {name: 'Kodları güvenli bir yere kaydettim'}).check()
+  await page.getByRole('button', {name: 'Bitir', exact: true}).click()
+  await expect(page.getByRole('status')).toHaveText('İki aşamalı doğrulama başarıyla etkinleştirildi.')
+  await expect(page.locator('.verificationRecoveryCodes')).toHaveCount(0)
+  await page.getByRole('button', {name: 'Giriş yap', exact: true}).click()
+  await expect(page.getByRole('button', {name: 'GÜVENLİ GİRİŞ', exact: true})).toBeVisible()
 })
 
 test('Refreshing security data does not erase unsaved trading preferences', async ({page}) => {

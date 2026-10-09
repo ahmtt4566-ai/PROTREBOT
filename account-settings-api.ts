@@ -27,7 +27,11 @@ export type AccountOverview = {
 export type AdminAccount = AccountUser & {subscription: AccountSubscription; two_factor_enabled: boolean; active_sessions: number; closed_at: string | null}
 export type AdminAccounts = {users: AdminAccount[]; total: number; page: number; page_size: number}
 export type SensitiveProof = {current_password?: string; totp_code?: string; challenge_id?: string; email_code?: string}
-export type AccountMutation = {ok: boolean; reauthenticate?: boolean}
+export type AccountMutation = {ok: boolean; reauthenticate?: boolean; notification_sent?: boolean}
+
+export class AccountRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly retryAfter: number) {super(message)}
+}
 
 export async function accountRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers)
@@ -40,7 +44,7 @@ export async function accountRequest<T>(path: string, options: RequestInit = {})
     const message = typeof detail === 'string' ? detail : Array.isArray(detail)
       ? detail.map(item => item && typeof item === 'object' && 'msg' in item ? String(item.msg) : 'Geçersiz alan').join(' · ')
       : `Hesap işlemi tamamlanamadı (HTTP ${response.status}).`
-    throw new Error(message)
+    throw new AccountRequestError(message, response.status, Number(response.headers.get('Retry-After')) || 0)
   }
   return payload as T
 }

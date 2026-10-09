@@ -189,7 +189,7 @@ def verification_email(action_url: str) -> tuple[str, str]:
 
 def send_auth_email(*, to_email: str, display_name: str, subject: str, title: str,
                     action_url: str, action_label: str, expiry: str = "24 saat", information_only: bool = False,
-                    verification_v2: bool = False) -> None:
+                    verification_v2: bool = False, security_notice: str | None = None) -> None:
     selected = provider()
     try:
         validate_configuration()
@@ -203,6 +203,14 @@ def send_auth_email(*, to_email: str, display_name: str, subject: str, title: st
         html = auth_email_html(title, display_name, action_url, action_label, expiry, information_only=information_only)
         if verification_v2:
             text, html = verification_email(action_url)
+        if security_notice is not None:
+            text = f"KaisTrade\n\n{title}\n\n{security_notice}\n\nBu işlemi sen yapmadıysan hesabını hemen kontrol et:\n{action_url}\n\nParolanı veya API anahtarlarını e-postayla istemeyiz."
+            html = f"""<!doctype html><html lang="tr"><body style="margin:0;background:#080e0c;color:#e7ecf3;font-family:Arial,sans-serif">
+<div style="max-width:480px;margin:32px auto;padding:28px;border:1px solid #ffffff26;border-radius:16px">
+<p style="color:#37c98a;font-weight:bold">KaisTrade</p><h1 style="font-size:24px">{escape(title)}</h1>
+<p>{escape(security_notice)}</p><p>Bu işlemi sen yapmadıysan hesabını hemen kontrol et.</p>
+<p><a style="color:#37c98a" href="{escape(action_url, quote=True)}">Hesabımı kontrol et</a></p>
+<p>Parolanı veya API anahtarlarını e-postayla istemeyiz.</p></div></body></html>"""
         reply_to = os.getenv("EMAIL_REPLY_TO", "").strip()
         if selected == "resend":
             payload = {"from": f"KaisTrade <{parseaddr(os.environ['EMAIL_FROM'])[1]}>", "to": [to_email],

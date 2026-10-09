@@ -78,6 +78,115 @@ def test_secure_pending_cookie_and_opaque_hash_only_30_minute_link(setup):
     assert "protrebot_session=" not in cookie
 
 
+def allow_next_send(setup, uid):
+    alter_doc(setup, lambda doc: doc.update(verification_last_sent=time.time() - 61), uid)
+
+
+def test_pending_email_correction_preserves_account_invalidates_old_links_and_requires_password(setup):
+    client, old_link = fresh_link(setup)
+    uid = user_id(client)
+    old_cookie = client.cookies.get(REGISTRATION_PENDING_COOKIE)
+    allow_next_send(setup, uid)
+    body = {"new_email": "corrected@example.test", "current_password": "Wrong-password-123!"}
+    denied = client.post("/api/v22/auth/registration/email", json=body)
+    assert denied.status_code == 401
+    assert get_doc(setup, uid)["auth_overlay"]["email"] == "new@example.test"
+    body["current_password"] = PASSWORD
+    changed = client.post("/api/v22/auth/registration/email", json=body)
+    assert changed.status_code == 200, changed.text
+    assert changed.json() == {"ok": True, "email": "corrected@example.test", "retry_after": 60}
+    assert client.cookies.get(REGISTRATION_PENDING_COOKIE) != old_cookie
+    status = client.get("/api/v22/auth/registration/status")
+    assert status.json()["email"] == "corrected@example.test"
+    assert not status.json()["verified"]
+    assert confirm(client, old_link).status_code == 400
+    new_link = sent_token(setup)
+    assert setup.mail.call_args.kwargs["to_email"] == "corrected@example.test"
+    assert confirm(client, new_link).status_code == 200
+    assert get_doc(setup, uid)["auth_overlay"]["email_verified"]
+    stale = setup.runtime()
+    stale.cookies.set(REGISTRATION_PENDING_COOKIE, old_cookie)
+    assert stale.get("/api/v22/auth/registration/status").status_code == 401
+
+
+def test_pending_email_correction_rejects_duplicates_cooldown_and_missing_cookie(setup):
+    client, link = fresh_link(setup)
+    uid = user_id(client)
+    body = {"new_email": "corrected@example.test", "current_password": PASSWORD}
+    assert setup.runtime().post("/api/v22/auth/registration/email", json=body).status_code == 401
+    assert client.post("/api/v22/auth/registration/email", json=body).status_code == 429
+    allow_next_send(setup, uid)
+    duplicate = client.post("/api/v22/auth/registration/email", json={**body, "new_email": setup.users[0]["email"]})
+    assert duplicate.status_code == 409
+    assert get_doc(setup, uid)["auth_overlay"]["email"] == "new@example.test"
+    assert confirm(client, link).status_code == 200
+    assert client.post("/api/v22/auth/registration/email", json=body).status_code == 401
+
+
+def test_pending_email_correction_rolls_back_address_links_and_cookie_when_delivery_fails(setup):
+    client, link = fresh_link(setup)
+    uid = user_id(client)
+    cookie = client.cookies.get(REGISTRATION_PENDING_COOKIE)
+    allow_next_send(setup, uid)
+    setup.mail.side_effect = email_service.EmailDeliveryError("Offline failure", provider="resend")
+    failed = client.post("/api/v22/auth/registration/email",
+                         json={"new_email": "corrected@example.test", "current_password": PASSWORD})
+    assert failed.status_code == 503
+    assert "set-cookie" not in failed.headers
+    assert client.cookies.get(REGISTRATION_PENDING_COOKIE) == cookie
+    assert get_doc(setup, uid)["auth_overlay"]["email"] == "new@example.test"
+    assert confirm(client, link).status_code == 200
+
+
+def test_email_correction_capability_and_wrong_password_do_not_reveal_duplicate_registration(setup):
+    created, duplicate = setup.runtime(), setup.runtime()
+    signup(created)
+    signup(duplicate, setup.users[0]["email"])
+    assert created.get("/api/v22/auth/registration/status").json()["can_change_email"] is True
+    assert duplicate.get("/api/v22/auth/registration/status").json()["can_change_email"] is True
+    body = {"new_email": "corrected@example.test", "current_password": "Wrong-password-123!"}
+    real_result = created.post("/api/v22/auth/registration/email", json=body)
+    synthetic_result = duplicate.post("/api/v22/auth/registration/email", json=body)
+    assert real_result.status_code == synthetic_result.status_code == 401
+    assert real_result.json() == synthetic_result.json()
+
+
+@pytest.mark.parametrize("kind", ["owner", "version", "mfa", "inactive", "expired"])
+def test_pending_email_correction_never_bypasses_account_security(setup, kind):
+    client, _ = fresh_link(setup)
+    uid = user_id(client)
+    def change(doc):
+        if kind == "owner":
+            doc["auth_overlay"]["role"] = "OWNER"
+        elif kind == "version":
+            doc["auth_overlay"]["auth_version"] += 1
+        elif kind == "mfa":
+            doc["two_factor_enabled"] = True
+        elif kind == "inactive":
+            doc["auth_overlay"]["active"] = False
+        else:
+            for row in doc["registration_pending"].values():
+                row["expires"] = time.time() - 1
+    alter_doc(setup, change, uid)
+    result = client.post("/api/v22/auth/registration/email",
+                         json={"new_email": "corrected@example.test", "current_password": PASSWORD})
+    assert result.status_code == 401
+    assert get_doc(setup, uid)["auth_overlay"]["email"] == "new@example.test"
+
+
+def test_email_correction_accepts_the_existing_full_password_length(setup):
+    from app.commercial_core import hash_password
+    client, _ = fresh_link(setup)
+    uid = user_id(client)
+    password = "Aa1!" + "x" * 252
+    alter_doc(setup, lambda doc: doc["auth_overlay"].update(password=hash_password(password)), uid)
+    allow_next_send(setup, uid)
+    result = client.post("/api/v22/auth/registration/email",
+                         json={"new_email": "corrected@example.test", "current_password": password})
+    assert result.status_code == 200, result.text
+    assert result.json()["email"] == "corrected@example.test"
+
+
 def test_valid_confirmation_does_not_login_and_get_does_not_consume(setup):
     client, token = fresh_link(setup)
     assert client.get("/api/v22/auth/verify-email", params={"token": token}).status_code == 405

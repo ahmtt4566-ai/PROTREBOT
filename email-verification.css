@@ -1,49 +1,23 @@
-.ev-page{min-height:100dvh;display:grid;place-items:center;padding:32px 16px;position:relative;isolation:isolate;overflow:hidden;background:#050706;color:#E6ECE8;font:400 15px/1.6 Manrope,sans-serif}
-.ev-page:before,.ev-page:after{content:"";position:absolute;z-index:-1;width:420px;height:420px;border-radius:50%;filter:blur(70px);pointer-events:none}
-.ev-page:before{background:rgba(47,125,87,.45);top:-150px;left:calc(50% - 430px)}
-.ev-page:after{background:rgba(95,203,142,.22);bottom:-170px;right:calc(50% - 430px)}
-.ev-card{box-sizing:border-box;width:min(392px,100%);padding:36px 32px 28px;border-radius:24px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(26px) saturate(120%);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 30px 80px rgba(0,0,0,.55);text-align:center}
-.ev-brand{display:flex;align-items:center;justify-content:center;gap:8px;color:#A3B0A9;font-size:12px;letter-spacing:.08em;text-transform:uppercase}
-.ev-symbol{display:block;margin:28px auto 24px;overflow:visible}
-.ev-symbol circle,.ev-symbol path,.ev-symbol rect{fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:2}
-.ev-track{stroke:rgba(255,255,255,.08)}
-.ev-ring{stroke:#5FCB8E;stroke-dasharray:327;stroke-dashoffset:327;transform:rotate(-90deg);transform-origin:60px 60px}
-.ev-envelope{stroke:#A3B0A9;transform-origin:60px 60px}
-.ev-flap{transform-origin:60px 46px}
-.ev-check{stroke:#5FCB8E;stroke-width:3!important;stroke-dasharray:65;stroke-dashoffset:65}
-.ph-waiting .ev-envelope{animation:ev-breathe 3.2s ease-in-out infinite}
-.ph-verifying .ev-envelope{opacity:.5}
-.ph-verifying .ev-ring{stroke-dasharray:55 272;stroke-dashoffset:0;animation:ev-spin 1.1s linear infinite}
-.ph-success{filter:drop-shadow(0 0 15px rgba(95,203,142,.15))}
-.ph-success .ev-envelope{opacity:0}
-.ph-success .ev-ring,.ph-success .ev-check{stroke-dashoffset:0}
-.ev-animated .ph-success .ev-flap{animation:ev-flap .5s cubic-bezier(.65,0,.35,1) both}
-.ev-animated .ph-success .ev-envelope{animation:ev-envelope-out .5s cubic-bezier(.65,0,.35,1) both}
-.ev-animated .ph-success .ev-ring{animation:ev-draw-ring .75s .25s cubic-bezier(.65,0,.35,1) both}
-.ev-animated .ph-success .ev-check{animation:ev-draw-check .5s 1s cubic-bezier(.65,0,.35,1) both}
-.ev-animated .ev-copy{animation:ev-copy-in .6s .9s cubic-bezier(.65,0,.35,1) both}
-.ev-copy h1{margin:0 0 12px;color:#F2F6F3;font:600 26px/1.35 Sora,sans-serif;overflow-wrap:anywhere}
-.ev-copy p{margin:0;color:#A3B0A9;overflow-wrap:anywhere}
-.ev-wait{display:flex;align-items:flex-start;justify-content:center;gap:8px;margin:24px 0;color:#A3B0A9;font-size:13px}
-.ev-wait i{flex:none;width:6px;height:6px;margin-top:7px;border-radius:50%;background:#5FCB8E;animation:ev-pulse 2.5s ease-in-out infinite}
-.ev-primary{box-sizing:border-box;display:block;width:100%;min-height:48px;margin-top:24px;padding:12px;border:0;border-radius:14px;background:#5FCB8E;color:#06120C;font:600 15px/1.5 Manrope,sans-serif;cursor:pointer}
-.ev-primary:hover:not(:disabled){background:#7FD8A6}
-.ev-primary:disabled{opacity:.55;cursor:wait}
-.ev-primary:focus-visible,.ev-link:focus-visible{outline:2px solid #7FD8A6;outline-offset:4px}
-.ev-footnote{margin:16px 0 4px;font-size:12px;color:#8E9C95}
-.ev-link{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:4px 8px;border:0;background:none;color:#A3B0A9;font:500 13px Manrope,sans-serif;text-decoration:underline;text-underline-offset:4px;cursor:pointer}
-.ev-progress{height:3px;margin-top:24px;overflow:hidden;border-radius:3px;background:rgba(255,255,255,.08)}
-.ev-progress i{display:block;height:100%;width:100%;background:#5FCB8E;transform-origin:left}
+.ev-page{min-height:100dvh;display:grid;place-items:center;padding:32px 16px;background:#080e0c;color:#e7ecf3;font:400 15px/1.6 "Plus Jakarta Sans","Segoe UI",sans-serif}
+.ev-card{box-sizing:border-box;width:min(440px,100%);padding:36px 32px 28px;border-radius:16px;background:rgba(255,255,255,.025);border:1px solid #ffffff18;backdrop-filter:blur(12px);box-shadow:0 20px 60px #0004;text-align:center}
+.ev-brand{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--verification-muted);font-size:12px;letter-spacing:.05em}
+.ev-card .verificationSymbol{margin:28px auto}
+.ev-copy h1{margin:0 0 12px;color:var(--verification-text);font:600 25px/1.35 "Plus Jakarta Sans","Segoe UI",sans-serif;overflow-wrap:anywhere}
+.ev-copy p{margin:0;color:var(--verification-muted);overflow-wrap:anywhere}
+.ev-wait{margin:24px 0;color:var(--verification-muted);font-size:13px}
+.ev-card .ev-primary{display:flex;width:100%;min-height:48px;margin-top:24px;padding:12px;border:1px solid var(--verification-green);border-radius:9px;background:var(--verification-green);color:#071b11;font-weight:600}
+.ev-card .ev-primary:hover:not(:disabled){background:var(--verification-green);filter:brightness(.95)}
+.ev-card .ev-primary:disabled{opacity:.45;cursor:not-allowed}
+.ev-footnote{margin:16px 0 4px;font-size:12px;color:var(--verification-muted)}
+.ev-card .ev-link{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:4px 8px;border:0;background:none;color:var(--verification-muted);font-weight:500;font-size:13px;text-decoration:underline;text-underline-offset:4px;cursor:pointer}
+.ev-card .ev-link:hover:not(:disabled){background:none}
+.ev-progress{height:3px;margin-top:24px;overflow:hidden;border-radius:3px;background:#ffffff14}
+.ev-progress i{display:block;height:100%;width:100%;background:var(--verification-green);transform-origin:left}
 .ev-progress.is-running i{animation:ev-progress 3s linear both}
-.ev-notice{margin:16px 0 0;color:#A3B0A9;font-size:13px;overflow-wrap:anywhere}
-@keyframes ev-breathe{50%{transform:translateY(-5px)}}
-@keyframes ev-spin{to{transform:rotate(270deg)}}
-@keyframes ev-pulse{50%{opacity:.35}}
-@keyframes ev-flap{to{transform:scaleY(-1)}}
-@keyframes ev-envelope-out{from{opacity:1;filter:blur(0);transform:scale(1)}to{opacity:0;filter:blur(4px);transform:scale(.7)}}
-@keyframes ev-draw-ring{from{stroke-dashoffset:327}to{stroke-dashoffset:0}}
-@keyframes ev-draw-check{from{stroke-dashoffset:65}to{stroke-dashoffset:0}}
-@keyframes ev-copy-in{from{opacity:0;filter:blur(4px);transform:translateY(8px)}to{opacity:1;filter:blur(0);transform:translateY(0)}}
+.ev-notice{margin:16px 0 0;color:var(--verification-muted);font-size:13px;overflow-wrap:anywhere}
+.ev-email-form{margin-top:20px;text-align:left}
+.ev-email-form label{display:grid;gap:8px;margin-top:16px;font-size:13px}
+.ev-email-form input{box-sizing:border-box;min-width:0;width:100%;min-height:44px;padding:10px 12px;border:1px solid #ffffff26;border-radius:9px;background:#050907;color:var(--verification-text);font:inherit}
 @keyframes ev-progress{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-@media(max-width:420px){.ev-card{padding:32px 24px 24px}.ev-brand{font-size:10px}}
-@media(prefers-reduced-motion:reduce){.ev-page *{animation:none!important;transition:opacity .15s ease!important}.ev-animated .ev-copy{opacity:1;filter:none;transform:none}.ev-envelope{transform:none}.ph-success .ev-envelope{opacity:0}.ph-success .ev-ring,.ph-success .ev-check{stroke-dashoffset:0}.ev-progress i{transform:none}}
+@media(max-width:420px){.ev-card{padding:32px 24px 24px}.ev-brand{font-size:11px}}
+@media(prefers-reduced-motion:reduce){.ev-page *{animation:none!important;transition:none!important}.ev-progress i{transform:none}}

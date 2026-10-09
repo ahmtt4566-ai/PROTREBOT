@@ -1,0 +1,58 @@
+.verificationFlow,.verificationCard{--verification-green:#37c98a;--verification-bg:#080e0c;--verification-text:#e7ecf3;--verification-muted:#a3b0aa;color:var(--verification-text);font-family:"Plus Jakarta Sans","Segoe UI",sans-serif}
+.verificationFlow{padding:8px 2px 4px;text-align:center}
+.verificationFlow h3{font-size:23px;line-height:1.35;margin:20px 0 10px}
+.verificationFlow p{color:var(--verification-muted);font-size:13px;line-height:1.7;margin:10px 0 20px;overflow-wrap:anywhere}
+.verificationSteps{list-style:none;padding:0;margin:0 0 24px;display:flex;gap:12px}
+.verificationSteps li{position:relative;flex:1;min-width:0;color:var(--verification-muted)}
+.verificationSteps li:after,.verificationSteps li:before{content:"";position:absolute;left:calc(50% + 22px);top:15px;width:calc(100% - 32px);height:1px;background:#ffffff1a;transform-origin:left}
+.verificationSteps li:before{z-index:1;background:var(--verification-green);transform:scaleX(0);transition:transform .25s ease}
+.verificationSteps li:last-child:after,.verificationSteps li:last-child:before{display:none}
+.verificationSteps li.is-complete:before{transform:scaleX(1)}
+.verificationSteps li>span{display:grid;place-items:center;width:32px;height:32px;margin:0 auto 9px;border:1px solid #ffffff26;border-radius:50%;font-size:12px}
+.verificationSteps li[aria-current]>span,.verificationSteps .is-complete>span{color:var(--verification-green);border-color:var(--verification-green)}
+.verificationSteps small{display:block;font-size:10px;line-height:1.5}
+.verificationSymbol{position:relative;display:grid;place-items:center;width:76px;height:76px;margin:20px auto;border:1px solid #37c98a26;border-radius:50%;background:#37c98a06;animation:verification-appear .35s ease-out both}
+.verificationSymbol .verificationSymbolOutline{width:34px;height:34px;color:var(--verification-green);stroke-width:1.5}
+.verificationSymbol .verificationSymbolCheck{position:absolute;width:18px;height:18px;color:var(--verification-green);animation:verification-appear .3s ease-out both}
+.verificationSymbol.is-success .verificationSymbolOutline{opacity:.6}
+.verificationSymbol.is-success:has(.verificationSymbolOutline.lucide-mail) .verificationSymbolOutline{opacity:0}
+.verificationFlow button,.verificationCard button,.accountDialog .verificationFlow button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;border:1px solid #ffffff26;border-radius:9px;padding:10px 14px;background:#ffffff04;color:var(--verification-text);font:600 13px/1.4 "Plus Jakarta Sans","Segoe UI",sans-serif;cursor:pointer}
+.verificationFlow button:disabled,.verificationCard button:disabled{opacity:.45;cursor:not-allowed}
+.verificationFlow button:hover:not(:disabled),.verificationCard button:hover:not(:disabled),.accountDialog .verificationFlow button:hover:not(:disabled),.accountDialog:has(.verificationFlow)>header>button:hover:not(:disabled){border-color:#37c98a;background:#37c98a0a}
+.verificationFlow :focus-visible,.verificationCard :focus-visible,.accountDialog .verificationFlow :focus-visible,.accountDialog:has(.verificationFlow)>header>button:focus-visible{outline:2px solid #37c98a;outline-offset:3px}
+.verificationFlow .verificationPrimary,.verificationCard .verificationPrimary,.accountDialog .verificationFlow .verificationPrimary{width:100%;background:var(--verification-green);border-color:var(--verification-green);color:#071b11;margin-top:20px}
+.verificationFlow .verificationPrimary:hover:not(:disabled),.accountDialog .verificationFlow .verificationPrimary:hover:not(:disabled){background:var(--verification-green);filter:brightness(.95)}
+.verificationQR{display:inline-flex;padding:16px;margin:4px auto 16px;background:white;border:1px solid var(--verification-green);border-radius:12px}
+.verificationQR svg{display:block}
+.verificationConnect{display:flex;flex-direction:column}
+.accountDialog .verificationFlow .verificationQR svg{width:180px;height:180px}
+.accountDialog .verificationFlow .verificationSymbolOutline{width:34px;height:34px}
+.accountDialog .verificationFlow .verificationSymbolCheck{width:18px;height:18px}
+.verificationKey{display:grid;gap:10px;margin:4px 0 24px;min-width:0}
+.verificationKey strong{font-size:12px;color:var(--verification-muted)}
+.verificationKey code{display:block;min-width:0;font:500 14px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;letter-spacing:.04em;color:var(--verification-text)}
+.verificationActions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.verificationCodeScreen{animation:verification-appear .25s ease-out both}
+.verificationCodeScreen.is-verified{animation:verification-leave .18s ease-in both}
+.verificationDigits{display:flex;justify-content:center;gap:8px;margin:26px 0 18px;min-width:0}
+.verificationDigits input{box-sizing:border-box;width:48px;min-width:0;height:56px;padding:0;border:1px solid #ffffff26;border-radius:9px;background:#050907;color:var(--verification-text);text-align:center;font:600 23px "Plus Jakarta Sans","Segoe UI",sans-serif;caret-color:var(--verification-green)}
+.verificationDigits input:focus{border-color:var(--verification-green)}
+.verificationDigits.is-error{animation:verification-shake .25s ease-out}
+.verificationFlow [role="alert"],.verificationCard [role="alert"]{color:var(--verification-text);display:block;font-size:13px;line-height:1.6}
+.verificationRecoveryCodes{list-style:none;padding:0;margin:24px 0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.verificationRecoveryCodes li{min-width:0;padding:6px 0;border-bottom:1px solid #ffffff10}
+.verificationRecoveryCodes code{font:500 13px/1.5 ui-monospace,monospace;overflow-wrap:anywhere}
+.verificationSaved{display:flex;gap:10px;align-items:center;text-align:left;min-height:44px;margin-top:20px;font-size:12px;line-height:1.6}
+.verificationSaved input{width:18px;height:18px;flex:none;accent-color:var(--verification-green)}
+.accountDialog:has(.verificationFlow){width:480px;max-height:calc(100dvh - 40px);background:rgba(8,14,12,.98);border-color:#ffffff18;box-shadow:0 20px 60px #0006}
+.accountDialog:has(.verificationFlow)>header h2{font-size:18px}
+.accountDialog:has(.verificationFlow) .accountNotice{background:#ffffff04;border-color:#ffffff18;color:#e7ecf3}
+.verificationFlow .accountProof{text-align:left;background:none;border:0;padding:0;margin:16px 0}
+.verificationFlow .accountProof input{box-sizing:border-box;width:100%;min-height:44px}
+.verificationFlow .accountProof label{display:grid;gap:8px}
+@keyframes verification-appear{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes verification-shake{25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+@keyframes verification-leave{to{opacity:0;transform:translateY(-4px)}}
+@media(max-width:600px){.accountDialog:has(.verificationFlow){box-sizing:border-box;width:100%;max-width:100%;max-height:100dvh;height:100dvh;margin:0;padding:20px 20px max(20px,env(safe-area-inset-bottom));border:0;border-radius:0;overflow-x:hidden;overscroll-behavior:contain}.verificationKey{margin:12px 0 24px}.verificationKey code{font-size:16px}.verificationDigits{gap:6px}.verificationDigits input{width:calc((100% - 30px)/6);max-width:48px;min-height:56px!important}.verificationRecoveryCodes{gap:8px}.verificationSymbol{margin-top:24px}.verificationSaved input{min-height:18px!important}}
+@media(max-width:600px){.verificationConnect .verificationKey{order:-1}}
+@media(prefers-reduced-motion:reduce){.verificationFlow *,.verificationFlow *::before,.verificationFlow *::after,.verificationCard *,.verificationCard *::before,.verificationCard *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
