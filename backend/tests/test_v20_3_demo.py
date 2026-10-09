@@ -226,12 +226,25 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         self.assertIn("VITE_BUILD_COMMIT", (ROOT / "vite.config.ts").read_text(encoding="utf-8"))
 
     def test_live_market_data_retries_only_transient_upstream_failures(self):
+        import ast
+
         self.assertIn("async def market_data_request", MAIN_TEXT)
         self.assertIn("for attempt in range(3)", MAIN_TEXT)
         self.assertIn("{500, 502, 503, 504}", MAIN_TEXT)
         self.assertIn("0.5 * (2 ** attempt)", MAIN_TEXT)
-        self.assertIn("market_data_request(app, \"/fapi/v1/ticker/24hr\")", MAIN_TEXT)
-        self.assertIn("market_data_request(\n            app,\n            \"/fapi/v1/klines\"", MAIN_TEXT)
+        self.assertIn('response = await market_data_request(app, path)', MAIN_TEXT)
+        self.assertIn('request_market_data("/fapi/v1/ticker/24hr", "ticker")', MAIN_TEXT)
+        klines = [
+            node for node in ast.walk(ast.parse(MAIN_TEXT))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "market_data_request" and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant) and node.args[1].value == "/fapi/v1/klines"
+        ]
+        self.assertTrue(klines)
+        for call in klines:
+            self.assertIsInstance(call.args[0], ast.Name)
+            self.assertEqual(call.args[0].id, "app")
+            self.assertIn("params", {keyword.arg for keyword in call.keywords})
 
     def test_http_client_is_rebound_when_stale_loop_is_detected(self):
         from app.main import ensure_http_client

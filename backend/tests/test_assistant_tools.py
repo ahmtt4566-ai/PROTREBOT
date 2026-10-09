@@ -113,7 +113,8 @@ class AssistantToolsTestCase(unittest.IsolatedAsyncioTestCase):
                                "entry_price": 987654.321, "stop_loss": 123456.789}],
                 "open_algo_orders_available": True,
                 "open_algo_orders": [{"symbol": "BTCUSDT", "side": "SELL", "type": "STOP_MARKET", "status": "NEW",
-                                      "algo_id": "stop-a", "trigger_price": 123456.789}],
+                                      "algo_id": "stop-a", "trigger_price": 123456.789,
+                                      "close_position": True, "working_type": "MARK_PRICE"}],
             },
             "plans": {"plan-a": {"symbol": "BTCUSDT", "direction": "LONG", "status": "KORUMA AKTİF",
                                  "stop_algo_id": "stop-a", "protection_state": "MATCHED",
@@ -328,7 +329,7 @@ class AssistantToolsTests(AssistantToolsTestCase):
         self.assertIn("41 saniye", result["data"]["message"])
 
     async def test_protection_unknown_errors_and_unrelated_stop_never_claim_verified(self):
-        for change in ("missing_time", "error", "reconciliation", "unavailable", "unrelated", "confidence", "future", "ambiguous", "invalid_orders"):
+        for change in ("missing_time", "error", "reconciliation", "unavailable", "unrelated", "confidence", "future", "ambiguous", "invalid_orders", "partial_stop", "wrong_working_type"):
             state = self.account()
             if change == "missing_time":
                 state["connection"]["last_checked"] = None
@@ -346,6 +347,10 @@ class AssistantToolsTests(AssistantToolsTestCase):
                 state["connection"]["last_checked"] = datetime.fromtimestamp(self.now + 1, timezone.utc).isoformat()
             elif change == "invalid_orders":
                 state["snapshot"]["open_algo_orders"] = None
+            elif change == "partial_stop":
+                state["snapshot"]["open_algo_orders"][0]["close_position"] = False
+            elif change == "wrong_working_type":
+                state["snapshot"]["open_algo_orders"][0]["working_type"] = "CONTRACT_PRICE"
             else:
                 state["snapshot"]["positions"].append(dict(state["snapshot"]["positions"][0]))
             result = (await self.tool("get_protection_status", symbol="BTCUSDT")).json()

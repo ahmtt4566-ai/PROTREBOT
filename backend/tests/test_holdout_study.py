@@ -252,6 +252,10 @@ class BootstrapTests(unittest.TestCase):
 
 class NativeCohortTests(unittest.TestCase):
     def test_spawn_cache_pipeline_matches_native_and_has_no_fallback(self):
+        from guarded_process import run_isolated_if_needed
+
+        if run_isolated_if_needed(self):
+            return
         original = dataset()
         data = HoldoutDataset(original.frames, original.marks, original.funding, original.metadata,
                               original.report, original.funding_months)

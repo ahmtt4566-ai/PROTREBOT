@@ -177,9 +177,18 @@ class SubscriptionCoreTests(unittest.TestCase):
     def test_owner_execution_bypass_is_explicit_and_preserved(self):
         secret = b"offline-owner-subscription-signing-key"
         user = {"id": "owner", "role": "OWNER", "active": True, "email_verified": True, "auth_version": 1}
-        pool = SimpleNamespace(fetchrow=AsyncMock(return_value={
+        canonical = AsyncMock(return_value={
             "auth_version": 1, "security": {"active": True, "role": "OWNER", "email_verified": True},
-        }))
+        })
+
+        async def fetchrow(query, user_id):
+            self.assertEqual(user_id, "owner")
+            if "SELECT payload FROM commercial_account_settings" in query:
+                return None
+            self.assertIn("SELECT auth_version, security FROM commercial_auth_users", query)
+            return await canonical(query, user_id)
+
+        pool = SimpleNamespace(fetchrow=fetchrow)
         request = SimpleNamespace(
             app=SimpleNamespace(state=SimpleNamespace(
                 v25_execution=v25_execution.initial_state(), db_pool=pool,
@@ -190,7 +199,7 @@ class SubscriptionCoreTests(unittest.TestCase):
         )
         request.state.member = asyncio.run(v22_commercial.authenticated_user_async(request))
         self.assertEqual(v25_execution.execution_owner(request)["role"], "OWNER")
-        pool.fetchrow.assert_awaited_once()
+        canonical.assert_awaited_once()
 
     def test_every_v25_route_requires_execution_owner(self):
         with open(v25_execution.__file__, encoding="utf-8") as source_file:

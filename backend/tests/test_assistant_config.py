@@ -219,6 +219,10 @@ class AssistantConfigTests(unittest.TestCase):
                 self.assertRegex(example, r"(?m)^ANTHROPIC_API_KEY=\s*$")
                 values = dict(re.findall(r"(?m)^(ASSISTANT_[A-Z_]+)=([^\r\n]*)", example))
                 self.assertEqual(set(values), expected_names)
+                if filename == ".env.example":
+                    self.assertIn("leave unused optional settings unset, not empty", example)
+                    self.assertTrue(all(value == "" for value in values.values()))
+                    values = {}
                 with patch.dict(os.environ, values):
                     config = load_assistant_config()
                     self.assertEqual(config.model_dump(), defaults)

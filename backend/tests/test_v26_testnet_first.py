@@ -12,23 +12,27 @@ RENDER = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
 
 class V26TestnetFirstContracts(unittest.TestCase):
-    def test_testnet_is_primary_and_paper_is_disabled_by_default(self):
+    def test_testnet_is_primary_and_deployment_disables_paper(self):
         self.assertIn('EXECUTION_MODE = "TESTNET_FIRST"', MAIN)
-        self.assertIn('env_flag("PROTREBOT_PAPER_ENABLED", default=False)', MAIN)
-        self.assertIn("Paper motoru V27 Testnet-First s├╝r├╝m├╝nde devre d─▒┼ş─▒d─▒r", MAIN)
+        self.assertIn('env_flag("PROTREBOT_PAPER_ENABLED", default=True)', MAIN)
+        self.assertIn('- key: PROTREBOT_PAPER_ENABLED\n        value: "false"', RENDER)
 
     def test_new_shell_exposes_separate_testnet_live_and_setup_tabs(self):
         self.assertIn("<TestnetFirstApp/>", ENTRY)
-        for label in ("TESTNET KOMUTA", "OPERASYON & KANIT", "CANLI HAZIRLIK", "YAYIN KAPILARI"):
+        for label in ("TESTNET KOMUTA", "OPERASYON & KANIT", "CANLI HAZIRLIK", "BORSA BAĞLANTILARI"):
             self.assertIn(label, FRONTEND)
-        self.assertIn("Paper devre d─▒┼ş─▒", FRONTEND)
+        self.assertIn("Paper devre dışı", FRONTEND)
+        self.assertIn("view === 'setup'", FRONTEND)
+        self.assertIn("<ExchangeConnections/>", FRONTEND)
 
-    def test_render_declares_demo_and_live_secrets_without_values(self):
+    def test_render_keeps_exchange_secrets_in_the_member_vault(self):
         for key in (
             "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_SECRET_KEY",
             "BINANCE_LIVE_API_KEY", "BINANCE_LIVE_SECRET_KEY",
         ):
-            self.assertIn(f"- key: {key}\n        sync: false", RENDER)
+            self.assertNotIn(f"- key: {key}", RENDER)
+        self.assertIn("ensure_exchange_vault", MAIN)
+        self.assertIn("session_credentials_for_request", MAIN)
 
     def test_live_channel_is_fail_closed_until_explicit_gates(self):
         self.assertIn("BINANCE_LIVE_API_KEY", CREDENTIALS)

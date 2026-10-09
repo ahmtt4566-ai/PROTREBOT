@@ -2,6 +2,23 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Offline backend regression tests
+
+Native Windows spawn/asyncio tests run their unchanged assertions in a
+main-guarded child harness. This prevents an external pytest launcher from
+running the complete suite again when multiprocessing imports its entry point.
+The harness blocks external networking, DNS and protected research paths in
+both the test process and spawned workers. Only the standard library's internal
+loopback socketpair is permitted, including through existing offline wrappers.
+The full-suite runner, default temporary directory and application sources
+remain unchanged.
+
+The blank `.env.example` is a settings inventory, not a runnable environment:
+leave unused optional entries unset, as its header requires. `env.example` and
+the deployment manifest contain the assistant defaults. Empty/invalid explicit
+assistant settings still raise validation errors; blank placeholders are not
+passed to the settings parser by the template regression test.
+
 ## Kais Original v2 Demo controls
 
 Both `PROTREBOT_BINANCE_DEMO_KAIS_ORIGINAL_V2_ENABLED` and

@@ -108,9 +108,23 @@ class MultiSymbolDemoAutoTests(unittest.TestCase):
         self.assertEqual(DEMO_REST_BASE, "https://demo-fapi.binance.com")
 
     def test_testnet_client_used_for_all_symbols(self):
+        import ast
+
         source = (BACKEND / "app" / "v21_demo.py").read_text(encoding="utf-8")
         self.assertIn("market_client_for(application)", source)
-        self.assertIn("execute_demo_order(application, body, source=\"AUTO_SCANNER\", request=request)", source)
+        calls = [
+            node for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "execute_demo_order"
+            and any(keyword.arg == "source" and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value == "AUTO_SCANNER" for keyword in node.keywords)
+        ]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([argument.id for argument in calls[0].args], ["application", "body"])
+        keywords = {keyword.arg: keyword.value for keyword in calls[0].keywords}
+        for key, name in (("request", "request"), ("demo_state", "demo_state"), ("v21_state", "state")):
+            self.assertIsInstance(keywords[key], ast.Name)
+            self.assertEqual(keywords[key].id, name)
         self.assertIn("DEMO_REST_BASE", source)
 
 

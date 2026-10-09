@@ -284,6 +284,10 @@ class BootstrapAndPeriodTests(unittest.TestCase):
 
 class DiagnosticCliTests(unittest.TestCase):
     def test_real_native_decisions_are_identical_serial_and_spawn_workers(self):
+        from guarded_process import run_isolated_if_needed
+
+        if run_isolated_if_needed(self):
+            return
         first = dataset(("BTCUSDT", "ETHUSDT"))
         second = dataset(("BTCUSDT", "ETHUSDT"))
         precompute(first, config(), 1)

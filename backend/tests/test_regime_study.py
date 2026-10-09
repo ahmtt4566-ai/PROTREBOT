@@ -37,6 +37,11 @@ def row(identifier, value, day=0, direction="LONG"):
 
 class OfflineNetworkTests(unittest.TestCase):
     def test_native_asyncio_loop_works_but_external_network_stays_blocked(self):
+        from guarded_process import run_isolated_if_needed
+
+        if run_isolated_if_needed(self):
+            return
+
         async def replay():
             await asyncio.sleep(0)
             return "completed"

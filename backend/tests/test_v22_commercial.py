@@ -3,12 +3,14 @@ import base64
 import copy
 import email
 import logging
+import json
 import os
 import sys
+import tempfile
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from types import FunctionType, SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from contextlib import asynccontextmanager
@@ -139,8 +141,11 @@ class V22CommercialTests(unittest.TestCase):
 
         self.assertTrue(access_snapshot(state, owner)["isAdmin"])
         self.assertTrue(access_snapshot(state, owner)["canAccessMasterTrade"])
-        self.assertFalse(access_snapshot(state, pro_user)["canAccessMasterTrade"])
-        self.assertFalse(access_snapshot(state, free_user)["canAccessMasterTrade"])
+        for user in (pro_user, free_user):
+            access = access_snapshot(state, user)
+            self.assertTrue(access["canAccessMasterTrade"])
+            self.assertFalse(access["isPremium"])
+            self.assertFalse(access["canExecuteMasterTrade"])
 
     def test_bootstrap_promotes_existing_admin_without_changing_password(self):
         original_password = hash_password("ExistingStrong!123")
@@ -415,19 +420,36 @@ class V22CommercialTests(unittest.TestCase):
             self.assertEqual(cancel_ctx.exception.status_code, 404)
 
     def test_demo_state_persists_by_user_and_restores_after_restart(self):
-        app = SimpleNamespace(state=SimpleNamespace())
+        from app import binance_demo
+
         user_a = {"id": "user-a", "role": "CUSTOMER", "active": True, "email_verified": True, "auth_version": 1}
-        request_a = SimpleNamespace(app=app, state=SimpleNamespace(member=user_a))
-
-        state = demo_state_for(request_a)
-        state.setdefault("plans", {})["plan-a"] = {"id": "plan-a", "symbol": "BTCUSDT", "status": "OPEN", "position_status": "OPEN", "position_id": "pos-a"}
-        state["_user_id"] = "user-a"
-
-        from app.binance_demo import persist_runtime, load_runtime
-        persist_runtime(state)
-        reloaded = load_runtime("user-a")
-        self.assertIn("plan-a", reloaded)
-        self.assertEqual(reloaded["plan-a"]["symbol"], "BTCUSDT")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "demo-state.json"
+            path.write_text(json.dumps({"users": {
+                "user-a": {"plans": {}, "events": []},
+                "user-b": {"plans": {}, "events": []},
+            }}), encoding="utf-8")
+            namespace = {**vars(binance_demo), "STATE_PATH": path}
+            for name in ("_load_file_demo_state", "load_runtime", "state_for", "persist_runtime"):
+                original = getattr(binance_demo, name)
+                function = FunctionType(original.__code__, namespace, name, original.__defaults__, original.__closure__)
+                function.__kwdefaults__ = original.__kwdefaults__
+                namespace[name] = function
+            app = SimpleNamespace(state=SimpleNamespace())
+            request_a = SimpleNamespace(app=app, state=SimpleNamespace(member=user_a))
+            state = namespace["state_for"](request_a)
+            self.assertEqual(state["_restore_status"], "restored")
+            state["plans"]["plan-a"] = {"id": "plan-a", "symbol": "BTCUSDT", "status": "OPEN", "position_status": "OPEN", "position_id": "pos-a"}
+            namespace["persist_runtime"](state)
+            reloaded = namespace["load_runtime"]("user-a")
+            self.assertIn("plan-a", reloaded["plans"])
+            self.assertEqual(reloaded["plans"]["plan-a"]["symbol"], "BTCUSDT")
+            self.assertNotIn("plan-a", namespace["load_runtime"]("user-b")["plans"])
+            restarted = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), state=SimpleNamespace(member=user_a))
+            restored = namespace["state_for"](restarted)
+            self.assertEqual(restored["_restore_status"], "restored")
+            self.assertEqual(restored["_user_id"], "user-a")
+            self.assertIn("plan-a", restored["plans"])
 
     def test_exchange_save_contract_accepts_testnet_and_rejects_demo_or_wrong_confirmation(self):
         valid = SaveCredentialsRequest(mode="TESTNET", api_key="abcdefghijklmnopqrstuvwxyz", secret_key="1234567890abcdef", confirmation="TESTNET KASAYA KAYDET")

@@ -116,6 +116,10 @@ class DataAndModelTests(unittest.TestCase):
             self.assertFalse(values[3]["result"]["native_signal_calculated"])
 
     def test_spawn_pipeline_preserves_gap_placeholders_no_native_fallback(self):
+        from guarded_process import run_isolated_if_needed
+
+        if run_isolated_if_needed(self):
+            return
         native, _, extension = fixture()
         adapted = GapDataset(native, extension["gap_rule"])
         cfg = replace(config(), end=T + 3600)

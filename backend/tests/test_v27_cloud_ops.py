@@ -65,11 +65,11 @@ class V27CloudOperationsTests(unittest.TestCase):
         self.assertIsNone(json_safe(float("inf")))
 
     def test_v27_contract_is_wired(self):
-        self.assertIn('version="27.0.0"', MAIN)
+        self.assertIn('version="28.0.0"', MAIN)
         self.assertIn("init_v27_cloud(app)", MAIN)
         self.assertIn("app.include_router(v27_cloud_router)", MAIN)
         self.assertIn("OPERASYON & KANIT", SHELL)
-        self.assertIn("KANITI ┼Ş─░MD─░ KAYDET", FRONTEND)
+        self.assertIn("KANITI ŞİMDİ KAYDET", FRONTEND)
         self.assertIn("PROTREBOT_DEPLOYMENT_TIER", RENDER)
 
 
