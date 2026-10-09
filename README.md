@@ -2,6 +2,55 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Authentication security
+
+- Password login keeps the existing request limiter and adds durable failure-only
+  limits: five failures per normalized email and twenty per client IP in fifteen
+  minutes. Locks increase from fifteen to thirty to sixty minutes; escalation
+  resets after twenty-four hours without failures. Unknown emails use the same
+  counters and generic error as inactive accounts and wrong passwords. Forwarded
+  IP headers are not trusted directly by the application.
+- All TOTP and recovery-code verification uses one account-wide limit: ten wrong
+  codes in an hour locks verification for one hour, including new login
+  challenges. The five-attempt challenge limit, single-use recovery codes and
+  TOTP replay checks remain in place. Required durable-store outages fail closed.
+- Registration, password reset and password change share
+  `backend/app/password_policy.json` through Python/browser helpers: 10–256 Unicode
+  code points, ASCII uppercase/lowercase/digits and the existing registration
+  non-alphanumeric symbol rule. Login and existing-password hash migration do
+  not require adopting the new-password policy.
+- Duplicate registration sends an existing-account notice without creating
+  another account. Public replies have the same status, message and envelope,
+  the same password-hashing cost and mail delivery path, and a common two-second
+  minimum response time.
+  Duplicate verification-status proofs are unlinked to the existing account;
+  real proofs read canonical security. Browser polling is every four seconds
+  with no overlapping status requests; the resend countdown stays sixty seconds.
+- Password change and 2FA enable/disable revoke only the same account's other
+  sessions. The current session receives a renewed token with the same session
+  ID and original expiry, and a new auth version. Browser renewal uses HttpOnly
+  cookies; native clients must use the replacement `token` returned by the API.
+  Password reset deliberately revokes **all** sessions of the target account.
+  Other users' sessions are never revoked by these operations.
+- Existing unverified-email behavior is unchanged: correct credentials can
+  issue a verification-gated session, but ordinary protected API access is 403.
+  Verification resend and the existing OWNER exception remain unchanged.
+- `PROTREBOT_EXPOSE_DEV_TOKENS` defaults off. Startup rejects enabling it unless
+  `PROTREBOT_ENVIRONMENT` is explicitly `development` or `test`, with no production
+  or hosted deployment signal. Production indicators override that local mode;
+  request-time checks also prevent exposing codes after configuration changes.
+  Set `PROTREBOT_ENVIRONMENT=production` in production; never enable dev tokens
+  on Render, Vercel or Heroku.
+
+Offline regressions: `backend/tests/test_auth_security_requirements.py`,
+the existing account/commercial auth suites, and
+`node --test tools/password-policy.test.mjs tools/browser-session.test.mjs tools/browser-request.test.mjs`.
+Browser auth checks use the shipping preview (4176), not Vite's auth-bypassing
+test-mode workspace: `frontend/tests/email-verification.spec.ts`,
+`frontend/tests/account-settings.spec.ts` and
+`frontend/tests/auth-request-lifecycle.spec.ts`, with mocked APIs and external
+network/WebSockets blocked.
+
 ## Browser entry and session recovery
 
 Owner verification, authentication and Master Trade access reads have a

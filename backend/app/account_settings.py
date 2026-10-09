@@ -23,6 +23,8 @@ from . import account_store as store
 from . import v22_commercial as auth
 from .commercial_core import hash_password, issue_token, normalize_email, verify_password, verify_token
 from .subscription_core import entitlement_snapshot
+from .auth_failures import MFA_ACCOUNT, decode_state, enforce_failure_wait, new_state, record_failure
+from .password_policy import validate_new_password
 
 router = APIRouter(prefix="/api/v22", tags=["Account settings"])
 DEFAULT_PREFERENCES = {"trading_mode": "MANUAL", "timeframe": "15m", "exchange": "BINANCE",
@@ -133,7 +135,10 @@ async def member(request, *, owner=False):
 
 
 def token_payload(request):
-    return verify_token(auth.bearer(request), auth.runtime(request)["secret"], expected_kind="USER")
+    try:
+        return verify_token(auth.bearer(request), auth.runtime(request)["secret"], expected_kind="USER")
+    except ValueError as exc:
+        raise HTTPException(401, "Oturum geçersiz veya süresi dolmuş") from exc
 
 
 def session_row(request, payload):
@@ -189,7 +194,7 @@ async def require_totp(request, user, code):
     await auth.enforce_auth_limit(request, "mfa", user["id"])
     valid = False
     async with store.edit(request, user["id"]) as doc:
-        valid = check_totp(request, doc, code)
+        valid = check_limited_totp(request, doc, code)
     if not valid:
         raise HTTPException(401, "İki aşamalı doğrulama kodu geçersiz")
 
@@ -220,6 +225,24 @@ def check_totp(request, doc, code, *, pending=False):
             doc["last_totp_step"] = candidate
             return True
     return False
+
+
+def mfa_failure_state(doc):
+    try:
+        return decode_state(doc.get("mfa_failures", new_state()))
+    except (ValueError, TypeError) as exc:
+        auth.logger.error("Account MFA failure ledger is invalid")
+        raise HTTPException(503, "İki aşamalı doğrulama sınırı deposu kullanılamıyor") from exc
+
+
+def check_limited_totp(request, doc, code, *, pending=False):
+    state = mfa_failure_state(doc)
+    enforce_failure_wait(state, time.time())
+    valid = check_totp(request, doc, code, pending=pending)
+    if not valid:
+        record_failure(state, MFA_ACCOUNT, time.time())
+        doc["mfa_failures"] = state
+    return valid
 
 
 async def proof(request, user, payload: Proof):
@@ -274,13 +297,47 @@ async def delivery(request, user, *, email=None, title, action_url, label, expir
         raise HTTPException(503, "E-posta gönderilemedi") from None
 
 
-async def rotate(request, user, doc, updates=None):
+async def rotate(request, user, doc, updates=None, *, preserve_current=False):
+    payload = token_payload(request) if preserve_current else None
+    if payload and payload["sub"] != user["id"]:
+        raise HTTPException(401, "Oturum sahibi eşleşmiyor")
     expected = int(user.get("auth_version", 1))
+    if payload and int(payload.get("ver", 1)) != expected:
+        raise HTTPException(401, "Oturum iptal edildi")
     await auth.invalidate_user_sessions(request, user, security_updates=updates or {}, expected_version=expected)
     if getattr(request.app.state, "db_pool", None) is None:
         doc["auth_overlay"] = {"auth_version": user["auth_version"], **auth.auth_security(user)}
     for row in doc.get("sessions", {}).values():
         row["revoked"] = True
+    if payload:
+        token = issue_token(
+            user["id"], user["role"], auth.runtime(request)["secret"],
+            token_version=int(user["auth_version"]), session_id=payload["jti"],
+            now=int(payload["iat"]), ttl_seconds=int(payload["exp"]) - int(payload["iat"]),
+        )
+        row = doc.setdefault("sessions", {}).setdefault(payload["jti"], session_row(request, payload))
+        row.update(revoked=False, auth_version=user["auth_version"], last_seen_at=iso())
+        doc.pop("sessions_valid_after", None)
+        doc.pop("preserved_session", None)
+        return token
+    return None
+
+
+def refreshed_session_response(request, response, user, token):
+    if not token:
+        raise HTTPException(503, "Mevcut oturum yenilenemedi")
+    try:
+        payload = verify_token(token, auth.runtime(request)["secret"], expected_kind="USER")
+    except ValueError as exc:
+        raise HTTPException(401, "Oturum süresi doldu; yeniden giriş yapın") from exc
+    cookie = request.cookies.get(auth.SESSION_COOKIE_NAME)
+    if cookie and cookie != auth.bearer(request):
+        return token
+    return auth.browser_session_response_token(
+        token, user, request, response,
+        browser_session=bool(request.cookies.get(auth.SESSION_COOKIE_NAME)),
+        remember=int(payload["exp"]) - int(payload["iat"]) > auth.STANDARD_SESSION_SECONDS,
+    )
 
 
 async def persist_projection(request):
@@ -548,13 +605,14 @@ async def password_change(payload: PasswordChange, request: Request, response: R
     user = await member(request)
     if payload.new_password != payload.confirm_password:
         raise HTTPException(422, "Parolalar eşleşmiyor")
+    validate_new_password(payload.new_password)
     await proof(request, user, payload)
     async with store.edit(request, user["id"]) as doc:
-        await rotate(request, user, doc, {"password": hash_password(payload.new_password), "password_changed_at": iso()})
-        activity(doc, "PASSWORD_CHANGED", "Parola güncellendi; oturumlar kapatıldı")
+        token = await rotate(request, user, doc, {"password": hash_password(payload.new_password), "password_changed_at": iso()}, preserve_current=True)
+        activity(doc, "PASSWORD_CHANGED", "Parola güncellendi; diğer oturumlar kapatıldı")
     await persist_projection(request)
-    auth.clear_rotated_session_cookie(request, response, user["id"])
-    return {"ok": True, "reauthenticate": True}
+    marker = refreshed_session_response(request, response, user, token)
+    return {"ok": True, "reauthenticate": False, "token": marker}
 
 
 @router.post("/account/2fa/setup")
@@ -581,20 +639,20 @@ async def enable_totp(payload: Code, request: Request, response: Response):
     async with store.edit(request, user["id"]) as doc:
         if doc.get("two_factor_enabled"):
             raise HTTPException(409, "İki aşamalı doğrulama zaten etkin")
-        valid = doc.get("pending_totp_version") == int(user.get("auth_version", 1)) and check_totp(request, doc, payload.code, pending=True)
+        valid = doc.get("pending_totp_version") == int(user.get("auth_version", 1)) and check_limited_totp(request, doc, payload.code, pending=True)
         if valid:
             doc["totp_seed"] = doc.pop("pending_totp")
             doc.pop("pending_totp_expires", None)
             doc["two_factor_enabled"] = True
             codes = [secrets.token_hex(8).upper() for _ in range(10)]
             doc["recovery_hashes"] = [digest(code) for code in codes]
-            await rotate(request, user, doc)
+            token = await rotate(request, user, doc, preserve_current=True)
             activity(doc, "TWO_FACTOR_ENABLED", "İki aşamalı doğrulama etkinleştirildi")
     if not valid:
         raise HTTPException(401, "İki aşamalı doğrulama kodu geçersiz veya süresi dolmuş")
     await persist_projection(request)
-    auth.clear_rotated_session_cookie(request, response, user["id"])
-    return {"recovery_codes": codes, "reauthenticate": True}
+    marker = refreshed_session_response(request, response, user, token)
+    return {"recovery_codes": codes, "reauthenticate": False, "token": marker}
 
 
 @router.post("/account/2fa/disable")
@@ -606,16 +664,19 @@ async def disable_totp(payload: Proof, request: Request, response: Response):
         doc["recovery_hashes"] = []
         for key in ("totp_seed", "pending_totp", "pending_totp_expires"):
             doc.pop(key, None)
-        await rotate(request, user, doc)
+        token = await rotate(request, user, doc, preserve_current=True)
         activity(doc, "TWO_FACTOR_DISABLED", "İki aşamalı doğrulama kapatıldı")
     await persist_projection(request)
-    auth.clear_rotated_session_cookie(request, response, user["id"])
-    return {"ok": True}
+    marker = refreshed_session_response(request, response, user, token)
+    return {"ok": True, "reauthenticate": False, "token": marker}
 
 
 async def login_challenge(request, user, *, remember=False, browser_session=False, google=False):
+    doc = await store.read(request, user["id"])
+    enforce_failure_wait(mfa_failure_state(doc or {}), time.time())
     await auth.enforce_auth_limit(request, "mfa", user["id"])
     async with store.edit(request, user["id"]) as doc:
+        enforce_failure_wait(mfa_failure_state(doc), time.time())
         challenge, _ = new_challenge(doc, user, "login", seconds=300, remember=remember,
                                     browser_session=browser_session, google=google)
     return {"mfa_required": True, "challenge_id": challenge}
@@ -665,7 +726,7 @@ async def mfa_login(payload: LoginCode, request: Request, response: Response):
         row = doc.get("challenges", {}).get(digest(payload.challenge_id))
         if challenge_valid(row, user, "login") and doc.get("two_factor_enabled") and row.get("attempts", 0) < 5:
             row["attempts"] = row.get("attempts", 0) + 1
-            valid = check_totp(request, doc, payload.code)
+            valid = check_limited_totp(request, doc, payload.code)
             if valid:
                 row["used"] = True
                 remember, browser, google = row["remember"], row["browser_session"], row["google"]

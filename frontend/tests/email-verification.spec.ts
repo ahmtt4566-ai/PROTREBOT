@@ -42,6 +42,54 @@ async function register(page: Page) {
   await page.getByRole('button', {name: 'HESAP OLUŞTUR', exact: true}).click()
 }
 
+test('Verification polling waits four seconds and never overlaps requests', async ({page}) => {
+  await prepare(page)
+  let calls = 0
+  let release: (() => void) | undefined
+  await page.route('**/api/v22/auth/verification-status?**', async route => {
+    calls++
+    if (calls === 1) await new Promise<void>(resolve => {release = resolve})
+    await route.fulfill({json: {verified: false}})
+  })
+  await page.clock.install()
+  await register(page)
+  await expect.poll(() => calls).toBe(1)
+  await page.clock.runFor(8000)
+  expect(calls).toBe(1)
+  release?.()
+  await expect(page.getByRole('heading', {name: 'E-postanızı kontrol edin'})).toBeVisible()
+  await page.clock.runFor(3999)
+  expect(calls).toBe(1)
+  await page.clock.runFor(1)
+  await expect.poll(() => calls).toBe(2)
+})
+
+test('Password reset uses the common policy and sends nothing for weak or mismatched passwords', async ({page}) => {
+  await prepare(page)
+  const resets: unknown[] = []
+  await page.route('**/api/v22/auth/reset-password', route => {
+    resets.push(route.request().postDataJSON())
+    return route.fulfill({json: {ok: true}})
+  })
+  await page.goto(`${root}/reset-password?token=offline-reset-policy-proof`)
+  await expect(page.getByRole('heading', {name: 'Yeni parola belirleyin'})).toBeVisible()
+  const inputs = page.locator('input[autocomplete="new-password"]')
+  await inputs.nth(0).fill('abcdefghijk')
+  await inputs.nth(1).fill('abcdefghijk')
+  await page.getByRole('button', {name: 'PAROLAYI GÜNCELLE'}).click()
+  await expect(page.getByRole('alert')).toContainText('Büyük harf, Rakam, Sembol')
+  expect(resets).toEqual([])
+  await inputs.nth(0).fill('Offline-Password1!')
+  await inputs.nth(1).fill('Offline-Password2!')
+  await page.getByRole('button', {name: 'PAROLAYI GÜNCELLE'}).click()
+  await expect(page.getByRole('alert')).toContainText('Şifreler eşleşmiyor.')
+  expect(resets).toEqual([])
+  await inputs.nth(1).fill('Offline-Password1!')
+  await page.getByRole('button', {name: 'PAROLAYI GÜNCELLE'}).click()
+  await expect(page.getByRole('button', {name: 'GÜVENLİ GİRİŞ'})).toBeVisible()
+  expect(resets).toEqual([{token: 'offline-reset-policy-proof', password: 'Offline-Password1!', confirm_password: 'Offline-Password1!'}])
+})
+
 test('Registration preserves consent and signed-status resend waits 60 seconds', async ({page}) => {
   const {registrations, resends} = await prepare(page)
   await page.clock.install()

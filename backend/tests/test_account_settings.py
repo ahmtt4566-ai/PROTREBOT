@@ -101,7 +101,11 @@ def enroll(setup, client, h):
     secret = response.json()["secret"]
     response = client.post("/api/v22/account/2fa/enable", headers=h, json={"code": pyotp.TOTP(secret).now()})
     assert response.status_code == 200
-    assert response.json()["reauthenticate"] is True
+    assert response.json()["reauthenticate"] is False
+    renewed = verify_token(response.json()["token"], SECRET)
+    original = verify_token(h["Authorization"].removeprefix("Bearer "), SECRET)
+    assert renewed["jti"] == original["jti"]
+    assert renewed["ver"] == original["ver"] + 1
     return secret, response.json()["recovery_codes"]
 
 
@@ -232,7 +236,8 @@ def test_google_only_verified_email_otp_password_establishment_and_failures(setu
     data["email_code"] = code
     assert client.post("/api/v22/account/password", headers=headers("other"), json=data).status_code == 401
     response = client.post("/api/v22/account/password", headers=h, json=data)
-    assert response.status_code == 200 and response.json()["reauthenticate"]
+    assert response.status_code == 200 and response.json()["reauthenticate"] is False
+    assert setup.runtime().get("/api/v22/account/overview", headers={"Authorization": "Bearer " + response.json()["token"]}).status_code == 200
     assert setup.runtime().get("/api/v22/account/overview", headers=h).status_code == 401
     new_headers = headers(version=2)
     assert setup.runtime().post("/api/v22/account/password", headers=new_headers, json=data).status_code == 401
@@ -572,7 +577,8 @@ def test_owner_email_password_changes_preserve_id_authority_without_email_privil
     assert fresh.get("/api/v22/admin/accounts", headers=authenticated).status_code == 200
     changed = fresh.post("/api/v22/account/password", headers=authenticated,
                          json={"current_password": PASSWORD, "new_password": PASSWORD+"x", "confirm_password": PASSWORD+"x"})
-    assert changed.status_code == 200 and changed.json()["reauthenticate"]
+    assert changed.status_code == 200 and changed.json()["reauthenticate"] is False
+    assert fresh.get("/api/v22/admin/accounts", headers={"Authorization": "Bearer " + changed.json()["token"]}).status_code == 200
     assert fresh.get("/api/v22/admin/accounts", headers=authenticated).status_code == 401
     newest = setup.runtime()
     login = newest.post("/api/v22/auth/login", json={"email": "renamed-owner@example.test", "password": PASSWORD+"x"})

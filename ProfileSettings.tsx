@@ -3,6 +3,7 @@ import {Activity, ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown, Copy,
 import {QRCodeSVG} from 'qrcode.react'
 import {accountDate, accountInitials, accountRequest, TRADING_TIMEFRAMES, type AccountMutation, type AccountOverview, type SensitiveProof, type TradingPreferences} from './account-settings-api'
 import './profile-settings.css'
+import {PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordPolicyError, passwordRules} from './password-policy'
 
 type DialogKind = 'profile' | 'email' | 'password' | 'two-factor' | 'sessions' | 'activity' | 'close'
 type Notice = {kind: 'success' | 'error'; text: string}
@@ -90,8 +91,11 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
       if (dialog === 'profile') {await mutate('/account/profile', {display_name: name}, 'Profil kaydedildi.', 'PATCH'); closeDialog()}
       else if (dialog === 'email') {await mutate('/account/email/request', {new_email: newEmail, ...proof}, 'Yeni adres için doğrulama e-postası gönderildi. Mevcut adresiniz henüz değişmedi.'); closeDialog()}
       else if (dialog === 'password') {
+        const error = passwordPolicyError(newPassword)
+        if (error) throw new Error(error)
         if (newPassword !== confirmPassword) throw new Error('Yeni parolalar eşleşmiyor.')
-        await mutate('/account/password', {...proof, new_password: newPassword, confirm_password: confirmPassword}, 'Parola güncellendi.')
+        await mutate('/account/password', {...proof, new_password: newPassword, confirm_password: confirmPassword}, 'Parola güncellendi; diğer cihazlardaki oturumlar kapatıldı.')
+        closeDialog()
       } else if (dialog === 'close') {
         await mutate('/account/close', {...proof, confirmation}, 'Hesap kapatıldı.')
       } else if (dialog === 'two-factor') {
@@ -178,7 +182,7 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
         : <form onSubmit={submit} className="accountForm">
           {dialog === 'profile' && <label>Ad soyad<input autoComplete="name" minLength={2} maxLength={80} required value={name} onChange={event => setName(event.target.value)}/></label>}
           {dialog === 'email' && <label>Yeni e-posta<input type="email" autoComplete="email" required maxLength={180} value={newEmail} onChange={event => setNewEmail(event.target.value)}/></label>}
-          {dialog === 'password' && <><label>Yeni parola<input data-private="true" type="password" autoComplete="new-password" minLength={10} maxLength={256} required value={newPassword} onChange={event => setNewPassword(event.target.value)}/></label><label>Yeni parola tekrar<input data-private="true" type="password" autoComplete="new-password" minLength={10} maxLength={256} required value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)}/></label><p>Parola değişikliğinden sonra eski oturumlar kapanır ve yeniden giriş gerekir.</p><a href="/forgot-password">Parolamı unuttum</a></>}
+          {dialog === 'password' && <><label>Yeni parola<input data-private="true" aria-label="Yeni parola" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} required value={newPassword} onChange={event => setNewPassword(event.target.value)}/><div className="passwordRules">{passwordRules(newPassword).map(([label,passed]) => <span className={passed ? 'passed' : 'missing'} key={label}>{passed ? '✓' : '•'} {label}</span>)}</div></label><label>Yeni parola tekrar<input data-private="true" type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} required value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)}/></label><p>Bu cihazdaki oturumunuz korunur; yalnızca hesabınızın diğer cihazlardaki oturumları kapanır.</p><a href="/forgot-password">Parolamı unuttum</a></>}
           {dialog === 'close' && <><p>Hesabınız kapatılacak; verileriniz yönetici panelinde kalacaktır.</p><label>Onay için HESABI KAPAT yazın<input required pattern="HESABI KAPAT" value={confirmation} onChange={event => setConfirmation(event.target.value)}/></label></>}
           {dialog === 'two-factor' && enrollment ? <div className="accountEnrollment" data-private="true"><QRCodeSVG value={enrollment.otpauth_uri} size={180}/><p>Authenticator uygulamanızla tarayın veya anahtarı girin:</p><code>{enrollment.secret}</code><label>Authenticator kodu<input data-private="true" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" required value={code} onChange={event => setCode(event.target.value)}/></label></div>
             : dialog !== 'profile' && proofFields()}

@@ -34,6 +34,7 @@ class Pool:
         self.identities = {}
         self.security = {}
         self.account_settings = {}
+        self.auth_failures = {}
         self.lock = asyncio.Lock()
         self.queries = []
         for user in state["users"]:
@@ -46,15 +47,18 @@ class Pool:
 
     @asynccontextmanager
     async def transaction(self):
-        backup = copy.deepcopy((self.snapshot, self.attempts, self.identities, self.security, self.account_settings))
+        backup = copy.deepcopy((self.snapshot, self.attempts, self.identities, self.security, self.account_settings, self.auth_failures))
         try:
             yield
         except BaseException:
-            self.snapshot, self.attempts, self.identities, self.security, self.account_settings = backup
+            self.snapshot, self.attempts, self.identities, self.security, self.account_settings, self.auth_failures = backup
             raise
 
     async def execute(self, query, *args):
         self.queries.append(query)
+        if "INSERT INTO commercial_auth_failures" in query:
+            self.auth_failures[args[0]] = json.loads(args[1])
+            return "OK"
         if "INSERT INTO commercial_account_settings" in query:
             self.account_settings[args[0]] = json.loads(args[1])
             return "OK"
@@ -81,6 +85,9 @@ class Pool:
 
     async def fetchrow(self, query, *args):
         self.queries.append(query)
+        if "commercial_auth_failures" in query:
+            row = self.auth_failures.get(args[0])
+            return {"payload": copy.deepcopy(row)} if row else None
         if "commercial_account_settings" in query:
             doc = self.account_settings.get(args[0])
             return {"payload": copy.deepcopy(doc)} if doc else None

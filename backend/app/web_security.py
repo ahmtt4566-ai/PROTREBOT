@@ -33,6 +33,21 @@ def env_flag(name: str, *, default: bool = False) -> bool:
     return value in {"1", "true", "yes", "on", "enabled"}
 
 
+def validate_auth_security_configuration(*, expose_dev_tokens: bool | None = None) -> None:
+    exposed = env_flag("PROTREBOT_EXPOSE_DEV_TOKENS") if expose_dev_tokens is None else expose_dev_tokens
+    if not exposed:
+        return
+    mode = os.getenv("PROTREBOT_ENVIRONMENT", "").strip().lower()
+    production = any(os.getenv(name, "").strip().lower() in {"production", "prod"} for name in (
+        "PROTREBOT_ENVIRONMENT", "ENVIRONMENT", "APP_ENV", "NODE_ENV", "VERCEL_ENV", "RAILWAY_ENVIRONMENT_NAME",
+    ))
+    hosted = env_flag("RENDER") or env_flag("VERCEL") or bool(os.getenv("DYNO"))
+    if production or hosted or mode not in {"development", "test"}:
+        raise RuntimeError(
+            "PROTREBOT_EXPOSE_DEV_TOKENS is forbidden outside explicit, unhosted development/test environments"
+        )
+
+
 def cors_origins(value: str | None, *, fallback: list[str] | None = None) -> list[str]:
     raw_value = str(value or "").strip()
     if raw_value.startswith("[") and raw_value.endswith("]"):

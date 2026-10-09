@@ -78,7 +78,7 @@ from .paper_autonomy import (
     dynamic_paper_allocation,
     rank_paper_candidates,
 )
-from .web_security import PUBLIC_PATHS, VERCEL_PREVIEW_ORIGIN_RE, bearer_token, cors_origins, env_flag, evaluate_access, is_allowed_cors_origin
+from .web_security import PUBLIC_PATHS, VERCEL_PREVIEW_ORIGIN_RE, bearer_token, cors_origins, env_flag, evaluate_access, is_allowed_cors_origin, validate_auth_security_configuration
 
 logger = logging.getLogger(__name__)
 
@@ -1069,6 +1069,7 @@ async def ensure_http_client(application: FastAPI) -> httpx.AsyncClient:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_auth_security_configuration()
     # Exchange signatures and API-key traffic must not silently inherit an
     # unrelated system proxy. This also avoids optional SOCKS dependencies
     # preventing the local API from starting.

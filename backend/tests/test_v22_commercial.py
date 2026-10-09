@@ -677,7 +677,7 @@ class V22CommercialTests(unittest.TestCase):
         application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool([user]), v22_commercial={"secret": secret, "state": {"users": [user]}}))
         request = offline_request(application)
         self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": False})
-        user["email_verified"] = True
+        application.state.db_pool.users[user["id"]]["security"]["email_verified"] = True
         self.assertEqual(asyncio.run(v22_verification_status(request, token)), {"verified": True})
 
     def test_durable_registration_requires_a_stable_session_secret(self):

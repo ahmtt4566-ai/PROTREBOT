@@ -55,6 +55,7 @@ class SharedStore:
         self.erased_hashes = set()
         self.account_settings = {}
         self.account_tokens = {}
+        self.auth_failures = {}
 
     @asynccontextmanager
     async def acquire(self):
@@ -62,11 +63,11 @@ class SharedStore:
 
     @asynccontextmanager
     async def transaction(self):
-        previous = copy.deepcopy((self.users, self.account_settings))
+        previous = copy.deepcopy((self.users, self.account_settings, self.auth_failures))
         try:
             yield
         except BaseException:
-            self.users, self.account_settings = previous
+            self.users, self.account_settings, self.auth_failures = previous
             raise
 
     def check(self, sql):
@@ -76,6 +77,9 @@ class SharedStore:
 
     async def execute(self, sql, *args):
         self.check(sql)
+        if "INSERT INTO commercial_auth_failures" in sql:
+            self.auth_failures[args[0]] = json.loads(args[1])
+            return
         if "INSERT INTO commercial_account_tokens" in sql:
             self.account_tokens[args[0]] = {"args": args, "used": False}
             return
@@ -89,6 +93,9 @@ class SharedStore:
 
     async def fetchrow(self, sql, *args):
         self.check(sql)
+        if "commercial_auth_failures" in sql:
+            row = self.auth_failures.get(args[0])
+            return {"payload": copy.deepcopy(row)} if row else None
         if "commercial_account_settings" in sql:
             doc = self.account_settings.get(args[0])
             return {"payload": copy.deepcopy(doc)} if doc else None
@@ -765,7 +772,7 @@ class SecurityAuthHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Secure", cookie)
         self.assertEqual(self.store.users["customer"]["auth_version"], 2)
 
-    async def test_password_change_is_durable_and_clears_browser_cookie(self):
+    async def test_password_change_is_durable_and_renews_current_browser_cookie(self):
         self.request.cookies[auth.SESSION_COOKIE_NAME] = auth.bearer(self.request)
         self.request.headers = {"x-protrebot-session": "cookie-session:customer"}
         await auth.authenticated_user_async(self.request)
@@ -773,11 +780,18 @@ class SecurityAuthHardeningTests(unittest.IsolatedAsyncioTestCase):
         result = await auth.v22_change_password(auth.PasswordChangeRequest(
             current_password=PASSWORD, new_password="ChangedStrongPassword456!",
         ), self.request, response)
-        self.assertTrue(result["reauthenticate"])
+        self.assertFalse(result["reauthenticate"])
         self.assertEqual(self.store.users["customer"]["auth_version"], 2)
         self.assertTrue(core.verify_password("ChangedStrongPassword456!", self.store.users["customer"]["security"]["password"]))
-        self.assertIn("Max-Age=0", response.headers["set-cookie"])
+        self.assertNotIn("Max-Age=0", response.headers["set-cookie"])
+        self.assertIn("HttpOnly", response.headers["set-cookie"])
+        original = core.verify_token(auth.bearer(self.request), SECRET)
+        renewed = response.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
+        updated = core.verify_token(renewed, SECRET)
+        self.assertEqual((updated["jti"], updated["iat"], updated["exp"]), (original["jti"], original["iat"], original["exp"]))
         await self.expect_status(401, auth.authenticated_user_async(self.request))
+        self.request.cookies[auth.SESSION_COOKIE_NAME] = renewed
+        self.assertEqual((await auth.authenticated_user_async(self.request))["id"], "customer")
 
     async def test_password_change_cannot_overwrite_concurrent_session_rotation(self):
         local_user = auth.runtime(self.request)["state"]["users"][0]

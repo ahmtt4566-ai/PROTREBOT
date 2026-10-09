@@ -28,6 +28,8 @@ from googleapiclient.errors import HttpError
 from pydantic import BaseModel, ConfigDict, Field
 from .error_monitoring import build_error_event, schedule_log_event
 from . import email_service
+from .auth_failures import login_failure_limits
+from .password_policy import validate_new_password
 from .email_service import auth_email_html, send_auth_email, VERIFY_SUBJECT, RESET_SUBJECT
 from .browser_security import (
     COOKIE_SESSION_PREFIX as BROWSER_SESSION_MARKER_PREFIX,
@@ -44,6 +46,7 @@ from .maintenance import get_maintenance_mode
 from .commercial_core import (
     FeeGuardInput,
     PASSWORD_ALGORITHM,
+    LEGACY_PASSWORD_ALGORITHM,
     V22_VERSION,
     calculate_fee_guard,
     calculate_grid_guard,
@@ -58,7 +61,7 @@ from .commercial_core import (
 )
 from .commerce_core import sanitize_business_settings
 from .local_storage import DATA_DIR, migrate_legacy_files
-from .web_security import MIN_ACCESS_TOKEN_LENGTH, bootstrap_access_allowed, env_flag
+from .web_security import MIN_ACCESS_TOKEN_LENGTH, bootstrap_access_allowed, env_flag, validate_auth_security_configuration
 from .subscription_core import (
     ACCESS_STATUSES,
     MASTER_MODE_PRICE,
@@ -95,6 +98,9 @@ AUTH_LIMITS = {
 AUTH_SECURITY_FIELDS = ("password", "active", "role", "email_verified", "email", "display_name", "password_changed_at", "closed_at")
 STANDARD_SESSION_SECONDS = 8 * 60 * 60
 REMEMBER_SESSION_SECONDS = 30 * 24 * 60 * 60
+DUMMY_PASSWORD_RECORD = hash_password(uuid.uuid4().hex)
+AUTH_FAILURE_RESPONSE_SECONDS = 0.5
+REGISTRATION_RESPONSE_SECONDS = 2.0
 COMMERCIAL_STATE_KEY = "v22-commercial"
 DURABLE_AUTH_REQUIRED = str(os.getenv("PROTREBOT_DURABLE_AUTH_REQUIRED", "")).strip().lower() in {"1", "true", "yes", "on"}
 BOOTSTRAP_OWNER_EMAIL = normalize_email(os.getenv("PROTREBOT_BOOTSTRAP_OWNER_EMAIL", "ahmtt4565@gmail.com"))
@@ -103,6 +109,16 @@ GMAIL_DELIVERY_ERRORS = (HttpError, GoogleAuthError, RefreshError, OSError, Runt
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def dev_tokens_exposed() -> bool:
+    exposed = env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False)
+    try:
+        validate_auth_security_configuration(expose_dev_tokens=exposed)
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        raise HTTPException(503, "Güvensiz geliştirme kodu yapılandırması") from None
+    return exposed
 
 
 def gmail_failure_log(exc: BaseException) -> dict[str, str]:
@@ -1317,7 +1333,9 @@ def _ensure_bootstrap_owner_privileges(state: dict[str, Any], user: dict[str, An
 
 @router.post("/auth/login")
 async def v22_login(payload: LoginRequest, request: Request, response: Response = None):
+    started = time.monotonic()
     rt = runtime(request)
+    await login_failure_limits(request, payload.email)
     await enforce_auth_limit(request, "login", payload.email)
     user = next((item for item in rt["state"]["users"] if item.get("email") == normalize_email(payload.email)), None)
     pool = getattr(request.app.state, "db_pool", None)
@@ -1343,7 +1361,14 @@ async def v22_login(payload: LoginRequest, request: Request, response: Response 
                 rt["state"]["users"].append(user)
     if user:
         await refresh_auth_security(request, user)
-    if not user or user.get("email") != normalize_email(payload.email) or not user.get("active") or not verify_password(payload.password, user.get("password", {})):
+    record = user.get("password") if user else None
+    usable_record = isinstance(record, dict) and record.get("algorithm") in {PASSWORD_ALGORITHM, LEGACY_PASSWORD_ALGORITHM}
+    password_valid = verify_password(payload.password, record if usable_record else DUMMY_PASSWORD_RECORD)
+    if usable_record and record.get("algorithm") != PASSWORD_ALGORITHM:
+        verify_password(payload.password, DUMMY_PASSWORD_RECORD)
+    if not user or user.get("email") != normalize_email(payload.email) or not user.get("active") or not password_valid:
+        await login_failure_limits(request, payload.email, failed=True)
+        await asyncio.sleep(max(0.0, AUTH_FAILURE_RESPONSE_SECONDS - (time.monotonic() - started)))
         raise HTTPException(401, "E-posta veya parola hatalı")
     from .account_settings import enabled, login_challenge, login_record
     if await enabled(request, user):
@@ -1378,8 +1403,12 @@ async def v22_login(payload: LoginRequest, request: Request, response: Response 
 @router.post("/auth/register")
 async def v22_register(payload: RegisterRequest, request: Request):
     from .google_oauth import registration_guard
-    async with registration_guard(request, payload.email):
-        return await register_password_user(payload, request)
+    started = time.monotonic()
+    try:
+        async with registration_guard(request, payload.email):
+            return await register_password_user(payload, request)
+    finally:
+        await asyncio.sleep(max(0.0, REGISTRATION_RESPONSE_SECONDS - (time.monotonic() - started)))
 
 
 async def register_password_user(payload: RegisterRequest, request: Request):
@@ -1388,15 +1417,17 @@ async def register_password_user(payload: RegisterRequest, request: Request):
         raise HTTPException(422, "Kullanım koşullarını kabul etmelisiniz")
     if payload.password != payload.confirm_password:
         raise HTTPException(422, "Parolalar eşleşmiyor")
+    validate_new_password(payload.password)
     rt = runtime(request)
     if DURABLE_AUTH_REQUIRED and not has_stable_session_secret():
         raise HTTPException(503, "Kalıcı oturum anahtarı yapılandırılmamış; kayıt güvenli şekilde başlatılamıyor")
     email = normalize_email(payload.email)
     if "@" not in email:
         raise HTTPException(422, "Geçerli bir e-posta yazın")
-    expose_dev_token = env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False)
+    expose_dev_token = dev_tokens_exposed()
     if not gmail_configured() and not expose_dev_token:
         raise HTTPException(503, email_service.unavailable_message(), headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"})
+    created_user = None
     async with rt["lock"]:
         await apply_erasure_tombstones(request.app)
         state = rt["state"]
@@ -1414,59 +1445,59 @@ async def register_password_user(payload: RegisterRequest, request: Request):
             }
             if expose_dev_token:
                 response["development_verification_token"] = issue_email_token(synthetic, rt["secret"], kind="EMAIL_VERIFY")
-            if gmail_configured():
-                try:
-                    await asyncio.to_thread(
-                        send_auth_email, to_email=email, display_name=synthetic["display_name"],
-                        subject=VERIFY_SUBJECT, title="Hesabını doğrula",
-                        action_url=app_base_url(), action_label="Hesabına git",
-                    )
-                except GMAIL_DELIVERY_ERRORS as exc:
-                    log_gmail_failure(exc, request.app)
-                    raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.", headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
-            return response
-        user_id = uuid.uuid4().hex
-        user = {
-            "id": user_id, "email": email, "display_name": payload.display_name.strip(),
-            "role": "CUSTOMER", "active": True, "auth_version": 1,
-            "email_verified": False, "password": hash_password(payload.password), "created_at": now_iso(),
-        }
-        state["users"].append(user)
-        state["profiles"].append({"id": uuid.uuid4().hex, "user_id": user_id, "full_name": user["display_name"], "avatar_url": None, "role": "user", "preferences": {}, "created_at": user["created_at"], "updated_at": user["created_at"]})
-        state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": user_id, "plan": "FREE", "status": "inactive", "started_at": user["created_at"], "expires_at": None, "created_at": user["created_at"], "updated_at": user["created_at"]})
-        verification_token = issue_one_time_token(state, user, rt["secret"], kind="EMAIL_VERIFY")
-        from .account_store import save_action_token
-        await save_action_token(request, verification_token, user, "EMAIL_VERIFY")
-        verification_status_token = issue_token(user_id, user["role"], rt["secret"], kind="EMAIL_STATUS", ttl_seconds=24 * 60 * 60)
-        add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
-        save_state(state)
+            mail = {
+                "to_email": email, "display_name": synthetic["display_name"],
+                "subject": "KaisTrade hesap bilgilendirmesi",
+                "title": "Bu e-postayla zaten bir hesabın var. Giriş yap veya şifreni sıfırla.",
+                "action_url": f"{app_base_url()}/login", "action_label": "Hesabına giriş yap",
+                "information_only": True,
+            }
+        else:
+            user_id = uuid.uuid4().hex
+            user = {
+                "id": user_id, "email": email, "display_name": payload.display_name.strip(),
+                "role": "CUSTOMER", "active": True, "auth_version": 1,
+                "email_verified": False, "password": hash_password(payload.password), "created_at": now_iso(),
+            }
+            created_user = user
+            state["users"].append(user)
+            state["profiles"].append({"id": uuid.uuid4().hex, "user_id": user_id, "full_name": user["display_name"], "avatar_url": None, "role": "user", "preferences": {}, "created_at": user["created_at"], "updated_at": user["created_at"]})
+            state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": user_id, "plan": "FREE", "status": "inactive", "started_at": user["created_at"], "expires_at": None, "created_at": user["created_at"], "updated_at": user["created_at"]})
+            verification_token = issue_one_time_token(state, user, rt["secret"], kind="EMAIL_VERIFY")
+            from .account_store import save_action_token
+            await save_action_token(request, verification_token, user, "EMAIL_VERIFY")
+            verification_status_token = issue_token(user_id, user["role"], rt["secret"], kind="EMAIL_STATUS", ttl_seconds=24 * 60 * 60)
+            add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
+            save_state(state)
+            response = {"user": public_user(user), "message": "E-posta kayıt için uygunsa doğrulama bağlantısı gönderildi.", "email_verification_required": True, "verification_status_token": verification_status_token}
+            if expose_dev_token:
+                response["development_verification_token"] = verification_token
+            mail = {"to_email": email, "display_name": user["display_name"], "subject": VERIFY_SUBJECT,
+                    "title": "Hesabını doğrula", "action_url": f"{app_base_url()}/verify-email?token={verification_token}",
+                    "action_label": "E-posta adresimi doğrula"}
     persisted = await persist_v22_commercial(request.app)
     if DURABLE_AUTH_REQUIRED and not persisted:
-        async with rt["lock"]:
-            rt["state"]["users"] = [item for item in rt["state"]["users"] if item.get("id") != user["id"]]
-            rt["state"]["profiles"] = [item for item in rt["state"].get("profiles", []) if item.get("user_id") != user["id"]]
-            rt["state"]["subscriptions"] = [item for item in rt["state"].get("subscriptions", []) if item.get("user_id") != user["id"]]
-            rt["state"]["auth_tokens"] = [item for item in rt["state"].get("auth_tokens", []) if item.get("user_id") != user["id"]]
-            save_state(rt["state"])
-        await persist_v22_commercial(request.app)
+        if created_user:
+            await rollback_password_registration(request, created_user["id"])
         raise HTTPException(503, "Kalıcı hesap veritabanı hazır değil; kayıt güvenli şekilde tamamlanamadı")
     if gmail_configured():
         try:
-            await asyncio.to_thread(send_auth_email, to_email=user["email"], display_name=user["display_name"], subject=VERIFY_SUBJECT, title="Hesabını doğrula", action_url=f"{app_base_url()}/verify-email?token={verification_token}", action_label="E-posta adresimi doğrula")
+            await asyncio.to_thread(send_auth_email, **mail)
         except GMAIL_DELIVERY_ERRORS as exc:
             log_gmail_failure(exc, request.app)
-            async with rt["lock"]:
-                rt["state"]["users"] = [item for item in rt["state"]["users"] if item.get("id") != user["id"]]
-                rt["state"]["profiles"] = [item for item in rt["state"].get("profiles", []) if item.get("user_id") != user["id"]]
-                rt["state"]["subscriptions"] = [item for item in rt["state"].get("subscriptions", []) if item.get("user_id") != user["id"]]
-                rt["state"]["auth_tokens"] = [item for item in rt["state"].get("auth_tokens", []) if item.get("user_id") != user["id"]]
-                save_state(rt["state"])
-            await persist_v22_commercial(request.app)
+            if created_user:
+                await rollback_password_registration(request, created_user["id"])
             raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.", headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
-    response: dict[str, Any] = {"user": public_user(user), "message": "E-posta kayıt için uygunsa doğrulama bağlantısı gönderildi.", "email_verification_required": True, "verification_status_token": verification_status_token}
-    if expose_dev_token:
-        response["development_verification_token"] = verification_token
     return response
+
+
+async def rollback_password_registration(request: Request, user_id: str) -> None:
+    rt = runtime(request)
+    async with rt["lock"]:
+        for key, field in (("users", "id"), ("profiles", "user_id"), ("subscriptions", "user_id"), ("auth_tokens", "user_id")):
+            rt["state"][key] = [item for item in rt["state"].get(key, []) if item.get(field) != user_id]
+        save_state(rt["state"])
+    await persist_v22_commercial(request.app)
 
 
 @router.post("/auth/verify-email")
@@ -1555,6 +1586,16 @@ async def v22_verification_status(request: Request, token: str = Query(..., min_
         raise HTTPException(400, "Geçersiz veya süresi dolmuş doğrulama bağlantısı") from exc
     user = next((item for item in rt["state"]["users"] if item.get("id") == payload["sub"]), None)
     if not user:
+        from .google_oauth import hydrate_user
+        user = await hydrate_user(request, user_id=payload["sub"])
+    if user:
+        try:
+            await refresh_auth_security(request, user)
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            user = None
+    if not user:
         if payload.get("kind") == "EMAIL_STATUS":
             return {"verified": False}
         raise HTTPException(400, "Geçersiz veya süresi dolmuş doğrulama bağlantısı")
@@ -1565,7 +1606,7 @@ async def v22_verification_status(request: Request, token: str = Query(..., min_
 async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
     rt = runtime(request)
     await enforce_auth_limit(request, "forgot", payload.email)
-    expose_dev_token = env_flag("PROTREBOT_EXPOSE_DEV_TOKENS", default=False)
+    expose_dev_token = dev_tokens_exposed()
     if not gmail_configured() and not expose_dev_token:
         raise HTTPException(503, "E-posta servisi yapılandırılmamış")
     user = next((item for item in rt["state"]["users"] if item.get("email") == normalize_email(payload.email)), None)
@@ -1605,6 +1646,7 @@ async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Requ
     await enforce_auth_limit(request, "reset", token_limit_account(payload.token, rt["secret"], "PASSWORD_RESET"))
     if payload.password != payload.confirm_password:
         raise HTTPException(422, "Parolalar eşleşmiyor")
+    validate_new_password(payload.password)
     try:
         token = verify_token(payload.token, rt["secret"], expected_kind="PASSWORD_RESET")
     except ValueError:
@@ -2270,24 +2312,22 @@ async def v22_admin_delete_user(user_id: str, payload: UserDeleteRequest, reques
 
 @router.post("/auth/change-password")
 async def v22_change_password(payload: PasswordChangeRequest, request: Request, response: Response = None):
+    validate_new_password(payload.new_password)
     user = authenticated_user(request)
     rt = runtime(request)
-    if not verify_password(payload.current_password, user.get("password", {})):
-        raise HTTPException(401, "Mevcut parola hatalı")
-    from .account_settings import require_totp
-    await require_totp(request, user, payload.totp_code)
+    from .account_settings import Proof, proof, refreshed_session_response, rotate
+    await proof(request, user, Proof(current_password=payload.current_password, totp_code=payload.totp_code))
     async with rt["lock"]:
-        await invalidate_user_sessions(
-            request, user, security_updates={"password": hash_password(payload.new_password), "password_changed_at": now_iso()},
-            expected_version=int(user.get("auth_version", 1)),
-        )
-        add_audit(rt["state"], "PASSWORD_CHANGED", "Hesap parolası değiştirildi; eski oturumlar kapatıldı.", actor=user["id"], subject=user["id"])
+        from . import account_store
+        async with account_store.edit(request, user["id"]) as doc:
+            token = await rotate(request, user, doc, {"password": hash_password(payload.new_password), "password_changed_at": now_iso()}, preserve_current=True)
+        add_audit(rt["state"], "PASSWORD_CHANGED", "Hesap parolası değiştirildi; diğer oturumlar kapatıldı.", actor=user["id"], subject=user["id"])
         save_state(rt["state"])
     persisted = await persist_v22_commercial(request.app)
     if DURABLE_AUTH_REQUIRED and not persisted:
         raise HTTPException(503, "Parola değişikliği kalıcı depoya yazılamadı")
-    clear_rotated_session_cookie(request, response, user["id"])
-    return {"ok": True, "reauthenticate": True, "message": "Parola değişti. Güvenlik için yeniden giriş yapın."}
+    marker = refreshed_session_response(request, response, user, token)
+    return {"ok": True, "reauthenticate": False, "token": marker, "message": "Parola değişti; diğer cihazlardaki oturumlar kapatıldı."}
 
 
 @router.post("/customers")

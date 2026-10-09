@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS commercial_account_tokens (
  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL,
  auth_version BIGINT NOT NULL, email TEXT, expires DOUBLE PRECISION NOT NULL, used BOOLEAN NOT NULL DEFAULT FALSE
 );
+CREATE TABLE IF NOT EXISTS commercial_auth_failures (
+ bucket TEXT PRIMARY KEY, payload JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 DROP TRIGGER IF EXISTS commercial_erasure_guard ON commercial_account_settings;
 CREATE TRIGGER commercial_erasure_guard BEFORE INSERT OR UPDATE ON commercial_account_settings
  FOR EACH ROW EXECUTE FUNCTION commercial_erasure_user_guard();
@@ -60,6 +63,7 @@ def connection(request):
     db.execute("""CREATE TABLE IF NOT EXISTS commercial_account_tokens (
         token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL,
         auth_version INTEGER NOT NULL, email TEXT, expires REAL NOT NULL, used BOOLEAN NOT NULL DEFAULT FALSE)""")
+    db.execute("CREATE TABLE IF NOT EXISTS commercial_auth_failures (bucket TEXT PRIMARY KEY, payload TEXT NOT NULL)")
     return db
 
 

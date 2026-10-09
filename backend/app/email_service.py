@@ -89,37 +89,41 @@ def failure_details(exc: BaseException) -> dict[str, str]:
             "message": "E-posta sağlayıcısı gönderimi tamamlayamadı."}
 
 
-def auth_email_html(title: str, display_name: str, action_url: str, action_label: str, expiry: str) -> str:
+def auth_email_html(title: str, display_name: str, action_url: str, action_label: str, expiry: str, *, information_only: bool = False) -> str:
     title, display_name, action_url, action_label, expiry = (
         escape(str(value), quote=True) for value in (title, display_name, action_url, action_label, expiry)
     )
+    instruction = ("Giriş sayfasını kullanabilirsin. Parolanı unuttuysan aynı sayfadan sıfırlayabilirsin."
+                   if information_only else "KaisTrade hesabındaki işlemi tamamlamak için aşağıdaki düğmeyi kullan.")
+    expiry_notice = "" if information_only else f'<p style="font-size:13px">Güvenlik bağlantısı veya kodu {expiry} içinde geçerliliğini yitirir.</p>'
     return f"""<!doctype html><html lang="tr"><body style="margin:0;background:#f4f6f8;font-family:Arial,sans-serif;color:#18242d">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border-radius:12px"><tr><td style="padding:32px">
 <p style="font-weight:700;color:#2457c5">KaisTrade</p>
 <h1 style="font-size:24px">{title}</h1>
 <p>Merhaba {display_name or 'KaisTrade kullanıcısı'},</p>
-<p>KaisTrade hesabındaki işlemi tamamlamak için aşağıdaki düğmeyi kullan.</p>
+<p>{instruction}</p>
 <p style="margin:28px 0"><a href="{action_url}" style="display:inline-block;padding:14px 24px;background:#2457c5;color:#fff;border-radius:8px;text-decoration:none;font-weight:700">{action_label}</a></p>
 <p style="font-size:13px">Düğme açılmıyorsa bu bağlantıyı tarayıcına kopyala:</p>
 <p style="font-size:13px;overflow-wrap:anywhere"><a href="{action_url}">{action_url}</a></p>
-<p style="font-size:13px">Güvenlik bağlantısı veya kodu {expiry} içinde geçerliliğini yitirir.</p>
+{expiry_notice}
 <p style="font-size:13px;color:#566570">Bu işlemi sen yapmadıysan bu maili yok sayabilirsin.</p>
 <p style="font-size:13px;color:#566570">KaisTrade parolanı veya borsa API anahtarını e-posta ile istemez.</p>
 </td></tr></table></td></tr></table></body></html>"""
 
 
 def send_auth_email(*, to_email: str, display_name: str, subject: str, title: str,
-                    action_url: str, action_label: str, expiry: str = "24 saat") -> None:
+                    action_url: str, action_label: str, expiry: str = "24 saat", information_only: bool = False) -> None:
     selected = provider()
     try:
         validate_configuration()
+        expiry_notice = "" if information_only else f"Bağlantı veya kod {expiry} içinde geçerliliğini yitirir.\n"
         text = (f"KaisTrade\n\n{title}\n\nMerhaba {display_name},\n"
                 f"KaisTrade hesabındaki işlemi tamamla: {action_label}\n\n{action_url}\n\n"
-                f"Bağlantı veya kod {expiry} içinde geçerliliğini yitirir.\n"
+                f"{expiry_notice}"
                 "Bu işlemi sen yapmadıysan bu maili yok sayabilirsin.\n"
                 "KaisTrade parolanı veya borsa API anahtarını e-posta ile istemez.")
-        html = auth_email_html(title, display_name, action_url, action_label, expiry)
+        html = auth_email_html(title, display_name, action_url, action_label, expiry, information_only=information_only)
         reply_to = os.getenv("EMAIL_REPLY_TO", "").strip()
         if selected == "resend":
             payload = {"from": f"KaisTrade <{parseaddr(os.environ['EMAIL_FROM'])[1]}>", "to": [to_email],

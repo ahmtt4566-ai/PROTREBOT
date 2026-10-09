@@ -3,6 +3,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'rea
 import { Activity, ArrowRight, BarChart3, Bitcoin, CircleDollarSign, Coins, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, LogOut, Mail, MailCheck, Pause, Play, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
 import { API_BASE, COOKIE_SESSION_PREFIX, USER_SESSION_KEY, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import {withRequestDeadline} from './browser-request'
+import {PASSWORD_MAX_LENGTH, passwordPolicyError, passwordRules} from './password-policy'
 import AdminPanel from './AdminPanel'
 import ProfileSettings, {AccountRecoveryScreen} from './ProfileSettings'
 import { AUTH_PANEL_MARKETS, LIVE_MARKET_CONFIG } from './live-market-config'
@@ -100,16 +101,6 @@ async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
 function strength(password:string):{label:string;score:number} {
   const score = passwordRules(password).filter(([,passed]) => passed).length
   return {score, label:score < 3 ? 'Zayıf' : score < 5 ? 'Orta' : 'Güçlü'}
-}
-
-function passwordRules(password:string) {
-  return [
-    ['En az 10 karakter', password.length >= 10],
-    ['Büyük harf', /[A-Z]/.test(password)],
-    ['Küçük harf', /[a-z]/.test(password)],
-    ['Rakam', /\d/.test(password)],
-    ['Sembol', /[^A-Za-z0-9]/.test(password)],
-  ] as const
 }
 
 function MaintenanceScreen({mode}:{mode:string}) {
@@ -374,6 +365,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
     autoVerificationStarted.current = true
     setAutoVerifying(true)
     let active = true
+    let checkingStatus = false
     const verifyEmailLink = async () => {
       try {
         await request('/auth/verify-email',{method:'POST',body:JSON.stringify({token:verificationLinkToken})})
@@ -384,6 +376,8 @@ export default function AuthGate({children}:{children:ReactNode}) {
       if (active) setAutoVerifying(false)
     }
     const checkStatus = async () => {
+      if (checkingStatus) return
+      checkingStatus = true
       try {
         const result = await request<{verified:boolean}>(`/auth/verification-status?token=${encodeURIComponent(verificationStatusToken)}`)
         if (active && result.verified) {
@@ -392,13 +386,14 @@ export default function AuthGate({children}:{children:ReactNode}) {
       } catch (error) {
         if (active) setMessage(error instanceof Error ? error.message : 'İşlem başarısız.')
       } finally {
+        checkingStatus = false
         if (active) setAutoVerifying(false)
       }
     }
     if (verificationLinkToken) void verifyEmailLink()
     else {
       void checkStatus()
-      const interval = window.setInterval(() => void checkStatus(),1000)
+      const interval = window.setInterval(() => void checkStatus(),4000)
       return () => { active = false; window.clearInterval(interval) }
     }
     return () => { active = false }
@@ -423,6 +418,12 @@ export default function AuthGate({children}:{children:ReactNode}) {
       else setTermsError('')
     }
     if (isGoogleConsent) setTermsError(register.terms_accepted ? '' : 'Devam etmek için kullanım koşullarını ve gizlilik politikasını kabul etmelisiniz.')
+    if (mode === 'reset') {
+      const error = passwordPolicyError(resetPassword.password)
+      if (error) errors.password = error
+      if (!resetPassword.confirm_password) errors.confirm_password = 'Şifrenizi tekrar girin.'
+      else if (resetPassword.password !== resetPassword.confirm_password) errors.confirm_password = 'Şifreler eşleşmiyor.'
+    }
     if (mode === 'verify' && !verificationInput && !verificationStatusToken && !verificationLinkToken) errors.verification = 'Doğrulama kodunu girin.'
     setFieldErrors(errors)
     return !Object.keys(errors).length && (!(isRegistration || isGoogleConsent) || register.terms_accepted)
@@ -561,7 +562,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
           {mode === 'mfa' && <label>2FA veya kurtarma kodu<input data-private="true" required autoComplete="one-time-code" value={mfaCode} onChange={event => setMfaCode(event.target.value)} placeholder="Authenticator veya kurtarma kodu"/><small>İlk doğrulama tamamlandı; oturum henüz açılmadı.</small>{fieldErrors.mfa && <em role="alert">{fieldErrors.mfa}</em>}</label>}
           {mode === 'forgot' && <label>E-posta<input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="siz@ornek.com"/><small>Kayıtlıysa yenileme bağlantısı hazırlanır.</small></label>}
           {mode === 'verify' && <label className={fieldErrors.verification ? 'authFieldError' : ''}>Doğrulama kodu<input required value={verificationInput} onChange={event => {setVerificationInput(event.target.value);setFieldErrors(current => ({...current,verification:''}))}} placeholder="E-posta doğrulama kodu"/><small>{message || 'Kayıt sonrası e-postanızdaki kodu girin.'}</small>{fieldErrors.verification && <em>{fieldErrors.verification}</em>}</label>}
-          {mode === 'reset' && <><label>Doğrulama kodu<input required value={resetToken} onChange={event => setResetToken(event.target.value)}/></label><label>Yeni parola<input data-private="true" required type="password" autoComplete="new-password" value={resetPassword.password} onChange={event => setResetPassword({...resetPassword,password:event.target.value})}/></label><label>Yeni parola tekrar<input data-private="true" required type="password" autoComplete="new-password" value={resetPassword.confirm_password} onChange={event => setResetPassword({...resetPassword,confirm_password:event.target.value})}/></label></>}
+          {mode === 'reset' && <><label>Doğrulama kodu<input required value={resetToken} onChange={event => setResetToken(event.target.value)}/></label><label className={fieldErrors.password ? 'authFieldError' : ''}>Yeni parola<input data-private="true" required type="password" autoComplete="new-password" maxLength={PASSWORD_MAX_LENGTH} aria-invalid={Boolean(fieldErrors.password)} value={resetPassword.password} onChange={event => {setResetPassword({...resetPassword,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><div className="passwordRules">{passwordRules(resetPassword.password).map(([label,passed]) => <span className={passed ? 'passed' : 'missing'} key={label}>{passed ? '✓' : '•'} {label}</span>)}</div>{fieldErrors.password && <em role="alert">{fieldErrors.password}</em>}</label><label className={fieldErrors.confirm_password ? 'authFieldError' : ''}>Yeni parola tekrar<input data-private="true" required type="password" autoComplete="new-password" maxLength={PASSWORD_MAX_LENGTH} aria-invalid={Boolean(fieldErrors.confirm_password)} value={resetPassword.confirm_password} onChange={event => {setResetPassword({...resetPassword,confirm_password:event.target.value});setFieldErrors(current => ({...current,confirm_password:''}))}}/>{fieldErrors.confirm_password && <em role="alert">{fieldErrors.confirm_password}</em>}</label></>}
           {mode === 'reset' && <label>2FA veya kurtarma kodu (etkinse)<input data-private="true" autoComplete="one-time-code" value={resetPassword.totp_code} onChange={event => setResetPassword({...resetPassword,totp_code:event.target.value})}/></label>}
           <button className="authSubmit" disabled={busy} aria-busy={busy}>{busy ? 'İŞLENİYOR…' : mode === 'mfa' ? 'DOĞRULA VE GİRİŞ YAP' : mode === 'login' ? 'GÜVENLİ GİRİŞ' : mode === 'bootstrap' ? 'YÖNETİCİ HESABINI OLUŞTUR' : mode === 'register' || isGoogleConsent ? 'HESAP OLUŞTUR' : mode === 'forgot' ? 'YENİLEME BAĞLANTISI GÖNDER' : mode === 'reset' ? 'PAROLAYI GÜNCELLE' : 'E-POSTAYI DOĞRULA'}{busy ? <LoaderCircle className="spin"/> : <ArrowRight/>}</button>
         </form>

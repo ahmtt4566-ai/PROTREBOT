@@ -111,7 +111,10 @@ def issue_token(
     ttl_seconds: int = 8 * 60 * 60,
     token_version: int = 1,
     now: int | None = None,
+    session_id: str | None = None,
 ) -> str:
+    if session_id is not None and (kind != "USER" or not isinstance(session_id, str) or not session_id or len(session_id) > 128):
+        raise ValueError("Geçersiz oturum kimliği")
     issued_at = int(time.time() if now is None else now)
     payload = {
         "sub": subject,
@@ -119,7 +122,7 @@ def issue_token(
         "kind": kind,
         "iat": issued_at,
         "exp": issued_at + max(60, int(ttl_seconds)),
-        "jti": secrets.token_hex(8),
+        "jti": session_id if session_id is not None else secrets.token_hex(8),
         "ver": max(1, int(token_version)),
     }
     encoded = _b64encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))

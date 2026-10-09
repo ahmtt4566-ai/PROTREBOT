@@ -44,8 +44,10 @@ async function prepare(page: Page, options: {width?: number; owner?: boolean; go
     if (path.endsWith('/sessions/revoke')) {data.sessions = data.sessions.filter(session => session.id !== body.session_id); data.security.active_sessions = data.sessions.length}
     if (path.endsWith('/reauth/email')) {await route.fulfill({json: {challenge_id: 'email-challenge', expires_at: '2026-10-05T13:00:00Z'}}); return}
     if (path.endsWith('/2fa/setup')) {await route.fulfill({json: {secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://totp/KaisTrade:ada%40example.test?secret=JBSWY3DPEHPK3PXP&issuer=KaisTrade'}}); return}
-    if (path.endsWith('/2fa/enable')) {data.security.two_factor_enabled = true; authenticated = false; await route.fulfill({json: {recovery_codes: ['OFFLINE-CODE-1', 'OFFLINE-CODE-2'], reauthenticate: true}}); return}
-    if (path.endsWith('/close') || path.endsWith('/password') || path.endsWith('/email/confirm')) {authenticated = false; await route.fulfill({json: {ok: true, reauthenticate: true}}); return}
+    if (path.endsWith('/2fa/enable')) {data.security.two_factor_enabled = true; data.sessions = data.sessions.filter(session => session.current); data.security.active_sessions = 1; await route.fulfill({json: {recovery_codes: ['OFFLINE-CODE-1', 'OFFLINE-CODE-2'], reauthenticate: false, token: `cookie-session:${data.user.id}`}}); return}
+    if (path.endsWith('/2fa/disable')) data.security.two_factor_enabled = false
+    if (path.endsWith('/password') || path.endsWith('/2fa/disable')) {data.sessions = data.sessions.filter(session => session.current); data.security.active_sessions = 1; await route.fulfill({json: {ok: true, reauthenticate: false, token: `cookie-session:${data.user.id}`}}); return}
+    if (path.endsWith('/close') || path.endsWith('/email/confirm')) {authenticated = false; await route.fulfill({json: {ok: true, reauthenticate: true}}); return}
     await route.fulfill({json: {ok: true}})
   })
   return {data, mutations, state, setAuthenticated: (value: boolean) => {authenticated = value}}
@@ -147,8 +149,8 @@ test('Email token stays out of URL and requires explicit confirmation before ses
   expect(await page.evaluate(() => localStorage.getItem('protrebot-v25-session'))).toBeNull()
 })
 
-test('Password mismatch sends nothing; successful change clears session metadata and passwords', async ({page}) => {
-  const {mutations} = await prepare(page)
+test('Password mismatch sends nothing; successful change preserves current device and clears passwords', async ({page}) => {
+  const {mutations, data} = await prepare(page)
   await page.goto(`${base}/settings`)
   await page.getByRole('button', {name: 'Parolayı değiştir'}).click()
   await page.getByLabel('Yeni parola', {exact: true}).fill('Offline-Password1!')
@@ -159,8 +161,39 @@ test('Password mismatch sends nothing; successful change clears session metadata
   expect(mutations).toEqual([])
   await page.getByLabel('Yeni parola tekrar').fill('Offline-Password1!')
   await page.getByRole('dialog').getByRole('button', {name: 'Kaydet', exact: true}).click()
-  await expect(page.getByRole('button', {name: 'GÜVENLİ GİRİŞ'})).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('heading', {name: 'Profil & Ayarlar'})).toBeVisible()
+  expect(data.sessions.map(session => session.id)).toEqual(['current-session'])
+  expect(await page.evaluate(() => localStorage.getItem('protrebot-v25-session'))).toBe('cookie-session:account-test-user')
   expect(await page.evaluate(() => JSON.stringify({...localStorage, ...sessionStorage}))).not.toContain('Offline-Password')
+})
+
+test('Password change rejects missing common rules without sending a request', async ({page}) => {
+  const {mutations} = await prepare(page)
+  await page.goto(`${base}/settings`)
+  await page.getByRole('button', {name: 'Parolayı değiştir'}).click()
+  await page.locator('input[autocomplete="new-password"]').nth(0).fill('abcdefghijk')
+  await page.locator('input[autocomplete="new-password"]').nth(1).fill('abcdefghijk')
+  await page.getByLabel('Mevcut parola').fill('Offline-OldPassword1!')
+  await page.getByRole('dialog').getByRole('button', {name: 'Kaydet', exact: true}).click()
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Büyük harf, Rakam, Sembol')
+  expect(mutations).toEqual([])
+  await expect(page.getByRole('heading', {name: 'Profil & Ayarlar'})).toBeVisible()
+})
+
+test('Disabling two-factor authentication keeps the current device only', async ({page}) => {
+  const {data, mutations} = await prepare(page)
+  data.security.two_factor_enabled = true
+  await page.goto(`${base}/settings`)
+  await page.getByRole('button', {name: '2FA yönet'}).click()
+  await page.getByLabel('Mevcut parola').fill('Offline-Password1!')
+  await page.getByLabel('2FA veya kurtarma kodu').fill('OFFLINE-RECOVERY-CODE')
+  await page.getByRole('dialog').getByRole('button', {name: '2FA devre dışı bırak'}).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(data.sessions.map(session => session.id)).toEqual(['current-session'])
+  expect(data.security.two_factor_enabled).toBe(false)
+  expect(mutations.map(item => item.path)).toEqual(['/api/v22/account/2fa/disable'])
+  expect(await page.evaluate(() => localStorage.getItem('protrebot-v25-session'))).toBe('cookie-session:account-test-user')
 })
 
 test('Google-only changes require email reauthentication and mail-unavailable UI is honest', async ({page}) => {
@@ -197,13 +230,14 @@ test('TOTP enrollment displays real QR, validates code and shows recovery codes 
   await page.getByLabel('Authenticator kodu').fill('123456')
   await page.getByRole('button', {name: 'Kodu doğrula ve etkinleştir'}).click()
   await expect(page.locator('.accountRecovery')).toContainText('OFFLINE-CODE-1')
-  expect(await page.evaluate(() => localStorage.getItem('protrebot-v25-session'))).toBeNull()
+  expect(await page.evaluate(() => localStorage.getItem('protrebot-v25-session'))).toBe('cookie-session:account-test-user')
   await page.clock.runFor(46000)
   await expect(page.locator('.accountRecovery')).toContainText('OFFLINE-CODE-1')
-  await expect(page.getByRole('heading', {name: 'Profil & Ayarlar'})).toHaveCount(0)
+  await expect(page.getByRole('heading', {name: 'Profil & Ayarlar'})).toBeVisible()
   await page.getByRole('button', {name: 'Kodları kaydettim'}).click()
   await expect(page.getByText('OFFLINE-CODE-1')).toHaveCount(0)
-  await expect(page.getByRole('button', {name: 'GÜVENLİ GİRİŞ'})).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('heading', {name: 'Profil & Ayarlar'})).toBeVisible()
   expect(mutations.filter(item => item.path.includes('/2fa/')).map(item => item.path)).toEqual(['/api/v22/account/2fa/setup', '/api/v22/account/2fa/enable'])
 })
 
