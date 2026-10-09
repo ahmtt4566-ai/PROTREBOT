@@ -8,7 +8,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 from urllib.parse import urlsplit
 
 import httpx
@@ -1031,6 +1031,15 @@ async def restore_health_snapshot(application: FastAPI) -> None:
         return
 
 
+def _build_http_client(proxy: str | None) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(30, connect=10, read=30, write=10, pool=30),
+        limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=30),
+        proxy=proxy,
+        trust_env=False,
+    )
+
+
 def build_http_client() -> httpx.AsyncClient:
     quotaguard_url = os.getenv("QUOTAGUARD_URL", "").strip()
     if quotaguard_url:
@@ -1040,32 +1049,40 @@ def build_http_client() -> httpx.AsyncClient:
                 raise ValueError
         except (TypeError, ValueError):
             raise ValueError("Invalid QUOTAGUARD_URL configuration; expected an http(s) proxy URL.") from None
-    return httpx.AsyncClient(
-        timeout=httpx.Timeout(30, connect=10, read=30, write=10, pool=30),
-        limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=30),
-        proxy=quotaguard_url or None,
-        trust_env=False,
-    )
+    return _build_http_client(quotaguard_url or None)
 
 
-async def ensure_http_client(application: FastAPI) -> httpx.AsyncClient:
+def build_market_http_client() -> httpx.AsyncClient:
+    return _build_http_client(None)
+
+
+async def _ensure_http_client(application: FastAPI, attribute: str, builder: Callable[[], httpx.AsyncClient]) -> httpx.AsyncClient:
     current_loop = asyncio.get_running_loop()
-    client = getattr(application.state, "http", None)
+    loop_attribute = f"{attribute}_loop"
+    client = getattr(application.state, attribute, None)
     if client is None:
-        client = build_http_client()
-        application.state.http = client
-        application.state.http_loop = current_loop
+        client = builder()
+        setattr(application.state, attribute, client)
+        setattr(application.state, loop_attribute, current_loop)
         return client
-    bound_loop = getattr(application.state, "http_loop", None)
-    if bound_loop is not None and bound_loop is not current_loop:
+    bound_loop = getattr(application.state, loop_attribute, None)
+    if getattr(client, "is_closed", False) or (bound_loop is not None and bound_loop is not current_loop):
         try:
             await client.aclose()
         except Exception as exc:
-            logger.warning("Failed to close stale HTTP client before rebuild: %s", exc)
-        client = build_http_client()
-        application.state.http = client
-        application.state.http_loop = current_loop
-    return application.state.http
+            logger.warning("Failed to close stale %s HTTP client before rebuild: %s", attribute, type(exc).__name__)
+        client = builder()
+        setattr(application.state, attribute, client)
+        setattr(application.state, loop_attribute, current_loop)
+    return client
+
+
+async def ensure_http_client(application: FastAPI) -> httpx.AsyncClient:
+    return await _ensure_http_client(application, "http", build_http_client)
+
+
+async def ensure_market_data_http_client(application: FastAPI) -> httpx.AsyncClient:
+    return await _ensure_http_client(application, "market_http", build_market_http_client)
 
 
 @asynccontextmanager
@@ -1077,6 +1094,9 @@ async def lifespan(app: FastAPI):
     # preventing the local API from starting.
     app.state.http = build_http_client()
     app.state.http_loop = asyncio.get_running_loop()
+    app.state.market_http = None
+    app.state.market_http_loop = None
+    app.state.market_proxy_retry_at = 0.0
     app.state.db_pool = None
     app.state.redis_client = None
     app.state.paper_schema_ready = False
@@ -1214,6 +1234,8 @@ async def lifespan(app: FastAPI):
     if app.state.redis_client is not None:
         await app.state.redis_client.aclose()
     await app.state.http.aclose()
+    if app.state.market_http is not None:
+        await app.state.market_http.aclose()
 
 
 app = FastAPI(title="ProTreBot Elite X API", version="28.0.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -1623,7 +1645,12 @@ async def markets(limit: int = Query(500, ge=1, le=500), all: bool = False):
         cache = getattr(app.state, "market_universe_cache", None)
         if cache is None:
             cache = app.state.market_universe_cache = MarketUniverseCache()
-        rows, stale = await cache.get(lambda path: market_data_request(app, path))
+        try:
+            rows, stale = await cache.get(lambda path: market_data_request(app, path))
+        except HTTPException as exc:
+            if isinstance(exc.__cause__, httpx.HTTPError):
+                raise market_data_http_exception("Binance Futures piyasa özeti alınamadı", exc.__cause__) from exc
+            raise
         return JSONResponse(rows, headers={"X-Market-Stale": "1" if stale else "0", "Cache-Control": "no-store"})
     return await _markets(limit=limit)
 
@@ -1709,12 +1736,18 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
 
 
 async def market_data_request(application: FastAPI, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
-    """Retry only transient public market-data failures; preserve final error mapping."""
-    application.state.http = await ensure_http_client(application)
+    """Bound public reads and recover proxy failures without rerouting signed requests."""
+    if path not in {"/fapi/v1/ping", "/fapi/v1/exchangeInfo", "/fapi/v1/ticker/24hr", "/fapi/v1/klines"}:
+        raise ValueError("Market-data transport only accepts public read-only endpoints.")
+    direct = getattr(application.state, "market_proxy_retry_at", 0.0) > time.monotonic()
+    client = await ensure_market_data_http_client(application) if direct else await ensure_http_client(application)
+    proxy_configured = bool(os.getenv("QUOTAGUARD_URL", "").strip())
+    total_deadline = time.monotonic() + MARKET_DATA_REQUEST_TIMEOUT_SECONDS
+    host_budget = MARKET_DATA_REQUEST_TIMEOUT_SECONDS / max(1, len(FUTURES_MARKET_DATA_APIS))
     last_error: httpx.HTTPError | None = None
     last_response: httpx.Response | None = None
     for host in FUTURES_MARKET_DATA_APIS:
-        deadline = time.monotonic() + MARKET_DATA_REQUEST_TIMEOUT_SECONDS
+        deadline = min(total_deadline, time.monotonic() + host_budget)
         for attempt in range(3):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -1722,7 +1755,7 @@ async def market_data_request(application: FastAPI, path: str, params: dict[str,
 
             async def request() -> httpx.Response:
                 async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
-                    response = await application.state.http.get(f"{host}{path}", params=params)
+                    response = await client.get(f"{host}{path}", params=params)
                     rate_limit.observe(response)
                     return response
 
@@ -1731,6 +1764,12 @@ async def market_data_request(application: FastAPI, path: str, params: dict[str,
                 last_response = response
                 if response.status_code not in {500, 502, 503, 504}:
                     return response
+                if proxy_configured and not direct:
+                    logger.warning("Public market proxy returned HTTP %s; switching read-only transport: path=%s", response.status_code, path)
+                    client = await ensure_market_data_http_client(application)
+                    direct = True
+                    application.state.market_proxy_retry_at = time.monotonic() + 30
+                    continue
                 logger.warning(
                     "Market data upstream response: host=%s status=%s path=%s attempt=%s",
                     host,
@@ -1748,16 +1787,23 @@ async def market_data_request(application: FastAPI, path: str, params: dict[str,
             except httpx.RequestError as exc:
                 last_error = exc
                 logger.warning("Market data upstream network failure: host=%s path=%s attempt=%s detail=%s", host, path, attempt + 1, type(exc).__name__)
+                if not direct and (proxy_configured or isinstance(exc, httpx.ProxyError)):
+                    client = await ensure_market_data_http_client(application)
+                    direct = True
+                    application.state.market_proxy_retry_at = time.monotonic() + 30
+                    logger.warning("Public market proxy unavailable; switching read-only transport: path=%s", path)
+                    continue
                 if host != FUTURES_MARKET_DATA_APIS[-1]:
                     break
+            if attempt == 2:
+                break
             retry_delay = min(0.5 * (2 ** attempt), max(0.0, deadline - time.monotonic()))
             if retry_delay <= 0:
                 break
             await asyncio.sleep(retry_delay)
         logger.warning("Market data host exhausted: host=%s path=%s", host, path)
-    if last_error is not None:
-        if last_response is None:
-            raise last_error
+    if last_error is not None and last_response is None:
+        raise last_error
     if last_response is not None:
         return last_response
     raise RuntimeError("Market data request retry loop ended unexpectedly")
@@ -1775,14 +1821,20 @@ def market_data_http_exception(prefix: str, error: httpx.HTTPError) -> HTTPExcep
         except (ValueError, json.JSONDecodeError):
             detail = ""
     logger.warning("Market data upstream failure: host=%s status=%s detail=%s", FUTURES_MARKET_DATA_API, status, detail or type(error).__name__)
+    if response is None:
+        if isinstance(error, httpx.ProxyError):
+            message = f"{prefix}: piyasa proxy bağlantısı kurulamadı."
+        elif isinstance(error, httpx.TimeoutException):
+            message = f"{prefix}: piyasa veri isteği zaman aşımına uğradı."
+        else:
+            message = f"{prefix}: Binance Futures sunucusuna ulaşılamadı."
+        return HTTPException(status_code=503, detail=message)
     if status in {418, 429}:
         message = f"{prefix}: Binance Futures erişimi geçici olarak engelledi (HTTP 418)."
         if status == 429:
             message = f"{prefix}: Binance Futures hız sınırına ulaşıldı (HTTP 429)."
     elif status >= 500:
         message = f"{prefix}: Binance Futures sunucu hatası (HTTP {status})."
-    elif response is None:
-        message = f"{prefix}: Binance Futures sunucusuna ulaşılamadı."
     else:
         message = f"{prefix}: HTTP {status}."
     if detail:

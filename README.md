@@ -170,6 +170,17 @@ passed to the settings parser by the template regression test.
 
 ## Kais Original v2 Demo controls
 
+Public market reads use a single bounded request budget across upstream hosts.
+A failed static-IP proxy can recover through a separate direct, read-only
+client; a 30-second circuit prevents every poll from retrying the broken proxy.
+Signed Demo/LIVE traffic retains its original proxy and never uses this fallback.
+The public fallback accepts only ping, exchange metadata, 24-hour tickers and
+klines; rate-limit and region denials are not bypassed. Both clients are closed
+at shutdown and rebound when their event loop changes. Market transport errors
+are distinguished from actual upstream HTTP responses. Trading and Master Trade
+show the real API error; dashboard reads are bounded, cancellable and never
+overlap. Invalid quotes are rejected rather than converted into invented prices.
+
 Both frontend entrypoints validate Demo status, account and summary responses
 before storing them. Missing limits, HTML/proxy fallback bodies and malformed
 summaries produce a recoverable in-panel error, not a workspace crash or

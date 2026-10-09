@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {filterMarketQuotes, marketPrice, marketWindow, parseMarketQuotes} from '../master-market-data.ts'
+import {filterMarketQuotes, marketPrice, marketWindow, parseMarketQuotes, parseRequiredMarketQuotes} from '../master-market-data.ts'
 import {coinBaseAsset} from '../src/components/coin-symbol.ts'
 
 const rows = [
@@ -39,6 +39,15 @@ test('Market payload validation rejects malformed data rather than fabricating p
   assert.equal(parseMarketQuotes([{...rows[0], test: true}])[0].test, true)
   assert.equal(parseMarketQuotes(rows)[0].test, undefined)
   assert.throws(() => parseMarketQuotes([{...rows[0], test: 'yes'}]))
+})
+
+test('Legacy market screens require actual finite quote values without changing nullable universe quotes', () => {
+  assert.deepEqual(parseRequiredMarketQuotes(rows.slice(0, 2)).map(row => row.price), [100, 200])
+  assert.throws(() => parseRequiredMarketQuotes(rows), /eksik/)
+  for (const field of ['price', 'change', 'volume']) {
+    for (const value of [undefined, null, '100', Infinity, NaN]) assert.throws(() => parseRequiredMarketQuotes([{...rows[0], [field]: value}]))
+  }
+  assert.equal(parseMarketQuotes(rows)[2].price, null)
 })
 
 test('Multiplier logo normalization preserves real numbered assets', () => {

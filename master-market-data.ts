@@ -22,6 +22,13 @@ export function parseMarketQuotes(payload: unknown): MarketQuote[] {
   return rows
 }
 
+export function parseRequiredMarketQuotes(payload: unknown): (MarketQuote & {price: number; change: number; volume: number})[] {
+  return parseMarketQuotes(payload).map(row => {
+    if (row.price === null || row.change === null || row.volume === null) throw new Error(`Piyasa sayısal verisi eksik: ${row.symbol}`)
+    return {...row, price: row.price, change: row.change, volume: row.volume}
+  })
+}
+
 export function marketWindow(offset: number, extent: number, count: number, size = 52) {
   const start = Math.max(0, Math.min(count, Math.floor(offset / size) - 2))
   return {start, end: Math.min(count, Math.ceil((offset + extent) / size) + 2)}

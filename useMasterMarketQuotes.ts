@@ -3,6 +3,7 @@ import {API_BASE} from './api'
 import {fetchWithTimeout} from './master-trade-request'
 import {parseMarketQuotes, type MarketQuote} from './master-market-data'
 import {coinDisplayName} from './src/components/coin-symbol'
+import {marketDataResponseError} from './master-trade-data-error'
 
 export type MasterMarketFeed = {rows: readonly MarketQuote[]; error: string; stale: boolean}
 let lastQuotes: MarketQuote[] = []
@@ -22,7 +23,7 @@ export function useMasterMarketQuotes(enabled: boolean): MasterMarketFeed {
         if (!response.ok) {
           const retry = Number(response.headers.get('Retry-After'))
           retryAt = Date.now() + Math.max(3000, Number.isFinite(retry) && retry > 0 ? retry * 1000 : 30000)
-          throw new Error(`Piyasa verisi alınamadı (HTTP ${response.status}).`)
+          throw await marketDataResponseError(response,'markets')
         }
         const rows = parseMarketQuotes(await response.json()).map(row => ({...row, name: coinDisplayName(row.symbol)}))
         if (!active) return

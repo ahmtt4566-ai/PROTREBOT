@@ -10,12 +10,13 @@ export class MarketDataFailure extends Error {
   }
 }
 
-export async function marketDataResponseError(response: Response): Promise<MarketDataFailure> {
+export async function marketDataResponseError(response: Response, scope: 'symbol' | 'markets' = 'symbol'): Promise<MarketDataFailure> {
+  const unavailable = scope === 'markets' ? 'Piyasa verisi alınamadı' : 'Bu sembol için yeterli veri yok'
   let payload: unknown
   try {
     payload = await response.json()
   } catch {
-    return new MarketDataFailure('backend', `Bu sembol için yeterli veri yok (backend geçersiz yanıt döndürdü; HTTP ${response.status}).`)
+    return new MarketDataFailure('backend', `${unavailable} (backend geçersiz yanıt döndürdü; HTTP ${response.status}).`)
   }
   const detail = typeof payload === 'object' && payload !== null && 'detail' in payload && typeof payload.detail === 'string' ? payload.detail.trim() : ''
   const code = typeof payload === 'object' && payload !== null && 'code' in payload ? payload.code : undefined
@@ -27,7 +28,7 @@ export async function marketDataResponseError(response: Response): Promise<Marke
   if ((response.status === 400 || response.status === 404) && /invalid symbol|sembol.*aktif değil|symbol.*inactive/i.test(detail)) {
     return new MarketDataFailure('inactive', `Bu sembol için yeterli veri yok (borsada aktif sembol bulunamadı; ${detail}).`)
   }
-  return new MarketDataFailure('backend', `Bu sembol için yeterli veri yok (${detail || 'backend veriyi sağlayamadı'}; HTTP ${response.status}).`)
+  return new MarketDataFailure('backend', `${unavailable} (${detail || 'backend veriyi sağlayamadı'}; HTTP ${response.status}).`)
 }
 
 export function marketDataFailure(error: unknown): MarketDataFailure {

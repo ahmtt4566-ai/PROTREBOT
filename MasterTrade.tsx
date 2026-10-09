@@ -13,6 +13,7 @@ import MasterTradeReference from './MasterTradeReference'
 import {useMasterMarketQuotes} from './useMasterMarketQuotes'
 import {useTradingPreferences} from './useTradingPreferences'
 import {MarketDataFailure, marketDataFailure, marketDataResponseError} from './master-trade-data-error'
+import {parseRequiredMarketQuotes} from './master-market-data'
 
 type TradeSide = 'LONG' | 'SHORT'
 type TradeHistoryRow = {
@@ -215,15 +216,15 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       inFlight = true
       try {
         const response = await fetchWithTimeout(`${API_BASE}/markets?limit=50`, { signal: controller.signal })
-        if (!response.ok) throw new Error('Market data unavailable')
-        const items = await response.json() as MarketRow[]
+        if (!response.ok) throw await marketDataResponseError(response,'markets')
+        const items = parseRequiredMarketQuotes(await response.json())
         if (!active) return
         setMarkets(items)
         const selected = items.find(item => item.symbol === draft.market)
         if (selected) setSnapshot(current => current?.symbol === draft.market ? { ...current, currentPrice: selected.price, priceUpdatedAt: new Date().toISOString() } : current)
         setMarketError('')
       } catch (error) {
-        if (active && !(error instanceof Error && error.name === 'AbortError')) setMarketError('DATA STALE / DATA UNAVAILABLE')
+        if (active && !(error instanceof Error && error.name === 'AbortError')) setMarketError(`DATA STALE / DATA UNAVAILABLE · ${marketDataFailure(error).message}`)
       } finally {
         inFlight = false
         if (active) setMarketLoading(false)
@@ -250,7 +251,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       } catch (error) {
         if (active && !(error instanceof Error && error.name === 'AbortError')) {
           setScannerCandidates([])
-          setMarketError('MARKET ANALYSIS DELAYED · RAW MARKETS ACTIVE')
+          setMarketError(current => current || 'MARKET ANALYSIS DELAYED · RAW MARKETS ACTIVE')
         }
       } finally {
         inFlight = false

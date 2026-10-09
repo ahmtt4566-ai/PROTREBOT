@@ -21,6 +21,15 @@ test('Explicit preview marker never claims the real contract lacks candle histor
   assert.equal(error.message, 'Önizleme: bu sembol için örnek veri yok')
 })
 
+test('Market-list failures preserve upstream details without claiming missing candle history', async () => {
+  const error = await marketDataResponseError(Response.json({detail: 'Piyasa proxy bağlantısı kurulamadı'}, {status: 503}), 'markets')
+  assert.equal(error.kind, 'backend')
+  assert.match(error.message, /Piyasa verisi alınamadı/)
+  assert.match(error.message, /proxy bağlantısı/)
+  assert.match(error.message, /HTTP 503/)
+  assert.doesNotMatch(error.message, /Bu sembol için/)
+})
+
 test('Invalid responses and network errors remain failures without success-shaped fallback', async () => {
   const error = await marketDataResponseError(new Response('<html>Unavailable</html>', {status: 502}))
   assert.equal(error.kind, 'backend')

@@ -10,6 +10,9 @@ import AssistantChat from './AssistantChat'
 import ComplianceContent from './ComplianceContent'
 import {useKaisErrorReaction, useKaisWorkspaceReaction} from './useKaisPageReactions'
 import {useTradingPreferences} from './useTradingPreferences'
+import {fetchWithTimeout} from './master-trade-request'
+import {marketDataResponseError} from './master-trade-data-error'
+import {parseRequiredMarketQuotes} from './master-market-data'
 
 const retryImport = async <T,>(load:() => Promise<T>,retry:() => Promise<T>):Promise<T> => {
   try {
@@ -468,7 +471,8 @@ export default function TestnetFirstApp() {
   const [analysisProgress,setAnalysisProgress] = useState(0)
   const [health,setHealth] = useState<Health|null>(null)
   const [loading,setLoading] = useState(false)
-  const [marketError,setMarketError] = useState(false)
+  const [marketError,setMarketError] = useState('')
+  const marketRefreshController = useRef<AbortController|null>(null)
   const [connectionState,setConnectionState] = useState<'checking'|'offline'|'online'>('checking')
   const [showConnectionNotice,setShowConnectionNotice] = useState(true)
   const [credentials,setCredentials] = useState({demoApiKey:'',demoSecretKey:'',liveApiKey:'',liveSecretKey:''})
@@ -569,31 +573,37 @@ export default function TestnetFirstApp() {
   }, [view,accessAttempt])
 
   const refresh = async () => {
+    if (marketRefreshController.current) return
+    const controller = new AbortController()
+    marketRefreshController.current = controller
     setLoading(true)
-    setMarketError(false)
     try {
       const [marketResult,healthResult] = await Promise.allSettled([
-        fetch(`${API_BASE}/markets?limit=100`),
-        fetch(`${API_BASE}/health`),
+        fetchWithTimeout(`${API_BASE}/markets?limit=100`,{signal:controller.signal}),
+        fetchWithTimeout(`${API_BASE}/health`,{signal:controller.signal}),
       ])
+      if (controller.signal.aborted) return
       const marketUnavailable = marketResult.status !== 'fulfilled' || !marketResult.value.ok
       const healthUnavailable = healthResult.status !== 'fulfilled' || !healthResult.value.ok
       updateConnectionState(marketUnavailable && healthUnavailable ? 'offline' : 'online')
-      if (marketResult.status === 'fulfilled' && marketResult.value.ok) {
-        try {
-          const payload = await marketResult.value.json() as Market[]
-          if (Array.isArray(payload)) setMarkets(payload)
-          else setMarketError(true)
-        } catch {
-          setMarketError(true)
-        }
-      } else {
-        setMarketError(true)
+      try {
+        if (marketResult.status === 'rejected') throw marketResult.reason
+        if (!marketResult.value.ok) throw await marketDataResponseError(marketResult.value,'markets')
+        setMarkets(parseRequiredMarketQuotes(await marketResult.value.json()))
+        setMarketError('')
+      } catch (error) {
+        if (!controller.signal.aborted) setMarketError(error instanceof Error ? error.message : 'Piyasa veri isteği başarısız.')
       }
       if (healthResult.status === 'fulfilled' && healthResult.value.ok) {
-        try { setHealth(await healthResult.value.json() as Health) } catch {}
+        try { setHealth(await healthResult.value.json() as Health) }
+        catch (error) { console.warn('Health response parsing failed:',error instanceof Error ? error.name : 'InvalidResponse') }
       }
-    } finally {setLoading(false)}
+    } finally {
+      if (marketRefreshController.current === controller) {
+        marketRefreshController.current = null
+        setLoading(false)
+      }
+    }
   }
 
   const refreshConnectionStatus = async () => {
@@ -672,7 +682,13 @@ export default function TestnetFirstApp() {
     const notificationTimer = window.setInterval(() => void refreshNotifications(),10000)
     const openExchangeSettings = () => setView('setup')
     window.addEventListener('protrebot-open-exchange-settings', openExchangeSettings)
-    return () => {window.clearInterval(timer);window.clearInterval(notificationTimer);window.removeEventListener('protrebot-open-exchange-settings',openExchangeSettings)}
+    return () => {
+      marketRefreshController.current?.abort()
+      marketRefreshController.current = null
+      window.clearInterval(timer)
+      window.clearInterval(notificationTimer)
+      window.removeEventListener('protrebot-open-exchange-settings',openExchangeSettings)
+    }
   },[])
 
   const notificationTarget = (target:string):{view:View;selector:string} => ({
@@ -833,7 +849,7 @@ export default function TestnetFirstApp() {
           </div>}
         </div>
         <div className="v26Intervals">{Array.from(new Set(['1m','5m','15m','1h','4h',interval])).map(item => <button key={item} className={interval === item ? 'active' : ''} onClick={() => setInterval(item)}>{item}</button>)}</div>
-        {marketError && <div className="v26MarketError" role="alert"><span>Market verisi yüklenemedi.</span><button className="action-button" type="button" aria-label="Market verisini yeniden dene" title="Market verisini yeniden dene" onClick={() => void refresh()} disabled={loading}>{loading ? <RefreshCw className="spin"/> : 'TEKRAR DENE'}</button></div>}
+        {marketError && <div className="v26MarketError" role="alert"><span>Market verisi yüklenemedi. {marketError}</span><button className="action-button" type="button" aria-label="Market verisini yeniden dene" title="Market verisini yeniden dene" onClick={() => void refresh()} disabled={loading}>{loading ? <RefreshCw className="spin"/> : 'TEKRAR DENE'}</button></div>}
       </section>
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Testnet merkezi hazırlanıyor…</div>}>
         <BinanceDemo active symbol={symbol} markets={markets} onSymbolChange={setSymbol} analysis={analysis} workspace="trade" chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis} onAnalysisProgress={setAnalysisProgress}/>}/>
