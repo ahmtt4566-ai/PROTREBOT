@@ -1,10 +1,13 @@
 import {expect, test, type Page} from '@playwright/test'
 import {mockAssistant} from './helpers/assistant-api'
 
+const root = 'http://127.0.0.1:4176'
+
 async function prepare(page: Page, options: {registrationFailure?: boolean; resendStatus?: number; malformed?: boolean} = {}) {
   await page.route('https://**', route => route.abort())
   await page.routeWebSocket('wss://**', socket => socket.close())
-  await mockAssistant(page)
+  const state = await mockAssistant(page)
+  state.sessionStatus = 401
   await page.addInitScript(() => {localStorage.clear(); sessionStorage.clear()})
   await page.route('**/api/v22/{session,profile}', route => route.fulfill({status: 401, json: {detail: 'Oturum gerekli'}}))
   await page.route('**/api/v22/auth/verification-status?**', route => route.fulfill({json: {verified: false}}))
@@ -25,7 +28,8 @@ async function prepare(page: Page, options: {registrationFailure?: boolean; rese
         : {detail: status === 429 ? 'Çok fazla deneme; daha sonra tekrar deneyin' : 'Doğrulama maili gönderilemedi. Lütfen tekrar dene.'},
     })
   })
-  await page.goto('/register')
+  await page.goto(`${root}/register`)
+  await expect(page.getByLabel('Ad soyad')).toBeVisible()
   return {registrations, resends}
 }
 
@@ -104,7 +108,7 @@ test('Malformed resend response is never displayed as successful delivery', asyn
 
 test('Direct verification page does not invent a mail delivery failure or a resend proof', async ({page}) => {
   const {resends} = await prepare(page)
-  await page.goto('/verify-email')
+  await page.goto(`${root}/verify-email`)
   await expect(page.locator('.authVerificationPanel')).toContainText('E-posta doğrulaması bekleniyor.')
   await expect(page.locator('.authVerificationPanel')).not.toContainText('maili gönderilemedi')
   await expect(page.getByRole('button', {name: /Doğrulama mailini tekrar gönder/})).toHaveCount(0)

@@ -57,6 +57,7 @@
 
 .authPage{display:flex!important;align-items:center!important;justify-content:center!important;min-height:100vh!important;min-height:100svh!important;padding:32px 16px!important;background:linear-gradient(145deg,#040b0a 0%,#071713 48%,#040909 100%)!important;overflow:hidden!important}
 .authPage:before{content:"";position:absolute;inset:-20%;z-index:-1;pointer-events:none;background:radial-gradient(circle at 50% 38%,rgba(71,196,133,.16),transparent 25%),radial-gradient(circle at 12% 86%,rgba(31,102,76,.1),transparent 30%),linear-gradient(rgba(139,227,185,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(139,227,185,.025) 1px,transparent 1px);background-size:auto,auto,64px 64px,64px 64px;filter:blur(1px);opacity:.8}
+@media (max-width:1023px){#root .authRoot>.authPage:before{inset:0}}
 .authPage:after{display:block!important;content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(circle at 50% 42%,transparent 0,rgba(2,7,6,.36) 72%)}
 .authCard{width:min(100%,440px)!important;max-width:440px!important;padding:36px!important;border:1px solid rgba(100,227,161,.2)!important;border-radius:18px!important;background:rgba(9,22,18,.72)!important;box-shadow:0 22px 60px rgba(0,0,0,.28),0 0 70px rgba(50,148,104,.08)!important;backdrop-filter:blur(20px)}
 .authLoginBrand{margin:0 0 30px!important}.authLoginBrand img{width:198px!important;max-width:76vw}
@@ -872,6 +873,24 @@
 	#root .authPageLogin .authCardLogin > .authMobileMarkets { width: calc(100% + 32px); margin: 8px -16px 0; }
 	#root .authPageLogin .authCoinScreen { padding-block: 2px; }
 	#root .authRoot:has(.authPageLogin) > .authFooter { padding-block: 6px max(6px, env(safe-area-inset-bottom)) !important; }
+}
+
+@media (max-width:1023px) {
+  #root .authRoot > .authPage { min-width:0; width:100%; box-sizing:border-box; }
+  #root .authRoot .authCard { min-width:0; box-sizing:border-box; }
+  #root .authRoot .authCardHead h2 { font-family:"Plus Jakarta Sans Variable",system-ui,sans-serif; font-size:clamp(22px,5.5vw,26px); font-weight:700; line-height:1.25; text-wrap:balance; }
+  #root .authRoot .authCard input:not([type="checkbox"]) { min-width:0; font-size:16px!important; }
+  #root .authRoot .authPassword input { padding-right:56px; }
+  #root .authRoot .authPassword button { width:44px; height:44px; min-width:44px; min-height:44px; }
+  #root .authRoot .authLinks { align-items:center; gap:8px 12px; }
+  #root .authRoot .authLinks button { min-height:44px; padding:8px 10px; box-sizing:border-box; line-height:1.4; }
+  #root .authRoot .authCheck { min-height:44px; align-items:center; }
+  #root .authRoot .authCheck a { display:inline-block; min-height:24px; line-height:24px; }
+  #root .authRoot .authMessage { overflow-wrap:anywhere; }
+  #root .authRoot > .authFooter { margin-top:16px!important; padding:12px 16px max(12px,env(safe-area-inset-bottom)); gap:4px 12px; }
+  #root .authRoot > .authFooter a { display:inline-flex; align-items:center; justify-content:center; min-height:44px; line-height:1.4; }
+  #root .authRoot .tickerTapeToggle,#root .authRoot .authCoinScreen header button { width:44px; min-width:44px; height:44px; min-height:44px; }
+  #root .authRoot > .tickerTape { min-height:44px; }
 }
 
 @media (min-width: 1024px) {

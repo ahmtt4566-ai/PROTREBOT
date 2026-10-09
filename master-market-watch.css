@@ -52,4 +52,18 @@
     .masterReferenceAnalysis .refMarketUniverse .refMarketViewport { overflow-x: auto; overflow-y: hidden; min-height: 54px; }
     .masterReferenceAnalysis .refMarketFilters { flex-wrap: nowrap; }
   }
+  @media (max-width: 1023px) {
+    #root > main.v26App.workspaceRoute.masterTradeRoute {
+      .masterReferenceAnalysis .refMarketSort > span { flex: 0 0 auto; white-space: nowrap; }
+      .masterReferenceAnalysis .refMarketSort select { min-width: 0; flex: 1; }
+      .masterReferenceAnalysis .refMarketUniverse .refMarketSearch > label { gap: 10px; }
+      .masterReferenceAnalysis .refMarketSearch input,
+      .masterReferenceAnalysis .refMarketSort select { min-height: 44px; font-size: 16px; }
+      .masterReferenceAnalysis .refMarketUniverse .refMarketFilters { flex-wrap: wrap; overflow-x: visible; gap: 6px; }
+      .masterReferenceAnalysis .refMarketFilters > button { min-height: 44px; padding: 8px 10px; font-size: 12px; }
+      .masterReferenceAnalysis .refMarketFavorite { flex-basis: 44px; width: 44px; height: 44px; }
+      .masterReferenceAnalysis .refMarketFavorite svg { width: 16px; height: 16px; }
+      .masterReferenceAnalysis .refMarketRow .refMarketPrice { max-width: 90px; }
+    }
+  }
 }

@@ -27,3 +27,33 @@
 @media(min-width:1500px){.accountWorkspace{padding-top:22px}.accountCard{padding:22px}.accountHeading h1{font-size:34px}.accountCard h2{font-size:19px}.accountSecurityRows>div{padding:15px 0}}
 @media(max-width:1000px){.accountGrid{gap:12px}.accountCard{padding:16px}.accountFacts{grid-template-columns:repeat(2,1fr)}.accountFacts>div+div{border:0;padding-left:0}.accountIdentity{gap:12px;flex-wrap:wrap}.accountIdentity>button{margin-left:0}.accountSecurityRows>div{flex-wrap:wrap}.accountSecurityRows button{margin-left:auto}.accountPreferences>label{grid-template-columns:1fr 1fr}.accountPlan>div{grid-template-columns:1fr}.accountPlan ul{margin-top:12px}}
 @media(max-width:700px){.accountWorkspace{padding:16px}.accountGrid{grid-template-columns:1fr}.accountHeading{align-items:flex-start}.accountHeading h1{font-size:24px}.accountHeading p{font-size:12px}.accountHeading>.accountBadge{font-size:10px;padding:7px}.accountIdentity>button{margin-left:auto}.accountPlan>div{grid-template-columns:1fr 1fr}.accountActivities li{flex-wrap:wrap}.accountActivities time{white-space:normal}.accountDanger>div{flex-wrap:wrap}.accountDanger button{margin-left:0}.accountTopbar{padding:0 16px}.accountTopIdentity{font-size:11px}.accountSessions li{flex-wrap:wrap}.accountSessions li>div{min-width:160px}}
+@media(max-width:1023px){
+  .accountSettings :is(button,a.accountBack,a.accountPrimary),.accountDialog button{min-height:44px}
+  .accountTopbar{min-height:60px;height:auto;gap:8px}
+  .accountTopbar>.accountBrand{display:inline-flex;align-items:center;min-height:44px;flex-shrink:0}
+  .accountTopbar>button:last-child{min-width:44px;flex-shrink:0}
+  .accountTopIdentity{min-width:0;padding-inline:6px}
+  .accountPreferences :is(input,select),.accountSymbolInput input,.accountDialog input{min-height:44px;font-size:16px}
+  .accountCard h2{flex-wrap:wrap;line-height:1.35}
+  .accountFacts dd button,.accountSymbols button{min-width:44px}
+  .accountDialog{max-height:calc(100dvh - 24px);max-width:calc(100% - 24px);padding:20px;overflow-x:hidden;overscroll-behavior:contain}
+  .accountDialog>header{align-items:flex-start;gap:10px}
+  .accountDialog>header>button{min-width:44px;flex-shrink:0}
+  .accountProof{min-width:0;padding:12px}
+  .accountSessions li>div{min-width:0;overflow-wrap:anywhere}
+}
+@media(max-width:480px){
+  .accountHeading{flex-wrap:wrap;gap:10px}
+  .accountHeading h1{font-size:24px}
+  .accountWorkspace{padding:14px 12px 24px}
+  .accountPreferences>label{grid-template-columns:minmax(0,1fr);gap:7px}
+  .accountSymbolInput{width:100%}
+  .accountPreferences>.accountPrimary{width:100%}
+  .accountSecurityRows>div{display:grid;grid-template-columns:36px minmax(0,1fr);gap:8px 12px}
+  .accountSecurityRows>div>i{grid-column:1;grid-row:1}
+  .accountSecurityRows>div>span{grid-column:2;grid-row:1}
+  .accountSecurityRows button{grid-column:2;margin-left:0;justify-self:start}
+  .accountIdentity>button{margin-left:0;width:100%}
+  .accountPlan>div{grid-template-columns:minmax(0,1fr)}
+  .accountRecovery ul{grid-template-columns:minmax(0,1fr)}
+}

@@ -1875,6 +1875,27 @@ npx playwright test assistant-chat.spec.ts --project chromium
 npx playwright test kais-eye.spec.ts --project chromium
 ```
 
+Mobil sunum regresyonları `frontend/tests/mobile-layout.spec.ts` içinde
+320, 390 ve 768 piksel genişlikte giriş/kayıt/parola kurtarma, hesap,
+abonelik, tüm Master Trade sekmeleri, çalışma alanları ve emirsiz Original
+Demo seçimini sahte API yanıtlarıyla denetler. Profil penceresi ayrıca
+360/412 piksel ve yatay, kısa ekranlarda sınanır. Kontroller sayfa genişliği,
+kesilen metin, üst şerit çakışması, birincil dokunma hedefleri ve form
+yazı boyutunu ölçer; navigasyonun işlem isteği üretmediğini doğrular.
+Reddedilen site sahibi oturumunda yalnız mevcut cookie logout isteği beklenir.
+Harici HTTP ve WebSocket bağlantıları engellenir.
+
+```powershell
+$env:COIN_LOGO_OFFLINE = '1'
+npm run build
+npm --prefix frontend exec -- playwright test mobile-layout.spec.ts --project chromium
+```
+
+`MOBILE_LAYOUT_SCREENSHOTS=1` isteğe bağlı ekran görüntüsü üretir; çıktıları
+repo dışına yönlendirmek için Playwright `--output` seçeneğini kullanın.
+Bu kontroller işlem yetkilerini, feature flag varsayılanlarını veya API
+sözleşmelerini değiştirmez.
+
 Son UI sözleşme kontrolleri: `node --test tools\eslint-private-fields.test.mjs tools\kais-ui-contracts.test.mjs`.
 Kök ve frontend Vite girişleri ortak bileşenler için `react`/`react-dom`
 dedupe kullanır; iki ayrı node_modules kopyası soğuk başlangıçta farklı hook

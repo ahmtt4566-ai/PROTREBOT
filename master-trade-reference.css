@@ -318,3 +318,18 @@
 @media (max-width: 767px) {
   #root > main.v26App.workspaceRoute.masterTradeRoute:has(.masterReferenceAnalysis) > .v26Header.v26HomeHeader { right: 10px !important; }
 }
+@media (max-width:1023px) {
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .refBrand { min-height:44px; }
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .refHeader nav { height:auto; min-height:44px; }
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .refHeader nav button { flex:1; min-width:0; min-height:44px; padding:8px; white-space:normal; line-height:1.35; }
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .refHeader nav button span { overflow-wrap:normal; }
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .refToolbar :is(button,select) { min-height:44px; }
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .refIndicatorGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); overflow-x:auto; }
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .masterTradeMetricTile { min-width:0; }
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .refIndicatorGrid strong { font-size:clamp(14px,3.8vw,18px); overflow-wrap:anywhere; }
+}
+@media (max-width:480px) {
+  #root > main.v26App.masterTradeRoute .masterReferenceAnalysis .refHeader nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; width:100%; overflow:visible; }
+  #root > main.v26App.masterTradeRoute .masterTradeTabs { display:grid!important; grid-template-columns:repeat(2,minmax(0,1fr))!important; height:auto!important; }
+  #root > main.v26App.masterTradeRoute .masterTradeTabs > button { width:auto!important; min-width:0!important; min-height:44px; padding:8px; font-size:12px; }
+}

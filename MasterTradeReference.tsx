@@ -181,7 +181,7 @@ export default function MasterTradeReference(props: Props) {
           <PremiumBoundary label="Trigger monitor" compact>
             <MasterTradeAccordions decision={decision} trigger={trigger} analysis={analysis} timeline={props.timeline}/>
           </PremiumBoundary>
-          <p className="refSafety">Final Decision is a presentation score; it does not send orders or grant Auto Trade eligibility.</p>
+          <p className="refSafety">Final Decision does not send orders or grant Auto Trade eligibility; it is a presentation score.</p>
         </section>
       </aside>
     </main>
