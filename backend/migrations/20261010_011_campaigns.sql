@@ -64,7 +64,7 @@ BEGIN
         RETURN NEW;
     END IF;
     IF pg_trigger_depth() > 1 AND NEW.title = '[erased]' AND NEW.subject = '[erased]' AND NEW.body = '[erased]'
-       AND NEW.status = CASE WHEN OLD.status IN ('sent','failed','cancelled') THEN OLD.status ELSE 'cancelled' END
+       AND NEW.status = (CASE WHEN OLD.status IN ('sent','failed','cancelled') THEN OLD.status ELSE 'cancelled' END)
        AND (to_jsonb(NEW) - ARRAY['title','subject','body','status'])
          = (to_jsonb(OLD) - ARRAY['title','subject','body','status'])
        AND EXISTS (SELECT 1 FROM commercial_erased_users WHERE user_hash =

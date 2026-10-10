@@ -47,7 +47,7 @@ BEGIN
     IF pg_trigger_depth() > 1 AND NEW.recipient_user_id = 'ERASED' AND NEW.payload = '{}'::jsonb
        AND NEW.dedupe_key = 'erased:' || OLD.id
        AND NEW.last_error_code = 'recipient_erased'
-       AND NEW.status = CASE WHEN OLD.status = 'sent' THEN 'sent' ELSE 'dead' END
+       AND NEW.status = (CASE WHEN OLD.status = 'sent' THEN 'sent' ELSE 'dead' END)
        AND (to_jsonb(NEW) - ARRAY['recipient_user_id','payload','dedupe_key','status','last_error_code'])
            = (to_jsonb(OLD) - ARRAY['recipient_user_id','payload','dedupe_key','status','last_error_code'])
        AND EXISTS (SELECT 1 FROM commercial_erased_users e WHERE e.user_hash =
