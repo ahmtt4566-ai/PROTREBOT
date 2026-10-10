@@ -2276,23 +2276,40 @@ async def v22_admin_unlink_trading_account(user_id: str, account_id: str, reques
 
 @router.patch("/admin/users/{user_id}/role")
 async def v22_admin_update_role(user_id: str, payload: RoleUpdateRequest, request: Request):
-    owner = authenticated_user(request, owner=True)
+    from . import account_store
+    from .audit_log import AuditActor, write_audit
+    from .moderator_access import locked_owner_target
+
+    owner = copy.deepcopy(authenticated_user(request, owner=True))
     if user_id == owner["id"]:
         raise HTTPException(403, "Kendi rolünüzü değiştiremezsiniz")
     if payload.role == "OWNER":
         raise HTTPException(409, "Bu endpoint OWNER atayamaz")
+    if getattr(request.app.state, "db_pool", None) is None:
+        raise HTTPException(503, "Audit storage unavailable")
     rt = runtime(request)
     async with rt["lock"]:
         user = next((item for item in rt["state"]["users"] if item.get("id") == user_id), None)
         if not user:
             raise HTTPException(404, "Kullanıcı bulunamadı")
-        await refresh_auth_security(request, user)
-        if user.get("role") == "OWNER" or user_id == rt["state"].get("owner_user_id"):
-            raise HTTPException(409, "OWNER hesabının rolü düşürülemez")
-        await invalidate_user_sessions(
-            request, user, security_updates={"role": payload.role},
-            expected_version=int(user.get("auth_version", 1)),
-        )
+        async with account_store.edit(request, user_id):
+            connection = account_store.active_connection(request, user_id)
+            current_owner, target = await locked_owner_target(
+                connection, owner["id"], int(owner.get("auth_version", 1)), user_id,
+            )
+            old_role = target["security"].get("role")
+            if old_role == "OWNER" or user_id == rt["state"].get("owner_user_id"):
+                raise HTTPException(409, "OWNER hesabının rolü düşürülemez")
+            user.update(target["security"])
+            user["auth_version"] = target["auth_version"]
+            await invalidate_user_sessions(
+                request, user, security_updates={"role": payload.role},
+                expected_version=target["auth_version"],
+            )
+            await write_audit(
+                connection, AuditActor.from_request(request, {"id": owner["id"], **current_owner["security"]}),
+                "ROLE_CHANGED", "USER", user_id, {"role": old_role}, {"role": payload.role},
+            )
         add_audit(rt["state"], "ROLE_CHANGED", f"Kullanıcı rolü {payload.role} olarak güncellendi.", actor=owner["id"], subject=user_id)
         save_state(rt["state"])
     await persist_v22_commercial(request.app)

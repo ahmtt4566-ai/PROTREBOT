@@ -101,15 +101,13 @@ def test_owner_is_rechecked_under_lock_before_permission_write(setup, change, st
 def test_failed_commit_rolls_back_grant_and_logs_type_only(setup, caplog):
     from contextlib import asynccontextmanager
     client, pool = setup
+    transaction = pool.transaction
 
     @asynccontextmanager
     async def failed_commit():
-        before = copy.deepcopy(pool.permissions)
-        try:
+        async with transaction():
             yield
             raise RuntimeError("private@example.test secret-token")
-        finally:
-            pool.permissions = before
 
     pool.transaction = failed_commit
     response = client.post("/api/v22/admin/users/moderator/permissions",

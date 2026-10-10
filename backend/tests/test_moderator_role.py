@@ -27,6 +27,10 @@ class CanonicalPool:
         self.settings = {}
         self.queries = []
         self.fail = False
+        self.audits = []
+        self.audit_fail = False
+        self.commit_fail = False
+        self.transaction_depth = 0
 
     @asynccontextmanager
     async def acquire(self):
@@ -34,12 +38,40 @@ class CanonicalPool:
 
     @asynccontextmanager
     async def transaction(self):
-        previous = copy.deepcopy((self.users, self.permissions))
+        previous = copy.deepcopy((self.users, self.permissions, self.settings, self.audits))
+        self.transaction_depth += 1
         try:
             yield
+            if self.commit_fail:
+                raise RuntimeError("offline commit failure")
         except BaseException:
-            self.users, self.permissions = previous
+            self.users, self.permissions, self.settings, self.audits = previous
             raise
+        finally:
+            self.transaction_depth -= 1
+
+    def is_in_transaction(self):
+        return self.transaction_depth > 0
+
+    async def execute(self, sql, *args):
+        self.check(sql)
+        if "INSERT INTO audit_log" in sql:
+            assert self.is_in_transaction()
+            if self.audit_fail:
+                raise RuntimeError("private@example.test secret-token")
+            self.audits.append({
+                "id": len(self.audits) + 1, "created_at": datetime.now(timezone.utc),
+                **dict(zip((
+                    "actor_user_id", "actor_role", "action", "target_type", "target_id",
+                    "request_id", "approval_request_id", "reason", "before", "after", "ip_masked",
+                ), args)),
+            })
+            return "INSERT 0 1"
+        if "INSERT INTO commercial_account_settings" in sql:
+            self.settings[args[0]] = json.loads(args[1])
+            return "INSERT 0 1"
+        assert "pg_advisory_xact_lock" in sql
+        return "SELECT 1"
 
     def check(self, sql):
         self.queries.append(sql)
@@ -49,6 +81,9 @@ class CanonicalPool:
     async def fetchrow(self, sql, *args):
         self.check(sql)
         row = self.users.get(args[0])
+        if "SELECT payload FROM commercial_account_settings" in sql:
+            doc = self.settings.get(args[0])
+            return {"payload": copy.deepcopy(doc)} if doc is not None else None
         if "AS mfa_enabled" in sql:
             if row is None:
                 return None

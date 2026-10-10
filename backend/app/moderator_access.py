@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from . import v22_commercial as auth
+from .audit_log import AuditActor, write_audit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Moderator"])
@@ -110,6 +111,30 @@ async def moderator_me(identity: ModeratorIdentity = Depends(moderator_identity)
     return {"role": identity.role, "permissions": list(identity.permissions)}
 
 
+async def locked_owner_target(connection, owner_id: str, version: int, user_id: str):
+    rows = await connection.fetch(
+        """SELECT user_id, auth_version, security FROM commercial_auth_users
+           WHERE user_id = ANY($1::text[]) ORDER BY user_id FOR UPDATE""",
+        [owner_id, user_id],
+    )
+    users = {
+        row["user_id"]: {
+            "auth_version": int(row["auth_version"]),
+            "security": json.loads(row["security"]) if isinstance(row["security"], str) else row["security"],
+        } for row in rows
+    }
+    current_owner = users.get(owner_id)
+    if not current_owner or current_owner["auth_version"] != version:
+        raise HTTPException(401, "Session revoked")
+    if (current_owner["security"].get("role") != "OWNER"
+            or current_owner["security"].get("active") is not True):
+        raise HTTPException(403, "Owner access required")
+    target = users.get(user_id)
+    if target is None:
+        raise HTTPException(404, "User not found")
+    return current_owner, target
+
+
 async def manage_permission(
     user_id: str, permission: Permission, request: Request, *, grant: bool,
 ) -> dict[str, Any]:
@@ -122,28 +147,17 @@ async def manage_permission(
     try:
         async with pool.acquire() as connection, connection.transaction():
             # Stable lock order serializes grants with both parties' role changes.
-            rows = await connection.fetch(
-                """SELECT user_id, auth_version, security FROM commercial_auth_users
-                   WHERE user_id = ANY($1::text[]) ORDER BY user_id FOR UPDATE""",
-                [owner_id, user_id],
+            current_owner, target = await locked_owner_target(
+                connection, owner_id, version, user_id,
             )
-            users = {
-                row["user_id"]: {
-                    "auth_version": int(row["auth_version"]),
-                    "security": json.loads(row["security"]) if isinstance(row["security"], str) else row["security"],
-                } for row in rows
-            }
-            current_owner = users.get(owner_id)
-            if not current_owner or current_owner["auth_version"] != version:
-                raise HTTPException(401, "Session revoked")
-            if (current_owner["security"].get("role") != "OWNER"
-                    or current_owner["security"].get("active") is not True):
-                raise HTTPException(403, "Owner access required")
-            target = users.get(user_id)
-            if target is None:
-                raise HTTPException(404, "User not found")
             if target["security"].get("role") != "MODERATOR":
                 raise HTTPException(409, "Permissions require a MODERATOR target")
+            actor = AuditActor.from_request(request, {"id": owner_id, **current_owner["security"]})
+            previous = await connection.fetchrow(
+                """SELECT user_id, permission, granted_by, granted_at
+                   FROM moderator_permissions WHERE user_id = $1 AND permission = $2""",
+                user_id, permission,
+            )
             if grant:
                 row = await connection.fetchrow(
                     """INSERT INTO moderator_permissions (user_id, permission, granted_by)
@@ -159,11 +173,21 @@ async def manage_permission(
                     )
                 if row is None:
                     raise HTTPException(409, "Permission grant was not stored")
+                await write_audit(
+                    connection, actor, "PERMISSION_GRANTED", "MODERATOR_PERMISSION", user_id,
+                    {"permission": permission, "granted": previous is not None},
+                    {"permission": permission, "granted": True},
+                )
                 return dict(row)
             row = await connection.fetchrow(
                 """DELETE FROM moderator_permissions WHERE user_id = $1 AND permission = $2
                    RETURNING permission""",
                 user_id, permission,
+            )
+            await write_audit(
+                connection, actor, "PERMISSION_REVOKED", "MODERATOR_PERMISSION", user_id,
+                {"permission": permission, "granted": previous is not None},
+                {"permission": permission, "granted": False},
             )
             return {"user_id": user_id, "permission": permission, "removed": row is not None}
     except HTTPException:
