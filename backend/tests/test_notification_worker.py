@@ -233,3 +233,23 @@ def test_demoted_owner_pending_digest_is_not_sent(worker_notifications):
         run(client)
     assert send.call_count == 0
     assert next(iter(pool.outbox.values()))["status"] == "dead"
+
+
+def test_delayed_digest_and_backoff_arm_wake_without_waiting_for_another_admin_request(worker_notifications):
+    client, pool = worker_notifications
+    async def delayed():
+        with patch.object(worker, "process_due", AsyncMock()) as process, \
+                patch.object(pool, "fetchval", AsyncMock(return_value=600)):
+            await worker.sweep_and_arm(client.app)
+            assert process.await_count == 1
+            timer = client.app.state.notification_timer
+            assert timer.when() - asyncio.get_running_loop().time() > 590
+            # A new decision during the cooldown replaces the distant digest wake.
+            client.app.state.notification_last_sweep = asyncio.get_running_loop().time()
+            schedule_sweep(client.app)
+            assert timer.cancelled()
+            earlier = client.app.state.notification_timer
+            assert earlier.when() - asyncio.get_running_loop().time() < 16
+            await worker.shutdown_notifications(client.app)
+            assert earlier.cancelled()
+    asyncio.run(delayed())

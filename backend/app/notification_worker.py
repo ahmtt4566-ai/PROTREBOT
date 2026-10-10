@@ -108,21 +108,51 @@ async def process_due(application, *, limit=10):
         logger.warning("Notification sweep failed (%s)", type(exc).__name__)
 
 
+async def sweep_and_arm(application):
+    await process_due(application)
+    pool = getattr(application.state, "db_pool", None)
+    if pool is None:
+        return
+    try:
+        delay = await pool.fetchval(
+            """SELECT extract(epoch FROM MIN(next_attempt_at) - clock_timestamp())
+               FROM notification_outbox WHERE status IN ('pending','failed','sending')
+                 AND recipient_user_id <> 'ERASED'""",
+        )
+        if delay is not None:
+            loop = asyncio.get_running_loop()
+            application.state.notification_timer = loop.call_later(
+                max(SWEEP_COOLDOWN_SECONDS, float(delay)), schedule_sweep, application,
+            )
+    except Exception as exc:
+        logger.warning("Notification next wake unavailable (%s)", type(exc).__name__)
+
+
 def schedule_sweep(application):
     """Coalesce endpoint/startup work without delaying or failing approval responses."""
     try:
         loop = asyncio.get_running_loop()
         current = getattr(application.state, "notification_task", None)
         last = getattr(application.state, "notification_last_sweep", float("-inf"))
-        if current is not None and not current.done() or loop.time() - last < SWEEP_COOLDOWN_SECONDS:
+        if current is not None and not current.done():
+            return
+        timer = getattr(application.state, "notification_timer", None)
+        if timer is not None:
+            timer.cancel()
+        remaining = SWEEP_COOLDOWN_SECONDS - (loop.time() - last)
+        if remaining > 0:
+            application.state.notification_timer = loop.call_later(remaining + .01, schedule_sweep, application)
             return
         application.state.notification_last_sweep = loop.time()
-        application.state.notification_task = loop.create_task(process_due(application))
+        application.state.notification_task = loop.create_task(sweep_and_arm(application))
     except Exception as exc:
         logger.warning("Notification scheduling failed (%s)", type(exc).__name__)
 
 
 async def shutdown_notifications(application):
+    timer = getattr(application.state, "notification_timer", None)
+    if timer is not None:
+        timer.cancel()
     task = getattr(application.state, "notification_task", None)
     if task is not None and not task.done():
         task.cancel()
