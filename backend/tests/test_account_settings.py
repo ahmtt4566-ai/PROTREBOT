@@ -230,6 +230,7 @@ def test_totp_enrollment_login_challenge_bad_codes_replay_and_redaction(setup):
     client.get("/api/v22/account/overview", headers=h)
     secret, recovery = enroll(setup, client, h)
     doc = get_doc(setup)
+    enrollment_code = pyotp.TOTP(secret).at(doc["last_totp_step"] * 30)
     assert secret not in json.dumps(doc)
     assert not any(code in json.dumps(doc) for code in recovery)
     assert "pending_totp" not in doc
@@ -241,7 +242,8 @@ def test_totp_enrollment_login_challenge_bad_codes_replay_and_redaction(setup):
     challenge = login.json()["challenge_id"]
     assert client.post("/api/v22/auth/2fa/login", json={"challenge_id": challenge, "code": "000000"}).status_code == 401
     # Enrollment's OTP is one-use; recovery is independently one-use.
-    assert client.post("/api/v22/auth/2fa/login", json={"challenge_id": challenge, "code": pyotp.TOTP(secret).now()}).status_code == 401
+    with patch.object(account.time, "time", return_value=(doc["last_totp_step"] + 1) * 30 + 1):
+        assert client.post("/api/v22/auth/2fa/login", json={"challenge_id": challenge, "code": enrollment_code}).status_code == 401
     success = client.post("/api/v22/auth/2fa/login", json={"challenge_id": challenge, "code": recovery[0]})
     assert success.status_code == 200
     assert success.json()["token"].startswith(auth.BROWSER_SESSION_MARKER_PREFIX)
