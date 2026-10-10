@@ -1,5 +1,6 @@
 """Offline moderator customer reads through production guards and middleware."""
 import copy
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -14,6 +15,8 @@ class CustomerReadPool(CanonicalPool):
         self.persisted_users = {}
         self.subscriptions = {}
         self.erased = set()
+        self.counters = {}
+        self.rate_fail = False
 
     def visible(self, actor, query=None):
         return [
@@ -35,6 +38,27 @@ class CustomerReadPool(CanonicalPool):
         }
 
     async def fetchrow(self, sql, *args):
+        if "INSERT INTO commercial_auth_limits" in sql:
+            self.check(sql)
+            if self.rate_fail:
+                raise RuntimeError("private rate storage failure")
+            start, count = self.counters.get(args[0], (time.monotonic(), 0))
+            if time.monotonic() - start >= 60:
+                start, count = time.monotonic(), 0
+            self.counters[args[0]] = (start, count + 1)
+            return {"attempts": count + 1}
+        if "AS allowed" in sql:
+            self.check(sql)
+            row = self.users.get(args[0])
+            if not row:
+                return None
+            return {
+                "auth_version": row["auth_version"], "role": row["security"]["role"],
+                "active": row["security"]["active"],
+                "email_verified": row["security"]["email_verified"],
+                "mfa_enabled": self.settings.get(args[0], {}).get("two_factor_enabled") is True,
+                "allowed": args[1] in self.permissions.get(args[0], {}),
+            }
         if "FOR SHARE OF u" in sql:
             self.check(sql)
             assert "NOT EXISTS" in sql and "commercial_erased_users" in sql

@@ -24,12 +24,18 @@ from fastapi import APIRouter, HTTPException, Query, Request
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Administrative audit"])
 
-AuditAction = Literal["ROLE_CHANGED", "PERMISSION_GRANTED", "PERMISSION_REVOKED"]
+AuditAction = Literal[
+    "ROLE_CHANGED", "PERMISSION_GRANTED", "PERMISSION_REVOKED",
+    "customer.viewed", "customer.subscription.viewed", "customer.payments.viewed",
+]
 AUDIT_ACTIONS: tuple[str, ...] = get_args(AuditAction)
 ACTION_FIELDS = {
     "ROLE_CHANGED": frozenset({"role"}),
     "PERMISSION_GRANTED": frozenset({"permission", "granted"}),
     "PERMISSION_REVOKED": frozenset({"permission", "granted"}),
+    "customer.viewed": frozenset(),
+    "customer.subscription.viewed": frozenset(),
+    "customer.payments.viewed": frozenset(),
 }
 
 
@@ -80,7 +86,7 @@ def allowed_snapshot(action: AuditAction, value: Mapping[str, Any]) -> dict[str,
     if action == "ROLE_CHANGED":
         if result["role"] not in ("OWNER", "MODERATOR", "CUSTOMER"):
             raise ValueError("Invalid audit role")
-    else:
+    elif action in ("PERMISSION_GRANTED", "PERMISSION_REVOKED"):
         from .moderator_access import PERMISSIONS
         if result["permission"] not in PERMISSIONS or type(result["granted"]) is not bool:
             raise ValueError("Invalid audit permission state")
@@ -98,7 +104,9 @@ async def write_audit(
         raise RuntimeError("Audit must share the mutation transaction")
     if actor.role not in ("OWNER", "MODERATOR", "CUSTOMER"):
         raise ValueError("Invalid audit actor role")
-    expected_target = "USER" if action == "ROLE_CHANGED" else "MODERATOR_PERMISSION"
+    expected_target = "MODERATOR_PERMISSION" if action in (
+        "PERMISSION_GRANTED", "PERMISSION_REVOKED",
+    ) else "USER"
     if target_type != expected_target:
         raise ValueError("Invalid audit target type")
     request_id = str(uuid.UUID(actor.request_id))

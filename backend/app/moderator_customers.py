@@ -6,6 +6,7 @@ Search is exact user ID or case-insensitive full email equality, never LIKE.
 No customer/commerce/exchange writes or provider calls belong in this module.
 """
 import logging
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal
@@ -15,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .email_service import masked_recipient
 from .moderator_access import ModeratorIdentity, require_permission
+from .audit_log import AuditAction, AuditActor, write_audit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/mod/customers", tags=["Moderator customer reads"])
@@ -66,6 +68,7 @@ CUSTOMER_WHERE = """
 PROFILE_COLUMNS = """
     u.user_id, u.security->>'email' AS email, u.security->>'role' AS role,
     COALESCE(u.security->'active' = 'true'::jsonb, FALSE) AS active,
+    COALESCE(u.security->'email_verified' = 'true'::jsonb, FALSE) AS email_verified,
     registration.created_at,
     COALESCE(u.security->'email_verified' = 'true'::jsonb, FALSE) AS email_verified,
     COALESCE(a.payload->'two_factor_enabled' = 'true'::jsonb, FALSE) AS mfa_enabled
@@ -84,16 +87,54 @@ PROFILE_FROM = """
 SEARCH_WHERE = """
     AND ($2::text IS NULL OR u.user_id = $2 OR lower(u.security->>'email') = lower($2))
 """
-CustomerId = str
-
-
 @asynccontextmanager
-async def customer_read_connection(request: Request):
+async def customer_read_connection(request: Request, identity: ModeratorIdentity, permission: str):
     pool = getattr(request.app.state, "db_pool", None)
     if pool is None:
         raise HTTPException(503, "Customer read storage unavailable")
     try:
+        bucket = "moderator-customer-read:" + hashlib.sha256(identity.user_id.encode("utf-8")).hexdigest()
+        counter = await pool.fetchrow(
+            """INSERT INTO commercial_auth_limits (bucket, window_start, attempts)
+               VALUES ($1, clock_timestamp(), 1)
+               ON CONFLICT (bucket) DO UPDATE SET
+                   attempts = CASE WHEN commercial_auth_limits.window_start <= clock_timestamp() - INTERVAL '60 seconds'
+                                   THEN 1 ELSE commercial_auth_limits.attempts + 1 END,
+                   window_start = CASE WHEN commercial_auth_limits.window_start <= clock_timestamp() - INTERVAL '60 seconds'
+                                       THEN clock_timestamp() ELSE commercial_auth_limits.window_start END
+               RETURNING attempts""",
+            bucket,
+        )
+        if counter is None:
+            raise HTTPException(503, "Customer read rate-limit storage unavailable")
+        if int(counter["attempts"]) > 30:
+            raise HTTPException(429, "Customer read rate limit exceeded", headers={"Retry-After": "60"})
         async with pool.acquire() as conn, conn.transaction():
+            actor = await conn.fetchrow(
+                """SELECT u.auth_version, u.security->>'role' AS role,
+                          COALESCE(u.security->'active' = 'true'::jsonb, FALSE) AS active,
+                          COALESCE(a.payload->'two_factor_enabled' = 'true'::jsonb, FALSE) AS mfa_enabled,
+                          EXISTS (SELECT 1 FROM moderator_permissions p
+                                  WHERE p.user_id = u.user_id AND p.permission = $2) AS allowed
+                   FROM commercial_auth_users u
+                   LEFT JOIN commercial_account_settings a ON a.user_id = u.user_id
+                   WHERE u.user_id = $1""",
+                identity.user_id, permission,
+            )
+            if not actor or actor["auth_version"] != identity.auth_version or actor["active"] is not True:
+                raise HTTPException(401, "Session revoked")
+            if actor["role"] != "OWNER":
+                if actor["role"] != "MODERATOR":
+                    raise HTTPException(403, "Moderator access required")
+                if actor["email_verified"] is not True:
+                    raise HTTPException(403, "Verified email required")
+                if actor["mfa_enabled"] is not True:
+                    raise HTTPException(403, {"code": "mfa_required"})
+                if actor["allowed"] is not True:
+                    raise HTTPException(403, "Permission required")
+            request.state.mod_read_actor = AuditActor.from_request(
+                request, {"id": identity.user_id, "role": actor["role"]},
+            )
             yield conn
     except HTTPException:
         raise
@@ -121,6 +162,10 @@ async def customer_row(conn, identity: ModeratorIdentity, user_id: str):
     return row
 
 
+async def audit_customer_read(conn, request: Request, user_id: str, action: AuditAction):
+    await write_audit(conn, request.state.mod_read_actor, action, "USER", user_id, {}, {})
+
+
 @router.get("", response_model=CustomerPage)
 async def customers(
     request: Request,
@@ -130,7 +175,7 @@ async def customers(
     search: str | None = Query(None, min_length=1, max_length=180),
 ):
     query = search.strip() if search is not None else None
-    async with customer_read_connection(request) as conn:
+    async with customer_read_connection(request, identity, "customers.view") as conn:
         total = await conn.fetchval(
             f"SELECT COUNT(*) FROM commercial_auth_users u WHERE {CUSTOMER_WHERE} {SEARCH_WHERE}",
             identity.user_id, query,
@@ -147,42 +192,46 @@ async def customers(
 @router.get("/{user_id}", response_model=CustomerSummary)
 async def customer(
     request: Request,
-    user_id: CustomerId = Path(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$"),
+    user_id: str = Path(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$"),
     identity: ModeratorIdentity = Depends(require_permission("customers.view")),
 ):
-    async with customer_read_connection(request) as conn:
-        return customer_summary(await customer_row(conn, identity, user_id))
+    async with customer_read_connection(request, identity, "customers.view") as conn:
+        result = customer_summary(await customer_row(conn, identity, user_id))
+        await audit_customer_read(conn, request, user_id, "customer.viewed")
+        return result
 
 
 @router.get("/{user_id}/subscription", response_model=CustomerSubscription)
 async def customer_subscription(
     request: Request,
-    user_id: CustomerId = Path(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$"),
+    user_id: str = Path(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$"),
     identity: ModeratorIdentity = Depends(require_permission("subscriptions.view")),
 ):
-    async with customer_read_connection(request) as conn:
+    async with customer_read_connection(request, identity, "subscriptions.view") as conn:
         await customer_row(conn, identity, user_id)
         row = await conn.fetchrow(
             """SELECT plan, status AS subscription_status, current_period_end, cancel_at_period_end
                FROM subscriptions WHERE user_id = $1 ORDER BY updated_at DESC, id DESC LIMIT 1""",
             user_id,
         )
-        return CustomerSubscription(
+        result = CustomerSubscription(
             user_id=user_id,
             plan=row["plan"] if row else None,
             subscription_status=row["subscription_status"] if row else None,
             current_period_end=row["current_period_end"] if row else None,
             cancel_at_period_end=row["cancel_at_period_end"] if row else None,
         )
+        await audit_customer_read(conn, request, user_id, "customer.subscription.viewed")
+        return result
 
 
 @router.get("/{user_id}/payments", response_model=CustomerPayments)
 async def customer_payments(
     request: Request,
-    user_id: CustomerId = Path(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$"),
+    user_id: str = Path(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$"),
     identity: ModeratorIdentity = Depends(require_permission("payments.view")),
 ):
-    async with customer_read_connection(request) as conn:
+    async with customer_read_connection(request, identity, "payments.view") as conn:
         await customer_row(conn, identity, user_id)
         row = await conn.fetchrow(
             """SELECT last_payment_status, last_payment_at FROM subscriptions
@@ -190,7 +239,9 @@ async def customer_payments(
             user_id,
         )
         status = row["last_payment_status"] if row else None
-        return CustomerPayments(
+        result = CustomerPayments(
             user_id=user_id, payment_status=status if status is not None else "veri yok",
             last_failed_payment_at=row["last_payment_at"] if row and status == "FAILED" else None,
         )
+        await audit_customer_read(conn, request, user_id, "customer.payments.viewed")
+        return result

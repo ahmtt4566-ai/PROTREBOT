@@ -44,6 +44,7 @@ class ModeratorIdentity:
     user_id: str
     role: str
     permissions: tuple[str, ...]
+    auth_version: int
 
 
 async def moderator_identity(request: Request) -> ModeratorIdentity:
@@ -72,7 +73,7 @@ async def moderator_identity(request: Request) -> ModeratorIdentity:
             raise HTTPException(401, "Session revoked")
         role = security.get("role")
         if role == "OWNER":
-            return ModeratorIdentity(user["id"], role, PERMISSIONS)
+            return ModeratorIdentity(user["id"], role, PERMISSIONS, version)
         if role != "MODERATOR":
             raise HTTPException(403, "Moderator access required")
         if security.get("email_verified") is not True:
@@ -86,7 +87,7 @@ async def moderator_identity(request: Request) -> ModeratorIdentity:
             raise ValueError("Invalid canonical permissions")
         return ModeratorIdentity(user["id"], role, tuple(
             permission for permission in PERMISSIONS if permission in permissions
-        ))
+        ), version)
     except HTTPException:
         raise
     except Exception as exc:
