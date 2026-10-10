@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from statistics import fmean
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import websockets
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -29,49 +29,58 @@ from .analysis import analyze, atr, ema
 from .binance_demo import (
     DEMO_REST_BASE,
     DEMO_WS_BASE,
-    MAX_LEVERAGE,
     MANUAL_MAX_LEVERAGE,
+    MAX_LEVERAGE,
     MAX_MARGIN_USDT,
     MAX_NOTIONAL_USDT,
     MAX_OPEN_POSITIONS,
     BinanceDemoClient,
     BinanceDemoError,
     DemoOrderRequest,
+    _algo_id,
+    _owned_protection_orders,
+    _plan_protection_ids,
+    _protection_classification,
+    _single_plan_algo_id,
+    _validate_new_protection_identity,
     account_snapshot,
     armed,
     bind_demo_grant,
     can_mutate_lifecycle,
-    credentials_configured,
     close_symbol_position,
     confirm_provenance_from_snapshot,
+    credentials_configured,
     decimal_text,
     execute_demo_order,
     load_demo_credentials,
     new_client_id,
     normalize_symbol,
     persist_runtime,
+    position_amount,
     post_algo,
     protection_lock,
-    position_amount,
+    reconcile_demo_plans,
     record_entry_trade_observation,
     response_rows,
-    reconcile_demo_plans,
     round_tick,
     safe_exchange_error,
-    state_for as demo_state_for,
     symbol_rules,
-    _protection_classification,
-    _single_plan_algo_id,
-    _owned_protection_orders,
-    _algo_id,
-    _plan_protection_ids,
-    _validate_new_protection_identity,
     validate_entry_risk,
 )
+from .binance_demo import (
+    state_for as demo_state_for,
+)
+from .legacy_demo_results import capture_close_order, observe_missing_positions
+from .legacy_demo_results import observe_stream as observe_legacy_stream
+from .legacy_loss_guard import loss_limit as legacy_loss_limit
+from .legacy_loss_guard import update as update_legacy_loss_guard
 from .local_storage import DATA_DIR, migrate_legacy_files
-from .stop_evidence import correlation_report, observe_position_snapshot, observe_stream_payload
+from .stop_evidence import (
+    correlation_report,
+    observe_position_snapshot,
+    observe_stream_payload,
+)
 from .trade_r_metrics import r_performance_metrics
-
 
 router = APIRouter(prefix="/api/v21", tags=["V21 Demo Complete"])
 logger = logging.getLogger(__name__)
@@ -167,6 +176,11 @@ class AutoStartRequest(BaseModel):
     strategy_id: str | None = None
 
 
+class ObserverErrorResetRequest(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=40)
+    acknowledged: bool = Field(strict=True)
+
+
 class BacktestRequest(BaseModel):
     symbol: str = Field(default="BTCUSDT", min_length=5, max_length=20)
     interval: Literal["1m", "5m", "15m", "1h", "4h"] = "15m"
@@ -205,6 +219,9 @@ def initial_state() -> dict[str, Any]:
         },
         "risk": {"consecutive_losses": 0, "consecutive_loss_limit": 3, "kill_switch": False},
         "notifications": {"seen": [], "unread": 0, "read_ids": []},
+        "legacy_trade_results": {},
+        "legacy_result_journal": {"journal": [], "seen_event_ids": []},
+        "legacy_result_observer_errors": [],
         "scanner": {
             "active": False, "running": False, "scan_status": "BEKLEMEDE", "coins_scanned": 0,
             "scan_duration_ms": 0, "last_scan_at": None, "next_scan_at": None,
@@ -267,7 +284,8 @@ def load_state() -> dict[str, Any]:
         "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades", "paper_positions",
         "risk", "evidence_sequence", "evidence_status", "evidence_observations", "stop_correlations",
-        "notifications",
+        "notifications", "legacy_trade_results", "legacy_result_journal", "legacy_result_observer_errors",
+        "legacy_loss_guard",
     ):
         if key in saved:
             base[key] = saved[key]
@@ -279,6 +297,11 @@ def load_state() -> dict[str, Any]:
     base["auto"]["user_confirmed"] = False
     base["auto"]["confirmation"] = None
     base["auto"]["last_decision"] = "Güvenli yeniden başlatma: DEMO OTOMATİK onayı bekleniyor."
+    if "legacy_loss_guard" in base and (
+        not isinstance(base["legacy_loss_guard"], dict)
+        or base["legacy_loss_guard"].get("paused") or base["legacy_loss_guard"].get("error")
+    ):
+        base["auto"].update(status="PAUSED", pause_reason="CONSECUTIVE_LOSSES")
     base["scanner"].setdefault("all_candidates", [])
     base["scanner"].setdefault("top_candidates", [])
     base["scanner"].setdefault("gate_rejections", {})
@@ -325,6 +348,12 @@ def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
     }
     if "original_v2" in state:
         payload["original_v2"] = state["original_v2"]
+    for key in ("legacy_trade_results", "legacy_result_observer_errors", "legacy_loss_guard"):
+        if state.get(key):
+            payload[key] = state[key]
+    result_journal = state.get("legacy_result_journal", {})
+    if result_journal.get("journal") or result_journal.get("seen_event_ids"):
+        payload["legacy_result_journal"] = result_journal
     return payload
 
 
@@ -339,7 +368,8 @@ def _state_from_payload(payload: dict[str, Any], user_id: str, application: Any 
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades",
         "paper_positions", "risk", "notifications", "snapshot", "reconciliation",
         "evidence_sequence", "evidence_status", "evidence_observations", "stop_correlations",
-        "original_v2",
+        "original_v2", "legacy_trade_results", "legacy_result_journal", "legacy_result_observer_errors",
+        "legacy_loss_guard",
     ):
         if key in payload:
             state[key] = payload[key]
@@ -358,6 +388,11 @@ def _state_from_payload(payload: dict[str, Any], user_id: str, application: Any 
     state["auto"]["user_confirmed"] = False
     state["auto"]["confirmation"] = None
     state["auto"]["last_decision"] = "Güvenli yeniden başlatma: DEMO OTOMATİK onayı bekleniyor."
+    if "legacy_loss_guard" in state and (
+        not isinstance(state["legacy_loss_guard"], dict)
+        or state["legacy_loss_guard"].get("paused") or state["legacy_loss_guard"].get("error")
+    ):
+        state["auto"].update(status="PAUSED", pause_reason="CONSECUTIVE_LOSSES")
     return state
 
 
@@ -399,6 +434,8 @@ def _queue_v21_snapshot(state: dict[str, Any], user_id: str, payload: dict[str, 
             error = completed.exception()
             if error is not None:
                 logger.error("Demo snapshot persistence failed: error=%s", type(error).__name__)
+                if payload.get("legacy_loss_guard"):
+                    _loss_guard_failed(state, error)
 
     task.add_done_callback(snapshot_done)
     return True
@@ -645,7 +682,7 @@ def _auto_transition_notification(state: dict[str, Any], was_enabled: bool) -> N
 def notification_payload(state: dict[str, Any], limit: int = 100) -> list[dict[str, Any]]:
     read_ids = {str(item) for item in state.get("notifications", {}).get("read_ids", [])}
     items = []
-    for event in state.get("journal", []):
+    for event in user_journal_items(state):
         if event.get("kind") != "NOTIFICATION":
             continue
         notification_type = str(event.get("reason") or "INFO").split(":", 1)[0]
@@ -1147,12 +1184,129 @@ def automatic_risk_block(state: dict[str, Any]) -> tuple[str, str] | None:
         state["auto"].update({"status": "PAUSED", "pause_reason": "KILL_SWITCH"})
         emit_notification(state, "KILL_SWITCH", "Demo Auto Trade kill switch aktif; yeni otomatik girişler durduruldu.", event_id=f"{today()}-kill-switch")
         return "KILL_SWITCH", "Demo kill switch aktif; yeni otomatik giriş kilitli."
-    consecutive_limit = min(3, int(state["settings"].get("consecutive_loss_limit", risk.get("consecutive_loss_limit", 3))))
-    if int(risk.get("consecutive_losses", 0)) >= consecutive_limit:
+    guard = state.get("legacy_loss_guard", {})
+    if guard.get("error"):
+        return "CONSECUTIVE_LOSS_ERROR", "Ardışık zarar kontrolü doğrulanamadı; yeni otomatik giriş kilitli."
+    consecutive_limit = legacy_loss_limit(state)
+    if guard.get("paused") or int(risk.get("consecutive_losses", 0)) >= consecutive_limit:
         state["auto"].update({"status": "PAUSED", "pause_reason": "CONSECUTIVE_LOSSES"})
-        emit_notification(state, "CONSECUTIVE_LOSSES", "Üç ardışık Demo zararı nedeniyle Auto Trade duraklatıldı.", event_id=f"{today()}-consecutive-losses")
+        _consecutive_pause_notification(state, consecutive_limit)
         return "CONSECUTIVE_LOSSES", "Ardışık Demo zarar koruması aktif; yeni otomatik giriş kilitli."
     return None
+
+
+def _consecutive_pause_notification(state: dict[str, Any], limit: int) -> None:
+    guard = state.get("legacy_loss_guard")
+    target = state
+    event_id = f"{today()}-consecutive-losses-0"
+    if guard:
+        journal = state.setdefault("legacy_result_journal", {"journal": [], "seen_event_ids": []})
+        target = {**journal, "notifications": state["notifications"]}
+        event_id = f"legacy-consecutive-losses-{guard['pause_sequence']}"
+    emit_notification(
+        target, "CONSECUTIVE_LOSSES",
+        f"{limit} ardışık Demo zarar sınırı nedeniyle Auto Trade duraklatıldı; elle yeniden başlatmanız gerekiyor.",
+        event_id=event_id,
+    )
+
+
+def _legacy_auto_selected(state: dict[str, Any]) -> bool:
+    from .strategies.original_v2_demo import feature_enabled
+
+    return not feature_enabled() and state["auto"].get("strategy_id") is None
+
+
+def _loss_guard_failed(state: dict[str, Any], error: Exception) -> None:
+    guard = state.get("legacy_loss_guard")
+    if not isinstance(guard, dict) or "date" not in guard:
+        risk = state.get("risk")
+        count = risk.get("consecutive_losses", 0) if isinstance(risk, dict) else 0
+        guard = {
+            "date": today(), "baseline": count if type(count) is int and count >= 0 else 0,
+            "applied": {}, "restart_at": None, "pause_sequence": 0,
+            "user_id": state.get("_user_id"),
+        }
+        state["legacy_loss_guard"] = guard
+    guard["error"] = type(error).__name__
+    guard["paused"] = True
+    logger.error("Legacy consecutive loss guard failed: error=%s; new entries blocked", type(error).__name__)
+    if _legacy_auto_selected(state):
+        state["auto"].update(enabled=False, status="PAUSED", pause_reason="CONSECUTIVE_LOSS_ERROR")
+
+
+def _refresh_legacy_loss_guard(state: dict[str, Any], demo: dict[str, Any], *, restart: bool = False) -> bool:
+    if not _legacy_auto_selected(state):
+        return False
+    try:
+        candidate = {
+            "_user_id": state.get("_user_id"), "settings": state["settings"],
+            "risk": copy.deepcopy(state["risk"]), "auto": copy.deepcopy(state["auto"]),
+            "legacy_trade_results": state.get("legacy_trade_results", {}),
+            "legacy_result_observer_errors": state.get("legacy_result_observer_errors", []),
+        }
+        if "legacy_loss_guard" in state:
+            candidate["legacy_loss_guard"] = copy.deepcopy(state["legacy_loss_guard"])
+        journal = copy.deepcopy(state.get("legacy_result_journal", {"journal": [], "seen_event_ids": []}))
+        notices = update_legacy_loss_guard(candidate, demo, datetime.now(timezone.utc), restart=restart)
+        if "legacy_loss_guard" not in candidate:
+            return False
+        for notice in notices:
+            record_event(journal, source="LEGACY_RISK", **notice)
+        changed = any(candidate[key] != state.get(key) for key in ("legacy_loss_guard", "risk", "auto"))
+        state["legacy_loss_guard"] = candidate["legacy_loss_guard"]
+        for key in ("risk", "auto"):
+            state[key].update(candidate[key])
+        state["legacy_result_journal"] = journal
+        if candidate["legacy_loss_guard"]["paused"] and not candidate["legacy_loss_guard"].get("error"):
+            _consecutive_pause_notification(state, legacy_loss_limit(state))
+        return changed
+    except Exception as exc:
+        _loss_guard_failed(state, exc)
+        return True
+
+
+async def _legacy_entry_block(
+    state: dict[str, Any], demo: dict[str, Any], *, restart: bool = False,
+) -> tuple[str, str] | None:
+    try:
+        manual_restart = restart
+        dirty = False
+        while True:
+            changed = _refresh_legacy_loss_guard(state, demo, restart=manual_restart)
+            changed |= dirty
+            manual_restart = False
+            tasks = getattr(getattr(state.get("_app"), "state", None), "_v21_persistence_tasks", set())
+            if tasks:
+                outcomes = await asyncio.gather(*tuple(tasks), return_exceptions=True)
+                for outcome in outcomes:
+                    if isinstance(outcome, Exception):
+                        raise outcome
+            saved_guard = copy.deepcopy(state.get("legacy_loss_guard"))
+            saved_counter = state["risk"]["consecutive_losses"]
+            if changed or restart or saved_guard:
+                persist_state(state)
+                tasks = getattr(getattr(state.get("_app"), "state", None), "_v21_persistence_tasks", set())
+                if tasks:
+                    outcomes = await asyncio.gather(*tuple(tasks), return_exceptions=True)
+                    for outcome in outcomes:
+                        if isinstance(outcome, Exception):
+                            raise outcome
+            if state.get("legacy_loss_guard", {}).get("error"):
+                return "CONSECUTIVE_LOSS_ERROR", "Ardışık zarar kontrolü doğrulanamadı; yeni otomatik giriş kilitli."
+            # Stream closures may arrive while awaiting the durable snapshot.
+            refreshed = _refresh_legacy_loss_guard(state, demo)
+            if (
+                not refreshed and saved_guard == state.get("legacy_loss_guard")
+                and saved_counter == state["risk"]["consecutive_losses"]
+            ):
+                break
+            dirty = True
+        if state.get("legacy_loss_guard", {}).get("error"):
+            return "CONSECUTIVE_LOSS_ERROR", "Ardışık zarar kaydı doğrulanamadı; yeni otomatik giriş kilitli."
+        return None if restart else automatic_risk_block(state)
+    except Exception as exc:
+        _loss_guard_failed(state, exc)
+        return "CONSECUTIVE_LOSS_ERROR", "Ardışık zarar kontrolü doğrulanamadı; yeni otomatik giriş kilitli."
 
 
 def select_auto_candidates(
@@ -1213,8 +1367,10 @@ async def rotate_safe_demo_positions(
     client = client_for_state(application, state)
     rotated = 0
     for symbol in symbols:
-        if await close_symbol_position(client, symbol) is None:
+        result = await close_symbol_position(client, symbol)
+        if result is None:
             continue
+        capture_close_order(state, symbol, "BOTH", result, "SAFE_ROTATION")
         for plan in state.get("plans", {}).values():
             if not can_mutate_lifecycle(plan):
                 continue
@@ -1290,7 +1446,45 @@ def reconcile_positions(state: dict[str, Any], previous: dict[str, Any] | None, 
     return changed
 
 
+def _observe_legacy_results(
+    state: dict[str, Any], demo_state: dict[str, Any] | None,
+    observer: Callable[..., list[dict[str, Any]]], *args: Any,
+) -> bool:
+    if demo_state is None or not state.get("_user_id") or state.get("_user_id") != demo_state.get("_user_id"):
+        return False
+    try:
+        candidate = {
+            "_user_id": state["_user_id"],
+            "legacy_trade_results": copy.deepcopy(state.get("legacy_trade_results", {})),
+        }
+        journal = copy.deepcopy(state.get("legacy_result_journal", {"journal": [], "seen_event_ids": []}))
+        notices = observer(candidate, demo_state, *args)
+        changed = candidate["legacy_trade_results"] != state.get("legacy_trade_results", {})
+        for notice in notices:
+            record_event(journal, source="LEGACY_ACCOUNTING", **notice)
+        state["legacy_trade_results"] = candidate["legacy_trade_results"]
+        state["legacy_result_journal"] = journal
+        return changed
+    except Exception as exc:
+        error = type(exc).__name__
+        state["_legacy_result_error_generation"] = state.get("_legacy_result_error_generation", 0) + 1
+        errors = state.setdefault("legacy_result_observer_errors", [])
+        if error not in errors:
+            errors.append(error)
+        logger.error("Legacy Demo result observation failed: error=%s; results remain unverified", error)
+        return True
+
+
 def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_state: dict[str, Any] | None = None) -> bool:
+    observed = False
+    try:
+        changed = _process_stream_event(state, payload, demo_state)
+    finally:
+        observed = _observe_legacy_results(state, demo_state, observe_legacy_stream, payload)
+    return changed or observed
+
+
+def _process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_state: dict[str, Any] | None = None) -> bool:
     event_type = str(payload.get("e") or "")
     event_time = payload.get("T", payload.get("E", 0))
     stream_event_id = None
@@ -1882,6 +2076,9 @@ async def reconciliation_loop(application: Any) -> None:
                     changed = False
                     if has_demo_plans:
                         changed = reconcile_positions(state, previous.get(user_id), snapshot)
+                        changed |= _observe_legacy_results(
+                            state, demo_state, observe_missing_positions, previous.get(user_id), snapshot,
+                        )
                         await confirm_provenance_from_snapshot(
                             demo_state,
                             snapshot,
@@ -1891,9 +2088,15 @@ async def reconciliation_loop(application: Any) -> None:
                     if has_demo_plans:
                         changed |= await ensure_stop_protection(application, snapshot, demo_state=demo_state, v21_state=state, client=client)
                         changed |= await improve_dynamic_stops(application, snapshot, demo_state=demo_state, v21_state=state, client=client)
+                        changed |= _refresh_legacy_loss_guard(state, demo_state)
                     reconciliation_changed = previous_reconciliation != state["reconciliation"]
                     if changed or plan_reconciliation["changed"] or reconciliation_changed:
-                        persist_state(state)
+                        try:
+                            persist_state(state)
+                        except Exception as exc:
+                            if not state.get("legacy_loss_guard") or not _legacy_auto_selected(state):
+                                raise
+                            _loss_guard_failed(state, exc)
                         persist_runtime(demo_state)
                 except BinanceDemoError as exc:
                     state["stream"]["last_error"] = str(exc)[:220]
@@ -1966,7 +2169,7 @@ async def _automatic_cycle_impl(
     if not in_schedule(settings):
         _set_rejection(state, "MARKET_HOURS", "İzin verilen çalışma saatleri dışında; yeni giriş yok.")
         return
-    risk_block = automatic_risk_block(state)
+    risk_block = await _legacy_entry_block(state, demo_state)
     if risk_block:
         _set_rejection(state, *risk_block)
         return
@@ -2047,6 +2250,10 @@ async def _automatic_cycle_impl(
             tp2=candidate["tp2"], tp3=candidate["tp3"],
         )
         try:
+            risk_block = await _legacy_entry_block(state, demo_state)
+            if risk_block:
+                _set_rejection(state, *risk_block)
+                break
             result = await execute_demo_order(
                 application,
                 body,
@@ -2514,6 +2721,13 @@ def performance_payload(state: dict[str, Any], period: str = "all", *, demo_only
     }
 
 
+def user_journal_items(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(
+        [*state.get("legacy_result_journal", {}).get("journal", []), *state.get("journal", [])],
+        key=lambda item: str(item.get("created_at", "")), reverse=True,
+    )
+
+
 def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
     snapshot = state.get("snapshot") or {}
     reconciliation = state.get("reconciliation") or {}
@@ -2537,6 +2751,10 @@ def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "version": "21.0.0", "mode": "BINANCE_FUTURES_DEMO_ONLY", "settings": state["settings"],
         "auto": state["auto"], "risk": state.get("risk", {}), "notifications": {**notifications, "items": notification_items},
+        "result_observer": {
+            "reset_required": bool(state.get("legacy_result_observer_errors") or state.get("legacy_loss_guard", {}).get("error")),
+            "errors": list(state.get("legacy_result_observer_errors", [])),
+        },
         "scanner": scanner_payload, "stream": state["stream"], "daily": daily_metrics(state),
         "account": {
             "wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"),
@@ -2550,7 +2768,7 @@ def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
             "duplicate_blocks": state.get("duplicate_blocks", 0),
             "duplicate_submissions": state.get("duplicate_submissions", 0),
         },
-        "journal": state.get("journal", [])[:60], "backtest": state.get("backtest"),
+        "journal": user_journal_items(state)[:60], "backtest": state.get("backtest"),
         "automation_trades": state.get("automation_trades", [])[:100],
         "evidence": {
             "observation_count": len(observations),
@@ -2789,6 +3007,86 @@ async def v21_demo_smoke_test(request: Request) -> dict[str, Any]:
     return {"ok": True, "position": position, "open_position_count": len(state["paper_positions"]), "demo_only": True, "real_trading_locked": True}
 
 
+@router.post("/auto/errors/reset")
+async def v21_observer_error_reset(request: Request, body: ObserverErrorResetRequest) -> dict[str, Any]:
+    state = state_for(request)
+    if not state.get("_user_id"):
+        raise HTTPException(401, "Doğrulanmış kullanıcı oturumu gerekli.")
+    if not body.acknowledged or body.confirmation.strip().upper() != "DEMO HATAYI SIFIRLA":
+        raise HTTPException(422, "Hatayı onaylamak için DEMO HATAYI SIFIRLA yazın.")
+    if not _legacy_auto_selected(state) or state["auto"].get("enabled"):
+        raise HTTPException(409, "Hata sıfırlama için eski Demo otomasyonu kapalı olmalı.")
+    demo = demo_state_for(request)
+    if demo.get("_user_id") != state["_user_id"]:
+        raise HTTPException(409, "Demo kullanıcı context'i eşleşmiyor.")
+    if not armed(demo):
+        raise HTTPException(423, "Önce 10 dakikalık DEMO emir kilidini açın.")
+    if not credentials_configured(request):
+        raise HTTPException(412, "Binance Futures Demo anahtarları ayarlı değil.")
+    snapshot = await account_snapshot(client_for(request))
+    if snapshot.get("hedge_mode"):
+        raise HTTPException(409, "Demo hesabı One-way / Tek Yön modunda olmalı.")
+    errors = list(state.get("legacy_result_observer_errors", []))
+    guard = copy.deepcopy(state.get("legacy_loss_guard", {}))
+    error = guard.get("error")
+    generation = state.get("_legacy_result_error_generation", 0)
+    if not errors and not error:
+        return summary_payload(state)
+    candidate = {**state, "legacy_result_observer_errors": []}
+    if guard:
+        candidate["legacy_loss_guard"] = {**guard, "error": None}
+    probe = {
+        "_user_id": state["_user_id"], "settings": state["settings"],
+        "risk": copy.deepcopy(state["risk"]), "auto": copy.deepcopy(state["auto"]),
+        "legacy_trade_results": state.get("legacy_trade_results", {}),
+        "legacy_result_observer_errors": [],
+    }
+    if guard:
+        probe["legacy_loss_guard"] = copy.deepcopy(candidate["legacy_loss_guard"])
+    try:
+        update_legacy_loss_guard(probe, demo, datetime.now(timezone.utc))
+    except Exception as exc:
+        logger.exception("Legacy observer reset rejected: accounting remains invalid")
+        raise HTTPException(409, "Hesaplama verisi hâlâ geçersiz; hata kilidi korunuyor.") from exc
+    journal = copy.deepcopy(state.get("legacy_result_journal", {"journal": [], "seen_event_ids": []}))
+    try:
+        record_event(
+            journal, "LEGACY_OBSERVER_ERROR_RESET",
+            "Kullanıcı gözlemci hatasını ve eksik sonuç riskini onaylayarak hata kaydını sıfırladı; "
+            "ardışık zarar kilidi, sayaç ve işlem sonuçları değiştirilmedi. Otomasyon ayrıca elle başlatılmalı.",
+            reason=", ".join(errors or [str(error)]), source="USER",
+        )
+        candidate["legacy_result_journal"] = journal
+        tasks = getattr(getattr(state.get("_app"), "state", None), "_v21_persistence_tasks", set())
+        if tasks:
+            await asyncio.gather(*tuple(tasks))
+        persist_state(candidate)
+        tasks = getattr(getattr(state.get("_app"), "state", None), "_v21_persistence_tasks", set())
+        if tasks:
+            await asyncio.gather(*tuple(tasks))
+        if (
+            state.get("_legacy_result_error_generation", 0) != generation
+            or state.get("legacy_result_observer_errors", []) != errors
+            or state.get("legacy_loss_guard", {}).get("error") != error
+        ):
+            persist_state(state)
+            tasks = getattr(getattr(state.get("_app"), "state", None), "_v21_persistence_tasks", set())
+            if tasks:
+                await asyncio.gather(*tuple(tasks))
+            logger.warning("Legacy observer reset raced with a new error; acknowledgement required again")
+            raise HTTPException(409, "Yeni gözlemci hatası oluştu; güncel uyarıyı yeniden onaylayın.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Legacy observer reset persistence failed; error lock retained")
+        raise HTTPException(503, "Hata kaydı sıfırlanamadı; kilit korunuyor.") from exc
+    state["legacy_result_observer_errors"] = []
+    if guard:
+        state["legacy_loss_guard"]["error"] = None
+    state["legacy_result_journal"] = journal
+    return summary_payload(state)
+
+
 @router.post("/auto/start")
 async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, Any]:
     state = state_for(request)
@@ -2821,6 +3119,16 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
         raise HTTPException(409, "Demo hesabı One-way / Tek Yön modunda olmalı.")
     bind_demo_grant(request, state)
     was_enabled = bool(state["auto"].get("enabled"))
+    from .strategies.original_v2_demo import STRATEGY_ID, feature_enabled
+
+    if not feature_enabled() and body.strategy_id is None:
+        previous_strategy = state["auto"].pop("strategy_id", None)
+        block = await _legacy_entry_block(state, demo_state, restart=True)
+        if block:
+            if previous_strategy is not None:
+                state["auto"]["strategy_id"] = previous_strategy
+            _set_rejection(state, *block)
+            raise HTTPException(423, block[1])
     state["auto"].update({
         "enabled": True,
         "status": "ON",
@@ -2882,7 +3190,8 @@ async def v21_auto_stop(request: Request) -> dict[str, Any]:
 @router.get("/journal")
 async def v21_journal(request: Request, limit: int = Query(default=200, ge=1, le=1000)) -> dict[str, Any]:
     state = state_for(request)
-    return {"items": state.get("journal", [])[:limit], "total": len(state.get("journal", [])), "demo_only": True}
+    items = user_journal_items(state)
+    return {"items": items[:limit], "total": len(items), "demo_only": True}
 
 
 @router.get("/performance")

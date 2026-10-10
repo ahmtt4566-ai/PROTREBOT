@@ -4275,6 +4275,9 @@ async def demo_close_position(request: Request, body: ClosePositionRequest) -> d
         result = await close_symbol_position(client, symbol, body.position_side)
         if result is None:
             raise BinanceDemoError("Bu paritede açık Demo pozisyonu yok.", http_status=404)
+        from .legacy_demo_results import capture_close_order
+
+        capture_close_order(state, symbol, body.position_side, result, "APP_MANUAL_CLOSE")
         for plan in state.get("plans", {}).values():
             if str(plan.get("symbol") or "").upper() == symbol and str(plan.get("user_id") or plan.get("_user_id") or "").strip() == _current_user_id(request=request, state=state) and plan.get("position_status") == "OPEN":
                 cleaned = await cleanup_closed_plan(

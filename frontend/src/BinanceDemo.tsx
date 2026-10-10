@@ -173,6 +173,7 @@ type V21Summary = {
   auto:{enabled:boolean;busy:boolean;cycles:number;last_scan:string|null;last_decision:string;last_error:string|null;status?:string;pause_reason?:string|null;started_at?:string|null;rejection_gate?:string|null;rejection_reason?:string|null}
   risk?:{daily_loss_pct?:number;last_warning_pct?:number;consecutive_losses?:number;consecutive_loss_limit?:number;kill_switch?:boolean}
   notifications?:{unread?:number}
+  result_observer?:{reset_required:boolean;errors:string[]}
   scanner:ScannerState
   stream:{status:string;transport:string;last_event:string|null;last_sync:string|null;reconnect_count:number;error_count:number;last_error:string|null}
   daily:{date:string;auto_entries:number;events:number;realized_pnl:number;remaining_loss_budget:number}
@@ -542,6 +543,20 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       .then(payload => {setRiskPreview(payload);setMessage('Maksimum kayba göre Demo pozisyon boyutu hesaplandı.');setMessageKind('ok')})
       .catch(error => {setMessage(error instanceof Error ? error.message : 'Risk hesabı yapılamadı.');setMessageKind('error')})
       .finally(() => setV21Busy(false))
+  }
+  const resetObserverError = () => {
+    setConfirmationText('')
+    setConfirmationChecked(false)
+    setConfirmation({
+      title:'Gözlemci hatasını onayla ve sıfırla',
+      message:'Bazı kapanış sonuçları eksik olabilir. Hata kaydı temizlenir; işlem sonuçları, ardışık zarar sayacı ve kilidi değişmez. Bu işlem emir göndermez ve otomasyonu başlatmaz.',
+      expected:'DEMO HATAYI SIFIRLA',
+      checkbox:false,
+      action:() => runV21(() => v21Call<V21Summary>('/auto/errors/reset',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({confirmation:'DEMO HATAYI SIFIRLA',acknowledged:true}),
+      }),'Gözlemci hata kaydı sıfırlandı; otomasyonu ayrıca elle başlatabilirsiniz.'),
+    })
   }
   const toggleAuto = () => {
     if (v21?.auto.enabled) {
@@ -1165,6 +1180,11 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
         enabled={Boolean(v21?.auto.enabled)} confirmation={autoConfirm} busy={busy || v21Busy} onRecorded={() => refreshV21(true)}/>
       {!v21?.auto.enabled && <div className="demoCredentialActions"><button type="button" disabled={busy || v21Busy} onClick={() => void quickDemo(true)}>Demo'yu hazırla ve otomasyonu başlat</button><p>Bu düğmeye basmak yalnız Demo otomasyonuna onay verir. Live değişmez.</p></div>}
       <header className="v21WorkspaceHead"><div><span>ÇİFT ONAY · DEMO ARM + DEMO OTOMATİK</span><h2>Kontrollü Demo Otopilot</h2><p>{demoStrategy === ORIGINAL_DEMO_ID ? 'Original: sabit 8 sembol ve sabit politika. Sunucu bayrakları, owner/session, arm ve kullanıcı onayı emir iznini ayrı ayrı sınırlar.' : 'İzin listesi, yön, saat, güven, volatilite, korelasyon, günlük kayıp ve pozisyon kapıları birlikte geçmeden emir göndermez.'}</p></div><b className={v21?.auto.enabled ? 'v21Running' : 'v21Stopped'}><Zap/> {v21?.auto.enabled ? 'ÇALIŞIYOR' : 'GÜVENLİ KAPALI'}</b></header>
+      {demoStrategy !== ORIGINAL_DEMO_ID && v21?.result_observer?.reset_required && <div className="v21AutoDecision" role="alert">
+        <b>Gözlemci hatası: yeni girişler kilitli</b>
+        <p>Bazı işlem sonuçları eksik olabilir. DEMO ARM açıkken hatayı onaylayıp sıfırlayabilirsiniz; ardışık zarar kilidi kaldırılmaz ve otomasyon kendiliğinden başlamaz.</p>
+        <button disabled={busy || v21Busy || !status?.armed || v21.auto.enabled} onClick={resetObserverError}>Hatayı onayla ve sıfırla</button>
+      </div>}
       <div className="v21AutoLayout"><article className="v21Card v21AutoControl"><header><Zap/><div><small>İKİLİ GÜVENLİK KAPISI</small><h3>Demo Emir Kilidi</h3></div></header><div className="v21AutoDecision"><small>DEMO ARM</small><b>{status?.armed ? 'AÇIK' : 'KAPALI'}</b><span>{status?.armed ? `Kalan süre ${Math.floor(armSeconds / 60)} dk ${armSeconds % 60} sn` : 'Yeni Demo girişleri kilitli.'}</span></div>{!status?.armed && <label><span>Başlatmak için yaz</span><input value={armText} onChange={event => setArmText(event.target.value)} placeholder="DEMO"/></label>}<button disabled={busy || !status?.connected || (!status?.armed && armText.trim().toUpperCase() !== 'DEMO')} onClick={status?.armed ? disarm : arm}>{status?.armed ? <TriangleAlert/> : <UnlockKeyhole/>}{status?.armed ? ' DEMO ARM KAPAT' : ' DEMO ARM AÇ'}</button><p>Bu kilit yalnızca Binance Futures Demo giriş emirlerini süreli olarak açar; Live kanalını etkilemez.</p></article><article className="v21Card v21AutoControl"><header><Zap/><div><small>İKİNCİ KULLANICI ONAYI</small><h3>Demo Otomasyon Motoru</h3></div></header><div className="v21AutoDecision"><small>SON KARAR</small><b>{v21?.auto.last_decision || 'Bekleniyor'}</b><span>{v21?.auto.last_scan ? `Son tarama ${stamp(v21.auto.last_scan)} · ${v21.auto.cycles} tur` : 'Henüz tarama yapılmadı.'}</span></div>{!v21?.auto.enabled && <label><span>Başlatmak için yaz</span><input value={autoConfirm} onChange={event => setAutoConfirm(event.target.value)} placeholder="DEMO OTOMATİK"/></label>}<button className={v21?.auto.enabled ? 'stop' : ''} disabled={v21Busy || (!v21?.auto.enabled && !status?.armed)} onClick={toggleAuto}>{v21?.auto.enabled ? <TriangleAlert/> : <Play/>}{v21?.auto.enabled ? ' YENİ GİRİŞLERİ DURDUR' : ' KONTROLLÜ DEMO OTOMASYONU BAŞLAT'}</button><p>Uygulama yeniden açıldığında daima kapalı başlar. Stop/TP koruması motor dursa bile Binance Demo hesabında kalır.</p></article>
         {demoStrategy !== ORIGINAL_DEMO_ID && <article className="v21Card v21AutoRules"><header><Settings2/><div><small>OTOMASYON EVRENİ</small><h3>İzinler ve Piyasa Kapıları</h3></div></header>{settingsDraft && <div>
           <label className="wide"><span>İzinli USDT pariteleri</span><input value={settingsDraft.allowed_symbols.join(', ')} onChange={event => setSettingsDraft({...settingsDraft,allowed_symbols:event.target.value.toUpperCase().split(',').map(value => value.trim()).filter(Boolean)})}/></label>
