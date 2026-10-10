@@ -54,6 +54,9 @@ class ApprovalPool(SupportPool):
         return rows
 
     async def fetchrow(self, sql, *args):
+        if "SELECT user_id FROM moderator_permissions" in sql:
+            self.check(sql)
+            return {"user_id": args[0]} if args[1] in self.permissions.get(args[0], {}) else None
         if "INSERT INTO approval_requests" in sql:
             self.check(sql)
             now = datetime.now(timezone.utc)

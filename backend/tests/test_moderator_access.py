@@ -102,6 +102,12 @@ def test_unknown_dependency_permission_fails_at_definition():
 
 
 OWNER_ENDPOINTS = [
+    ("GET", "/api/v22/admin/approvals", None),
+    ("GET", "/api/v22/admin/approvals/summary", None),
+    ("GET", "/api/v22/admin/approvals/missing", None),
+    ("POST", "/api/v22/admin/approvals/missing/approve", None),
+    ("POST", "/api/v22/admin/approvals/missing/reject", {"decision_note": "İnceleme gerekli"}),
+    ("POST", "/api/v22/admin/approvals/missing/retry-agents", None),
     ("GET", "/api/v22/admin/overview", None),
     ("GET", "/api/v22/admin/users/customer/trading-accounts", None),
     ("POST", "/api/v22/admin/users/customer/trading-accounts",

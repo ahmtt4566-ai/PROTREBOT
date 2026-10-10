@@ -170,6 +170,8 @@ def setup():
     application.include_router(exchange_connections.router)
     application.include_router(moderator_router)
     application.include_router(audit_router)
+    from app.admin_approvals import router as approvals_router
+    application.include_router(approvals_router)
     for route in main.app.routes:
         if getattr(route, "path", "").startswith("/api/v22/admin/"):
             if not any(getattr(existing, "path", None) == route.path
