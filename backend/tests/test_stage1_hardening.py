@@ -1,17 +1,19 @@
 import sys
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import main
+from app import error_monitoring, main
 
 
 @pytest.mark.parametrize("role,status", [("OWNER", 200), ("ADMIN", 403), ("CUSTOMER", 403)])
@@ -72,3 +74,64 @@ def test_error_update_rejects_non_owner_without_writing(role):
         with TestClient(application) as client:
             response = client.patch("/api/v22/admin/errors/7", json={"status": "RESOLVED"})
     assert response.status_code == 403
+
+
+@pytest.mark.parametrize("failed_write", [1, 2])
+def test_error_logging_database_failure_warns_without_failing_request(caplog, failed_write):
+    class Pool:
+        async def execute(self, *_args):
+            self.calls += 1
+            if self.calls == failed_write:
+                raise RuntimeError("PRIVATE_EXCEPTION_EMAIL@example.test token=PRIVATE_EXCEPTION_TOKEN")
+
+        calls = 0
+
+    application = FastAPI()
+    application.state.db_pool = Pool()
+    application.add_api_route("/api/client-errors", main.client_error, methods=["POST"])
+
+    @application.middleware("http")
+    async def request_id(request, call_next):
+        request.state.request_id = "offline-request"
+        return await call_next(request)
+
+    with caplog.at_level("WARNING", logger="app.error_monitoring"):
+        with TestClient(application) as client:
+            response = client.post("/api/client-errors", json={
+                "message": "PRIVATE_EVENT_CONTENT", "context": {"email": "PRIVATE_CONTEXT@example.test"},
+            })
+    assert response.status_code == 200
+    assert response.json() == {"accepted": True, "request_id": "offline-request"}
+    warnings = [record.getMessage() for record in caplog.records if record.name == "app.error_monitoring"]
+    assert warnings == ["Error event logging failed: error_type=RuntimeError"]
+    assert "PRIVATE_" not in caplog.text
+    assert application.state.db_pool.calls == failed_write
+
+
+@pytest.mark.parametrize("failure", ["transport", "http"])
+def test_alarm_failure_warns_only_type_and_preserves_non_throwing_logging(caplog, failure):
+    event = error_monitoring.build_error_event(
+        source="backend", kind="OfflineTest", severity="CRITICAL", message="PRIVATE_EVENT_CONTENT",
+        context={"email": "PRIVATE_CONTEXT@example.test"},
+    )
+    pool = SimpleNamespace(execute=AsyncMock())
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    if failure == "transport":
+        client.post.side_effect = httpx.TimeoutException("PRIVATE_EXCEPTION_TOKEN")
+        expected_type = "TimeoutException"
+    else:
+        client.post.return_value = httpx.Response(
+            503, request=httpx.Request("POST", "https://example.test/PRIVATE_EXCEPTION_TOKEN"),
+            text="PRIVATE_RESPONSE_CONTENT",
+        )
+        expected_type = "HTTPStatusError"
+    with patch.dict("os.environ", {"ALERT_TELEGRAM_TOKEN": "PRIVATE_ALERT_TOKEN", "ALERT_TELEGRAM_CHAT_ID": "PRIVATE_CHAT"}), \
+            patch.object(error_monitoring, "_telegram_alerts", {}), \
+            patch.object(error_monitoring.httpx, "AsyncClient", return_value=client), \
+            caplog.at_level("WARNING", logger="app.error_monitoring"):
+        asyncio.run(error_monitoring.log_event(pool, event))
+    warnings = [record.getMessage() for record in caplog.records if record.name == "app.error_monitoring"]
+    assert warnings == [f"Critical error alert failed: error_type={expected_type}"]
+    assert "PRIVATE_" not in caplog.text
+    assert pool.execute.await_count == 2

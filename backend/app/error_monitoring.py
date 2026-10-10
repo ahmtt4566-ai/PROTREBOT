@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import asyncio
 import json
+import logging
 import os
 import re
 import traceback
@@ -13,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 SENSITIVE_KEY_RE = re.compile(r"(?:password|passwd|secret|token|api[_-]?key|apikey|authorization|cookie|credential|private[_-]?key|signature|x-mbx-apikey|listen[_-]?key)", re.I)
 SENSITIVE_VALUE_RE = re.compile(
@@ -140,7 +143,8 @@ async def log_event(pool: Any, event: dict[str, Any]) -> None:
         """, event["fingerprint"], event["source"], event.get("service", event["source"]), event["kind"], event.get("code"), event["severity"], event["message"], event["route"], event["method"], event["request_id"], event["user_id"], json.dumps(event["context"]), json.dumps(event.get("details", {})), event["stack"])
         await maybe_alert_critical(event)
         await pool.execute("DELETE FROM error_events WHERE last_seen < NOW() - ($1 * INTERVAL '1 day')", RETENTION_DAYS)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Error event logging failed: error_type=%s", type(exc).__name__)
         return
 
 
@@ -159,6 +163,8 @@ async def maybe_alert_critical(event: dict[str, Any]) -> None:
     text = sanitize_text(f"CRITICAL {event.get('service', 'backend')} {event.get('code') or event.get('kind')}: {event.get('message', '')[:500]}")
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": text})
-    except Exception:
+            response = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": text})
+            response.raise_for_status()
+    except Exception as exc:
+        logger.warning("Critical error alert failed: error_type=%s", type(exc).__name__)
         return
