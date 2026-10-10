@@ -1394,9 +1394,19 @@ Both active Vercel configurations exclude the exact `/sitemap.xml` and
 types. The root API proxy remains first; its destination, OAuth callback, CSP,
 CORS and session behavior are unchanged.
 
-The sitemap lists only the canonical public policy pages `/privacy`, `/terms`
-and `/risk`. The authenticated application, login, verification links and API
-routes are not sitemap entries. Robots uses a conservative public-page allowlist
+Both HTML entry points publish the homepage title
+`KaisTrade | AI-Powered Crypto Trading Platform`, a description of the existing
+AI-powered analysis, market scanning, demo trading and risk tools, a canonical
+`https://kaistrade.com/` link, and matching Open Graph/Twitter metadata. The
+existing public `og-image.png` is used; no profit or performance claims are made.
+Metadata is present in the HTTP HTML before JavaScript executes.
+
+The sitemap lists the canonical homepage `/` and public policy pages `/privacy`,
+`/terms` and `/risk`. The homepage continues to display the existing login UI;
+indexing that public entry point does not expose signed-in application content.
+Separate login/registration routes, verification links and API routes are not
+sitemap entries. Robots allows the exact root with `Allow: /$`, not all paths or
+OAuth/token query variants, and uses a conservative public-page allowlist
 and permits the public assets needed to render those pages, without enumerating
 private routes. Robots directives are crawler guidance, not access control;
 all existing authentication and authorization checks remain necessary.

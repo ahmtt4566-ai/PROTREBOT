@@ -2,13 +2,39 @@ import {expect, test} from '@playwright/test'
 import {PUBLIC_POLICIES, publicPolicyForPath} from '../../compliance-content'
 import {mockAssistant} from './helpers/assistant-api'
 
-test('home page publishes the KaisTrade site name before JavaScript in both entrypoints and production', async ({request}) => {
-  for (const base of ['http://127.0.0.1:4173', 'http://127.0.0.1:4175', 'http://127.0.0.1:4176']) {
+test('home page publishes complete KaisTrade metadata before JavaScript in both entrypoints and builds', async ({request,page}) => {
+  const title = 'KaisTrade | AI-Powered Crypto Trading Platform'
+  const description = "Explore KaisTrade's AI-powered crypto analysis, market scanning and trading tools, with demo trading and risk controls for informed market decisions."
+  for (const base of ['http://127.0.0.1:4173', 'http://127.0.0.1:4175', 'http://127.0.0.1:4176', 'http://127.0.0.1:4177']) {
     const response = await request.get(base)
     expect(response.status()).toBe(200)
     const html = await response.text()
-    expect(html).toContain('<title>KaisTrade</title>')
+    expect(html).toContain(`<title>${title}</title>`)
     expect(html).toContain('<meta property="og:site_name" content="KaisTrade"')
+    const metadata = await page.evaluate(html => {
+      const parsed = new DOMParser().parseFromString(html,'text/html')
+      return {
+        title:parsed.title,
+        canonical:Array.from(parsed.querySelectorAll('link[rel="canonical"]'),element => element.getAttribute('href')),
+        meta:Object.fromEntries(Array.from(parsed.querySelectorAll('meta[name],meta[property]'),element => [
+          element.getAttribute('name') || element.getAttribute('property'),element.getAttribute('content'),
+        ])),
+      }
+    },html)
+    expect(metadata.title).toBe(title)
+    expect(metadata.canonical).toEqual(['https://kaistrade.com/'])
+    expect(metadata.meta).toMatchObject({
+      description,
+      'og:site_name':'KaisTrade','og:type':'website','og:title':title,'og:description':description,
+      'og:url':'https://kaistrade.com/','og:image':'https://kaistrade.com/og-image.png',
+      'og:image:alt':'KaisTrade crypto trading platform',
+      'twitter:card':'summary_large_image','twitter:title':title,'twitter:description':description,
+      'twitter:image':'https://kaistrade.com/og-image.png','twitter:image:alt':'KaisTrade crypto trading platform',
+    })
+    expect(metadata.meta.robots).toBeUndefined()
+    const image = await request.get(`${base}/og-image.png`)
+    expect(image.status()).toBe(200)
+    expect(image.headers()['content-type']).toMatch(/^image\/png\b/i)
     const schema = html.match(/<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/)?.[1]
     if (!schema) throw new Error('Home page is missing its WebSite structured data')
     expect(JSON.parse(schema)).toEqual({

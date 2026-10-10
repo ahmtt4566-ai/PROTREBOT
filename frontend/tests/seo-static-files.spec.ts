@@ -4,7 +4,7 @@ import rootDeployment from '../../vercel.json' with {type:'json'}
 import frontendDeployment from '../vercel.json' with {type:'json'}
 import {PUBLIC_POLICIES,publicPolicyForPath} from '../../compliance-content'
 
-const expectedUrls = ['https://kaistrade.com/privacy','https://kaistrade.com/terms','https://kaistrade.com/risk']
+const expectedUrls = ['https://kaistrade.com/','https://kaistrade.com/privacy','https://kaistrade.com/terms','https://kaistrade.com/risk']
 const publicDirectory = new URL('../public/',import.meta.url)
 const sitemapSource = readFileSync(new URL('sitemap.xml',publicDirectory),'utf8')
 const robotsSource = readFileSync(new URL('robots.txt',publicDirectory),'utf8')
@@ -15,6 +15,20 @@ function fallbackPattern(source:string) {
   expect(source.endsWith(')')).toBe(true)
   return new RegExp(`^/${source.slice(prefix.length,-1)}$`)
 }
+
+test('crawler allowlist permits the homepage but not login variants or private application routes',() => {
+  const directives = robotsSource.split(/\r?\n/).filter(line => /^(Allow|Disallow): /.test(line))
+  expect(directives).toEqual([
+    'Disallow: /','Allow: /$','Allow: /privacy$','Allow: /terms$','Allow: /risk$',
+    'Allow: /assets/','Allow: /kaistrade-logo.png$','Allow: /og-image.png$','Allow: /sitemap.xml$','Allow: /robots.txt$',
+  ])
+  const allowedPaths = directives.filter(line => line.startsWith('Allow: ')).map(line => line.slice(7))
+  const allowed = (path:string) => allowedPaths.some(rule => rule.endsWith('$') ? path === rule.slice(0,-1) : path.startsWith(rule))
+  for (const path of ['/','/privacy','/terms','/risk','/assets/app.js','/og-image.png']) expect(allowed(path)).toBe(true)
+  for (const path of ['/login','/register','/profile','/admin','/settings','/master-trade','/verify-email','/api/v22/session','/api/v22/auth/google/callback','/?google_login=success','/?token=private']) {
+    expect(allowed(path)).toBe(false)
+  }
+})
 
 test('Vercel serves SEO files outside the SPA fallback without changing API or OAuth routing',() => {
   expect(rootDeployment.rewrites[0]).toEqual({
@@ -92,6 +106,12 @@ for (const base of ['http://127.0.0.1:4173','http://127.0.0.1:4175','http://127.
     expect(parsed).toEqual({errors:0,namespace:'http://www.sitemaps.org/schemas/sitemap/0.9',root:'urlset',urls:expectedUrls})
     for (const url of expectedUrls) {
       const {pathname} = new URL(url)
+      if (pathname === '/') {
+        const home = await request.get(base+'/')
+        expect(home.status()).toBe(200)
+        expect(await home.text()).toContain('<title>KaisTrade | AI-Powered Crypto Trading Platform</title>')
+        continue
+      }
       const policy = publicPolicyForPath(pathname)
       if (!policy) throw new Error(`Sitemap contains a non-public route: ${pathname}`)
       const response = await page.goto(base+pathname)
