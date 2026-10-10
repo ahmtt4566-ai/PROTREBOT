@@ -63,6 +63,7 @@ from .v22_commercial import (
     sync_v22_storage,
 )
 from .v24_commerce import router as v24_commerce_router
+from .moderator_access import router as moderator_router
 from .v25_execution import init_v25_execution, restore_v25_state, router as v25_execution_router, shutdown_v25_execution
 from .v27_cloud_ops import (
     init_v27_cloud,
@@ -1399,7 +1400,7 @@ async def owner_preview_gate(request, call_next):
         chunks = [chunk async for chunk in response.body_iterator]
         body = b"".join(chunk.encode() if isinstance(chunk, str) else chunk for chunk in chunks)
         headers = {key: value for key, value in response.headers.items() if key not in {"content-length", "content-type", "content-encoding"}}
-        trading_payload = not request.url.path.startswith(("/api/v22/", "/api/v24/", "/api/v27/"))
+        trading_payload = not request.url.path.startswith(("/api/v22/", "/api/v24/", "/api/v27/", "/api/mod/"))
         response = JSONResponse(public_projection(json.loads(body), allowlist=trading_payload), status_code=response.status_code, headers=headers)
     if request.url.path.startswith("/api/analyst/") and response.status_code in {401, 403, 409, 422, 429}:
         logger.warning("Analyst request rejected path=%s status=%s", request.url.path, response.status_code)
@@ -1413,6 +1414,7 @@ async def owner_preview_gate(request, call_next):
 app.include_router(binance_demo_router)
 app.include_router(v21_demo_router)
 app.include_router(v22_commercial_router)
+app.include_router(moderator_router)
 from .account_settings import router as account_settings_router
 app.include_router(account_settings_router)
 app.include_router(google_oauth_router)

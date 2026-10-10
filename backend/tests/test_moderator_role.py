@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from app import account_settings
@@ -49,6 +48,14 @@ class CanonicalPool:
     async def fetchrow(self, sql, *args):
         self.check(sql)
         row = self.users.get(args[0])
+        if "AS mfa_enabled" in sql:
+            if row is None:
+                return None
+            return {
+                **copy.deepcopy(row),
+                "mfa_enabled": self.settings.get(args[0], {}).get("two_factor_enabled") is True,
+                "permissions": list(self.permissions.get(args[0], {})),
+            }
         if "UPDATE commercial_auth_users" in sql:
             if not row or (args[2] is not None and args[2] != row["auth_version"]):
                 return None
@@ -63,6 +70,8 @@ def headers(user_id, role, version=1):
 
 @pytest.fixture
 def setup():
+    from app import main, v24_commerce, exchange_connections
+    from app.moderator_access import router as moderator_router
     users = [
         {"id": uid, "email": f"{uid}@example.test", "display_name": uid, "role": role,
          "active": True, "email_verified": True, "auth_version": 1}
@@ -70,6 +79,16 @@ def setup():
     ]
     application = FastAPI()
     application.include_router(auth.router)
+    application.include_router(account_settings.router)
+    application.include_router(v24_commerce.router)
+    application.include_router(exchange_connections.router)
+    application.include_router(moderator_router)
+    for route in main.app.routes:
+        if getattr(route, "path", "").startswith("/api/v22/admin/"):
+            if not any(getattr(existing, "path", None) == route.path
+                       and getattr(existing, "methods", None) == route.methods
+                       for existing in application.routes):
+                application.router.routes.append(route)
     state = default_commercial_state()
     state.update(users=copy.deepcopy(users), owner_user_id="owner")
     application.state.v22_commercial = {
@@ -79,18 +98,15 @@ def setup():
     pool = CanonicalPool(users)
     application.state.db_pool = pool
 
-    @application.middleware("http")
-    async def canonical(request, call_next):
-        try:
-            request.state.member = await auth.authenticated_user_async(request)
-            return await call_next(request)
-        except HTTPException as exc:
-            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    application.middleware("http")(main.owner_preview_gate)
 
     with patch.object(account_settings, "track_session", AsyncMock()), \
             patch.object(auth, "save_state"), \
-            patch.object(auth, "persist_v22_commercial", AsyncMock(return_value=True)):
-        with TestClient(application) as client:
+            patch.object(auth, "persist_v22_commercial", AsyncMock(return_value=True)), \
+            patch.object(auth, "schedule_log_event"), \
+            patch.object(main, "WEB_REQUIRE_AUTH", False), \
+            patch.object(main, "hydrate_authenticated_user_state", AsyncMock()):
+        with TestClient(application, base_url="https://moderator.example.test") as client:
             yield client, pool
 
 
