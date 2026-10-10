@@ -29,6 +29,10 @@ class ApprovalPool(SupportPool):
             raise
 
     async def execute(self, sql, *args):
+        if "INSERT INTO commercial_auth_users" in sql:
+            self.check(sql)
+            assert args[0] in self.users, "Approval must not create a new canonical user"
+            return "INSERT 0 0"
         if "INSERT INTO audit_log" in sql and args[2] == self.fail_action:
             raise RuntimeError("private@example.test secret-token")
         if "INSERT INTO commercial_erased_users" in sql:

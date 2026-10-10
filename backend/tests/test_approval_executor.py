@@ -242,3 +242,14 @@ def test_each_nonexecution_transition_rolls_back_if_audit_cannot_persist(approva
         response = approve(client, row)
     assert response.status_code == 503
     assert pool.approvals[row["id"]] == previous and pool.canonical_changes == 0
+
+
+def test_snapshot_auth_persistence_cannot_reactivate_target_or_increment_version_again(approvals):
+    client, pool = approvals
+    row = create(client)
+    assert approve(client, row).status_code == 200
+    asyncio.run(auth.persist_auth_security(client.app))
+    assert pool.users["customer"]["security"]["active"] is False
+    assert pool.users["customer"]["auth_version"] == 2 and pool.canonical_changes == 1
+    target = next(u for u in client.app.state.v22_commercial["state"]["users"] if u["id"] == "customer")
+    assert target["active"] is False and target["auth_version"] == 2
