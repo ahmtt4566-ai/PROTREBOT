@@ -1400,6 +1400,13 @@ AI-powered analysis, market scanning, demo trading and risk tools, a canonical
 `https://kaistrade.com/` link, and matching Open Graph/Twitter metadata. The
 existing public `og-image.png` is used; no profit or performance claims are made.
 Metadata is present in the HTTP HTML before JavaScript executes.
+Each entry point contains exactly one `WebSite` JSON-LD object with
+`name: KaisTrade`, `alternateName: Kais Trade` and the canonical homepage URL.
+The existing square transparent PNG favicons (48, 96, 192 and 512 pixels), ICO
+and 180-pixel Apple touch icon are retained, with exact crawler allowlist entries.
+The social image is an existing 1200-by-630 PNG. Tests verify local image sizes
+and real HTTP image bytes/MIME types in both entry points and builds. Search
+engines choose whether and when to display the site name or favicon.
 
 The sitemap lists the canonical homepage `/` and public policy pages `/privacy`,
 `/terms` and `/risk`. The homepage continues to display the existing login UI;

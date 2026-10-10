@@ -48,7 +48,7 @@ function AuthCoinScreen({data,status}:{data:LiveTickerData;status:LiveTickerStat
 
 function AuthIntroPanel({data,status,movers,premium = false}:{data:LiveTickerData;status:LiveTickerStatus;movers:ReturnType<typeof useTopMovers>;premium?:boolean}) {
   return <section className="authIntro">
-    <div className="authIntroCopy"><h1 className="authLogoHeading"><span className="authBrandMark" role="link" tabIndex={0} aria-label="Ana sayfaya git" onClick={() => window.location.assign('/')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.assign('/') } }}><img src="/kaistrade-logo.png" alt="KaisTrade"/></span></h1>{premium && <h2 className="authPremiumTitle"><span className="authWordmark" aria-label="KaisTrade"><b>KAİS</b><i>TRADE</i></span><span>Piyasanın ritmini yakalayın.</span></h2>}<p>Hızlı kararlar, berrak analiz ve güvenli işlem akışı için ihtiyacınız olan her şey tek çalışma alanında.</p></div>
+    <div className="authIntroCopy"><h1 className="authLogoHeading"><span className="authBrandMark" role="link" tabIndex={0} aria-label="Ana sayfaya git" onClick={() => window.location.assign('/')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.assign('/') } }}><img src="/kaistrade-logo.png" alt="KaisTrade"/></span></h1>{premium && <h2 className="authPremiumTitle"><span className="authWordmark" aria-label="KaisTrade"><b>Kais</b><i>Trade</i></span><span>Piyasanın ritmini yakalayın.</span></h2>}<p>Hızlı kararlar, berrak analiz ve güvenli işlem akışı için ihtiyacınız olan her şey tek çalışma alanında.</p></div>
     {!premium && <div className="authFeatureList"><span><Zap/> Hızlı işlem</span><span><BarChart3/> Gelişmiş analiz</span><span><ShieldCheck/> Güvenli altyapı</span></div>}
     <AuthMarketCards data={data} status={status}/>
     <TopMovers movers={movers} autoScroll={premium}/>
@@ -557,8 +557,8 @@ export default function AuthGate({children}:{children:ReactNode}) {
   if (!session || (mode === 'reset' && resetToken) || (mode === 'forgot' && window.location.pathname === '/forgot-password')) {
     const registrationStrength = strength(register.password)
     return <LoginMarketShell>{market => <main className={`authPage${isRegistration ? ' authPageRegister' : ''}${mode === 'login' ? ' authPageLogin' : ''}`}>
-      {mode !== 'login' && <p className="authMobileSlogan">KAİSTRADE piyasayı tek yerden yönetin</p>}
-      {mode === 'login' && <header className="authMobileIdentity"><img src="/kaistrade-logo.png" alt="KaisTrade"/><p>KAİSTRADE piyasayı tek yerden yönetin</p></header>}
+      {mode !== 'login' && <p className="authMobileSlogan">KaisTrade piyasayı tek yerden yönetin</p>}
+      {mode === 'login' && <header className="authMobileIdentity"><img src="/kaistrade-logo.png" alt="KaisTrade"/><p>KaisTrade piyasayı tek yerden yönetin</p></header>}
       <AuthIntroPanel data={market.data} status={market.status} movers={market.movers} premium={mode === 'login'}/>
       <section className={`authCard ${mode === 'verify' ? 'authCardVerify' : ''}${isRegistration ? ' authCardRegister' : ''}${mode === 'login' ? ' authCardLogin' : ''}`}>
         <div className="authLoginBrand"><img src="/kaistrade-logo.png" alt="KaisTrade"/></div>

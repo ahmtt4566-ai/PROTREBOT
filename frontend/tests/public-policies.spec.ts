@@ -1,4 +1,5 @@
 import {expect, test} from '@playwright/test'
+import {readFileSync} from 'node:fs'
 import {PUBLIC_POLICIES, publicPolicyForPath} from '../../compliance-content'
 import {mockAssistant} from './helpers/assistant-api'
 
@@ -16,6 +17,10 @@ test('home page publishes complete KaisTrade metadata before JavaScript in both 
       return {
         title:parsed.title,
         canonical:Array.from(parsed.querySelectorAll('link[rel="canonical"]'),element => element.getAttribute('href')),
+        schemas:Array.from(parsed.querySelectorAll('script[type="application/ld+json"]'),element => JSON.parse(element.textContent || '')),
+        icons:Array.from(parsed.querySelectorAll('link[rel="icon"],link[rel="apple-touch-icon"]'),element => ({
+          href:element.getAttribute('href'),type:element.getAttribute('type'),sizes:element.getAttribute('sizes'),
+        })),
         meta:Object.fromEntries(Array.from(parsed.querySelectorAll('meta[name],meta[property]'),element => [
           element.getAttribute('name') || element.getAttribute('property'),element.getAttribute('content'),
         ])),
@@ -35,12 +40,25 @@ test('home page publishes complete KaisTrade metadata before JavaScript in both 
     const image = await request.get(`${base}/og-image.png`)
     expect(image.status()).toBe(200)
     expect(image.headers()['content-type']).toMatch(/^image\/png\b/i)
-    const schema = html.match(/<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/)?.[1]
-    if (!schema) throw new Error('Home page is missing its WebSite structured data')
-    expect(JSON.parse(schema)).toEqual({
+    expect(await image.body()).toEqual(readFileSync(new URL('../public/og-image.png',import.meta.url)))
+    expect(metadata.schemas).toEqual([{
       '@context': 'https://schema.org', '@type': 'WebSite',
-      name: 'KaisTrade', url: 'https://kaistrade.com/',
-    })
+      name: 'KaisTrade', alternateName: 'Kais Trade', url: 'https://kaistrade.com/',
+    }])
+    expect(metadata.icons).toHaveLength(6)
+    expect(metadata.icons).toContainEqual({href:'/favicon-48x48.png',type:'image/png',sizes:'48x48'})
+    expect(metadata.icons).toContainEqual({href:'/favicon-512x512.png',type:'image/png',sizes:'512x512'})
+    for (const icon of metadata.icons) {
+      if (!icon.href) throw new Error('Icon URL missing')
+      const response = await request.get(base+icon.href)
+      expect(response.status()).toBe(200)
+      expect(response.headers()['content-type']).toMatch(icon.href.endsWith('.ico') ? /^image\/(x-icon|vnd\.microsoft\.icon)\b/i : /^image\/png\b/i)
+      expect(await response.body()).toEqual(readFileSync(new URL('../public'+icon.href,import.meta.url)))
+    }
+    const logo = await request.get(`${base}/kaistrade-logo.png`)
+    expect(logo.status()).toBe(200)
+    expect(logo.headers()['content-type']).toMatch(/^image\/png\b/i)
+    expect(await logo.body()).toEqual(readFileSync(new URL('../public/kaistrade-logo.png',import.meta.url)))
   }
 })
 
@@ -83,6 +101,8 @@ test('ordinary login remains protected and badges do not claim encryption streng
   await page.goto('http://127.0.0.1:4175/')
   await expect(page.getByRole('button', {name:'Google ile devam et', exact:true})).toBeEnabled()
   await expect(page.locator('.authCard input[autocomplete="current-password"]')).toBeVisible()
+  await expect(page.locator('.authWordmark')).toHaveText('KaisTrade')
+  await expect(page.locator('.authLogoHeading img')).toHaveAttribute('alt','KaisTrade')
   const badges = page.locator('.authTrustBadges')
   await expect(badges).toBeVisible()
   await expect(badges).toContainText('Hesap yönetimi')

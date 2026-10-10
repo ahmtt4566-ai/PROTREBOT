@@ -20,11 +20,14 @@ test('crawler allowlist permits the homepage but not login variants or private a
   const directives = robotsSource.split(/\r?\n/).filter(line => /^(Allow|Disallow): /.test(line))
   expect(directives).toEqual([
     'Disallow: /','Allow: /$','Allow: /privacy$','Allow: /terms$','Allow: /risk$',
-    'Allow: /assets/','Allow: /kaistrade-logo.png$','Allow: /og-image.png$','Allow: /sitemap.xml$','Allow: /robots.txt$',
+    'Allow: /assets/','Allow: /kaistrade-logo.png$',
+    'Allow: /favicon.ico$','Allow: /favicon-48x48.png$','Allow: /favicon-96x96.png$',
+    'Allow: /favicon-192x192.png$','Allow: /favicon-512x512.png$','Allow: /apple-touch-icon.png$',
+    'Allow: /og-image.png$','Allow: /sitemap.xml$','Allow: /robots.txt$',
   ])
   const allowedPaths = directives.filter(line => line.startsWith('Allow: ')).map(line => line.slice(7))
   const allowed = (path:string) => allowedPaths.some(rule => rule.endsWith('$') ? path === rule.slice(0,-1) : path.startsWith(rule))
-  for (const path of ['/','/privacy','/terms','/risk','/assets/app.js','/og-image.png']) expect(allowed(path)).toBe(true)
+  for (const path of ['/','/privacy','/terms','/risk','/assets/app.js','/og-image.png','/favicon.ico','/favicon-48x48.png','/favicon-96x96.png','/favicon-192x192.png','/favicon-512x512.png','/apple-touch-icon.png']) expect(allowed(path)).toBe(true)
   for (const path of ['/login','/register','/profile','/admin','/settings','/master-trade','/verify-email','/api/v22/session','/api/v22/auth/google/callback','/?google_login=success','/?token=private']) {
     expect(allowed(path)).toBe(false)
   }
