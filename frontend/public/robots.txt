@@ -1,0 +1,11 @@
+User-agent: *
+Disallow: /
+Allow: /privacy$
+Allow: /terms$
+Allow: /risk$
+Allow: /assets/
+Allow: /kaistrade-logo.png$
+Allow: /sitemap.xml$
+Allow: /robots.txt$
+
+Sitemap: https://kaistrade.com/sitemap.xml

@@ -1380,6 +1380,34 @@ Login badges use neutral feature descriptions, not unverified encryption, 2FA,
 or round-the-clock support promises. Publishing these local changes requires a
 separate release; they do not clear a Google Safe Browsing warning automatically.
 
+### Sitemap and crawler access
+
+`frontend/public/sitemap.xml` and `frontend/public/robots.txt` are shared static
+assets. The root Vite build uses `frontend/public` explicitly; the compatibility
+frontend uses the same directory as its default public directory. Both builds
+copy these files to the output root. There is no sitemap generator or added
+dependency. The duplicate tree under `tradbt458-main/` is not an active build
+entrypoint and is not changed by this configuration.
+
+Both active Vercel configurations exclude the exact `/sitemap.xml` and
+`/robots.txt` paths from the SPA fallback and declare their XML/plain-text MIME
+types. The root API proxy remains first; its destination, OAuth callback, CSP,
+CORS and session behavior are unchanged.
+
+The sitemap lists only the canonical public policy pages `/privacy`, `/terms`
+and `/risk`. The authenticated application, login, verification links and API
+routes are not sitemap entries. Robots uses a conservative public-page allowlist
+and permits the public assets needed to render those pages, without enumerating
+private routes. Robots directives are crawler guidance, not access control;
+all existing authentication and authorization checks remain necessary.
+
+After an explicitly authorized Vercel deployment, verify
+`https://kaistrade.com/sitemap.xml` returns HTTP 200 and XML, and
+`https://kaistrade.com/robots.txt` returns HTTP 200 and plain text, not the login
+HTML. Check all three policy links while signed out. In Google Search Console,
+remove the homepage URL submitted as a sitemap and submit only `sitemap.xml`
+(or its full canonical URL). A valid sitemap does not guarantee indexing.
+
 ## Güvenlik ve tarayıcı oturumları
 
 Tarayıcı üyelik oturumu ve yönetici erişimi `HttpOnly`, `SameSite=Lax`,

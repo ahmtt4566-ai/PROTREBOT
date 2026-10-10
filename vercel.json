@@ -17,10 +17,22 @@
         {"key": "Referrer-Policy", "value": "no-referrer"},
         {"key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=()"}
       ]
+    },
+    {
+      "source": "/sitemap.xml",
+      "headers": [
+        {"key": "Content-Type", "value": "application/xml; charset=utf-8"}
+      ]
+    },
+    {
+      "source": "/robots.txt",
+      "headers": [
+        {"key": "Content-Type", "value": "text/plain; charset=utf-8"}
+      ]
     }
   ],
   "rewrites": [
     {"source": "/api/:path*", "destination": "https://protrebot-rkpt.onrender.com/api/:path*"},
-    {"source": "/(.*)", "destination": "/index.html"}
+    {"source": "/:path((?!sitemap\\.xml$|robots\\.txt$).*)", "destination": "/index.html"}
   ]
 }
