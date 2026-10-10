@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from .approval_service import (
     ApprovalItem, ApprovalPage, CreateApproval, ID, Status, approval_item, approval_row,
     audit_approval, expire_pending, mod_connection, target_row, target_snapshot, transition,
+    CampaignApprovalItem,
 )
 from .moderator_access import ModeratorIdentity, require_permission
 from .notification_outbox import enqueue_digest
@@ -68,7 +69,7 @@ async def own_approvals(request: Request, identity: ModeratorIdentity = Depends(
         return ApprovalPage(items=[approval_item(row) for row in rows], total=total, limit=limit, offset=offset, pending_count=pending)
 
 
-@router.post("/{approval_id}/cancel", response_model=ApprovalItem)
+@router.post("/{approval_id}/cancel", response_model=ApprovalItem | CampaignApprovalItem)
 async def cancel_approval(request: Request, approval_id: str = Path(pattern=ID, min_length=1, max_length=160),
                           identity: ModeratorIdentity = Depends(require_permission("approvals.create"))):
     expired = False
@@ -78,6 +79,11 @@ async def cancel_approval(request: Request, approval_id: str = Path(pattern=ID, 
             raise HTTPException(404, "Approval not found")
         if row["status"] != "pending":
             raise HTTPException(409, "Approval is not pending")
+        if row["action_type"] == "campaign.send":
+            from .campaign_service import campaign_row, cancel, payload as campaign_payload
+            campaign = await campaign_row(conn, campaign_payload(row)["campaign_id"], actor)
+            await cancel(conn, actor, campaign, withdraw=True)
+            return approval_item(await approval_row(conn, approval_id))
         expired = await conn.fetchval("SELECT $1::timestamptz <= clock_timestamp()", row["expires_at"])
         changed = await transition(conn, actor, row, "expired" if expired else "cancelled",
                                    "approval.expired" if expired else "approval.cancelled")

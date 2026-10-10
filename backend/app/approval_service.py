@@ -1,4 +1,5 @@
 """Canonical approval storage; no account changes happen on request creation."""
+from __future__ import annotations
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -78,7 +79,7 @@ class ApprovalItem(BaseModel):
 
 
 class ApprovalPage(BaseModel):
-    items: list[ApprovalItem]
+    items: list[ApprovalItem | CampaignApprovalItem]
     total: int
     limit: int
     offset: int
@@ -90,6 +91,45 @@ class ApprovalDetail(BaseModel):
     current_target: TargetSnapshot | None
     target_changed: bool
     active_subscription: bool
+
+
+class CampaignApprovalPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    campaign_id: str = Field(pattern=ID, min_length=1, max_length=160)
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CampaignApprovalItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    action_type: Literal["campaign.send"]
+    target_user_id: None
+    requester_user_id: str
+    requester_role: Literal["MODERATOR"]
+    target_snapshot: dict[str, None]
+    payload: CampaignApprovalPayload
+    reason: str
+    status: Status
+    decided_by: str | None
+    decided_at: datetime | None
+    decision_note: str | None
+    executed_at: datetime | None
+    result_code: ResultCode | Literal["campaign_changed"] | None
+    expires_at: datetime
+    version: int
+    created_at: datetime
+    needs_review: bool
+
+
+ApprovalPage.model_rebuild()
+
+
+class CampaignApprovalDetail(BaseModel):
+    request: CampaignApprovalItem
+    campaign_preview: dict
+    current_target: None
+    target_changed: bool
+    active_subscription: Literal[False]
 
 
 def security(row):
@@ -110,7 +150,16 @@ def stored_snapshot(row) -> TargetSnapshot:
     return TargetSnapshot.model_validate(json.loads(value) if isinstance(value, str) else value)
 
 
-def approval_item(row) -> ApprovalItem:
+def approval_item(row) -> ApprovalItem | CampaignApprovalItem:
+    if row["action_type"] == "campaign.send":
+        value = row["payload"]
+        snapshot = row["target_snapshot"]
+        return CampaignApprovalItem(
+            **{name: row[name] for name in CampaignApprovalItem.model_fields if name not in ("needs_review", "payload", "target_snapshot")},
+            payload=json.loads(value) if isinstance(value, str) else value,
+            target_snapshot=json.loads(snapshot) if isinstance(snapshot, str) else snapshot,
+            needs_review=row["status"] == "executing",
+        )
     fields = {name: row[name] for name in ApprovalItem.model_fields if name not in ("needs_review", "target_snapshot")}
     fields["reason"] = mask_support_text(fields["reason"])
     if fields["decision_note"] is not None:

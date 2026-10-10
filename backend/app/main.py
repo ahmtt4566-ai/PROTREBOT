@@ -71,6 +71,7 @@ from .moderator_approvals import router as moderator_approvals_router
 from .admin_approvals import router as admin_approvals_router
 from .notification_admin import router as notification_admin_router
 from .moderator_events import router as moderator_events_router
+from .campaign_routes import router as campaign_router
 from .v25_execution import init_v25_execution, restore_v25_state, router as v25_execution_router, shutdown_v25_execution
 from .v27_cloud_ops import (
     init_v27_cloud,
@@ -1437,6 +1438,7 @@ app.include_router(moderator_approvals_router)
 app.include_router(admin_approvals_router)
 app.include_router(notification_admin_router)
 app.include_router(moderator_events_router)
+app.include_router(campaign_router)
 from .account_settings import router as account_settings_router
 app.include_router(account_settings_router)
 app.include_router(google_oauth_router)

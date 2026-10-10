@@ -4,6 +4,7 @@ from .approval_executor import complete_execution, requester_valid
 from .approval_service import (
     ApprovalDetail, ApprovalItem, ApprovalPage, ID, RejectApproval, Status, approval_item,
     approval_row, expire_pending, owner_connection, stored_snapshot, target_row, target_snapshot, transition,
+    CampaignApprovalDetail, CampaignApprovalItem,
 )
 
 router = APIRouter(prefix="/api/v22/admin/approvals", tags=["Owner approvals"])
@@ -30,11 +31,16 @@ async def approval_summary(request: Request):
         return {"pending_count": await conn.fetchval("SELECT COUNT(*) FROM approval_requests WHERE status = 'pending'")}
 
 
-@router.get("/{approval_id}", response_model=ApprovalDetail)
+@router.get("/{approval_id}", response_model=ApprovalDetail | CampaignApprovalDetail)
 async def approval_detail(request: Request, approval_id: str = Path(pattern=ID, min_length=1, max_length=160)):
     async with owner_connection(request) as (conn, actor):
         await expire_pending(conn, actor, owner=True)
         row = await approval_row(conn, approval_id)
+        if row["action_type"] == "campaign.send":
+            from .campaign_executor import detail
+            result = await detail(conn, request, row, actor)
+            result["request"] = approval_item(row)
+            return CampaignApprovalDetail(**result)
         target = await target_row(conn, row["target_user_id"])
         current = target_snapshot(target) if target else None
         subscription = await conn.fetchval(
@@ -56,7 +62,7 @@ async def decision_check(conn, actor, row):
     return None
 
 
-@router.post("/{approval_id}/reject", response_model=ApprovalItem)
+@router.post("/{approval_id}/reject", response_model=ApprovalItem | CampaignApprovalItem)
 async def reject_approval(payload: RejectApproval, request: Request,
                           approval_id: str = Path(pattern=ID, min_length=1, max_length=160)):
     async with owner_connection(request) as (conn, actor):
@@ -70,13 +76,20 @@ async def reject_approval(payload: RejectApproval, request: Request,
     return result
 
 
-@router.post("/{approval_id}/approve", response_model=ApprovalItem)
+@router.post("/{approval_id}/approve", response_model=ApprovalItem | CampaignApprovalItem)
 async def approve_approval(request: Request, approval_id: str = Path(pattern=ID, min_length=1, max_length=160)):
     error = None
+    campaign_result = None
     async with owner_connection(request) as (conn, actor):
         row = await approval_row(conn, approval_id)
         if await decision_check(conn, actor, row):
             error = "Approval expired"
+        elif row["action_type"] == "campaign.send":
+            from .campaign_executor import approve
+            changed = await approve(conn, actor, row)
+            campaign_result = approval_item(changed)
+            if changed["status"] == "stale":
+                error = "Campaign or requester changed; review again"
         elif not await requester_valid(conn, row):
             await transition(conn, actor, row, "stale", "approval.stale", result_code="requester_changed")
             error = "Requester changed; review again"
@@ -90,6 +103,8 @@ async def approve_approval(request: Request, approval_id: str = Path(pattern=ID,
                 await transition(conn, actor, row, "executing")
     if error:
         raise HTTPException(409, error)
+    if campaign_result is not None:
+        return campaign_result
     result = await complete_execution(request, approval_id)
     if result.status == "stale":
         raise HTTPException(409, "Target or requester changed; review again")
