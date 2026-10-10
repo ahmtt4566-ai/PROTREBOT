@@ -36,7 +36,7 @@ def _identity_matches(event_id: str, event_client: str, known_id: str, known_cli
     )
 
 
-def _plans(state: dict[str, Any], demo: dict[str, Any]) -> list[dict[str, Any]]:
+def owned_legacy_plans(state: dict[str, Any], demo: dict[str, Any]) -> list[dict[str, Any]]:
     uid = _id(state.get("_user_id"))
     if not uid or uid != _id(demo.get("_user_id")):
         return []
@@ -179,7 +179,7 @@ def observe_stream(state: dict[str, Any], demo: dict[str, Any], payload: dict[st
     event = payload.get("o") if isinstance(payload.get("o"), dict) else payload.get("a", {})
     if not isinstance(event, dict):
         return []
-    plans = _plans(state, demo)
+    plans = owned_legacy_plans(state, demo)
     symbol = str(event.get("s") or event.get("symbol") or "")
     candidates = [plan for plan in plans if plan.get("symbol") == symbol]
     notices = []
@@ -237,7 +237,7 @@ def observe_missing_positions(state: dict[str, Any], demo: dict[str, Any], previ
     current_symbols = {item["symbol"] for item in current.get("positions", [])}
     missing = {item["symbol"] for item in (previous or {}).get("positions", [])} - current_symbols
     notices = []
-    for plan in _plans(state, demo):
+    for plan in owned_legacy_plans(state, demo):
         if plan.get("symbol") not in missing and not (plan.get("position_status") == "CLOSED" and plan.get("symbol") not in current_symbols):
             continue
         row = _record(state, plan)

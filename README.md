@@ -190,8 +190,20 @@ Observer errors are logged and retained as user-state error markers.
 Result evidence survives JSONB/file state restoration. Accounting journal
 records are stored separately and merged only for journal display, so they
 cannot evict trading fills or change daily PnL/loss-limit calculations.
-This first step does **not** update the consecutive-loss counter, pause/resume
-automation, change day-reset behavior or alter any execution/risk gate.
+Legacy consecutive-loss accounting consumes each complete closure once.
+Verified net losses and unverified closures increment the streak; verified
+profit or breakeven resets it. Partial exits alone do not count. An unverified
+closure is retained as a conservative loss even if later evidence resolves it,
+and its reason is recorded separately without inventing monetary PnL.
+Accounting follows UTC closure order and resets the counter on UTC day change.
+Reaching the existing effective limit latches a persistent pause: profits, day
+change and process restart cannot resume entries. Only the existing confirmed
+manual start flow can reset the streak and release this latch. Invalid
+accounting, unresolved observer errors or failed state persistence block new
+legacy entries; reconciliation still runs Stop/TP protection before accounting.
+Original V2, kill switch, daily monetary limits and order/protection logic are
+unchanged. Rotation and app/manual safety closures without linked exit order
+identities remain unverified; linking those identities is a separate step.
 
 The user bell panel includes critical Demo notifications for failed Stop
 repair (`ACİL KORUMA`), a failed first automation cycle (`AUTO_START_ERROR`),
