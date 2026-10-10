@@ -1454,6 +1454,12 @@ A valid sitemap does not guarantee indexing.
 
 ## Güvenlik ve tarayıcı oturumları
 
+Müşteri oluşturma, müşteri etkinleştirme/askıya alma ve satış adayı oluşturma
+audit mesajları mevcut `email_service.masked_recipient` yardımcısını kullanır
+(ör. `s***@example.test`). Kullanıcı ve satış adayı kayıtlarındaki e-posta
+adresleri değişmez; yalnız bu yeni audit mesajlarındaki adresler maskelenir.
+Geçmiş audit kayıtları bu değişiklikle yeniden yazılmaz.
+
 Tarayıcı üyelik oturumu ve yönetici erişimi `HttpOnly`, `SameSite=Lax`,
 üretimde `Secure`, host-only `/api` çerezleriyle taşınır. Frontend depolarında
 yalnızca gizli olmayan kullanıcı/oturum göstergesi bulunur; eski bearer

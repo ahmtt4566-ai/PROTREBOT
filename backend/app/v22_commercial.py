@@ -2425,7 +2425,7 @@ async def v22_create_customer(payload: CustomerRequest, request: Request):
         state["licenses"].append(license_row)
         created_at = now_iso()
         state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": user_id, "plan": "STARTER" if payload.plan == "TRIAL" else payload.plan, "status": "TRIAL" if payload.plan == "TRIAL" else "ACTIVE", "billingInterval": "monthly", "trialStart": created_at if payload.plan == "TRIAL" else None, "trialEnd": expires_at if payload.plan == "TRIAL" else None, "currentPeriodStart": created_at, "currentPeriodEnd": expires_at, "currentPrice": 0 if payload.plan == "TRIAL" else state["plans"].get(payload.plan, {}).get("monthly_usd"), "stripeCustomerId": None, "stripeSubscriptionId": None, "cancelAtPeriodEnd": False, "provider": "DEVELOPMENT", "createdAt": created_at, "updatedAt": created_at})
-        add_audit(state, "CUSTOMER_CREATED", f"{email} için {payload.plan} Demo lisansı oluşturuldu.", actor=owner["id"], subject=user_id)
+        add_audit(state, "CUSTOMER_CREATED", f"{email_service.masked_recipient(email)} için {payload.plan} Demo lisansı oluşturuldu.", actor=owner["id"], subject=user_id)
         save_state(state)
     return {"user": public_user(user), "license": license_row, "demo_only": True}
 
@@ -2454,7 +2454,7 @@ async def v22_customer_status(user_id: str, payload: CustomerStatusRequest, requ
                     agent["revoked_at"] = now_iso()
                     agent["token_version"] = int(agent.get("token_version", 1)) + 1
         kind = "CUSTOMER_ACTIVATED" if payload.active else "CUSTOMER_SUSPENDED"
-        message = f"{user['email']} {'etkinleştirildi' if payload.active else 'askıya alındı'}: {payload.reason}"
+        message = f"{email_service.masked_recipient(user['email'])} {'etkinleştirildi' if payload.active else 'askıya alındı'}: {payload.reason}"
         add_audit(rt["state"], kind, message, actor=owner["id"], subject=user_id)
         try:
             save_state(rt["state"])

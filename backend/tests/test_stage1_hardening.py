@@ -13,7 +13,9 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import error_monitoring, main
+from app import error_monitoring, main, v22_commercial as auth, v24_commerce as commerce
+from app.commercial_core import default_commercial_state
+from app.email_service import masked_recipient
 
 
 @pytest.mark.parametrize("role,status", [("OWNER", 200), ("ADMIN", 403), ("CUSTOMER", 403)])
@@ -135,3 +137,52 @@ def test_alarm_failure_warns_only_type_and_preserves_non_throwing_logging(caplog
     assert warnings == [f"Critical error alert failed: error_type={expected_type}"]
     assert "PRIVATE_" not in caplog.text
     assert pool.execute.await_count == 2
+
+
+@pytest.mark.parametrize("action", ["create_customer", "activate_customer", "suspend_customer", "create_lead"])
+def test_commercial_audit_masks_email_without_changing_records_or_owner_guard(action):
+    email = "synthetic.person@example.test"
+    user = {"id": "customer-test", "email": email, "role": "CUSTOMER", "active": True, "auth_version": 1}
+    owner = {"id": "owner-test", "role": "OWNER"}
+    state = default_commercial_state()
+    state["users"] = [owner, user] if action != "create_customer" else [owner]
+    runtime = {"state": state, "lock": asyncio.Lock(), "secret": b"offline"}
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(v22_commercial=runtime, db_pool=None)))
+
+    async def invalidate(_request, target, *, security_updates):
+        target.update(security_updates)
+
+    module = commerce if action == "create_lead" else auth
+    with patch.object(module, "authenticated_user", return_value=owner) as guard, \
+            patch.object(module, "save_state") as save, \
+            patch.object(auth, "refresh_auth_security", AsyncMock()), \
+            patch.object(auth, "invalidate_user_sessions", side_effect=invalidate), \
+            patch.object(auth, "persist_v22_commercial", AsyncMock(return_value=True)), \
+            patch.object(auth, "hash_password", return_value={"algorithm": "offline"}), \
+            patch("app.account_settings.close_blocker", AsyncMock(return_value=None)):
+        if action == "create_customer":
+            result = asyncio.run(auth.v22_create_customer(auth.CustomerRequest(
+                email=email, display_name="Synthetic Person", password="SyntheticPassword1!",
+            ), request))
+            assert result["user"]["email"] == email
+            kind = "CUSTOMER_CREATED"
+        elif action == "create_lead":
+            result = asyncio.run(commerce.v24_create_lead(commerce.LeadRequest(name="Synthetic Person", email=email), request))
+            assert result["email"] == email
+            kind = "LEAD_CREATED"
+        else:
+            active = action == "activate_customer"
+            result = asyncio.run(auth.v22_customer_status(user["id"], auth.CustomerStatusRequest(
+                active=active, reason="Synthetic reason",
+            ), request))
+            assert result["user"]["email"] == email
+            assert user["active"] == active
+            kind = "CUSTOMER_ACTIVATED" if active else "CUSTOMER_SUSPENDED"
+        guard.assert_called_once_with(request, owner=True)
+        save.assert_called_once_with(state)
+    event = next(row for row in state["audit"] if row["kind"] == kind)
+    assert email not in event["message"]
+    assert masked_recipient(email) == "s***@example.test"
+    assert masked_recipient(email) in event["message"]
+    assert event["actor"] == owner["id"]
+    assert event["subject"]

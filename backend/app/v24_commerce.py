@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .commerce_core import calculate_demo_invoice, launch_checklist, sanitize_business_settings
+from .email_service import masked_recipient
 from .v22_commercial import (
     active_license,
     add_audit,
@@ -141,7 +142,7 @@ async def v24_create_lead(payload: LeadRequest, request: Request):
         }
         rt["state"]["leads"].insert(0, row)
         del rt["state"]["leads"][500:]
-        add_audit(rt["state"], "LEAD_CREATED", f"{row['email']} için Demo satış adayı eklendi.", actor=owner["id"], subject=row["id"])
+        add_audit(rt["state"], "LEAD_CREATED", f"{masked_recipient(row['email'])} için Demo satış adayı eklendi.", actor=owner["id"], subject=row["id"])
         save_state(rt["state"])
     return row
 
