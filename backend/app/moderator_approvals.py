@@ -8,6 +8,7 @@ from .approval_service import (
     audit_approval, expire_pending, mod_connection, target_row, target_snapshot, transition,
 )
 from .moderator_access import ModeratorIdentity, require_permission
+from .notification_outbox import enqueue_digest
 
 router = APIRouter(prefix="/api/mod/approvals", tags=["Moderator approvals"])
 
@@ -44,6 +45,7 @@ async def create_approval(payload: CreateApproval, request: Request,
         )
         result = approval_item(row)
         await audit_approval(conn, actor, row, "approval.requested")
+        await enqueue_digest(conn)
         return result
 
 

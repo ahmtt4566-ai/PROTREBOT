@@ -13,6 +13,7 @@ from .audit_log import AuditActor, write_audit
 from .moderator_access import ModeratorIdentity
 from .moderator_customers import customer_read_connection
 from .moderator_support import mask_support_text
+from .notification_outbox import enqueue_decision
 
 logger = logging.getLogger(__name__)
 Action = Literal["account.deactivate", "account.reactivate"]
@@ -154,6 +155,7 @@ async def transition(conn, actor, row, status, action=None, *, result_code=None,
         raise HTTPException(409, "Approval changed")
     if action:
         await audit_approval(conn, actor, changed, action, phase=phase)
+    await enqueue_decision(conn, changed)
     return changed
 
 
