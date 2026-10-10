@@ -13,7 +13,8 @@ const profile = {user_id: 'customer-id', email_masked: 'a***@example.test', role
 test('Menu exposes only permitted areas, with Turkish labels', () => {
   assert.deepEqual(model.visibleModeratorSections([]).map(item => item.id), ['overview'])
   assert.deepEqual(model.visibleModeratorSections(['payments.view']).map(item => item.id), ['overview', 'payments'])
-  assert.equal(model.visibleModeratorSections(model.MODERATOR_PERMISSIONS).length, 7)
+  assert.deepEqual(model.visibleModeratorSections(model.MODERATOR_PERMISSIONS).map(item => item.id),
+    ['overview', 'customers', 'subscriptions', 'payments', 'support', 'activity', 'approvals', 'campaigns'])
   assert.deepEqual(model.visibleModeratorSections(['customers.view', 'subscriptions.view']).map(item => item.label), ['Genel Bakış', 'Müşteriler', 'Abonelikler'])
   assert.deepEqual(model.visibleModeratorSections(['support.manage']).map(item => item.id), ['overview'])
 })

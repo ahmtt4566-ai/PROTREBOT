@@ -4,6 +4,7 @@ import {APPROVAL_STATUSES, approvalLabels, parseApproval, parseApprovalDetail, p
 import {ApprovalCards, ApprovalError, ApprovalOwnerDetail} from './approval-ui'
 import './moderator-panel.css'
 import AdminNotificationSummary from './AdminNotificationSummary'
+import CampaignApprovalPreview from './CampaignApprovalPreview'
 
 export default function AdminApprovals() {
   const [query, setQuery] = useState<{status: ApprovalStatus | ''; offset: number; version: number}>({status: 'pending', offset: 0, version: 0})
@@ -55,7 +56,9 @@ export default function AdminApprovals() {
       }}><option value="">Tümü</option>{APPROVAL_STATUSES.map(status => <option key={status} value={status}>{approvalLabels[status]}</option>)}</select></label>}
     {busy && <p role="status" className="mod-secondary">Onay bilgileri yükleniyor...</p>}
     {error !== null && <ApprovalError error={error} onRefresh={() => setQuery(value => ({...value, version: value.version + 1}))}/>}
-    {detail && <ApprovalOwnerDetail detail={detail} busy={busy} note={note} onNote={setNote} onApprove={() => void mutate('approve')} onReject={() => void mutate('reject')} onRetry={() => void mutate('retry-agents')}/>}
+    {detail && (detail.request.action_type === 'campaign.send' ?
+      <CampaignApprovalPreview detail={detail} busy={busy} note={note} onNote={setNote} onApprove={() => void mutate('approve')} onReject={() => void mutate('reject')}/> :
+      <ApprovalOwnerDetail detail={detail} busy={busy} note={note} onNote={setNote} onApprove={() => void mutate('approve')} onReject={() => void mutate('reject')} onRetry={() => void mutate('retry-agents')}/>)}
     {page && <><p className="mod-secondary">Bekleyen talepler: {page.pending_count}</p><ApprovalCards items={page.items} owner busy={busy} onSelect={setSelected}/>
       <div className="mod-pagination"><button disabled={busy || page.offset === 0} onClick={() => setQuery({...query, offset: Math.max(0, page.offset - page.limit)})}>Önceki</button>
         <button disabled={busy || page.offset + page.limit >= page.total} onClick={() => setQuery({...query, offset: page.offset + page.limit})}>Sonraki</button></div></>}

@@ -18,7 +18,7 @@ export function ApprovalCards({items, owner = false, busy = false, onCancel, onS
   if (!items.length) return <ModCard title="Onay talepleri"><ModEmpty text="Henüz onay talebi yok."/></ModCard>
   return <ul className="mod-results">{items.map(row => <li key={row.id}><ModCard title={actionLabels[row.action_type]}>
     <div className="mod-badges"><ApprovalBadge status={row.status} needsReview={row.needs_review}/></div>
-    <p className="mod-secondary">Müşteri: {row.target_user_id}</p>
+    <p className="mod-secondary">{row.action_type === 'campaign.send' ? `Duyuru: ${row.payload.campaign_id}` : `Müşteri: ${row.target_user_id}`}</p>
     {owner && <p className="mod-secondary">Talep eden: {row.requester_user_id}</p>}
     <p className="mod-support-text">{row.reason || 'Gerekçe hesap silme nedeniyle temizlendi.'}</p>
     {row.decision_note && <p className="mod-support-text">Karar notu: {row.decision_note}</p>}
@@ -44,6 +44,7 @@ export function ApprovalOwnerDetail({detail, busy, note, onNote, onApprove, onRe
   onApprove: () => void; onReject: () => void; onRetry: () => void
 }) {
   const row = detail.request
+  if (row.action_type === 'campaign.send') return null
   const current = detail.current_target
   return <ModCard title="Talep incelemesi">
     <h3>{actionLabels[row.action_type]}</h3><ApprovalBadge status={row.status} needsReview={row.needs_review}/>

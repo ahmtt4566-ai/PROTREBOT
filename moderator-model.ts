@@ -1,6 +1,7 @@
 export const MODERATOR_PERMISSIONS = [
   'customers.view', 'subscriptions.view', 'payments.view', 'support.view',
   'support.manage', 'events.view', 'approvals.create',
+  'campaigns.manage',
 ] as const
 export type ModeratorPermission = typeof MODERATOR_PERMISSIONS[number]
 export const permissionLabels: Record<ModeratorPermission, string> = {
@@ -11,6 +12,7 @@ export const permissionLabels: Record<ModeratorPermission, string> = {
   'support.manage': 'Destek taleplerini yönet',
   'events.view': 'Etkinliği görüntüle',
   'approvals.create': 'Onay talebi oluştur',
+  'campaigns.manage': 'Bilgilendirme duyurularını yönet',
 }
 
 export const moderatorSections = [
@@ -21,6 +23,7 @@ export const moderatorSections = [
   {id: 'support', label: 'Destek Talepleri', permission: 'support.view'},
   {id: 'activity', label: 'Etkinlik', permission: 'events.view'},
   {id: 'approvals', label: 'Onay Talepleri', permission: 'approvals.create'},
+  {id: 'campaigns', label: 'Duyurular', permission: 'campaigns.manage'},
 ] as const
 export type ModeratorSection = typeof moderatorSections[number]['id']
 export function visibleModeratorSections(permissions: readonly ModeratorPermission[]) {
