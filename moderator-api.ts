@@ -3,9 +3,16 @@ import {withRequestDeadline} from './browser-request'
 import {ModeratorRequestError} from './moderator-model'
 
 export async function moderatorRequest<T>(path: string, parse: (value: unknown) => T, signal: AbortSignal): Promise<T> {
+  return moderatorApiRequest(path, parse, signal, {method: 'GET'})
+}
+
+export async function moderatorApiRequest<T>(path: string, parse: (value: unknown) => T, signal: AbortSignal, options: RequestInit): Promise<T> {
   return withRequestDeadline(async transportSignal => {
+    const headers = new Headers(options.headers)
+    headers.set('X-Requested-With', 'XMLHttpRequest')
+    if (options.body) headers.set('Content-Type', 'application/json')
     const response = await fetch(`${API_BASE}/mod${path}`, {
-      method: 'GET', credentials: 'same-origin', headers: {'X-Requested-With': 'XMLHttpRequest'}, signal: transportSignal,
+      ...options, credentials: 'same-origin', headers, signal: transportSignal,
     })
     if (!response.ok) {
       const payload: unknown = await response.json()

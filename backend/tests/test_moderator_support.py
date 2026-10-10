@@ -218,6 +218,22 @@ def test_list_triggers_cached_sync_filters_page_limit_and_never_writes_snapshot(
         assert client.get("/api/mod/support/cases?status=OPEN", headers=H).json()["total"] == 1
 
 
+def test_all_support_reads_and_writes_fail_test_if_snapshot_writer_is_called(support):
+    client, pool = support
+    forbidden = AssertionError("Support must never write legacy snapshots")
+    with patch("app.v24_commerce.save_state", side_effect=forbidden), \
+         patch("app.v22_commercial.save_state", side_effect=forbidden), \
+         patch("app.v22_commercial.persist_v22_commercial", AsyncMock(side_effect=forbidden)):
+        path = f"/api/mod/support/cases/{load_case(client)}"
+        assert client.get("/api/mod/support/summary", headers=H).status_code == 200
+        assert client.get(path, headers=H).status_code == 200
+        assert client.post(path + "/take", headers=H).status_code == 200
+        assert client.post(path + "/status", headers=H, json={"status": "OPEN", "expected_version": 2}).status_code == 200
+        assert client.post(path + "/notes", headers=H, json={"body": "Ekip notu"}).status_code == 200
+        assert client.post(path + "/release", headers=H).status_code == 200
+    assert all(sql.strip().startswith("SELECT") for sql in pool.queries if "application_state_snapshots" in sql)
+
+
 def test_owner_works_and_audit_contains_only_ids(support):
     client, pool = support
     id_ = load_case(client)
@@ -267,6 +283,16 @@ def test_blank_or_overlong_note_is_rejected(support, body):
     id_ = load_case(client)
     assert client.post(f"/api/mod/support/cases/{id_}/notes", headers=H, json={"body": body}).status_code == 422
 
+
+def test_note_exactly_2000_characters_is_accepted(support):
+    client, pool = support
+    path = f"/api/mod/support/cases/{load_case(client)}"
+    assert client.post(path + "/take", headers=H).status_code == 200
+    body = "Bir ekip notu. " * 133 + "x" * 5
+    assert len(body) == 2000
+    result = client.post(path + "/notes", headers=H, json={"body": body})
+    assert result.status_code == 200
+    assert pool.notes[0]["body"] == body
 
 @pytest.mark.parametrize("suffix,body", [
     ("/take", None), ("/release", None), ("/status", {"status": "OPEN", "expected_version": 2}),

@@ -58,6 +58,7 @@ export function moderatorErrorMessage(status: number, code = ''): string {
   if (code === 'mfa_required') return 'Devam etmek için profilinden iki adımlı doğrulamayı aç.'
   if (status === 429) return 'İstek sınırına ulaşıldı. Bir dakika bekleyip yeniden deneyin.'
   if (status === 404) return 'Bu müşteri bulunamadı. Kullanıcı numarasını kontrol edin.'
+  if (status === 409) return 'Bu talep başka biri tarafından güncellendi, yenile.'
   if (status === 403) return 'Bu bölüm için izniniz yok. Yöneticinizden erişim isteyin.'
   if (status === 401) return 'Oturumunuz sona erdi. Yeniden giriş yapın.'
   return 'Bilgiler alınamadı. Lütfen biraz sonra yeniden deneyin.'

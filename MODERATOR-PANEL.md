@@ -1,5 +1,10 @@
 # Moderator panel (stage 5)
 
+Stage 6 adds internal support case management and real support overview counts.
+Customer/subscription/payment screens remain read-only. See
+[support cases](backend/SUPPORT-CASES.md) for migrations, erasure rules and tests.
+The stage 5 results below describe the original baseline.
+
 ## Integration decisions
 
 - The admin shell, navigation and top bar are private, stateful pieces of

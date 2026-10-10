@@ -1,27 +1,12 @@
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
-import {createRequire} from 'node:module'
 import {test} from 'node:test'
-import {fileURLToPath} from 'node:url'
-import {rolldown} from 'rolldown'
 import React from 'react'
 import {renderToStaticMarkup} from 'react-dom/server'
 import * as model from '../moderator-model.ts'
-
-async function componentModule(file, overrides = {}) {
-  const url = new URL(`../${file}`, import.meta.url)
-  const bundle = await rolldown({input: fileURLToPath(url), external: ['react', 'react/jsx-runtime', 'lucide-react', './moderator-model', './account-settings-api'], transform: {jsx: {runtime: 'automatic'}}})
-  const {output} = await bundle.generate({format: 'cjs', exports: 'named'})
-  await bundle.close()
-  const require = createRequire(url)
-  const module = {exports: {}}
-  new Function('require', 'module', 'exports', output[0].code)(
-    name => name === './moderator-model' ? model : name in overrides ? overrides[name] : require(name), module, module.exports,
-  )
-  return module.exports
-}
-const {ModEmpty, ModError, ModResourceView} = await componentModule('moderator-ui.tsx')
-const {default: AdminModeratorAccess} = await componentModule('AdminModeratorAccess.tsx', {'./account-settings-api': {accountRequest: () => {throw new Error('SSR must not fetch')}}})
+import {componentModule} from './moderator-component-test.mjs'
+const {ModEmpty, ModError, ModResourceView} = await componentModule('moderator-ui.tsx', {'./moderator-model': model})
+const {default: AdminModeratorAccess} = await componentModule('AdminModeratorAccess.tsx', {'./moderator-model': model, './account-settings-api': {accountRequest: () => {throw new Error('SSR must not fetch')}}})
 const render = (component, props) => renderToStaticMarkup(React.createElement(component, props))
 const profile = {user_id: 'customer-id', email_masked: 'a***@example.test', role: 'CUSTOMER', active: true, created_at: null, email_verified: true, mfa_enabled: false}
 
@@ -87,7 +72,7 @@ test('OWNER cannot be promoted or demoted; moderator role buttons reflect actual
   assert.doesNotMatch(moderator, /type="checkbox"/)
 })
 
-test('Moderator requests are GET-only and admin styles have not acquired mod selectors', () => {
+test('Customer moderator requests remain GET-only and admin styles have not acquired mod selectors', () => {
   const api = readFileSync(new URL('../moderator-api.ts', import.meta.url), 'utf8')
   assert.match(api, /method: 'GET'/)
   assert.doesNotMatch(api, /method: '(POST|PATCH|DELETE|PUT)'/)

@@ -10,6 +10,7 @@ import {
 } from './moderator-model'
 import './admin.css'
 import './moderator-panel.css'
+import ModeratorSupport, {SupportOverview} from './ModeratorSupport'
 
 const icons = {overview: Home, customers: Users, subscriptions: Wallet, payments: CreditCard, support: MessageCircle, activity: Activity, approvals: ShieldCheck}
 type Navigate = (section: ModeratorSection, userId?: string) => void
@@ -45,23 +46,25 @@ function CustomerResourcePanel({kind, initialUserId, onBack}: {kind: CustomerRes
   </div>
 }
 
-function Customers({permissions, navigate}: {permissions: ModeratorPermission[]; navigate: Navigate}) {
+function Customers({permissions, navigate, initialUserId = ''}: {permissions: ModeratorPermission[]; navigate: Navigate; initialUserId?: string}) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState({search: '', offset: 0, version: 0})
   const [page, setPage] = useState<CustomerPage | null>(null)
-  const [selected, setSelected] = useState('')
+  const [selected, setSelected] = useState(initialUserId)
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(true)
   useEffect(() => {
+    if (selected) return
     const controller = new AbortController()
     setBusy(true); setError(null); setPage(null)
-    const params = new URLSearchParams({limit: '25', offset: String(query.offset), search: query.search})
+    const params = new URLSearchParams({limit: '25', offset: String(query.offset)})
+    if (query.search) params.set('search', query.search)
     void moderatorRequest(`/customers?${params}`, parseCustomerPage, controller.signal)
       .then(value => {if (!controller.signal.aborted) setPage(value)})
       .catch(failure => {if (!controller.signal.aborted) setError(failure)})
       .finally(() => {if (!controller.signal.aborted) setBusy(false)})
     return () => controller.abort()
-  }, [query])
+  }, [query, selected])
   if (selected) return <div className="mod-stack"><CustomerResourcePanel kind="profile" initialUserId={selected} onBack={() => setSelected('')}/>
     <div className="mod-actions">{permissions.includes('subscriptions.view') && <button onClick={() => navigate('subscriptions', selected)}>Aboneliği görüntüle</button>}
       {permissions.includes('payments.view') && <button onClick={() => navigate('payments', selected)}>Ödemeleri görüntüle</button>}</div>
@@ -115,14 +118,16 @@ export default function ModeratorPanel({onLogout}: {onLogout: () => void}) {
       <div className="mod-account-links"><a href="/settings"><UserRound aria-hidden="true"/>Profil ve güvenlik</a><button onClick={onLogout}><LogOut aria-hidden="true"/>Çıkış</button></div>
     </aside>
     <main className="mod-main" id="mod-main" tabIndex={-1}>
-      <header className="mod-header"><div><p className="mod-secondary">Salt okunur çalışma alanı</p><h1 ref={heading} tabIndex={-1}>{title}</h1></div>{me && <ModBadge>{accountRoleLabel(me.role)}</ModBadge>}</header>
+      <header className="mod-header"><div><p className="mod-secondary">Moderatör çalışma alanı</p><h1 ref={heading} tabIndex={-1}>{title}</h1></div>{me && <ModBadge>{accountRoleLabel(me.role)}</ModBadge>}</header>
       {error !== null ? <ModError error={error} onRetry={() => setRefresh(value => value + 1)}/> : !me ? <p role="status" className="mod-secondary">Erişim bilgileri yükleniyor...</p> :
         section === 'overview' ? <div className="mod-stack">
-          <ModCard title="Erişim bilgileriniz"><div className="mod-badges"><ModBadge>{accountRoleLabel(me.role)}</ModBadge><ModBadge>Salt okunur</ModBadge></div>
+          {me.permissions.includes('support.view') && <SupportOverview/>}
+          <ModCard title="Erişim bilgileriniz"><div className="mod-badges"><ModBadge>{accountRoleLabel(me.role)}</ModBadge><ModBadge>Müşteri bilgileri salt okunur</ModBadge></div>
             <h3>İzinleriniz</h3>{me.permissions.length ? <ul className="mod-permissions">{me.permissions.map(permission => <li key={permission}><ShieldCheck aria-hidden="true"/>{permissionLabels[permission]}</li>)}</ul> : <ModEmpty text="Henüz bir izin tanımlanmamış. Yöneticinizden erişim isteyin."/>}
             <button className="mod-refresh" onClick={() => setRefresh(value => value + 1)}>İzinleri yenile</button>
-          </ModCard><ModCard title="Diğer bölümler yakında"><p className="mod-secondary">Destek talepleri, etkinlik ve onay talepleri sonraki aşamalarda kullanıma açılacak.</p></ModCard>
-        </div> : section === 'customers' ? <Customers key={section} permissions={me.permissions} navigate={navigate}/> :
+          </ModCard><ModCard title="Diğer bölümler yakında"><p className="mod-secondary">Etkinlik ve onay talepleri sonraki aşamalarda kullanıma açılacak.</p></ModCard>
+        </div> : section === 'customers' ? <Customers key={`${section}:${userId}`} initialUserId={userId} permissions={me.permissions} navigate={navigate}/> :
+          section === 'support' ? <ModeratorSupport manage={me.permissions.includes('support.manage')} onCustomer={me.permissions.includes('customers.view') ? id => navigate('customers', id) : undefined}/> :
           section === 'subscriptions' || section === 'payments' ? <CustomerResourcePanel key={`${section}:${userId}`} kind={section === 'subscriptions' ? 'subscription' : 'payments'} initialUserId={userId}/> :
             <ModCard title="Yakında"><p className="mod-secondary">{title} bu aşamada kullanıma açık değil.</p></ModCard>}
     </main>
