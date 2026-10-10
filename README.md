@@ -1403,7 +1403,7 @@ Metadata is present in the HTTP HTML before JavaScript executes.
 Each entry point contains exactly one `WebSite` JSON-LD object with
 `name: KaisTrade`, `alternateName: Kais Trade` and the canonical homepage URL.
 The existing square transparent PNG favicons (48, 96, 192 and 512 pixels), ICO
-and 180-pixel Apple touch icon are retained, with exact crawler allowlist entries.
+and 180-pixel Apple touch icon are retained and available for crawling.
 The social image is an existing 1200-by-630 PNG. Tests verify local image sizes
 and real HTTP image bytes/MIME types in both entry points and builds. Search
 engines choose whether and when to display the site name or favicon.
@@ -1412,10 +1412,12 @@ The sitemap lists the canonical homepage `/` and public policy pages `/privacy`,
 `/terms` and `/risk`. The homepage continues to display the existing login UI;
 indexing that public entry point does not expose signed-in application content.
 Separate login/registration routes, verification links and API routes are not
-sitemap entries. Robots allows the exact root with `Allow: /$`, not all paths or
-OAuth/token query variants, and uses a conservative public-page allowlist
-and permits the public assets needed to render those pages, without enumerating
-private routes. Robots directives are crawler guidance, not access control;
+sitemap entries. Robots explicitly allows general crawling with `Allow: /` and
+does not contain a site-wide `Disallow: /`. Scoped disallow rules discourage
+API endpoints (including OAuth callbacks), authenticated account/application
+routes, login and verification flows, and URLs containing token, code, state,
+MFA challenge or Google-login query parameters. Public pages, icons and other
+assets remain crawlable. Robots directives are crawler guidance, not access control;
 all existing authentication and authorization checks remain necessary.
 
 After an explicitly authorized Vercel deployment, verify
@@ -1423,7 +1425,9 @@ After an explicitly authorized Vercel deployment, verify
 `https://kaistrade.com/robots.txt` returns HTTP 200 and plain text, not the login
 HTML. Check all three policy links while signed out. In Google Search Console,
 remove the homepage URL submitted as a sitemap and submit only `sitemap.xml`
-(or its full canonical URL). A valid sitemap does not guarantee indexing.
+(or its full canonical URL). After changing robots rules, rerun the homepage's
+live URL test in Search Console; crawler caches can retain the previous rules.
+A valid sitemap does not guarantee indexing.
 
 ## Güvenlik ve tarayıcı oturumları
 

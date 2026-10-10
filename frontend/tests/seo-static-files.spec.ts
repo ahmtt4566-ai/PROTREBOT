@@ -16,19 +16,29 @@ function fallbackPattern(source:string) {
   return new RegExp(`^/${source.slice(prefix.length,-1)}$`)
 }
 
-test('crawler allowlist permits the homepage but not login variants or private application routes',() => {
+test('general crawling is allowed while private routes and sensitive query URLs are discouraged',() => {
   const directives = robotsSource.split(/\r?\n/).filter(line => /^(Allow|Disallow): /.test(line))
   expect(directives).toEqual([
-    'Disallow: /','Allow: /$','Allow: /privacy$','Allow: /terms$','Allow: /risk$',
-    'Allow: /assets/','Allow: /kaistrade-logo.png$',
-    'Allow: /favicon.ico$','Allow: /favicon-48x48.png$','Allow: /favicon-96x96.png$',
-    'Allow: /favicon-192x192.png$','Allow: /favicon-512x512.png$','Allow: /apple-touch-icon.png$',
-    'Allow: /og-image.png$','Allow: /sitemap.xml$','Allow: /robots.txt$',
+    'Allow: /','Disallow: /api$','Disallow: /api/',
+    'Disallow: /admin','Disallow: /dashboard','Disallow: /profile','Disallow: /settings',
+    'Disallow: /master-trade','Disallow: /billing','Disallow: /pricing',
+    'Disallow: /login','Disallow: /register','Disallow: /forgot-password',
+    'Disallow: /reset-password','Disallow: /verify-email','Disallow: /local-owner-setup',
+    'Disallow: /*?*token=','Disallow: /*?*code=','Disallow: /*?*state=',
+    'Disallow: /*?*mfa_challenge=','Disallow: /*?*google_login=','Disallow: /*?*google_remember=',
   ])
-  const allowedPaths = directives.filter(line => line.startsWith('Allow: ')).map(line => line.slice(7))
-  const allowed = (path:string) => allowedPaths.some(rule => rule.endsWith('$') ? path === rule.slice(0,-1) : path.startsWith(rule))
-  for (const path of ['/','/privacy','/terms','/risk','/assets/app.js','/og-image.png','/favicon.ico','/favicon-48x48.png','/favicon-96x96.png','/favicon-192x192.png','/favicon-512x512.png','/apple-touch-icon.png']) expect(allowed(path)).toBe(true)
-  for (const path of ['/login','/register','/profile','/admin','/settings','/master-trade','/verify-email','/api/v22/session','/api/v22/auth/google/callback','/?google_login=success','/?token=private']) {
+  expect(robotsSource).not.toMatch(/^Disallow:\s*\/\s*$/m)
+  const rules = directives.map(line => {
+    const [directive,pattern] = line.split(': ')
+    const exact = pattern.endsWith('$')
+    const path = exact ? pattern.slice(0,-1) : pattern
+    const expression = path.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('.*')
+    return {allow:directive === 'Allow',length:path.replace(/\*/g,'').length,pattern:new RegExp('^'+expression+(exact ? '$' : ''))}
+  })
+  const allowed = (path:string) => rules.filter(rule => rule.pattern.test(path))
+    .sort((left,right) => right.length-left.length || Number(right.allow)-Number(left.allow))[0]?.allow ?? true
+  for (const path of ['/','/?lang=tr','/privacy','/privacy/','/terms','/risk','/new-public-page','/assets/app.js','/og-image.png','/kaistrade-logo.png','/favicon.ico','/favicon-48x48.png','/favicon-96x96.png','/favicon-192x192.png','/favicon-512x512.png','/apple-touch-icon.png','/sitemap.xml','/robots.txt']) expect(allowed(path)).toBe(true)
+  for (const path of ['/login','/register','/forgot-password','/reset-password','/profile','/admin','/admin/users','/dashboard','/settings','/settings/security','/master-trade','/billing','/pricing','/verify-email','/local-owner-setup','/api','/api/v22/session','/api/v22/auth/google/callback','/?google_login=success','/?google_remember=1','/?token=private','/?lang=tr&token=private','/privacy?token=private','/assets/app.js?token=private','/?code=private','/?state=private','/?mfa_challenge=private']) {
     expect(allowed(path)).toBe(false)
   }
 })
@@ -123,10 +133,10 @@ for (const base of ['http://127.0.0.1:4173','http://127.0.0.1:4175','http://127.
       await expect(page.locator('input[type="password"]')).toHaveCount(0)
     }
     expect(authRequests).toEqual([])
-    expect(robotsSource).toContain('Disallow: /')
-    for (const url of expectedUrls) expect(robotsSource).toContain(`Allow: ${new URL(url).pathname}$`)
-    expect(robotsSource).toContain('Allow: /assets/')
+    expect(robotsSource).toMatch(/^Allow: \/\s*$/m)
+    expect(robotsSource).not.toMatch(/^Disallow:\s*\/\s*$/m)
     expect(robotsSource).toContain('Sitemap: https://kaistrade.com/sitemap.xml')
-    expect(robotsSource).not.toMatch(/\/api\/|\/admin|\/profile|\/settings|[?&]token=/i)
+    expect(robotsSource).toContain('Disallow: /api/')
+    expect(robotsSource).toContain('Disallow: /*?*token=')
   })
 }
