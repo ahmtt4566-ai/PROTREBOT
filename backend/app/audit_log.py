@@ -31,6 +31,7 @@ AuditAction = Literal[
     "support.case.status_changed", "support.note.added",
     "approval.requested", "approval.approved", "approval.rejected", "approval.cancelled",
     "approval.expired", "approval.stale", "approval.executed", "approval.failed",
+    "customer.events.viewed",
 ]
 AUDIT_ACTIONS: tuple[str, ...] = get_args(AuditAction)
 ACTION_FIELDS = {
@@ -53,6 +54,7 @@ ACTION_FIELDS = {
     "approval.stale": frozenset(),
     "approval.executed": frozenset({"phase"}),
     "approval.failed": frozenset(),
+    "customer.events.viewed": frozenset(),
 }
 
 

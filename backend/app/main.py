@@ -70,6 +70,7 @@ from .moderator_support import router as moderator_support_router
 from .moderator_approvals import router as moderator_approvals_router
 from .admin_approvals import router as admin_approvals_router
 from .notification_admin import router as notification_admin_router
+from .moderator_events import router as moderator_events_router
 from .v25_execution import init_v25_execution, restore_v25_state, router as v25_execution_router, shutdown_v25_execution
 from .v27_cloud_ops import (
     init_v27_cloud,
@@ -1185,6 +1186,8 @@ async def lifespan(app: FastAPI):
     app.state.infrastructure_task = asyncio.create_task(infrastructure_loop(app))
     app.state.runtime_tasks = [app.state.infrastructure_task]
     from .notification_worker import schedule_sweep, shutdown_notifications
+    from .customer_event_writer import schedule_cleanup, shutdown_events
+    schedule_cleanup(app)
     schedule_sweep(app)
     if PAPER_ENABLED:
         app.state.runtime_tasks.extend([
@@ -1199,6 +1202,7 @@ async def lifespan(app: FastAPI):
         app.state.runtime_tasks.append(asyncio.create_task(v9_market_twin_loop(app)))
     yield
     await shutdown_notifications(app)
+    await shutdown_events(app)
     for task in app.state.runtime_tasks:
         task.cancel()
     try:
@@ -1405,6 +1409,8 @@ async def owner_preview_gate(request, call_next):
         tasks = pending.pop(user_id, []) if user_id and isinstance(pending, dict) else []
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+    from .customer_event_writer import record_event
+    record_event(request, getattr(request.state, "member", None), "api.error", "server_error" if response.status_code >= 500 else "request_failed", "api", response.status_code) if response.status_code >= 500 or response.status_code in (409, 429) else None
     if protected_member_request and request.method == "GET" and not request.state.premium and response.status_code == 200 and "application/json" in response.headers.get("content-type", "") and not request.url.path.startswith("/api/analyst/") and request.url.path not in {"/api/assistant/usage", "/api/assistant/proactive/preferences"}:
         chunks = [chunk async for chunk in response.body_iterator]
         body = b"".join(chunk.encode() if isinstance(chunk, str) else chunk for chunk in chunks)
@@ -1430,6 +1436,7 @@ app.include_router(moderator_support_router)
 app.include_router(moderator_approvals_router)
 app.include_router(admin_approvals_router)
 app.include_router(notification_admin_router)
+app.include_router(moderator_events_router)
 from .account_settings import router as account_settings_router
 app.include_router(account_settings_router)
 app.include_router(google_oauth_router)
