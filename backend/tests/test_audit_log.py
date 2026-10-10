@@ -1,8 +1,17 @@
 """Offline append-only audit contract; no PostgreSQL migration is executed."""
 import re
+import asyncio
+import json
+import uuid
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-from app.audit_log import AUDIT_ACTIONS
+import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
+
+from app.audit_log import AUDIT_ACTIONS, AuditActor, write_audit
 
 
 def test_audit_migration_is_append_only_and_survives_user_erasure():
@@ -33,3 +42,110 @@ def test_audit_migration_is_append_only_and_survives_user_erasure():
         assert re.search(rf"CREATE INDEX IF NOT EXISTS audit_log_{column} ON audit_log \({column}", statements)
     assert "application_state_snapshots" not in statements
     assert statements.strip().endswith("COMMIT;")
+
+
+@pytest.mark.parametrize("action,before,after", [
+    ("ROLE_CHANGED", {"role": "CUSTOMER"}, {"role": "MODERATOR"}),
+    ("PERMISSION_GRANTED", {"permission": "events.view", "granted": False},
+     {"permission": "events.view", "granted": True}),
+    ("PERMISSION_REVOKED", {"permission": "events.view", "granted": True},
+     {"permission": "events.view", "granted": False}),
+])
+def test_write_audit_drops_all_non_allowlisted_fields_and_masks_reason(action, before, after):
+    conn = SimpleNamespace(is_in_transaction=lambda: True, execute=AsyncMock(return_value="INSERT 0 1"))
+    private = {
+        "email": "private@example.test", "name": "Private Name", "token": "private-token",
+        "nested": {"api_key": "private-key"}, "password": "private-password",
+    }
+    actor = AuditActor("owner-id", "OWNER", str(uuid.uuid4()), "192.0.2.0/24")
+    asyncio.run(write_audit(
+        conn, actor, action, "USER" if action == "ROLE_CHANGED" else "MODERATOR_PERMISSION",
+        "target-id", {**before, **private}, {**after, **private},
+        reason="private@example.test private-token", approval_request_id="approval-id",
+    ))
+    sql, *values = conn.execute.call_args.args
+    assert values[:5] == ["owner-id", "OWNER", action,
+                          "USER" if action == "ROLE_CHANGED" else "MODERATOR_PERMISSION", "target-id"]
+    assert values[6] == "approval-id"
+    assert values[7] == "[REDACTED]"
+    assert json.loads(values[8]) == before
+    assert json.loads(values[9]) == after
+    assert values[10] == "192.0.2.0/24"
+    assert "created_at" not in sql
+    assert not any(value in str(values) for value in (
+        "private@example.test", "Private Name", "private-token", "private-key", "private-password",
+    ))
+
+
+@pytest.mark.parametrize("host,masked", [
+    ("192.0.2.123", "192.0.2.0/24"),
+    ("2001:db8:abcd:1234::99", "2001:db8:abcd::/48"),
+    ("testclient", None),
+])
+def test_audit_actor_normalizes_request_id_and_masks_only_peer_address(host, masked):
+    request = Request({
+        "type": "http", "client": (host, 443),
+        "headers": [(b"x-forwarded-for", b"203.0.113.123")],
+        "state": {"request_id": "private@example.test private-token"},
+    })
+    actor = AuditActor.from_request(request, {
+        "id": "owner-id", "role": "OWNER", "email": "private@example.test", "token": "private-token",
+    })
+    assert actor.ip_masked == masked
+    uuid.UUID(actor.request_id)
+    assert "private" not in str(actor)
+    valid = str(uuid.uuid4())
+    request.state.request_id = valid
+    assert AuditActor.from_request(request, {"id": "owner-id", "role": "OWNER"}).request_id == valid
+
+
+def test_audit_refuses_autocommit_connection():
+    conn = SimpleNamespace(is_in_transaction=lambda: False, execute=AsyncMock())
+    with pytest.raises(RuntimeError):
+        asyncio.run(write_audit(conn, AuditActor("owner", "OWNER", str(uuid.uuid4())),
+                               "ROLE_CHANGED", "USER", "target",
+                               {"role": "CUSTOMER"}, {"role": "MODERATOR"}))
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("action", "LOGIN"), ("actor_id", "private@example.test"), ("target_id", "private@example.test"),
+    ("actor_role", "ADMIN"), ("request_id", "private-token"), ("ip", "192.0.2.123"),
+    ("before", {"role": "private-token"}), ("before", {}),
+    ("target_type", "EMAIL"), ("approval_request_id", "private@example.test"),
+])
+def test_audit_rejects_invalid_allowed_values_without_writing(field, value):
+    conn = SimpleNamespace(is_in_transaction=lambda: True, execute=AsyncMock())
+    args = {
+        "actor": AuditActor(
+            value if field == "actor_id" else "owner",
+            value if field == "actor_role" else "OWNER",
+            value if field == "request_id" else str(uuid.uuid4()),
+            value if field == "ip" else None,
+        ),
+        "action": "ROLE_CHANGED", "target_type": "USER", "target_id": "target",
+        "before": {"role": "CUSTOMER"}, "after": {"role": "MODERATOR"},
+    }
+    if field in args and field != "actor":
+        args[field] = value
+    if field == "approval_request_id":
+        args[field] = value
+    with pytest.raises(ValueError):
+        asyncio.run(write_audit(conn, **args))
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("result", ["INSERT 0 0", "failure"])
+def test_audit_persistence_failure_is_explicit_and_logs_only_type(result, caplog):
+    execute = AsyncMock(return_value=result)
+    if result == "failure":
+        execute.side_effect = RuntimeError("private@example.test private-token")
+    conn = SimpleNamespace(is_in_transaction=lambda: True, execute=execute)
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(write_audit(conn, AuditActor("owner", "OWNER", str(uuid.uuid4())),
+                               "ROLE_CHANGED", "USER", "target",
+                               {"role": "CUSTOMER"}, {"role": "MODERATOR"}))
+    assert caught.value.status_code == 503
+    assert "Audit write failed (RuntimeError)" in caplog.text
+    assert "private@example.test" not in caplog.text
+    assert "private-token" not in caplog.text
