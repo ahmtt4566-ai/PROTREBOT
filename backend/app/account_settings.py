@@ -196,6 +196,7 @@ async def require_totp(request, user, code):
     async with store.edit(request, user["id"]) as doc:
         valid = check_limited_totp(request, doc, code)
     if not valid:
+        auth.record_event(request, user, "auth.mfa_failed", "invalid_mfa", "security", 401)
         raise HTTPException(401, "İki aşamalı doğrulama kodu geçersiz")
 
 
@@ -286,6 +287,7 @@ def new_challenge(doc, user, kind, *, seconds=600, **extra):
 
 async def delivery(request, user, *, email=None, title, action_url, label, expiry="24 saat"):
     if not auth.gmail_configured():
+        auth.record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 503) if title == auth.VERIFY_SUBJECT else None
         raise HTTPException(503, "E-posta servisi kullanılamıyor")
     try:
         await asyncio.to_thread(auth.send_auth_email, to_email=email or user["email"],
@@ -293,8 +295,10 @@ async def delivery(request, user, *, email=None, title, action_url, label, expir
                                 action_url=action_url, action_label=label, expiry=expiry)
     except auth.GMAIL_DELIVERY_ERRORS as exc:
         auth.log_gmail_failure(exc, request.app)
+        auth.record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 503) if title == auth.VERIFY_SUBJECT else None
         # Provider exception messages may contain recipients, OTPs or URLs.
         raise HTTPException(503, "E-posta gönderilemedi") from None
+    auth.record_event(request, user, "auth.email_verification_sent", "verification_sent", "verification") if title == auth.VERIFY_SUBJECT else None
 
 
 async def notify_two_factor(request, user, *, active):
@@ -681,6 +685,7 @@ async def enable_totp(payload: Code, request: Request, response: Response):
             token = await rotate(request, user, doc, preserve_current=True)
             activity(doc, "TWO_FACTOR_ENABLED", "İki aşamalı doğrulama etkinleştirildi")
     if not valid:
+        auth.record_event(request, user, "auth.mfa_failed", "invalid_mfa", "security", 401)
         raise HTTPException(401, "İki aşamalı doğrulama kodu geçersiz veya süresi dolmuş")
     await persist_projection(request)
     marker = refreshed_session_response(request, response, user, token)
@@ -723,6 +728,7 @@ async def login_record(request, user, token, *, google=False):
         if google:
             doc["google_linked"] = True
         activity(doc, "LOGIN", "Yeni oturum açıldı")
+    auth.record_event(request, user, "auth.login_succeeded", "login_ok", "auth")
 
 
 @router.post("/auth/2fa/login")
@@ -765,6 +771,7 @@ async def mfa_login(payload: LoginCode, request: Request, response: Response):
                 row["used"] = True
                 remember, browser, google = row["remember"], row["browser_session"], row["google"]
     if not valid:
+        auth.record_event(request, user, "auth.mfa_failed", "invalid_mfa", "security", 401)
         raise HTTPException(401, "Doğrulama kodu veya isteği geçersiz")
     await auth.validate_authoritative_session(request.app, user["id"], int(user.get("auth_version", 1)))
     await auth.restore_demo_state_for_user(request.app, user["id"])
@@ -789,6 +796,7 @@ async def revoke_session(payload: SessionRevoke, request: Request, response: Res
     current = payload.session_id == token_payload(request).get("jti")
     if current:
         auth.clear_rotated_session_cookie(request, response, user["id"])
+    auth.record_event(request, user, "account.session_revoked", "session_revoked", "account")
     return {"ok": True, **({"reauthenticate": True} if current else {})}
 
 
@@ -804,6 +812,7 @@ async def revoke_others(request: Request):
         doc["sessions_valid_after"] = time.time()
         doc["preserved_session"] = current
         activity(doc, "OTHER_SESSIONS_REVOKED", "Diğer oturumlar kapatıldı")
+    auth.record_event(request, user, "account.session_revoked", "session_revoked", "account")
     return {"ok": True}
 
 
@@ -893,6 +902,7 @@ async def admin_account(user_id: str, request: Request):
 @router.post("/admin/accounts/{user_id}/password-reset")
 async def admin_password_reset(user_id: str, request: Request):
     user = await admin_target(request, user_id)
+    auth.record_event(request, user, "auth.password_reset_requested", "reset_requested", "security")
     await auth.enforce_auth_limit(request, "account-mail", user["id"])
     if not auth.gmail_configured():
         raise HTTPException(503, "E-posta servisi kullanılamıyor")

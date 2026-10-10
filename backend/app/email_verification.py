@@ -242,8 +242,10 @@ async def send_link(request, user_id: str, *, pending: tuple[str, dict] | None =
                     action_label="E-postamı doğrula", expiry="30 dakika", verification_v2=True)
             except auth.GMAIL_DELIVERY_ERRORS as exc:
                 auth.log_gmail_failure(exc, request.app)
+                auth.record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 503)
                 raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene.",
                                     headers={"Retry-After": "60"}) from None
+            auth.record_event(request, user, "auth.email_verification_sent", "verification_sent", "verification")
     return {"ok": True, "message": "Yeni bağlantı gönderildi — gelen kutunu kontrol et", "retry_after": 60}
 
 
@@ -303,8 +305,10 @@ async def change_pending_email(request, response, email: str, password: str) -> 
                 action_label="E-postamı doğrula", expiry="30 dakika", verification_v2=True)
         except auth.GMAIL_DELIVERY_ERRORS as exc:
             auth.log_gmail_failure(exc, request.app)
+            auth.record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 503)
             raise HTTPException(503, "Adres değiştirilemedi; e-posta gönderilemedi. Lütfen tekrar dene.",
                                 headers={"Retry-After": "60"}) from None
+        auth.record_event(request, user, "auth.email_verification_sent", "verification_sent", "verification")
     return {"ok": True, "email": email, "retry_after": 60}
 
 
@@ -377,11 +381,13 @@ async def verify_link(request, token: str) -> dict:
             await auth.update_auth_security(
                 request, user, {"email_verified": True, "email_verified_at": user.get("email_verified_at") or iso()})
     except BaseException:
+        auth.record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 400)
         if legacy:
             for row in auth.runtime(request)["state"].get("auth_tokens", []):
                 if row.get("user_id") == user_id and row.get("jti") in legacy_used:
                     row["used"] = legacy_used[row["jti"]]
         raise
+    auth.record_event(request, user, "auth.email_verified", "email_verified", "verification")
     return {"ok": True, "verified": True, "email": user["email"], "already_verified": already_verified}
 
 

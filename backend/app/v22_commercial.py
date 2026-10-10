@@ -28,6 +28,7 @@ from googleapiclient.errors import HttpError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .error_monitoring import build_error_event, schedule_log_event
 from . import email_service, email_verification
+from .customer_event_writer import record_event
 from .auth_failures import login_failure_limits
 from .password_policy import MAX_LENGTH as PASSWORD_MAX_LENGTH, validate_new_password
 from .email_service import auth_email_html, send_auth_email, VERIFY_SUBJECT, RESET_SUBJECT
@@ -1377,6 +1378,7 @@ async def v22_login(payload: LoginRequest, request: Request, response: Response 
     if not user or user.get("email") != normalize_email(payload.email) or not user.get("active") or not password_valid:
         await login_failure_limits(request, payload.email, failed=True)
         await asyncio.sleep(max(0.0, AUTH_FAILURE_RESPONSE_SECONDS - (time.monotonic() - started)))
+        record_event(request, user, "auth.login_failed", "invalid_credentials", "auth", 401)
         raise HTTPException(401, "E-posta veya parola hatalı")
     from .account_settings import enabled, login_challenge, login_record
     if await enabled(request, user):
@@ -1499,8 +1501,10 @@ async def register_password_user(payload: RegisterRequest, request: Request, bro
     if gmail_configured():
         try:
             await asyncio.to_thread(send_auth_email, **mail)
+            record_event(request, created_user, "auth.email_verification_sent", "verification_sent", "verification")
         except GMAIL_DELIVERY_ERRORS as exc:
             log_gmail_failure(exc, request.app)
+            record_event(request, created_user, "auth.email_verification_failed", "verification_failed", "verification", 503)
             if created_user:
                 await rollback_password_registration(request, created_user["id"])
             raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.", headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
@@ -1547,6 +1551,7 @@ async def v22_verify_email(payload: EmailTokenRequest, request: Request):
     persisted = await persist_v22_commercial(request.app)
     if DURABLE_AUTH_REQUIRED and not persisted:
         raise HTTPException(503, "E-posta doğrulaması kalıcı depoya yazılamadı")
+    record_event(request, user, "auth.email_verified", "email_verified", "verification")
     return {"ok": True, "message": "E-posta doğrulandı. Artık giriş yapabilirsiniz."}
 
 
@@ -1598,8 +1603,10 @@ async def v22_resend_verification(payload: EmailTokenRequest, request: Request):
                                 action_url=f"{app_base_url()}/verify-email?token={token}", action_label="E-posta adresimi doğrula")
     except GMAIL_DELIVERY_ERRORS as exc:
         log_gmail_failure(exc, request.app)
+        record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 503)
         raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.",
                             headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
+    record_event(request, user, "auth.email_verification_sent", "verification_sent", "verification")
     return result
 
 
@@ -1699,6 +1706,7 @@ async def v22_forgot_password(payload: PasswordResetRequest, request: Request):
     if user:
         async with rt["lock"]:
             reset_token = issue_one_time_token(rt["state"], user, rt["secret"], kind="PASSWORD_RESET")
+            record_event(request, user, "auth.password_reset_requested", "reset_requested", "security")
             from .account_store import save_action_token
             await save_action_token(request, reset_token, user, "PASSWORD_RESET")
             save_state(rt["state"])
@@ -1749,6 +1757,7 @@ async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Requ
     if DURABLE_AUTH_REQUIRED and not persisted:
         raise HTTPException(503, "Parola yenileme durumu kalıcı depoya yazılamadı")
     clear_rotated_session_cookie(request, response, user["id"])
+    record_event(request, user, "auth.password_reset_completed", "reset_completed", "security")
     return {"ok": True, "message": "Parolanız güncellendi. Yeni parolanızla giriş yapabilirsiniz."}
 
 
@@ -2329,6 +2338,7 @@ async def v22_admin_password_reset(user_id: str, request: Request):
     user = next((item for item in rt["state"]["users"] if item.get("id") == user_id), None)
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
+    record_event(request, user, "auth.password_reset_requested", "reset_requested", "security")
     if not gmail_configured():
         raise HTTPException(503, "E-posta servisi yapılandırılmamış")
     await refresh_auth_security(request, user)
@@ -2370,6 +2380,7 @@ async def v22_admin_revoke_sessions(user_id: str, request: Request, response: Re
     if (DURABLE_AUTH_REQUIRED or getattr(request.app.state, "db_pool", None) is not None) and not persisted:
         raise HTTPException(503, "Oturum iptali kalıcı depoya yazılamadı")
     clear_rotated_session_cookie(request, response, user_id)
+    record_event(request, user_id, "account.session_revoked", "session_revoked", "account")
     return {"ok": True, "message": "Tüm kullanıcı oturumları sonlandırıldı.", "demo_only": True}
 
 
