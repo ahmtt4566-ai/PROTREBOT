@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 
 MIN_ACCESS_TOKEN_LENGTH = 24
-PUBLIC_PATHS = frozenset({"/healthz", "/api/health", "/api/health/database", "/api/web/access/logout"})
+PUBLIC_PATHS = frozenset({"/healthz", "/api/health", "/api/health/database", "/api/web/access/logout", "/announcements/unsubscribe"})
 OWNER_REQUIRED_PATHS = frozenset({"/api/web/access/check"})
 CUSTOMER_SESSION_PATH_PREFIXES = ("/api/v22", "/api/v24", "/api/v25")
 OWNER_GATE_PATH_PREFIXES = (

@@ -34,6 +34,7 @@
     }
   ],
   "rewrites": [
+    {"source": "/announcements/unsubscribe", "destination": "https://protrebot-rkpt.onrender.com/announcements/unsubscribe"},
     {"source": "/api/:path*", "destination": "https://protrebot-rkpt.onrender.com/api/:path*"},
     {"source": "/privacy", "destination": "/privacy.html"},
     {"source": "/terms", "destination": "/terms.html"},
