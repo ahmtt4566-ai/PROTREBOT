@@ -1,11 +1,15 @@
 import { useEffect } from 'react'
 import ComplianceContent from './ComplianceContent'
 import { PUBLIC_POLICIES, type PublicPolicy } from './compliance-content'
+import {applyPublicPageMetadata} from './public-page-metadata'
 import './public-policy.css'
 
 export default function PublicPolicyPage({policy}:{policy:PublicPolicy}) {
   const title = PUBLIC_POLICIES[policy].title
-  useEffect(() => { document.title = `${title} | KaisTrade` }, [title])
+  useEffect(() => {
+    applyPublicPageMetadata(policy)
+    return () => applyPublicPageMetadata('home')
+  }, [policy])
 
   return <main className="publicPolicyPage">
     <header><a href="/" aria-label="KaisTrade ana sayfa"><img src="/kaistrade-logo.png" alt="KaisTrade"/></a></header>

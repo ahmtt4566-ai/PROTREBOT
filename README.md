@@ -1380,6 +1380,17 @@ Login badges use neutral feature descriptions, not unverified encryption, 2FA,
 or round-the-clock support promises. Publishing these local changes requires a
 separate release; they do not clear a Google Safe Browsing warning automatically.
 
+Public-page SEO values are shared in `public-page-metadata.ts`. Both Vite builds
+use `tools/public-policy-html.ts` to emit `privacy.html`, `terms.html`, and
+`risk.html` from the bundled homepage shell, with page-specific title,
+description, canonical, Open Graph, Twitter, and WebPage structured data before
+JavaScript runs. Vercel routes the three public paths (and trailing-slash
+variants) to those files before the SPA fallback. Existing legal paragraphs,
+favicon assets, access gates, robots rules, and sitemap URLs remain unchanged.
+The policy component applies the same metadata during rendering and restores
+homepage metadata on unmount, preventing stale policy metadata after navigation.
+Google may retain previous titles or favicons until it recrawls the site.
+
 ### Sitemap and crawler access
 
 `frontend/public/sitemap.xml` and `frontend/public/robots.txt` are shared static

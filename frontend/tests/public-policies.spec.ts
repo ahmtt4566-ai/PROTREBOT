@@ -2,6 +2,7 @@ import {expect, test} from '@playwright/test'
 import {readFileSync} from 'node:fs'
 import {PUBLIC_POLICIES, publicPolicyForPath} from '../../compliance-content'
 import {mockAssistant} from './helpers/assistant-api'
+import {PUBLIC_PAGE_METADATA,publicPageSchema} from '../../public-page-metadata'
 
 test('home page publishes complete KaisTrade metadata before JavaScript in both entrypoints and builds', async ({request,page}) => {
   const title = 'KaisTrade | AI-Powered Crypto Trading Platform'
@@ -63,7 +64,9 @@ test('home page publishes complete KaisTrade metadata before JavaScript in both 
 })
 
 for (const policy of ['privacy', 'terms', 'risk'] as const) {
-  test(`${policy} is public in both entry points and the production build without auth requests`, async ({page}) => {
+  test(`${policy} is public in both entry points and the production build without auth requests`, async ({page,request}) => {
+    await page.route('https://**', route => route.abort())
+    await page.routeWebSocket('**/*', socket => socket.close())
     const requests:string[] = []
     await page.route('**/api/**', async route => {
       requests.push(route.request().url())
@@ -71,6 +74,20 @@ for (const policy of ['privacy', 'terms', 'risk'] as const) {
     })
     for (const base of ['http://127.0.0.1:4173', 'http://127.0.0.1:4175', 'http://127.0.0.1:4176']) {
       for (const suffix of ['', '/']) {
+        const metadata = PUBLIC_PAGE_METADATA[policy]
+        const raw = await request.get(`${base}/${policy}${suffix}`)
+        expect(raw.status()).toBe(200)
+        const head = await page.evaluate(html => {
+          const parsed = new DOMParser().parseFromString(html,'text/html')
+          return {
+            title:parsed.title,
+            description:Array.from(parsed.querySelectorAll('meta[name="description"]'),node => node.getAttribute('content')),
+            canonical:Array.from(parsed.querySelectorAll('link[rel="canonical"]'),node => node.getAttribute('href')),
+            schemas:Array.from(parsed.querySelectorAll('script[type="application/ld+json"]'),node => JSON.parse(node.textContent || '')),
+            robots:parsed.querySelector('meta[name="robots"]')?.getAttribute('content'),
+          }
+        },await raw.text())
+        expect(head).toEqual({title:metadata.title,description:[metadata.description],canonical:[metadata.url],schemas:[publicPageSchema(policy)],robots:undefined})
         const response = await page.goto(`${base}/${policy}${suffix}`)
         expect(response?.status()).toBe(200)
         await expect(page.getByRole('heading', {name:PUBLIC_POLICIES[policy].title, exact:true})).toBeVisible()
@@ -80,6 +97,17 @@ for (const policy of ['privacy', 'terms', 'risk'] as const) {
         await expect(page.locator('input[type="password"]')).toHaveCount(0)
         await expect(page.getByRole('button', {name:'Google ile devam et', exact:true})).toHaveCount(0)
         await expect(page).toHaveTitle(`${PUBLIC_POLICIES[policy].title} | KaisTrade`)
+        await expect(page.locator('meta[name="description"]')).toHaveAttribute('content',metadata.description)
+        await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href',metadata.url)
+        await expect(page.locator('meta[property="og:title"],meta[name="twitter:title"]')).toHaveCount(2)
+        for (const selector of ['meta[property="og:title"]','meta[name="twitter:title"]']) {
+          await expect(page.locator(selector)).toHaveAttribute('content',metadata.title)
+        }
+        for (const selector of ['meta[property="og:description"]','meta[name="twitter:description"]']) {
+          await expect(page.locator(selector)).toHaveAttribute('content',metadata.description)
+        }
+        await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content',metadata.url)
+        await expect(page.locator('link[rel="icon"][href="/favicon-96x96.png"]')).toHaveCount(1)
       }
     }
     expect(requests).toEqual([])
@@ -89,6 +117,33 @@ for (const policy of ['privacy', 'terms', 'risk'] as const) {
 test('public policy path matching does not bypass gates for other routes', () => {
   for (const path of ['/', '/register', '/profile', '/admin', '/privacy/extra', '/privacy//', '/Privacy', '/api/v22/session']) {
     expect(publicPolicyForPath(path)).toBeNull()
+  }
+})
+
+test('SPA policy changes and unmount restore every head value without duplicate metadata', async ({page,request}) => {
+  const base = 'http://127.0.0.1:4173'
+  const shell = await (await request.get(base+'/')).text()
+  expect(shell).toContain('/src/main.tsx')
+  await page.route(base+'/metadata-navigation', route =>
+    route.fulfill({contentType:'text/html',body:shell.replace('/src/main.tsx','/tests/fixtures/public-page-metadata.tsx')}))
+  await page.route('https://**', route => route.abort())
+  await page.routeWebSocket('**/*', socket => socket.close())
+  await page.goto(base+'/metadata-navigation')
+  for (const pageName of ['privacy','risk','terms','home'] as const) {
+    await page.getByRole('button',{name:pageName,exact:true}).click()
+    const metadata = PUBLIC_PAGE_METADATA[pageName]
+    await expect(page).toHaveTitle(metadata.title)
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute('content',metadata.description)
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href',metadata.url)
+    for (const selector of ['meta[property="og:title"]','meta[name="twitter:title"]']) {
+      await expect(page.locator(selector)).toHaveAttribute('content',metadata.title)
+    }
+    for (const selector of ['meta[property="og:description"]','meta[name="twitter:description"]']) {
+      await expect(page.locator(selector)).toHaveAttribute('content',metadata.description)
+    }
+    await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content',metadata.url)
+    await expect(page.locator('script[type="application/ld+json"]')).toHaveCount(1)
+    expect(await page.locator('script[type="application/ld+json"]').textContent()).toBe(JSON.stringify(publicPageSchema(pageName)))
   }
 })
 

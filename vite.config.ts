@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import {assetInlineLimit} from './vite-asset-policy'
+import {publicPolicyHtml} from './tools/public-policy-html'
 export default defineConfig({
-	plugins:[react()],
+	plugins:[react(),publicPolicyHtml()],
 	resolve:{dedupe:['react','react-dom']},
 	publicDir:'frontend/public',
 	define:{'import.meta.env.VITE_BUILD_COMMIT':JSON.stringify(process.env.VITE_BUILD_COMMIT || 'unknown')},

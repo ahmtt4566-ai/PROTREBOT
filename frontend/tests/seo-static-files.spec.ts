@@ -61,6 +61,12 @@ test('Vercel serves SEO files outside the SPA fallback without changing API or O
     const fallback = deployment.rewrites.at(-1)
     if (!fallback) throw new Error('SPA fallback missing')
     expect(fallback.destination).toBe('/index.html')
+    for (const policy of ['privacy','terms','risk']) {
+      for (const suffix of ['','/']) {
+        expect(deployment.rewrites.find(rule => rule.source === `/${policy}${suffix}`))
+          .toEqual({source:`/${policy}${suffix}`,destination:`/${policy}.html`})
+      }
+    }
     const pattern = fallbackPattern(fallback.source)
     for (const path of ['/sitemap.xml','/robots.txt']) expect(pattern.test(path)).toBe(false)
     for (const path of ['/','/privacy','/terms','/risk','/profile','/verify-email','/master-trade','/api/v22/auth/google/callback']) {
@@ -82,13 +88,16 @@ test('Vercel serves SEO files outside the SPA fallback without changing API or O
     for (const rule of rootDeployment.rewrites) {
       if (rule.source === '/api/:path*') {
         if (pathname.startsWith('/api/')) return rule.destination.replace(':path*',pathname.slice('/api/'.length))
-      } else if (fallbackPattern(rule.source).test(pathname)) return rule.destination
+      } else if (rule.source.startsWith('/:path(')) {
+        if (fallbackPattern(rule.source).test(pathname)) return rule.destination
+      } else if (rule.source === pathname) return rule.destination
     }
     return null
   }
   expect(resolveRootRoute('/api/v22/auth/google/callback')).toBe('https://protrebot-rkpt.onrender.com/api/v22/auth/google/callback')
   expect(resolveRootRoute('/api/v22/session')).toBe('https://protrebot-rkpt.onrender.com/api/v22/session')
   expect(resolveRootRoute('/verify-email')).toBe('/index.html')
+  for (const policy of ['privacy','terms','risk']) expect(resolveRootRoute(`/${policy}`)).toBe(`/${policy}.html`)
   expect(resolveRootRoute('/sitemap.xml')).toBeNull()
   expect(resolveRootRoute('/robots.txt')).toBeNull()
 })

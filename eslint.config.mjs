@@ -4,7 +4,7 @@ import privatePasswordRule from './tools/eslint-private-fields.mjs'
 export default [
   {ignores: ['node_modules/**', 'dist/**', 'frontend/dist/**', 'frontend/node_modules/**', 'tradbt458-main/**', '**/test-results/**']},
   {
-    files: ['*.ts', '*.tsx', 'frontend/vite.config.ts', 'frontend/src/**/*.ts', 'frontend/src/**/*.tsx', 'frontend/tests/**/*.ts', 'frontend/tests/**/*.tsx'],
+    files: ['*.ts', '*.tsx', 'tools/public-policy-html.ts', 'frontend/vite.config.ts', 'frontend/playwright.seo.config.ts', 'frontend/src/**/*.ts', 'frontend/src/**/*.tsx', 'frontend/tests/**/*.ts', 'frontend/tests/**/*.tsx'],
     languageOptions: {parser: babelParser, parserOptions: {requireConfigFile: false, babelOptions: {babelrc: false, configFile: false, parserOpts: {plugins: ['typescript', 'jsx']}}}},
     plugins: {kais: {rules: {'private-password': privatePasswordRule}}},
     rules: {
