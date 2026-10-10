@@ -115,3 +115,9 @@
   .mod-support-row { gap:12px; }
 }
 @media(prefers-reduced-motion:reduce) { .mod-shell * { transition:none !important; animation:none !important; scroll-behavior:auto !important; } }
+.mod-event-timeline {list-style:none; padding:0; margin:0; display:grid; gap:1.25rem}
+.mod-event-timeline li {display:grid; gap:.5rem; min-width:0; overflow-wrap:anywhere}
+.mod-event-timeline time {color:var(--admin-muted); font-size:.85rem}
+.mod-event-filters {display:flex; align-items:end; flex-wrap:wrap; gap:.75rem}
+.mod-event-filters label {display:grid; gap:.4rem; flex:1 1 140px; min-width:0}
+.mod-event-filters select,.mod-event-filters input {width:100%; min-width:0; padding:.7rem; border:1px solid var(--admin-border); border-radius:.6rem; background:var(--admin-elevated); color:var(--admin-text)}

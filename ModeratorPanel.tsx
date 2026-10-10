@@ -12,11 +12,12 @@ import './admin.css'
 import './moderator-panel.css'
 import ModeratorSupport, {SupportOverview} from './ModeratorSupport'
 import ModeratorApprovals, {ApprovalOverview, ApprovalRequestForm} from './ModeratorApprovals'
+import CustomerEvents, {OwnerApprovalNotice} from './CustomerEvents'
 
 const icons = {overview: Home, customers: Users, subscriptions: Wallet, payments: CreditCard, support: MessageCircle, activity: Activity, approvals: ShieldCheck}
 type Navigate = (section: ModeratorSection, userId?: string) => void
 
-function CustomerResourcePanel({kind, initialUserId, onBack, canRequest = false, onRequestCreated}: {kind: CustomerResource['kind']; initialUserId: string; onBack?: () => void; canRequest?: boolean; onRequestCreated?: () => void}) {
+function CustomerResourcePanel({kind, initialUserId, onBack, canRequest = false, canViewEvents = false, onRequestCreated}: {kind: CustomerResource['kind']; initialUserId: string; onBack?: () => void; canRequest?: boolean; canViewEvents?: boolean; onRequestCreated?: () => void}) {
   const [input, setInput] = useState(initialUserId)
   const [query, setQuery] = useState(initialUserId ? {userId: initialUserId, version: 0} : null)
   const [resource, setResource] = useState<CustomerResource | null>(null)
@@ -45,10 +46,11 @@ function CustomerResourcePanel({kind, initialUserId, onBack, canRequest = false,
     {!query && <ModCard title="Müşteri seçimi"><ModEmpty text="Görüntülemek için bir kullanıcı numarası yazın."/></ModCard>}
     {resource && <ModResourceView resource={resource}/>}
     {resource?.kind === 'profile' && canRequest && <ApprovalRequestForm key={resource.data.user_id} userId={resource.data.user_id} active={resource.data.active} onCreated={onRequestCreated}/>}
+    {resource?.kind === 'profile' && canViewEvents && <CustomerEvents key={resource.data.user_id} userId={resource.data.user_id}/>}
   </div>
 }
 
-function Customers({permissions, navigate, initialUserId = ''}: {permissions: ModeratorPermission[]; navigate: Navigate; initialUserId?: string}) {
+function Customers({permissions, navigate, owner = false, initialUserId = ''}: {permissions: ModeratorPermission[]; navigate: Navigate; owner?: boolean; initialUserId?: string}) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState({search: '', offset: 0, version: 0})
   const [page, setPage] = useState<CustomerPage | null>(null)
@@ -67,7 +69,7 @@ function Customers({permissions, navigate, initialUserId = ''}: {permissions: Mo
       .finally(() => {if (!controller.signal.aborted) setBusy(false)})
     return () => controller.abort()
   }, [query, selected])
-  if (selected) return <div className="mod-stack"><CustomerResourcePanel kind="profile" initialUserId={selected} onBack={() => setSelected('')} canRequest={permissions.includes('approvals.create')} onRequestCreated={() => navigate('approvals')}/>
+  if (selected) return <div className="mod-stack"><CustomerResourcePanel kind="profile" initialUserId={selected} onBack={() => setSelected('')} canRequest={!owner && permissions.includes('approvals.create')} canViewEvents={permissions.includes('events.view')} onRequestCreated={() => navigate('approvals')}/>
     <div className="mod-actions">{permissions.includes('subscriptions.view') && <button onClick={() => navigate('subscriptions', selected)}>Aboneliği görüntüle</button>}
       {permissions.includes('payments.view') && <button onClick={() => navigate('payments', selected)}>Ödemeleri görüntüle</button>}</div>
   </div>
@@ -117,21 +119,22 @@ export default function ModeratorPanel({onLogout}: {onLogout: () => void}) {
       <nav id="mod-navigation" aria-label="Moderatör menüsü" className={menuOpen ? 'mod-navigation mod-navigation-open' : 'mod-navigation'}>
         {sections.map(item => {const Icon = icons[item.id]; return <button key={item.id} aria-current={section === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon aria-hidden="true"/>{item.label}</button>})}
       </nav>
-      <div className="mod-account-links"><a href="/settings"><UserRound aria-hidden="true"/>Profil ve güvenlik</a><button onClick={onLogout}><LogOut aria-hidden="true"/>Çıkış</button></div>
+      <div className="mod-account-links">{me?.role === 'OWNER' && <a href="/admin"><ChevronLeft aria-hidden="true"/>Admin paneline dön</a>}<a href="/settings"><UserRound aria-hidden="true"/>Profil ve güvenlik</a><button onClick={onLogout}><LogOut aria-hidden="true"/>Çıkış</button></div>
     </aside>
     <main className="mod-main" id="mod-main" tabIndex={-1}>
       <header className="mod-header"><div><p className="mod-secondary">Moderatör çalışma alanı</p><h1 ref={heading} tabIndex={-1}>{title}</h1></div>{me && <ModBadge>{accountRoleLabel(me.role)}</ModBadge>}</header>
       {error !== null ? <ModError error={error} onRetry={() => setRefresh(value => value + 1)}/> : !me ? <p role="status" className="mod-secondary">Erişim bilgileri yükleniyor...</p> :
         section === 'overview' ? <div className="mod-stack">
           {me.permissions.includes('support.view') && <SupportOverview/>}
-          {me.permissions.includes('approvals.create') && <ApprovalOverview/>}
+          {me.role === 'MODERATOR' && me.permissions.includes('approvals.create') && <ApprovalOverview/>}
           <ModCard title="Erişim bilgileriniz"><div className="mod-badges"><ModBadge>{accountRoleLabel(me.role)}</ModBadge><ModBadge>Müşteri bilgileri salt okunur</ModBadge></div>
             <h3>İzinleriniz</h3>{me.permissions.length ? <ul className="mod-permissions">{me.permissions.map(permission => <li key={permission}><ShieldCheck aria-hidden="true"/>{permissionLabels[permission]}</li>)}</ul> : <ModEmpty text="Henüz bir izin tanımlanmamış. Yöneticinizden erişim isteyin."/>}
             <button className="mod-refresh" onClick={() => setRefresh(value => value + 1)}>İzinleri yenile</button>
           </ModCard><ModCard title="Diğer bölümler yakında"><p className="mod-secondary">Etkinlik sonraki aşamalarda kullanıma açılacak.</p></ModCard>
-        </div> : section === 'customers' ? <Customers key={`${section}:${userId}`} initialUserId={userId} permissions={me.permissions} navigate={navigate}/> :
+        </div> : section === 'customers' ? <Customers key={`${section}:${userId}`} initialUserId={userId} permissions={me.permissions} owner={me.role === 'OWNER'} navigate={navigate}/> :
           section === 'support' ? <ModeratorSupport manage={me.permissions.includes('support.manage')} onCustomer={me.permissions.includes('customers.view') ? id => navigate('customers', id) : undefined}/> :
-          section === 'approvals' ? <ModeratorApprovals/> :
+          section === 'approvals' ? me.role === 'OWNER' ? <OwnerApprovalNotice/> : <ModeratorApprovals/> :
+          section === 'activity' ? <ModCard title="Teknik Olaylar"><p className="mod-secondary">Teknik olay geçmişi müşteri profilinde görüntülenir.</p><button className="mod-back" disabled={!me.permissions.includes('customers.view')} onClick={() => navigate('customers')}>Müşteri seç</button></ModCard> :
           section === 'subscriptions' || section === 'payments' ? <CustomerResourcePanel key={`${section}:${userId}`} kind={section === 'subscriptions' ? 'subscription' : 'payments'} initialUserId={userId}/> :
             <ModCard title="Yakında"><p className="mod-secondary">{title} bu aşamada kullanıma açık değil.</p></ModCard>}
     </main>
