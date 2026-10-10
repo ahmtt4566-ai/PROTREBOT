@@ -30,6 +30,7 @@ Permission = Literal[
     "support.manage",
     "events.view",
     "approvals.create",
+    "campaigns.manage",
 ]
 PERMISSIONS: tuple[str, ...] = get_args(Permission)
 

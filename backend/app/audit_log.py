@@ -32,6 +32,8 @@ AuditAction = Literal[
     "approval.requested", "approval.approved", "approval.rejected", "approval.cancelled",
     "approval.expired", "approval.stale", "approval.executed", "approval.failed",
     "customer.events.viewed",
+    "campaign.created", "campaign.updated", "campaign.test_sent", "campaign.send_requested",
+    "campaign.send_started", "campaign.cancelled", "campaign.completed",
 ]
 AUDIT_ACTIONS: tuple[str, ...] = get_args(AuditAction)
 ACTION_FIELDS = {
@@ -55,6 +57,13 @@ ACTION_FIELDS = {
     "approval.executed": frozenset({"phase"}),
     "approval.failed": frozenset(),
     "customer.events.viewed": frozenset(),
+    "campaign.created": frozenset(),
+    "campaign.updated": frozenset(),
+    "campaign.test_sent": frozenset(),
+    "campaign.send_requested": frozenset(),
+    "campaign.send_started": frozenset(),
+    "campaign.cancelled": frozenset(),
+    "campaign.completed": frozenset(),
 }
 
 
@@ -126,7 +135,7 @@ async def write_audit(
         raise RuntimeError("Audit must share the mutation transaction")
     if actor.role not in ("OWNER", "MODERATOR", "CUSTOMER"):
         raise ValueError("Invalid audit actor role")
-    expected_target = "MODERATOR_PERMISSION" if action in (
+    expected_target = "CAMPAIGN" if action.startswith("campaign.") else "MODERATOR_PERMISSION" if action in (
         "PERMISSION_GRANTED", "PERMISSION_REVOKED",
     ) else "SUPPORT_CASE" if action.startswith("support.") else "APPROVAL_REQUEST" if action.startswith("approval.") else "USER"
     if target_type != expected_target:
