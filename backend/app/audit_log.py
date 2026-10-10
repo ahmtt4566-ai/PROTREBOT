@@ -29,6 +29,8 @@ AuditAction = Literal[
     "customer.viewed", "customer.subscription.viewed", "customer.payments.viewed",
     "support.case.viewed", "support.case.taken", "support.case.released",
     "support.case.status_changed", "support.note.added",
+    "approval.requested", "approval.approved", "approval.rejected", "approval.cancelled",
+    "approval.expired", "approval.stale", "approval.executed", "approval.failed",
 ]
 AUDIT_ACTIONS: tuple[str, ...] = get_args(AuditAction)
 ACTION_FIELDS = {
@@ -43,6 +45,14 @@ ACTION_FIELDS = {
     "support.case.released": frozenset(),
     "support.case.status_changed": frozenset(),
     "support.note.added": frozenset(),
+    "approval.requested": frozenset(),
+    "approval.approved": frozenset(),
+    "approval.rejected": frozenset(),
+    "approval.cancelled": frozenset(),
+    "approval.expired": frozenset(),
+    "approval.stale": frozenset(),
+    "approval.executed": frozenset({"phase"}),
+    "approval.failed": frozenset(),
 }
 
 
@@ -97,6 +107,9 @@ def allowed_snapshot(action: AuditAction, value: Mapping[str, Any]) -> dict[str,
         from .moderator_access import PERMISSIONS
         if result["permission"] not in PERMISSIONS or type(result["granted"]) is not bool:
             raise ValueError("Invalid audit permission state")
+    elif action == "approval.executed":
+        if result["phase"] not in ("canonical", "completed"):
+            raise ValueError("Invalid approval execution phase")
     return result
 
 
@@ -113,7 +126,7 @@ async def write_audit(
         raise ValueError("Invalid audit actor role")
     expected_target = "MODERATOR_PERMISSION" if action in (
         "PERMISSION_GRANTED", "PERMISSION_REVOKED",
-    ) else "SUPPORT_CASE" if action.startswith("support.") else "USER"
+    ) else "SUPPORT_CASE" if action.startswith("support.") else "APPROVAL_REQUEST" if action.startswith("approval.") else "USER"
     if target_type != expected_target:
         raise ValueError("Invalid audit target type")
     request_id = str(uuid.UUID(actor.request_id))

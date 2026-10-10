@@ -35,7 +35,10 @@ def test_audit_migration_is_append_only_and_survives_user_erasure():
     previous_actions = tuple(re.findall(r"'([^']+)'", extension_check.group(1)))
     support_extension = (Path(__file__).parents[1] / "migrations" / "20261010_005_support_audit_actions.sql").read_text(encoding="utf-8")
     support_check = re.search(r"CHECK \(action IN \((.*?)\)\)", support_extension, re.S)
-    assert tuple(re.findall(r"'([^']+)'", support_check.group(1))) == AUDIT_ACTIONS
+    approval_extension = (Path(__file__).parents[1] / "migrations" / "20261010_007_approval_audit_actions.sql").read_text(encoding="utf-8")
+    approval_check = re.search(r"CHECK \(action IN \((.*?)\)\)", approval_extension, re.S)
+    assert tuple(re.findall(r"'([^']+)'", approval_check.group(1))) == AUDIT_ACTIONS
+    assert set(re.findall(r"'([^']+)'", support_check.group(1))) < set(AUDIT_ACTIONS)
     assert set(previous_actions) < set(AUDIT_ACTIONS)
     assert set(initial_actions) < set(AUDIT_ACTIONS)
     assert re.search(

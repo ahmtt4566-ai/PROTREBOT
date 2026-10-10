@@ -13,6 +13,8 @@ CREATE TABLE approval_requests (
         AND (target_snapshot - ARRAY['active','role','auth_version']) = '{}'::jsonb
         AND jsonb_typeof(target_snapshot->'active') = 'boolean'
         AND target_snapshot->>'role' = 'CUSTOMER'
+        AND jsonb_typeof(target_snapshot->'auth_version') = 'number'
+        AND target_snapshot->>'auth_version' ~ '^[1-9][0-9]*$'
         AND (target_snapshot->>'auth_version')::bigint >= 1
     ),
     reason TEXT NOT NULL CHECK (char_length(reason) = 0 OR char_length(reason) BETWEEN 10 AND 500),
