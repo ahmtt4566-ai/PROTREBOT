@@ -1393,6 +1393,11 @@ Both active Vercel configurations exclude the exact `/sitemap.xml` and
 `/robots.txt` paths from the SPA fallback and declare their XML/plain-text MIME
 types. The root API proxy remains first; its destination, OAuth callback, CSP,
 CORS and session behavior are unchanged.
+Only `/robots.txt` sends `Cache-Control: no-store, max-age=0` and
+`Vercel-CDN-Cache-Control: no-store`; other assets keep their existing cache
+policies. This discourages HTTP/CDN storage but cannot purge Google's internal
+robots cache. Compare the deployed GET body with `frontend/public/robots.txt`,
+not only its status or the presence of a header.
 
 Both HTML entry points publish the homepage title
 `KaisTrade | AI-Powered Crypto Trading Platform`, a description of the existing
@@ -1427,6 +1432,13 @@ HTML. Check all three policy links while signed out. In Google Search Console,
 remove the homepage URL submitted as a sitemap and submit only `sitemap.xml`
 (or its full canonical URL). After changing robots rules, rerun the homepage's
 live URL test in Search Console; crawler caches can retain the previous rules.
+If Google still reports a block despite a matching live response, open
+Settings > robots.txt, inspect the fetched version and its timestamp, then use
+Request a recrawl for the canonical HTTPS robots URL. Google documents that
+its cached robots version normally refreshes every 24 hours; the recrawl
+request is the supported way to request an earlier refresh. A new deployment
+alone does not prove Google has fetched new rules. Recheck the homepage live
+test after the robots report reflects the new version.
 A valid sitemap does not guarantee indexing.
 
 ## Güvenlik ve tarayıcı oturumları

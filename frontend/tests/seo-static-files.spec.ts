@@ -69,7 +69,14 @@ test('Vercel serves SEO files outside the SPA fallback without changing API or O
     expect(deployment.headers.find(rule => rule.source === '/sitemap.xml')?.headers)
       .toEqual([{key:'Content-Type',value:'application/xml; charset=utf-8'}])
     expect(deployment.headers.find(rule => rule.source === '/robots.txt')?.headers)
-      .toEqual([{key:'Content-Type',value:'text/plain; charset=utf-8'}])
+      .toEqual([
+        {key:'Content-Type',value:'text/plain; charset=utf-8'},
+        {key:'Cache-Control',value:'no-store, max-age=0'},
+        {key:'Vercel-CDN-Cache-Control',value:'no-store'},
+      ])
+    for (const rule of deployment.headers.filter(rule => rule.source !== '/robots.txt')) {
+      expect(rule.headers.some(header => /^(Cache-Control|Vercel-CDN-Cache-Control)$/i.test(header.key))).toBe(false)
+    }
   }
   const resolveRootRoute = (pathname:string) => {
     for (const rule of rootDeployment.rewrites) {
@@ -106,6 +113,10 @@ for (const base of ['http://127.0.0.1:4173','http://127.0.0.1:4175','http://127.
     expect(robots.headers()['content-type']).toMatch(/^text\/plain\b/i)
     expect(await robots.text()).toBe(robotsSource)
     expect(robotsSource).not.toMatch(/<!doctype html|<html[\s>]/i)
+    const robotsHead = await request.head(`${base}/robots.txt`)
+    expect(robotsHead.status()).toBe(200)
+    expect(robotsHead.headers()['content-type']).toMatch(/^text\/plain\b/i)
+    expect(await robotsHead.body()).toHaveLength(0)
     await page.goto(`${base}/sitemap.xml`)
     const parsed = await page.evaluate(xml => {
       const documentXml = new DOMParser().parseFromString(xml,'application/xml')
