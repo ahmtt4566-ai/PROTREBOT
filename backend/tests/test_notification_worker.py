@@ -53,7 +53,7 @@ class WorkerPool(OutboxPool):
             self.check(sql)
             row = self.users.get(args[0])
             value = row["security"] if row else {}
-            if args[0] in self.erased or not value.get("active") or not value.get("email_verified") or value.get("role") not in ("OWNER", "MODERATOR"):
+            if args[0] in self.erased or not value.get("active") or not value.get("email_verified") or args[1] == "approval.pending_digest" and value.get("role") != "OWNER":
                 return None
             return {"email": value["email"]}
         return await super().fetchrow(sql, *args)
@@ -213,3 +213,23 @@ def test_provider_crash_and_database_failure_cannot_escape_background_worker(wor
     run(client)
     assert "Notification sweep failed (RuntimeError)" in caplog.text
     assert "private@example.test" not in caplog.text
+
+
+def test_recipient_email_is_resolved_at_send_time_and_demoted_owner_does_not_get_digest(worker_notifications):
+    client, pool = worker_notifications
+    create(client)
+    pool.users["owner"]["security"]["email"] = "updated@example.test"
+    with patch.object(worker, "send_notification") as send:
+        run(client)
+    assert send.call_args.kwargs["to_email"] == "updated@example.test"
+    assert "updated@example.test" not in str(pool.outbox)
+
+
+def test_demoted_owner_pending_digest_is_not_sent(worker_notifications):
+    client, pool = worker_notifications
+    create(client)
+    pool.users["owner"]["security"]["role"] = "MODERATOR"
+    with patch.object(worker, "send_notification") as send:
+        run(client)
+    assert send.call_count == 0
+    assert next(iter(pool.outbox.values()))["status"] == "dead"

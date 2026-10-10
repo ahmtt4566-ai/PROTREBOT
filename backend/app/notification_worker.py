@@ -64,10 +64,11 @@ async def deliver(conn, lease):
     recipient = await conn.fetchrow(
         """SELECT security->>'email' AS email FROM commercial_auth_users
            WHERE user_id = $1 AND security->'active' = 'true'::jsonb
-             AND security->'email_verified' = 'true'::jsonb AND security->>'role' IN ('OWNER','MODERATOR')
+             AND security->'email_verified' = 'true'::jsonb
+             AND ($2 = 'approval.decision' OR security->>'role' = 'OWNER')
              AND NOT EXISTS (SELECT 1 FROM commercial_erased_users e
                WHERE e.user_hash = encode(sha256(convert_to(user_id,'UTF8')),'hex'))
-           FOR SHARE""", row["recipient_user_id"],
+           FOR SHARE""", row["recipient_user_id"], row["kind"],
     )
     if recipient is None or not recipient["email"]:
         await finish(conn, row, "dead", "recipient_unavailable")
