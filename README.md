@@ -177,6 +177,77 @@ passed to the settings parser by the template regression test.
 
 ## Kais Original v2 Demo controls
 
+Legacy Demo Auto Trade has a passive, user-scoped result observer. It requires
+owned `AUTO_SCANNER` plan identities, exact entry/exit order evidence, complete
+fill quantities and verified USDT commissions before classifying a full
+closure as loss, profit or breakeven. Results use Decimal arithmetic and the
+exchange closure timestamp in UTC; partial exits are not separate trades.
+Duplicate/out-of-order fills and delayed protective-order bindings are handled
+without changing plan lifecycle or sending requests. Original and manual plans
+are excluded. Old trades without complete entry fees, unlinked manual/safety
+close orders and snapshot disappearance remain unverified with no invented PnL.
+Observer errors are logged and retained as user-state error markers.
+Result evidence survives JSONB/file state restoration. Accounting journal
+records are stored separately and merged only for journal display, so they
+cannot evict trading fills or change daily PnL/loss-limit calculations.
+Legacy consecutive-loss accounting consumes each complete closure once.
+Verified net losses and unverified closures increment the streak; verified
+profit or breakeven resets it. Partial exits alone do not count. An unverified
+closure is retained as a conservative loss even if later evidence resolves it,
+and its reason is recorded separately without inventing monetary PnL.
+Accounting follows UTC closure order and resets the counter on UTC day change.
+Reaching the existing effective limit latches a persistent pause: profits, day
+change and process restart cannot resume entries. Only the existing confirmed
+manual start flow can reset the streak and release this latch. Invalid
+accounting, unresolved observer errors or failed state persistence block new
+legacy entries; reconciliation still runs Stop/TP protection before accounting.
+Original V2, kill switch, daily monetary limits and order/protection logic are
+unchanged. Rotation and app manual closes capture the returned exit order
+identity only for an unambiguous, confirmed, owned legacy plan. The observer
+requires complete fills and fees before verifying those closures; delayed
+identity binding can resolve earlier unverified evidence. Binding failures are
+logged and never interrupt closure or protection cleanup. Safety closes, direct
+exchange closes and missing/ambiguous identities remain unverified. Previously
+counted conservative losses are not retracted when later evidence resolves.
+An authenticated legacy Demo user can acknowledge stale observer errors from
+the Otopilot warning using `DEMO HATAYI SIFIRLA`. The reset requires explicit
+risk acknowledgement, an armed Demo grant, configured credentials and One-way
+mode while automation is off. It durably clears only error markers and logs
+the acknowledgement; results, loss counter and pause latch remain unchanged.
+Invalid accounting or a new error during persistence rejects the reset.
+Starting automation still requires its separate existing confirmation.
+
+The user bell panel includes critical Demo notifications for failed Stop
+repair (`ACİL KORUMA`), a failed first automation cycle (`AUTO_START_ERROR`),
+and an unexpectedly terminated automation task (`AUTO_LOOP_CRASH`).
+Authenticated manual scans send `SCAN_STARTED` only to the requesting user's
+notification state; global/background scan notifications remain global and are
+never broadcast to user journals. Scanner state, filtering and decisions stay
+unchanged. Auto start/stop notifications follow enabled-state transitions:
+repeated starts/stops do not notify again, while each real stop/start gets a
+fresh notification session. Notification failures are isolated from scanning,
+protection and automation; existing start/stop execution calls are unchanged.
+The bell panel distinguishes loading, empty, error and populated states.
+Failed refreshes retain the previous list with a stale-data warning; failed
+single/bulk read requests restore the prior read flags and show a short error.
+Polling cannot overwrite a pending read operation. Notification titles and
+severity come from a fixed event-type presentation map on every read, including
+old journal records: daily loss 5/10 are warnings, 15/20 are critical; unknown
+events use an informational system title. No journal migration or trading
+decision changes are required.
+The bell reads both the main and legacy-risk journals, so consecutive-loss
+pauses retain their critical Turkish presentation and dynamic limit message.
+Legacy risk validation runs before automation is enabled or a start notification
+is emitted; rejected restarts cannot produce a successful-start notification.
+Notification creation/storage failures are logged and isolated from Stop repair,
+safe position closure and automation recovery; synchronous failures restore the
+notification bookkeeping so retries are not suppressed. Asynchronous PostgreSQL
+snapshot failures are logged; an in-memory notification does not prove durable
+delivery. A loop crash is retained in the global system journal and server log
+even without a user recipient. Only matching, confirmed active user automation
+contexts receive that crash notification. Execution decisions and risk gates
+are unchanged; the panel shows a red critical icon and a `KRİTİK` label.
+
 Public market reads use a single bounded request budget across upstream hosts.
 Owners can diagnose the original signed-request transport without entering
 credentials via `GET /api/exchange-connections/time-status?mode=TESTNET` (or
