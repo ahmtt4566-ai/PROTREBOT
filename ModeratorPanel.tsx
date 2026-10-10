@@ -11,11 +11,12 @@ import {
 import './admin.css'
 import './moderator-panel.css'
 import ModeratorSupport, {SupportOverview} from './ModeratorSupport'
+import ModeratorApprovals, {ApprovalOverview, ApprovalRequestForm} from './ModeratorApprovals'
 
 const icons = {overview: Home, customers: Users, subscriptions: Wallet, payments: CreditCard, support: MessageCircle, activity: Activity, approvals: ShieldCheck}
 type Navigate = (section: ModeratorSection, userId?: string) => void
 
-function CustomerResourcePanel({kind, initialUserId, onBack}: {kind: CustomerResource['kind']; initialUserId: string; onBack?: () => void}) {
+function CustomerResourcePanel({kind, initialUserId, onBack, canRequest = false, onRequestCreated}: {kind: CustomerResource['kind']; initialUserId: string; onBack?: () => void; canRequest?: boolean; onRequestCreated?: () => void}) {
   const [input, setInput] = useState(initialUserId)
   const [query, setQuery] = useState(initialUserId ? {userId: initialUserId, version: 0} : null)
   const [resource, setResource] = useState<CustomerResource | null>(null)
@@ -43,6 +44,7 @@ function CustomerResourcePanel({kind, initialUserId, onBack}: {kind: CustomerRes
     {error !== null && <ModError error={error} onRetry={() => {if (query) setQuery({...query, version: query.version + 1})}}/>}
     {!query && <ModCard title="Müşteri seçimi"><ModEmpty text="Görüntülemek için bir kullanıcı numarası yazın."/></ModCard>}
     {resource && <ModResourceView resource={resource}/>}
+    {resource?.kind === 'profile' && canRequest && <ApprovalRequestForm key={resource.data.user_id} userId={resource.data.user_id} active={resource.data.active} onCreated={onRequestCreated}/>}
   </div>
 }
 
@@ -65,7 +67,7 @@ function Customers({permissions, navigate, initialUserId = ''}: {permissions: Mo
       .finally(() => {if (!controller.signal.aborted) setBusy(false)})
     return () => controller.abort()
   }, [query, selected])
-  if (selected) return <div className="mod-stack"><CustomerResourcePanel kind="profile" initialUserId={selected} onBack={() => setSelected('')}/>
+  if (selected) return <div className="mod-stack"><CustomerResourcePanel kind="profile" initialUserId={selected} onBack={() => setSelected('')} canRequest={permissions.includes('approvals.create')} onRequestCreated={() => navigate('approvals')}/>
     <div className="mod-actions">{permissions.includes('subscriptions.view') && <button onClick={() => navigate('subscriptions', selected)}>Aboneliği görüntüle</button>}
       {permissions.includes('payments.view') && <button onClick={() => navigate('payments', selected)}>Ödemeleri görüntüle</button>}</div>
   </div>
@@ -122,12 +124,14 @@ export default function ModeratorPanel({onLogout}: {onLogout: () => void}) {
       {error !== null ? <ModError error={error} onRetry={() => setRefresh(value => value + 1)}/> : !me ? <p role="status" className="mod-secondary">Erişim bilgileri yükleniyor...</p> :
         section === 'overview' ? <div className="mod-stack">
           {me.permissions.includes('support.view') && <SupportOverview/>}
+          {me.permissions.includes('approvals.create') && <ApprovalOverview/>}
           <ModCard title="Erişim bilgileriniz"><div className="mod-badges"><ModBadge>{accountRoleLabel(me.role)}</ModBadge><ModBadge>Müşteri bilgileri salt okunur</ModBadge></div>
             <h3>İzinleriniz</h3>{me.permissions.length ? <ul className="mod-permissions">{me.permissions.map(permission => <li key={permission}><ShieldCheck aria-hidden="true"/>{permissionLabels[permission]}</li>)}</ul> : <ModEmpty text="Henüz bir izin tanımlanmamış. Yöneticinizden erişim isteyin."/>}
             <button className="mod-refresh" onClick={() => setRefresh(value => value + 1)}>İzinleri yenile</button>
-          </ModCard><ModCard title="Diğer bölümler yakında"><p className="mod-secondary">Etkinlik ve onay talepleri sonraki aşamalarda kullanıma açılacak.</p></ModCard>
+          </ModCard><ModCard title="Diğer bölümler yakında"><p className="mod-secondary">Etkinlik sonraki aşamalarda kullanıma açılacak.</p></ModCard>
         </div> : section === 'customers' ? <Customers key={`${section}:${userId}`} initialUserId={userId} permissions={me.permissions} navigate={navigate}/> :
           section === 'support' ? <ModeratorSupport manage={me.permissions.includes('support.manage')} onCustomer={me.permissions.includes('customers.view') ? id => navigate('customers', id) : undefined}/> :
+          section === 'approvals' ? <ModeratorApprovals/> :
           section === 'subscriptions' || section === 'payments' ? <CustomerResourcePanel key={`${section}:${userId}`} kind={section === 'subscriptions' ? 'subscription' : 'payments'} initialUserId={userId}/> :
             <ModCard title="Yakında"><p className="mod-secondary">{title} bu aşamada kullanıma açık değil.</p></ModCard>}
     </main>

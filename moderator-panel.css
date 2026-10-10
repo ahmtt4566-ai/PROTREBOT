@@ -85,6 +85,11 @@
 .mod-support-note textarea { width:100%; resize:vertical; }
 .mod-support-note textarea:disabled { opacity:.65; }
 .mod-support-note button { justify-self:start; }
+.mod-approval-section { font-family:system-ui,sans-serif; color:var(--admin-text); }
+.mod-approval-section :is(button,textarea,select) { font:inherit; }
+.mod-approval-section button { cursor:pointer; }
+.mod-approval-section button:disabled { opacity:.55; cursor:default; }
+.mod-approval-section :is(button,textarea,select):focus-visible { outline:2px solid var(--admin-blue); outline-offset:4px; }
 @media(max-width:1050px) { .mod-main { padding:32px 28px; } .mod-sidebar { width:230px; } }
 @media(max-width:760px) {
   .mod-shell { flex-direction:column; }
