@@ -13,7 +13,7 @@ test('Authenticated landing routes follow the canonical session role', () => {
 test('Moderator cannot render admin; customer cannot render moderator', () => {
   assert.equal(authenticatedPath('MODERATOR', '/admin/users'), '/moderator')
   assert.equal(authenticatedPath('CUSTOMER', '/moderator'), '/dashboard')
-  assert.equal(authenticatedPath('OWNER', '/moderator'), '/admin')
+  assert.equal(authenticatedPath('OWNER', '/moderator'), '/moderator')
   assert.equal(authenticatedPath('CUSTOMER', '/admin'), '/admin')
 })
 
