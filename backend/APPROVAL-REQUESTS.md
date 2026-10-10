@@ -1,5 +1,7 @@
 # Aşama 7 — Hesap durumu onayları
 
+Aşama 8 bildirim/outbox uzantısı: [APPROVAL-NOTIFICATIONS.md](APPROVAL-NOTIFICATIONS.md).
+
 Yerel dal: `stage7-approvals`, başlangıç: `stage6-support` (`3f2ec7e`).
 Migration uygulanmadı; push ve deploy yapılmadı.
 

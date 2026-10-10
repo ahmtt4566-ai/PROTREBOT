@@ -3,6 +3,7 @@ import {approvalRequest} from './approval-api'
 import {APPROVAL_STATUSES, approvalLabels, parseApproval, parseApprovalDetail, parseApprovalPage, type ApprovalDetail, type ApprovalPage, type ApprovalStatus} from './approval-model'
 import {ApprovalCards, ApprovalError, ApprovalOwnerDetail} from './approval-ui'
 import './moderator-panel.css'
+import AdminNotificationSummary from './AdminNotificationSummary'
 
 export default function AdminApprovals() {
   const [query, setQuery] = useState<{status: ApprovalStatus | ''; offset: number; version: number}>({status: 'pending', offset: 0, version: 0})
@@ -46,6 +47,7 @@ export default function AdminApprovals() {
     finally {inFlight.current = false; if (!controller.signal.aborted) setBusy(false)}
   }
   return <section className="mod-approval-section mod-stack" aria-label="Onay talepleri">
+    <AdminNotificationSummary refresh={query.version}/>
     {selected ? <div className="mod-actions"><button disabled={busy} onClick={() => setSelected('')}>Listeye dön</button></div> :
       <label className="mod-support-priority">Durum<select value={query.status} disabled={busy} onChange={event => {
         const status = APPROVAL_STATUSES.find(value => value === event.target.value) ?? ''

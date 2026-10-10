@@ -2,6 +2,7 @@ import copy
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -66,6 +67,14 @@ class OutboxPool(ApprovalPool):
             self.check(sql)
             return self.bucket
         return await super().fetchval(sql, *args)
+
+    async def fetchrow(self, sql, *args):
+        if "FROM notification_outbox WHERE recipient_user_id" in sql:
+            self.check(sql)
+            rows = [r for r in self.outbox.values() if r["recipient_user_id"] != "ERASED"]
+            return {"pending": sum(r["status"] in ("pending", "sending") for r in rows),
+                    "failed": sum(r["status"] in ("failed", "dead") for r in rows)}
+        return await super().fetchrow(sql, *args)
 
 
 @pytest.fixture
@@ -160,3 +169,42 @@ def test_new_time_bucket_gets_a_new_digest_and_persisted_decision_dedupes(notifi
     import asyncio
     asyncio.run(repeated())
     assert len([r for r in pool.outbox.values() if r["kind"] == "approval.decision"]) == 1
+
+
+@pytest.mark.parametrize("uid,role,expected", [("owner", "OWNER", 200), ("moderator", "MODERATOR", 403), ("customer", "CUSTOMER", 403)])
+def test_summary_is_canonical_owner_only_with_real_counts(notifications, uid, role, expected):
+    client, pool = notifications
+    create(client)
+    response = client.get("/api/v22/admin/approvals/notifications/summary", headers=headers(uid, role))
+    assert response.status_code == expected
+    if expected == 200:
+        assert response.json() == {"pending": 1, "failed": 0}
+
+
+def test_summary_storage_error_returns_explicit_no_data_with_safe_warning(notifications, caplog):
+    client, pool = notifications
+    original = pool.fetchrow
+    async def failure(sql, *args):
+        if "FROM notification_outbox" in sql:
+            raise RuntimeError("private@example.test counts")
+        return await original(sql, *args)
+    with patch.object(pool, "fetchrow", side_effect=failure):
+        response = client.get("/api/v22/admin/approvals/notifications/summary", headers=headers("owner", "OWNER"))
+    assert response.status_code == 200 and response.json() == {"pending": None, "failed": None}
+    assert "Notification summary unavailable (RuntimeError)" in caplog.text
+    assert "private@example.test" not in caplog.text
+
+
+def test_endpoint_triggers_are_scheduled_only_after_approval_transaction_commit(notifications, monkeypatch):
+    client, pool = notifications
+    from app import notification_worker
+    triggers = []
+    monkeypatch.setattr(notification_worker, "schedule_sweep", lambda _: triggers.append(pool.transaction_depth))
+    row = create(client)
+    assert triggers == [0]
+    response = client.post(f"/api/v22/admin/approvals/{row['id']}/reject", headers=headers("owner", "OWNER"),
+                           json={"decision_note": "Yeniden incelensin"})
+    assert response.status_code == 200 and triggers == [0, 0]
+    assert client.get("/api/v22/admin/approvals", headers=headers("owner", "OWNER")).status_code == 200
+    assert client.get("/api/v22/admin/approvals/summary", headers=headers("owner", "OWNER")).status_code == 200
+    assert triggers == [0, 0, 0, 0]
