@@ -202,8 +202,13 @@ manual start flow can reset the streak and release this latch. Invalid
 accounting, unresolved observer errors or failed state persistence block new
 legacy entries; reconciliation still runs Stop/TP protection before accounting.
 Original V2, kill switch, daily monetary limits and order/protection logic are
-unchanged. Rotation and app/manual safety closures without linked exit order
-identities remain unverified; linking those identities is a separate step.
+unchanged. Rotation and app manual closes capture the returned exit order
+identity only for an unambiguous, confirmed, owned legacy plan. The observer
+requires complete fills and fees before verifying those closures; delayed
+identity binding can resolve earlier unverified evidence. Binding failures are
+logged and never interrupt closure or protection cleanup. Safety closes, direct
+exchange closes and missing/ambiguous identities remain unverified. Previously
+counted conservative losses are not retracted when later evidence resolves.
 
 The user bell panel includes critical Demo notifications for failed Stop
 repair (`ACİL KORUMA`), a failed first automation cycle (`AUTO_START_ERROR`),

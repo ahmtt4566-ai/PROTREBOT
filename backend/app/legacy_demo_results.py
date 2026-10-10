@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -12,6 +13,7 @@ from .binance_demo import can_mutate_lifecycle
 
 FILL_FIELDS = ("i", "c", "t", "s", "ps", "S", "R", "l", "z", "rp", "n", "N", "T")
 PROTECTION_LABELS = ("stop", "tp1", "tp2", "tp3")
+logger = logging.getLogger(__name__)
 
 
 def _id(value: Any) -> str:
@@ -48,6 +50,75 @@ def owned_legacy_plans(state: dict[str, Any], demo: dict[str, Any]) -> list[dict
     ]
 
 
+def capture_close_order(
+    demo: dict[str, Any], symbol: str, position_side: str, response: dict[str, Any], reason: str,
+) -> bool:
+    try:
+        uid = _id(demo.get("_user_id"))
+        side = str(position_side or "BOTH").upper()
+        matching = [
+            plan for plan in demo.get("plans", {}).values()
+            if isinstance(plan, dict) and plan.get("symbol") == symbol
+            and plan.get("position_side", "BOTH") == side and plan.get("position_status") == "OPEN"
+        ]
+        legacy = [
+            plan for plan in matching
+            if plan.get("source") == "AUTO_SCANNER" and plan.get("strategy_id") is None
+        ]
+        if not legacy:
+            return False
+        if (
+            len(matching) != 1 or not uid or legacy[0].get("user_id") != uid
+            or demo["plans"].get(legacy[0].get("id")) is not legacy[0]
+            or not can_mutate_lifecycle(legacy[0])
+        ):
+            raise ValueError("close_plan_ownership_unverified")
+        plan = legacy[0]
+        order_id, client = _id(response.get("orderId")), _id(response.get("clientOrderId"))
+        exit_side = {"LONG": "SELL", "SHORT": "BUY"}.get(plan.get("direction"))
+        if (
+            not order_id.isdigit() or int(order_id) <= 0 or exit_side is None
+            or response.get("symbol", symbol) != symbol
+            or response.get("positionSide", side) != side
+            or response.get("side", exit_side) != exit_side
+        ):
+            raise ValueError("close_order_identity_unverified")
+        orders = list(plan.get("legacy_close_orders", []))
+        identity = {"id": order_id, "client": client, "reason": reason}
+        for candidate in demo["plans"].values():
+            if not isinstance(candidate, dict):
+                continue
+            known = [
+                {"id": _id(candidate.get("entry_order_id") or candidate.get("provenance_entry_order_id")),
+                 "client": _id(candidate.get("entry_client_order_id") or candidate.get("provenance_entry_client_order_id"))},
+                *[
+                    {"id": _id(candidate.get(f"{label}_actual_order_id")),
+                     "client": _id(candidate.get(f"{label}_actual_client_order_id"))}
+                    for label in PROTECTION_LABELS
+                ],
+            ]
+            if candidate is not plan:
+                known.extend(candidate.get("legacy_close_orders", []))
+            if any(
+                order_id == item["id"] or client and client == item["client"]
+                for item in known
+            ):
+                raise ValueError("close_order_identity_conflict")
+        for item in orders:
+            if item["id"] == order_id or client and item["client"] == client:
+                if item == identity:
+                    return False
+                raise ValueError("close_order_identity_conflict")
+        plan["legacy_close_orders"] = [*orders, identity]
+        return True
+    except Exception:
+        logger.exception(
+            "Legacy close order binding failed: symbol=%s reason=%s; closure remains unverified",
+            symbol, reason,
+        )
+        return False
+
+
 def _record(state: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     records = state.setdefault("legacy_trade_results", {})
     row = records.setdefault(plan["id"], {
@@ -64,6 +135,10 @@ def _record(state: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
             row["algo_orders"].append(algo)
         actual = {"id": _id(plan.get(f"{label}_actual_order_id")), "client": _id(plan.get(f"{label}_actual_client_order_id"))}
         if any(actual.values()) and actual not in row["exit_orders"]:
+            row["exit_orders"].append(actual)
+    for close in plan.get("legacy_close_orders", []):
+        actual = {"id": _id(close["id"]), "client": _id(close["client"])}
+        if actual not in row["exit_orders"]:
             row["exit_orders"].append(actual)
     return row
 

@@ -70,7 +70,7 @@ from .binance_demo import (
 from .binance_demo import (
     state_for as demo_state_for,
 )
-from .legacy_demo_results import observe_missing_positions
+from .legacy_demo_results import capture_close_order, observe_missing_positions
 from .legacy_demo_results import observe_stream as observe_legacy_stream
 from .legacy_loss_guard import loss_limit as legacy_loss_limit
 from .legacy_loss_guard import update as update_legacy_loss_guard
@@ -1336,8 +1336,10 @@ async def rotate_safe_demo_positions(
     client = client_for_state(application, state)
     rotated = 0
     for symbol in symbols:
-        if await close_symbol_position(client, symbol) is None:
+        result = await close_symbol_position(client, symbol)
+        if result is None:
             continue
+        capture_close_order(state, symbol, "BOTH", result, "SAFE_ROTATION")
         for plan in state.get("plans", {}).values():
             if not can_mutate_lifecycle(plan):
                 continue
