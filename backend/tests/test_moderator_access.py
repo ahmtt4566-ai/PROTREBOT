@@ -138,6 +138,8 @@ OWNER_ENDPOINTS = [
     ("PUT", "/api/v22/commerce/leads/offline/status", {"status": "NEW"}),
     ("PUT", "/api/v22/commerce/support/offline", {"status": "OPEN"}),
     ("GET", "/api/exchange-connections/time-status", None),
+    ("POST", "/api/v22/admin/users/moderator/permissions", {"permission": "events.view"}),
+    ("DELETE", "/api/v22/admin/users/moderator/permissions/events.view", None),
 ]
 
 

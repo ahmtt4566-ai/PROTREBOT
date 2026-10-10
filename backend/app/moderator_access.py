@@ -3,6 +3,10 @@
 GET /api/mod/me exposes only the caller's role and permissions, with no specific
 permission required. Protected moderator operations use require_permission.
 Missing canonical storage fails closed; OWNER grants are always implicit.
+OWNER manages grants using POST /api/v22/admin/users/{user_id}/permissions
+with {"permission": "..."} or DELETE on that path plus /{permission}.
+Both operations require a canonical MODERATOR target; repeated grants preserve
+their original attribution, and repeated deletion reports removed=false.
 """
 import json
 import logging
@@ -104,3 +108,76 @@ def require_permission(permission: str) -> Callable[..., Coroutine[Any, Any, Mod
 @router.get("/api/mod/me")
 async def moderator_me(identity: ModeratorIdentity = Depends(moderator_identity)):
     return {"role": identity.role, "permissions": list(identity.permissions)}
+
+
+async def manage_permission(
+    user_id: str, permission: Permission, request: Request, *, grant: bool,
+) -> dict[str, Any]:
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(503, "Moderator permission storage unavailable")
+    owner = await auth.authenticated_user_async(request, owner=True)
+    owner_id = owner["id"]
+    version = int(owner.get("auth_version", 1))
+    try:
+        async with pool.acquire() as connection, connection.transaction():
+            # Stable lock order serializes grants with both parties' role changes.
+            rows = await connection.fetch(
+                """SELECT user_id, auth_version, security FROM commercial_auth_users
+                   WHERE user_id = ANY($1::text[]) ORDER BY user_id FOR UPDATE""",
+                [owner_id, user_id],
+            )
+            users = {
+                row["user_id"]: {
+                    "auth_version": int(row["auth_version"]),
+                    "security": json.loads(row["security"]) if isinstance(row["security"], str) else row["security"],
+                } for row in rows
+            }
+            current_owner = users.get(owner_id)
+            if not current_owner or current_owner["auth_version"] != version:
+                raise HTTPException(401, "Session revoked")
+            if (current_owner["security"].get("role") != "OWNER"
+                    or current_owner["security"].get("active") is not True):
+                raise HTTPException(403, "Owner access required")
+            target = users.get(user_id)
+            if target is None:
+                raise HTTPException(404, "User not found")
+            if target["security"].get("role") != "MODERATOR":
+                raise HTTPException(409, "Permissions require a MODERATOR target")
+            if grant:
+                row = await connection.fetchrow(
+                    """INSERT INTO moderator_permissions (user_id, permission, granted_by)
+                       VALUES ($1, $2, $3) ON CONFLICT (user_id, permission) DO NOTHING
+                       RETURNING user_id, permission, granted_by, granted_at""",
+                    user_id, permission, owner_id,
+                )
+                if row is None:
+                    row = await connection.fetchrow(
+                        """SELECT user_id, permission, granted_by, granted_at
+                           FROM moderator_permissions WHERE user_id = $1 AND permission = $2""",
+                        user_id, permission,
+                    )
+                if row is None:
+                    raise HTTPException(409, "Permission grant was not stored")
+                return dict(row)
+            row = await connection.fetchrow(
+                """DELETE FROM moderator_permissions WHERE user_id = $1 AND permission = $2
+                   RETURNING permission""",
+                user_id, permission,
+            )
+            return {"user_id": user_id, "permission": permission, "removed": row is not None}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Moderator permission update failed (%s)", type(exc).__name__)
+        raise HTTPException(503, "Moderator permission storage unavailable") from None
+
+
+@router.post("/api/v22/admin/users/{user_id}/permissions")
+async def grant_permission(user_id: str, payload: PermissionGrant, request: Request):
+    return await manage_permission(user_id, payload.permission, request, grant=True)
+
+
+@router.delete("/api/v22/admin/users/{user_id}/permissions/{permission}")
+async def revoke_permission(user_id: str, permission: Permission, request: Request):
+    return await manage_permission(user_id, permission, request, grant=False)

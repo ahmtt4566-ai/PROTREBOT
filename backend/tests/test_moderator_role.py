@@ -3,6 +3,7 @@ import asyncio
 import copy
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -56,12 +57,35 @@ class CanonicalPool:
                 "mfa_enabled": self.settings.get(args[0], {}).get("two_factor_enabled") is True,
                 "permissions": list(self.permissions.get(args[0], {})),
             }
+        if "moderator_permissions" in sql:
+            from app.moderator_access import PERMISSIONS
+            permission = args[1]
+            if permission not in PERMISSIONS:
+                raise ValueError("offline CHECK violation")
+            grants = self.permissions.setdefault(args[0], {})
+            if "INSERT INTO" in sql:
+                if permission in grants:
+                    return None
+                grants[permission] = {
+                    "user_id": args[0], "permission": permission,
+                    "granted_by": args[2], "granted_at": datetime.now(timezone.utc),
+                }
+                return copy.deepcopy(grants[permission])
+            if "DELETE FROM" in sql:
+                return grants.pop(permission, None)
+            return copy.deepcopy(grants.get(permission))
         if "UPDATE commercial_auth_users" in sql:
             if not row or (args[2] is not None and args[2] != row["auth_version"]):
                 return None
             row["security"].update(json.loads(args[1]))
             row["auth_version"] += 1
         return copy.deepcopy(row)
+
+    async def fetch(self, sql, *args):
+        self.check(sql)
+        assert "ORDER BY user_id FOR UPDATE" in sql
+        return [{"user_id": user_id, **copy.deepcopy(self.users[user_id])}
+                for user_id in sorted(set(args[0])) if user_id in self.users]
 
 
 def headers(user_id, role, version=1):
