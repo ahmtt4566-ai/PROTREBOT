@@ -140,6 +140,7 @@ OWNER_ENDPOINTS = [
     ("GET", "/api/exchange-connections/time-status", None),
     ("POST", "/api/v22/admin/users/moderator/permissions", {"permission": "events.view"}),
     ("DELETE", "/api/v22/admin/users/moderator/permissions/events.view", None),
+    ("GET", "/api/v22/admin/audit", None),
 ]
 
 

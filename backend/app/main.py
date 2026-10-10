@@ -64,6 +64,7 @@ from .v22_commercial import (
 )
 from .v24_commerce import router as v24_commerce_router
 from .moderator_access import router as moderator_router
+from .audit_log import router as audit_router
 from .v25_execution import init_v25_execution, restore_v25_state, router as v25_execution_router, shutdown_v25_execution
 from .v27_cloud_ops import (
     init_v27_cloud,
@@ -1415,6 +1416,7 @@ app.include_router(binance_demo_router)
 app.include_router(v21_demo_router)
 app.include_router(v22_commercial_router)
 app.include_router(moderator_router)
+app.include_router(audit_router)
 from .account_settings import router as account_settings_router
 app.include_router(account_settings_router)
 app.include_router(google_oauth_router)

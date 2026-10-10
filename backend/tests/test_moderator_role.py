@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import json
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -118,9 +119,32 @@ class CanonicalPool:
 
     async def fetch(self, sql, *args):
         self.check(sql)
+        if "FROM audit_log" in sql:
+            filtered = self.filtered_audits(sql, args)
+            ordered = sorted(filtered, key=lambda row: (row["created_at"], row["id"]), reverse=True)
+            return copy.deepcopy(ordered[args[-1]:args[-1] + args[-2]])
         assert "ORDER BY user_id FOR UPDATE" in sql
         return [{"user_id": user_id, **copy.deepcopy(self.users[user_id])}
                 for user_id in sorted(set(args[0])) if user_id in self.users]
+
+    def filtered_audits(self, sql, args):
+        rows = self.audits
+        for column, operator, index in re.findall(
+            r"(actor_user_id|target_id|action|created_at) (=|>=|<=) \$(\d+)", sql,
+        ):
+            value = args[int(index) - 1]
+            if operator == "=":
+                rows = [row for row in rows if row[column] == value]
+            elif operator == ">=":
+                rows = [row for row in rows if row[column] >= value]
+            else:
+                rows = [row for row in rows if row[column] <= value]
+        return rows
+
+    async def fetchval(self, sql, *args):
+        self.check(sql)
+        assert "COUNT(*) FROM audit_log" in sql
+        return len(self.filtered_audits(sql, args))
 
 
 def headers(user_id, role, version=1):
@@ -131,6 +155,7 @@ def headers(user_id, role, version=1):
 def setup():
     from app import main, v24_commerce, exchange_connections
     from app.moderator_access import router as moderator_router
+    from app.audit_log import router as audit_router
     users = [
         {"id": uid, "email": f"{uid}@example.test", "display_name": uid, "role": role,
          "active": True, "email_verified": True, "auth_version": 1}
@@ -142,6 +167,7 @@ def setup():
     application.include_router(v24_commerce.router)
     application.include_router(exchange_connections.router)
     application.include_router(moderator_router)
+    application.include_router(audit_router)
     for route in main.app.routes:
         if getattr(route, "path", "").startswith("/api/v22/admin/"):
             if not any(getattr(existing, "path", None) == route.path

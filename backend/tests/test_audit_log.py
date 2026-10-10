@@ -15,6 +15,7 @@ from app.audit_log import AUDIT_ACTIONS, AuditActor, write_audit
 
 
 def test_audit_migration_is_append_only_and_survives_user_erasure():
+    from app.account_erasure import PERSONAL_TABLES
     sql = (Path(__file__).parents[1] / "migrations" / "20261010_002_audit_log.sql").read_text(encoding="utf-8")
     statements = re.sub(r"--[^\n]*", "", sql)
     for column in (
@@ -24,6 +25,7 @@ def test_audit_migration_is_append_only_and_survives_user_erasure():
         assert re.search(rf"^\s*{re.escape(column)}\s+", statements, re.M)
     assert not re.search(r"\b(REFERENCES|FOREIGN\s+KEY|CASCADE)\b", statements, re.I)
     assert "commercial_erasure" not in statements
+    assert "audit_log" not in PERSONAL_TABLES
     check = re.search(r"CHECK \(action IN \((.*?)\)\)", statements, re.S)
     assert check is not None
     assert tuple(re.findall(r"'([^']+)'", check.group(1))) == AUDIT_ACTIONS

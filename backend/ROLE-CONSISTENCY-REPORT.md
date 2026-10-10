@@ -117,3 +117,54 @@ Additional unchanged subscription/LIVE baseline: 108 passed, zero failed.
 New stage-2b tests cover no-subscription MODERATOR denial, forged/stale OWNER
 projection denial, and CUSTOMER/MODERATOR identical LIVE gate outcomes for
 read/write, subscription and cross-session ownership.
+
+## Stage 3 audit implementation and final verification
+
+- New, **unapplied** migration:
+  [20261010_002_audit_log.sql](migrations/20261010_002_audit_log.sql).
+  No actor/target FK or erasure integration; rows survive user deletion.
+  BEFORE UPDATE/DELETE/TRUNCATE statement trigger rejects mutations, including
+  empty-table operations; ENABLE ALWAYS keeps it active in replication mode.
+  BEFORE INSERT overrides caller-supplied created_at with server clock time.
+- [audit_log.py](app/audit_log.py) defines three fixed actions and one writer,
+  `write_audit(conn, actor, action, target_type, target_id, before, after,
+  reason=None, approval_request_id=None)`. It refuses autocommit connections.
+  ROLE_CHANGED permits only validated role; permission actions permit only a
+  validated permission name and boolean granted flag. All other JSON fields
+  are dropped. Free-form reason is replaced by `[REDACTED]` when nonempty.
+  IDs are opaque; correlation IDs are UUIDs (invalid inbound values generate
+  a new audit UUID), IPv4/IPv6 peers are masked to /24 and /48. Forwarded
+  IP headers are not trusted. Invalid context/persistence warnings log type,
+  never supplied values.
+- Only role changes and permission grant/revoke are connected. Role revocation
+  uses the existing account-store transaction so failed audit/commit restores
+  the local user projection and auth baseline too. Actor and target canonical
+  security rows are locked/rechecked in stable order. The old snapshot audit
+  structure is retained, not converted to this table.
+- Permission idempotent retries are logged with their actual before/after
+  booleans, including true->true grants and false->false deletions. Original
+  permission attribution remains unchanged.
+- `GET /api/v22/admin/audit` is OWNER-only. Response:
+  `{items, total, limit, offset}`; limit defaults to 50 and is constrained to
+  1..100. Filters: actor, target, action, created_from, created_to. Date bounds
+  must include a timezone; reversed bounds are rejected. Ordering is
+  created_at DESC, id DESC. Missing storage returns 503, never empty success.
+- Main only imports/includes the audit router. The only v22 product change
+  is the role administration endpoint. No frontend, trading, vault, login,
+  payment/subscription or snapshot schema change was made.
+- Final affected tests: **462 passed, 0 failed, 5 subtests passed**. Baselines:
+  **288 + 108 passed, 0 failed, 5 subtests passed**. Existing baseline test IDs
+  are retained. Python syntax/compile checks and git diff whitespace check pass.
+  One existing Starlette/AnyIO deprecation warning remains.
+- Added tests:
+  [test_moderator_role_consistency.py](tests/test_moderator_role_consistency.py),
+  [test_audit_log.py](tests/test_audit_log.py),
+  [test_audit_mutations.py](tests/test_audit_mutations.py),
+  [test_audit_read.py](tests/test_audit_read.py).
+  Existing moderator fake transactions now model audit/settings rollback and
+  active-transaction proof; assertions were not weakened.
+- **Not verified on real PostgreSQL**: no DB connection or migration execution
+  occurred. Trigger behavior is checked as SQL text, and atomicity is exercised
+  against offline transaction fakes. No push or deploy occurred. A database
+  superuser/table owner capable of changing triggers remains outside this
+  append-only guarantee. Production DB role/DDL permissions are **UNKNOWN**.
