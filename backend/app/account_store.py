@@ -260,6 +260,8 @@ async def consume_action_token(request, token, user, kind):
                     db.close()
         return auth.verify_token(token, auth.runtime(request)["secret"], expected_kind=kind)
     except HTTPException:
+        auth.record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 400) if kind == "EMAIL_VERIFY" and not auth.email_verification.enabled() else None
         raise
     except Exception:
+        auth.record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 503) if kind == "EMAIL_VERIFY" and not auth.email_verification.enabled() else None
         raise HTTPException(503, "Doğrulama deposu kullanılamıyor") from None

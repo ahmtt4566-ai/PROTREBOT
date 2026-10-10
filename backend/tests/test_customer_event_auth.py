@@ -32,3 +32,10 @@ def test_nonexistent_login_never_schedules_an_event(setup):
 def test_original_security_regression_is_unchanged_when_recorder_raises(setup, regression):
     with patch.object(writer, "record_customer_event", side_effect=RuntimeError("private recording failure")):
         regression(setup)
+
+
+def test_legacy_verification_replay_records_one_failure_without_changing_original_regression(setup):
+    with patch.object(writer, "record_customer_event") as recorder:
+        existing.test_verification_resend_real_delivery_cross_worker_single_use(setup)
+    failed = [call for call in recorder.call_args_list if call.args[2] == "auth.email_verification_failed"]
+    assert len(failed) == 1 and failed[0].args[3:6] == ("verification_failed", "verification", 400)

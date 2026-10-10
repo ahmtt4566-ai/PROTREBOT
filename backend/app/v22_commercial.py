@@ -1537,12 +1537,14 @@ async def v22_verify_email(payload: EmailTokenRequest, request: Request):
     try:
         token = verify_token(payload.token, rt["secret"], expected_kind="EMAIL_VERIFY")
     except ValueError:
+        record_event(request, account if account != "invalid-token" else None, "auth.email_verification_failed", "verification_failed", "verification", 400)
         raise HTTPException(400, "Doğrulama bağlantısı geçersiz") from None
     user = next((item for item in rt["state"]["users"] if item.get("id") == token["sub"]), None)
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
     await refresh_auth_security(request, user)
     if not user.get("active"):
+        record_event(request, user, "auth.email_verification_failed", "verification_failed", "verification", 400)
         raise HTTPException(400, "Doğrulama bağlantısı geçersiz")
     from .account_store import consume_action_token
     await consume_action_token(request, payload.token, user, "EMAIL_VERIFY")
