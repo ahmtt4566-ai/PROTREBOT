@@ -14,7 +14,7 @@ const API_TIMEOUT_MS = 15000
 
 type Plan = {name:string;monthly_usd:number;days:number;agents:number;bots:number;features:string[]}
 type PublicInfo = {version:string;edition:string;setup_required:boolean;plans:Record<string,Plan>;billing:{provider:string;live:boolean};security:Record<string,boolean>;account_storage?:string;message:string}
-type User = {id:string;email:string;display_name:string;role:'OWNER'|'CUSTOMER';active:boolean;created_at:string}
+type User = {id:string;email:string;display_name:string;role:'OWNER'|'MODERATOR'|'CUSTOMER';active:boolean;created_at:string}
 type License = {id:string;user_id:string;plan:string;status:string;starts_at:string;expires_at:string;source:string;demo_only:boolean}
 type Session = {user:User;license:License|null;demo_only:boolean}
 type Agent = {id:string;user_id:string;device_name:string;status:string;last_seen_at:string;app_version:string;mode:string}

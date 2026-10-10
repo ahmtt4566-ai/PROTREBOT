@@ -5,6 +5,8 @@ import { API_BASE, COOKIE_SESSION_PREFIX, USER_SESSION_KEY, clearDemoCredentials
 import {withRequestDeadline} from './browser-request'
 import {PASSWORD_MAX_LENGTH, passwordPolicyError, passwordRules} from './password-policy'
 import AdminPanel from './AdminPanel'
+import ModeratorPanel from './ModeratorPanel'
+import {authenticatedPath, type AccountRole} from './account-role'
 import ProfileSettings, {AccountRecoveryScreen} from './ProfileSettings'
 import { AUTH_PANEL_MARKETS, LIVE_MARKET_CONFIG } from './live-market-config'
 import TickerTape from './TickerTape'
@@ -14,7 +16,7 @@ import { useTopMovers } from './use-top-movers'
 import '@fontsource-variable/plus-jakarta-sans'
 import './auth.css'
 
-type User = { id:string; email:string; display_name:string; role:string; active:boolean; email_verified?:boolean }
+type User = { id:string; email:string; display_name:string; role:AccountRole; active:boolean; email_verified?:boolean }
 type Session = { user:User; maintenance?:{mode:string} }
 type Mode = 'login'|'register'|'bootstrap'|'forgot'|'reset'|'verify'|'google-consent'|'mfa'
 type AuthResult = {token: string; user: User; remember?: boolean; email_verification_v2_enabled?: boolean} | {mfa_required: true; challenge_id: string}
@@ -598,9 +600,9 @@ export default function AuthGate({children}:{children:ReactNode}) {
     </main>}</LoginMarketShell>
   }
 
-  const path = window.location.pathname
+  const path = authenticatedPath(session.user.role, window.location.pathname)
+  if (path !== window.location.pathname) history.replaceState(null, '', path)
   const sessionNotice = message ? createPortal(<p className="profileNotice" role="alert" style={{position:'fixed',bottom:12,left:12,right:12,zIndex:10000}}>{message}</p>,document.body) : null
-  if (['/login','/register','/forgot-password','/reset-password','/verify-email'].includes(path)) { history.replaceState(null,'','/dashboard') }
   if (path.startsWith('/admin') && session.user.role !== 'OWNER') return <main className="authLoading"><div className="authLoader"><ShieldCheck/><b>403 · ERİŞİM YOK</b><span>Bu alan yalnızca yönetici hesaplarına açıktır.</span><button onClick={() => {history.replaceState(null,'','/dashboard'); location.reload()}}>Dashboard'a dön</button></div></main>
   if (path.startsWith('/admin')) return <>{sessionNotice}<div className="authSessionBar"><span><ShieldCheck/> {session.user.display_name} <b>ADMIN</b></span><button onClick={() => void logout()}><LogOut/> Çıkış</button></div><AdminPanel token={token} onBack={() => {history.replaceState(null,'','/dashboard');location.reload()}}/></>
   if (path.startsWith('/settings') || path === '/profile') return <>{sessionNotice}<ProfileSettings onLogout={() => void logout()} onSessionEnded={finishSession} onEnrollmentComplete={codes => {setEnrollmentRecoveryCodes(codes); finishSession()}}/></>
@@ -608,6 +610,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   if (session.user.role !== 'OWNER' && (maintenanceMode === 'MAINTENANCE' || maintenanceMode === 'EMERGENCY')) {
     return <MaintenanceScreen mode={maintenanceMode as string}/>
   }
+  if (path.startsWith('/moderator')) return <>{sessionNotice}<ModeratorPanel onLogout={() => void logout()}/></>
   const memberMenu = memberMenuOpen ? createPortal(<div ref={memberMenuRef} className="authMemberMenu authMemberPortalMenu" role="menu" style={{top:memberMenuPosition.top,left:memberMenuPosition.left}}><div className="authMemberMenuHead"><small>SECURE ACCOUNT</small><strong>{session.user.email}</strong></div>{session.user.role === 'OWNER' && <button type="button" role="menuitem" onClick={() => {setMemberMenuOpen(false);location.assign('/admin')}}><ShieldCheck/><span><b>Admin Dashboard</b><small>Control center</small></span></button>}<button type="button" role="menuitem" onClick={() => {setMemberMenuOpen(false);location.assign('/settings')}}><UserRound/><span><b>Profile &amp; Settings</b><small>Identity and security</small></span></button><button className="authMemberLogout" type="button" role="menuitem" onClick={() => void logout()}><LogOut/><span><b>Çıkış</b><small>End secure session</small></span></button></div>,document.body) : null
   const profileControl = <div className="authSessionBar"><button ref={memberTriggerRef} className="authMemberTrigger" type="button" aria-label="Profil menüsünü aç" aria-expanded={memberMenuOpen} aria-haspopup="menu" onClick={() => setMemberMenuOpen(value => !value)}><svg className="authProfileGlyph" viewBox="3.5 3.8 17 17.9" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><circle cx="12" cy="8" r="3.15"/><path d="M4.7 20.1c.55-3.55 3.35-5.55 7.3-5.55s6.75 2 7.3 5.55c.05.32-.2.6-.52.6H5.22c-.32 0-.57-.28-.52-.6Z"/></svg></button></div>
   const adminMaintenanceBanner = session.user.role === 'OWNER' && (maintenanceMode === 'MAINTENANCE' || maintenanceMode === 'EMERGENCY') ? <div className="authAdminMaintenanceBar" role="status"><span>{maintenanceMode === 'EMERGENCY' ? 'Acil durum modu aktif.' : 'Bakım modu aktif.'} Üyeler bakım ekranını görüyor.</span><button type="button" onClick={() => location.assign('/admin')}>Admin Panel</button></div> : null

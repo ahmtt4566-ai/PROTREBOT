@@ -25,7 +25,7 @@ function messageFrom(body:unknown):string {
   return 'İşlem tamamlanamadı.'
 }
 
-export default function CommerceCenter({token,role,plans,onNotice}:{token:string;role:'OWNER'|'CUSTOMER';plans:Record<string,Plan>;onNotice:(text:string,kind:'ok'|'warn'|'error')=>void}) {
+export default function CommerceCenter({token,role,plans,onNotice}:{token:string;role:'OWNER'|'MODERATOR'|'CUSTOMER';plans:Record<string,Plan>;onNotice:(text:string,kind:'ok'|'warn'|'error')=>void}) {
   const [tab,setTab] = useState<SubTab>('launch')
   const [busy,setBusy] = useState(false)
   const [overview,setOverview] = useState<CommerceOverview|null>(null)

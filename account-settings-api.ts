@@ -1,5 +1,6 @@
 import {API_BASE} from './api'
 import {fetchWithTimeout} from './master-trade-request'
+import type {AccountRole} from './account-role'
 
 export const TRADING_TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w'] as const
 
@@ -10,7 +11,7 @@ export type TradingPreferences = {
 export type AccountSession = {id: string; current: boolean; device: string; browser: string; created_at: string; last_seen_at: string; expires_at: string}
 export type AccountActivity = {id: string; kind: string; message: string; created_at: string}
 export type AccountUser = {
-  id: string; display_name: string; email: string; role: string; active: boolean;
+  id: string; display_name: string; email: string; role: AccountRole; active: boolean;
   email_verified: boolean; created_at: string; last_login: string | null;
   password_changed_at: string | null; auth_methods: string[];
 }
