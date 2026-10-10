@@ -2,6 +2,8 @@ import {useCallback, useEffect, useRef, useState} from 'react'
 import {Check, ChevronLeft, ChevronRight, Mail, Monitor, RefreshCw, Search, ShieldCheck, UserRound, X} from 'lucide-react'
 import {accountDate, accountInitials, accountRequest, type AccountOverview, type AdminAccount, type AdminAccounts} from './account-settings-api'
 import './admin-account-users.css'
+import AdminModeratorAccess from './AdminModeratorAccess'
+import {accountRoleLabel} from './account-role'
 
 type Props = {search: string; onSearch: (value: string) => void; page: number; onPage: (value: number) => void; filter: string; onFilter: (value: string) => void; pageSize: number}
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Kullanıcı bilgileri alınamadı.'
@@ -49,7 +51,7 @@ function AccountDetail({id, onClose, onChanged}: {id: string; onClose: () => voi
     {data && <>
       <div className="adminAccountIdentity"><i>{accountInitials(data.user.display_name)}</i><div><h3>{data.user.display_name}</h3><p>{data.user.email}</p><small>{data.user.id}</small></div><b data-tone={data.user.active ? 'positive' : 'negative'}>{data.user.active ? 'Aktif' : 'Kapalı / devre dışı'}</b></div>
       <dl className="adminAccountFacts">
-        <div><dt>Hesap rolü</dt><dd>{data.user.role === 'OWNER' ? 'Yönetici' : 'Kullanıcı'}</dd></div>
+        <div><dt>Hesap rolü</dt><dd>{accountRoleLabel(data.user.role)}</dd></div>
         <div><dt>Giriş yöntemleri</dt><dd>{data.user.auth_methods.join(' / ') || '—'}</dd></div>
         <div><dt>E-posta doğrulaması</dt><dd>{data.user.email_verified ? 'Doğrulandı' : 'Doğrulanmadı'}</dd></div>
         <div><dt>Bekleyen e-posta</dt><dd>{data.pending_email?.email || '—'}</dd></div>
@@ -67,6 +69,7 @@ function AccountDetail({id, onClose, onChanged}: {id: string; onClose: () => voi
       <h3>Oturumlar</h3><ul className="adminAccountRecords">{data.sessions.map(session => <li key={session.id}><Monitor/><span>{session.device} · {session.browser}</span><time>{accountDate(session.last_seen_at)}</time></li>)}</ul>{!data.sessions.length && <p>Aktif oturum yok.</p>}
       <h3>Hesap aktiviteleri</h3><ul className="adminAccountRecords">{data.activity.map(item => <li key={item.id}><span>{item.message}</span><time>{accountDate(item.created_at)}</time></li>)}</ul>{!data.activity.length && <p>Kayıtlı aktivite yok.</p>}
       <p className="adminAccountPrivacy">Şifreler, 2FA anahtarları, kurtarma kodları, oturum token'ları ve API anahtarları bu ekranda gösterilmez.</p>
+      <AdminModeratorAccess id={id} role={data.user.role} onBusyChange={setBusy} onChanged={async () => {await refresh(); onChanged()}}/>
       <div className="adminAccountActions"><button disabled={busy || data.user.role === 'OWNER'} onClick={() => setConfirmation('status')}>{data.user.active ? 'Hesabı devre dışı bırak' : 'Hesabı yeniden aç'}</button><button disabled={busy} onClick={() => setConfirmation('sessions')}>Oturumları sonlandır</button><button disabled={busy || !data.security.email_delivery_available} onClick={() => setConfirmation('reset')}>Parola yenileme e-postası gönder</button></div>
       {confirmation && <section className="adminAccountConfirmation" role="group" aria-label="Yönetici işlemi onayı"><p>{confirmation === 'status' ? `Bu hesabı ${data.user.active ? 'devre dışı bırakmak' : 'yeniden açmak'} istiyor musunuz? Kayıtlar silinmez.` : confirmation === 'sessions' ? 'Bu kullanıcının tüm oturumları sonlandırılacak.' : 'Kullanıcıya gerçek parola yenileme e-postası gönderilecek.'}</p><button disabled={busy} onClick={() => void act()}>İşlemi onayla</button><button disabled={busy} onClick={() => setConfirmation(null)}>İptal</button></section>}
     </>}

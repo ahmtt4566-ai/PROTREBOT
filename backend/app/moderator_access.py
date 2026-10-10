@@ -5,6 +5,7 @@ permission required. Protected moderator operations use require_permission.
 Missing canonical storage fails closed; OWNER grants are always implicit.
 OWNER manages grants using POST /api/v22/admin/users/{user_id}/permissions
 with {"permission": "..."} or DELETE on that path plus /{permission}.
+GET on the same path reads the canonical target's current permission list.
 Both operations require a canonical MODERATOR target; repeated grants preserve
 their original attribution, and repeated deletion reports removed=false.
 """
@@ -201,6 +202,34 @@ async def manage_permission(
 @router.post("/api/v22/admin/users/{user_id}/permissions")
 async def grant_permission(user_id: str, payload: PermissionGrant, request: Request):
     return await manage_permission(user_id, payload.permission, request, grant=True)
+
+
+@router.get("/api/v22/admin/users/{user_id}/permissions")
+async def read_permissions(user_id: str, request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(503, "Moderator permission storage unavailable")
+    owner = await auth.authenticated_user_async(request, owner=True)
+    try:
+        async with pool.acquire() as connection, connection.transaction():
+            _, target = await locked_owner_target(
+                connection, owner["id"], int(owner.get("auth_version", 1)), user_id,
+            )
+            if target["security"].get("role") != "MODERATOR":
+                raise HTTPException(409, "Permissions require a MODERATOR target")
+            rows = await connection.fetch(
+                "SELECT permission FROM moderator_permissions WHERE user_id = $1 ORDER BY permission",
+                user_id,
+            )
+            stored = [row["permission"] for row in rows]
+            if any(permission not in PERMISSIONS for permission in stored):
+                raise ValueError("Invalid canonical permissions")
+            return {"user_id": user_id, "permissions": [p for p in PERMISSIONS if p in stored]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Moderator permission read failed (%s)", type(exc).__name__)
+        raise HTTPException(503, "Moderator permission storage unavailable") from None
 
 
 @router.delete("/api/v22/admin/users/{user_id}/permissions/{permission}")

@@ -119,6 +119,8 @@ class CanonicalPool:
 
     async def fetch(self, sql, *args):
         self.check(sql)
+        if "SELECT permission FROM moderator_permissions" in sql:
+            return [{"permission": p} for p in sorted(self.permissions.get(args[0], {}))]
         if "FROM audit_log" in sql:
             filtered = self.filtered_audits(sql, args)
             ordered = sorted(filtered, key=lambda row: (row["created_at"], row["id"]), reverse=True)

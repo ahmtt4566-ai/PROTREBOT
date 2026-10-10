@@ -26,17 +26,21 @@ def test_owner_grants_and_revokes_each_permission_with_durable_attribution(setup
     assert duplicate.status_code == 200
     assert duplicate.json() == result.json()
     assert "owner" not in pool.permissions
+    read = client.get(path, headers=h)
+    assert read.status_code == 200
+    assert read.json() == {"user_id": "moderator", "permissions": [permission]}
     removed = client.delete(path + "/" + permission, headers=h)
     assert removed.status_code == 200
     assert removed.json() == {"user_id": "moderator", "permission": permission, "removed": True}
     assert permission not in pool.permissions["moderator"]
+    assert client.get(path, headers=h).json() == {"user_id": "moderator", "permissions": []}
     assert client.delete(path + "/" + permission, headers=h).json()["removed"] is False
     locked = next(index for index, sql in enumerate(pool.queries) if "FOR UPDATE" in sql)
     inserted = next(index for index, sql in enumerate(pool.queries) if "INSERT INTO moderator_permissions" in sql)
     assert locked < inserted
 
 
-@pytest.mark.parametrize("method", ["POST", "DELETE"])
+@pytest.mark.parametrize("method", ["GET", "POST", "DELETE"])
 @pytest.mark.parametrize("actor,role,target,status", [
     ("moderator", "MODERATOR", "moderator", 403),
     ("customer", "CUSTOMER", "moderator", 403),
@@ -54,6 +58,14 @@ def test_permission_write_restrictions(setup, method, actor, role, target, statu
     result = client.request(method, path, headers=headers(actor, role), json=payload)
     assert result.status_code == status
     assert pool.permissions == before
+
+
+def test_permission_read_failure_exposes_no_data_or_private_warning(setup, caplog):
+    client, pool = setup
+    pool.fail = True
+    result = client.get("/api/v22/admin/users/moderator/permissions", headers=headers("owner", "OWNER"))
+    assert result.status_code == 503
+    assert "permissions" not in result.json()
 
 
 @pytest.mark.parametrize("method", ["POST", "DELETE"])
