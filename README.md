@@ -177,6 +177,22 @@ passed to the settings parser by the template regression test.
 
 ## Kais Original v2 Demo controls
 
+Legacy Demo Auto Trade has a passive, user-scoped result observer. It requires
+owned `AUTO_SCANNER` plan identities, exact entry/exit order evidence, complete
+fill quantities and verified USDT commissions before classifying a full
+closure as loss, profit or breakeven. Results use Decimal arithmetic and the
+exchange closure timestamp in UTC; partial exits are not separate trades.
+Duplicate/out-of-order fills and delayed protective-order bindings are handled
+without changing plan lifecycle or sending requests. Original and manual plans
+are excluded. Old trades without complete entry fees, unlinked manual/safety
+close orders and snapshot disappearance remain unverified with no invented PnL.
+Observer errors are logged and retained as user-state error markers.
+Result evidence survives JSONB/file state restoration. Accounting journal
+records are stored separately and merged only for journal display, so they
+cannot evict trading fills or change daily PnL/loss-limit calculations.
+This first step does **not** update the consecutive-loss counter, pause/resume
+automation, change day-reset behavior or alter any execution/risk gate.
+
 The user bell panel includes critical Demo notifications for failed Stop
 repair (`ACİL KORUMA`), a failed first automation cycle (`AUTO_START_ERROR`),
 and an unexpectedly terminated automation task (`AUTO_LOOP_CRASH`).

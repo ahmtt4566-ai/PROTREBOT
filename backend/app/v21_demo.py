@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from statistics import fmean
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import websockets
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -29,49 +29,56 @@ from .analysis import analyze, atr, ema
 from .binance_demo import (
     DEMO_REST_BASE,
     DEMO_WS_BASE,
-    MAX_LEVERAGE,
     MANUAL_MAX_LEVERAGE,
+    MAX_LEVERAGE,
     MAX_MARGIN_USDT,
     MAX_NOTIONAL_USDT,
     MAX_OPEN_POSITIONS,
     BinanceDemoClient,
     BinanceDemoError,
     DemoOrderRequest,
+    _algo_id,
+    _owned_protection_orders,
+    _plan_protection_ids,
+    _protection_classification,
+    _single_plan_algo_id,
+    _validate_new_protection_identity,
     account_snapshot,
     armed,
     bind_demo_grant,
     can_mutate_lifecycle,
-    credentials_configured,
     close_symbol_position,
     confirm_provenance_from_snapshot,
+    credentials_configured,
     decimal_text,
     execute_demo_order,
     load_demo_credentials,
     new_client_id,
     normalize_symbol,
     persist_runtime,
+    position_amount,
     post_algo,
     protection_lock,
-    position_amount,
+    reconcile_demo_plans,
     record_entry_trade_observation,
     response_rows,
-    reconcile_demo_plans,
     round_tick,
     safe_exchange_error,
-    state_for as demo_state_for,
     symbol_rules,
-    _protection_classification,
-    _single_plan_algo_id,
-    _owned_protection_orders,
-    _algo_id,
-    _plan_protection_ids,
-    _validate_new_protection_identity,
     validate_entry_risk,
 )
+from .binance_demo import (
+    state_for as demo_state_for,
+)
+from .legacy_demo_results import observe_missing_positions
+from .legacy_demo_results import observe_stream as observe_legacy_stream
 from .local_storage import DATA_DIR, migrate_legacy_files
-from .stop_evidence import correlation_report, observe_position_snapshot, observe_stream_payload
+from .stop_evidence import (
+    correlation_report,
+    observe_position_snapshot,
+    observe_stream_payload,
+)
 from .trade_r_metrics import r_performance_metrics
-
 
 router = APIRouter(prefix="/api/v21", tags=["V21 Demo Complete"])
 logger = logging.getLogger(__name__)
@@ -205,6 +212,9 @@ def initial_state() -> dict[str, Any]:
         },
         "risk": {"consecutive_losses": 0, "consecutive_loss_limit": 3, "kill_switch": False},
         "notifications": {"seen": [], "unread": 0, "read_ids": []},
+        "legacy_trade_results": {},
+        "legacy_result_journal": {"journal": [], "seen_event_ids": []},
+        "legacy_result_observer_errors": [],
         "scanner": {
             "active": False, "running": False, "scan_status": "BEKLEMEDE", "coins_scanned": 0,
             "scan_duration_ms": 0, "last_scan_at": None, "next_scan_at": None,
@@ -267,7 +277,7 @@ def load_state() -> dict[str, Any]:
         "journal", "seen_event_ids", "backtest", "drills", "duplicate_blocks",
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades", "paper_positions",
         "risk", "evidence_sequence", "evidence_status", "evidence_observations", "stop_correlations",
-        "notifications",
+        "notifications", "legacy_trade_results", "legacy_result_journal", "legacy_result_observer_errors",
     ):
         if key in saved:
             base[key] = saved[key]
@@ -325,6 +335,12 @@ def serializable_state(state: dict[str, Any]) -> dict[str, Any]:
     }
     if "original_v2" in state:
         payload["original_v2"] = state["original_v2"]
+    for key in ("legacy_trade_results", "legacy_result_observer_errors"):
+        if state.get(key):
+            payload[key] = state[key]
+    result_journal = state.get("legacy_result_journal", {})
+    if result_journal.get("journal") or result_journal.get("seen_event_ids"):
+        payload["legacy_result_journal"] = result_journal
     return payload
 
 
@@ -339,7 +355,7 @@ def _state_from_payload(payload: dict[str, Any], user_id: str, application: Any 
         "duplicate_submissions", "protection_repairs", "scanner", "automation_trades",
         "paper_positions", "risk", "notifications", "snapshot", "reconciliation",
         "evidence_sequence", "evidence_status", "evidence_observations", "stop_correlations",
-        "original_v2",
+        "original_v2", "legacy_trade_results", "legacy_result_journal", "legacy_result_observer_errors",
     ):
         if key in payload:
             state[key] = payload[key]
@@ -1264,7 +1280,44 @@ def reconcile_positions(state: dict[str, Any], previous: dict[str, Any] | None, 
     return changed
 
 
+def _observe_legacy_results(
+    state: dict[str, Any], demo_state: dict[str, Any] | None,
+    observer: Callable[..., list[dict[str, Any]]], *args: Any,
+) -> bool:
+    if demo_state is None or not state.get("_user_id") or state.get("_user_id") != demo_state.get("_user_id"):
+        return False
+    try:
+        candidate = {
+            "_user_id": state["_user_id"],
+            "legacy_trade_results": copy.deepcopy(state.get("legacy_trade_results", {})),
+        }
+        journal = copy.deepcopy(state.get("legacy_result_journal", {"journal": [], "seen_event_ids": []}))
+        notices = observer(candidate, demo_state, *args)
+        changed = candidate["legacy_trade_results"] != state.get("legacy_trade_results", {})
+        for notice in notices:
+            record_event(journal, source="LEGACY_ACCOUNTING", **notice)
+        state["legacy_trade_results"] = candidate["legacy_trade_results"]
+        state["legacy_result_journal"] = journal
+        return changed
+    except Exception as exc:
+        error = type(exc).__name__
+        errors = state.setdefault("legacy_result_observer_errors", [])
+        if error not in errors:
+            errors.append(error)
+        logger.error("Legacy Demo result observation failed: error=%s; results remain unverified", error)
+        return True
+
+
 def process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_state: dict[str, Any] | None = None) -> bool:
+    observed = False
+    try:
+        changed = _process_stream_event(state, payload, demo_state)
+    finally:
+        observed = _observe_legacy_results(state, demo_state, observe_legacy_stream, payload)
+    return changed or observed
+
+
+def _process_stream_event(state: dict[str, Any], payload: dict[str, Any], demo_state: dict[str, Any] | None = None) -> bool:
     event_type = str(payload.get("e") or "")
     event_time = payload.get("T", payload.get("E", 0))
     stream_event_id = None
@@ -1856,6 +1909,9 @@ async def reconciliation_loop(application: Any) -> None:
                     changed = False
                     if has_demo_plans:
                         changed = reconcile_positions(state, previous.get(user_id), snapshot)
+                        changed |= _observe_legacy_results(
+                            state, demo_state, observe_missing_positions, previous.get(user_id), snapshot,
+                        )
                         await confirm_provenance_from_snapshot(
                             demo_state,
                             snapshot,
@@ -2478,6 +2534,13 @@ def performance_payload(state: dict[str, Any], period: str = "all", *, demo_only
     }
 
 
+def user_journal_items(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(
+        [*state.get("legacy_result_journal", {}).get("journal", []), *state.get("journal", [])],
+        key=lambda item: str(item.get("created_at", "")), reverse=True,
+    )
+
+
 def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
     snapshot = state.get("snapshot") or {}
     reconciliation = state.get("reconciliation") or {}
@@ -2514,7 +2577,7 @@ def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
             "duplicate_blocks": state.get("duplicate_blocks", 0),
             "duplicate_submissions": state.get("duplicate_submissions", 0),
         },
-        "journal": state.get("journal", [])[:60], "backtest": state.get("backtest"),
+        "journal": user_journal_items(state)[:60], "backtest": state.get("backtest"),
         "automation_trades": state.get("automation_trades", [])[:100],
         "evidence": {
             "observation_count": len(observations),
@@ -2840,7 +2903,8 @@ async def v21_auto_stop(request: Request) -> dict[str, Any]:
 @router.get("/journal")
 async def v21_journal(request: Request, limit: int = Query(default=200, ge=1, le=1000)) -> dict[str, Any]:
     state = state_for(request)
-    return {"items": state.get("journal", [])[:limit], "total": len(state.get("journal", [])), "demo_only": True}
+    items = user_journal_items(state)
+    return {"items": items[:limit], "total": len(items), "demo_only": True}
 
 
 @router.get("/performance")
