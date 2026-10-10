@@ -1198,7 +1198,7 @@ class CustomerStatusRequest(BaseModel):
 
 
 class RoleUpdateRequest(BaseModel):
-    role: Literal["OWNER", "CUSTOMER"]
+    role: Literal["OWNER", "MODERATOR", "CUSTOMER"]
 
 
 class UserDeleteRequest(BaseModel):
@@ -2277,15 +2277,22 @@ async def v22_admin_unlink_trading_account(user_id: str, account_id: str, reques
 @router.patch("/admin/users/{user_id}/role")
 async def v22_admin_update_role(user_id: str, payload: RoleUpdateRequest, request: Request):
     owner = authenticated_user(request, owner=True)
+    if user_id == owner["id"]:
+        raise HTTPException(403, "Kendi rolünüzü değiştiremezsiniz")
+    if payload.role == "OWNER":
+        raise HTTPException(409, "Bu endpoint OWNER atayamaz")
     rt = runtime(request)
     async with rt["lock"]:
         user = next((item for item in rt["state"]["users"] if item.get("id") == user_id), None)
         if not user:
             raise HTTPException(404, "Kullanıcı bulunamadı")
         await refresh_auth_security(request, user)
-        if user.get("role") == "OWNER" and payload.role != "OWNER":
+        if user.get("role") == "OWNER" or user_id == rt["state"].get("owner_user_id"):
             raise HTTPException(409, "OWNER hesabının rolü düşürülemez")
-        await invalidate_user_sessions(request, user, security_updates={"role": payload.role})
+        await invalidate_user_sessions(
+            request, user, security_updates={"role": payload.role},
+            expected_version=int(user.get("auth_version", 1)),
+        )
         add_audit(rt["state"], "ROLE_CHANGED", f"Kullanıcı rolü {payload.role} olarak güncellendi.", actor=owner["id"], subject=user_id)
         save_state(rt["state"])
     await persist_v22_commercial(request.app)
