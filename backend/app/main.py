@@ -1537,7 +1537,8 @@ async def admin_error_update(request: Request, event_id: int, payload: dict[str,
     if pool is None:
         raise HTTPException(503, "Error monitoring storage unavailable")
     notes = str(payload.get("notes") or "").strip()[:2_000] or None
-    row = await pool.fetchrow("UPDATE error_events SET status = $2, notes = COALESCE($3, notes), acknowledged_at = CASE WHEN $2 = 'ACKNOWLEDGED' THEN NOW() ELSE acknowledged_at END, resolved_at = CASE WHEN $2 = 'RESOLVED' THEN NOW() ELSE resolved_at END WHERE id = $1 RETURNING *", event_id, status, notes)
+    update_details = json.dumps({"admin_update": {"user_id": actor["id"], "updated_at": datetime.now(timezone.utc).isoformat()}})
+    row = await pool.fetchrow("UPDATE error_events SET status = $2, notes = COALESCE($3, notes), details = COALESCE(details, '{}'::jsonb) || $4::jsonb, acknowledged_at = CASE WHEN $2 = 'ACKNOWLEDGED' THEN NOW() ELSE acknowledged_at END, resolved_at = CASE WHEN $2 = 'RESOLVED' THEN NOW() ELSE resolved_at END WHERE id = $1 RETURNING *", event_id, status, notes, update_details)
     if row is None:
         raise HTTPException(404, "Error event not found")
     return dict(row)
