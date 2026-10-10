@@ -22,7 +22,8 @@ async def notification_summary(request: Request):
                 row = await conn.fetchrow(
                     """SELECT COUNT(*) FILTER (WHERE status IN ('pending','sending')) AS pending,
                        COUNT(*) FILTER (WHERE status IN ('failed','dead')) AS failed
-                       FROM notification_outbox WHERE recipient_user_id <> 'ERASED'""",
+                       FROM notification_outbox WHERE recipient_user_id <> 'ERASED'
+                         AND kind IN ('approval.pending_digest','approval.decision')""",
                 )
                 return NotificationSummary(pending=row["pending"], failed=row["failed"])
         except Exception as exc:

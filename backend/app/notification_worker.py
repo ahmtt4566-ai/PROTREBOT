@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 
 from .email_service import EmailDeliveryError
 from .notification_email import send_notification
@@ -28,6 +29,7 @@ async def claim(conn):
     return await conn.fetchrow(
         """WITH due AS (
              SELECT id FROM notification_outbox WHERE status IN ('pending','failed') AND attempts < 8
+               AND kind <> 'campaign.info'
                AND next_attempt_at <= clock_timestamp() ORDER BY next_attempt_at,id FOR UPDATE SKIP LOCKED LIMIT 1
            )
            UPDATE notification_outbox o SET status = 'sending', attempts = attempts + 1,
@@ -53,7 +55,10 @@ async def finish(conn, row, status, code=None):
         raise RuntimeError("Outbox delivery lease changed")
 
 
-async def deliver(conn, lease):
+async def deliver(conn, lease, application=None):
+    if lease["kind"] == "campaign.info":
+        from .campaign_worker import deliver_campaign
+        return await deliver_campaign(conn, lease, application)
     # Hold the outbox row through delivery: erasure cannot race a completed recipient check.
     row = await conn.fetchrow(
         "SELECT * FROM notification_outbox WHERE id = $1 AND status = 'sending' AND attempts = $2 FOR UPDATE",
@@ -89,7 +94,7 @@ async def deliver(conn, lease):
         await finish(conn, row, "sent")
 
 
-async def process_due(application, *, limit=10):
+async def process_due(application, *, limit=10, include_campaigns=True):
     pool = getattr(application.state, "db_pool", None)
     if pool is None:
         logger.warning("Notification sweep unavailable code=storage_unavailable")
@@ -97,19 +102,29 @@ async def process_due(application, *, limit=10):
     try:
         async with pool.acquire() as conn, conn.transaction():
             await recover_leases(conn)
+            if include_campaigns and os.getenv("CAMPAIGN_EMAIL_ENABLED", "false").lower() in ("true", "1", "yes"):
+                from .campaign_worker import reconcile
+                await reconcile(conn)
         for _ in range(min(max(limit, 0), 10)):
             async with pool.acquire() as conn, conn.transaction():
                 row = await claim(conn)
             if row is None:
+                if include_campaigns and os.getenv("CAMPAIGN_EMAIL_ENABLED", "false").lower() in ("true", "1", "yes"):
+                    from .campaign_worker import process_campaign_due
+                    await process_campaign_due(application, limit=min(max(limit, 0), 10) - _)
                 break
             async with pool.acquire() as conn, conn.transaction():
-                await deliver(conn, row)
+                await deliver(conn, row, application)
     except Exception as exc:
         logger.warning("Notification sweep failed (%s)", type(exc).__name__)
 
 
 async def sweep_and_arm(application):
-    await process_due(application)
+    await process_due(application, include_campaigns=False)
+    if os.getenv("CAMPAIGN_EMAIL_ENABLED", "false").lower() in ("true", "1", "yes"):
+        current = getattr(application.state, "campaign_notification_task", None)
+        if current is None or current.done():
+            application.state.campaign_notification_task = asyncio.create_task(process_due(application, limit=1))
     pool = getattr(application.state, "db_pool", None)
     if pool is None:
         return
@@ -157,3 +172,7 @@ async def shutdown_notifications(application):
     if task is not None and not task.done():
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+    campaign = getattr(application.state, "campaign_notification_task", None)
+    if campaign is not None and not campaign.done():
+        campaign.cancel()
+        await asyncio.gather(campaign, return_exceptions=True)
