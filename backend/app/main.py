@@ -1437,7 +1437,7 @@ app.state.analyst_analysis = analyst_analysis
 
 def monitoring_admin(request: Request) -> dict[str, Any]:
     user = authenticated_user(request)
-    if user.get("role") not in {"OWNER", "ADMIN"}:
+    if user.get("role") != "OWNER":
         raise HTTPException(403, "Yönetici yetkisi gerekli")
     return user
 
