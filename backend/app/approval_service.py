@@ -176,6 +176,8 @@ async def mod_connection(request, identity: ModeratorIdentity):
     async with customer_read_connection(request, identity, "approvals.create") as conn:
         await conn.execute("SELECT pg_advisory_xact_lock(71010006)")
         yield conn, request.state.mod_read_actor
+    from .notification_worker import schedule_sweep
+    schedule_sweep(request.app)
 
 
 @asynccontextmanager
@@ -198,6 +200,8 @@ async def owner_connection(request: Request):
                 raise HTTPException(403, "Owner required")
             actor = AuditActor.from_request(request, {"id": owner["id"], "role": "OWNER"})
             yield conn, actor
+        from .notification_worker import schedule_sweep
+        schedule_sweep(request.app)
     except HTTPException:
         raise
     except Exception as exc:

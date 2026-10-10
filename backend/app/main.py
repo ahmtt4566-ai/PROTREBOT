@@ -1183,6 +1183,8 @@ async def lifespan(app: FastAPI):
     await restore_health_snapshot(app)
     app.state.infrastructure_task = asyncio.create_task(infrastructure_loop(app))
     app.state.runtime_tasks = [app.state.infrastructure_task]
+    from .notification_worker import schedule_sweep, shutdown_notifications
+    schedule_sweep(app)
     if PAPER_ENABLED:
         app.state.runtime_tasks.extend([
             asyncio.create_task(paper_bot_loop(app)),
@@ -1195,6 +1197,7 @@ async def lifespan(app: FastAPI):
     if LIVE_CHANNEL_ENABLED:
         app.state.runtime_tasks.append(asyncio.create_task(v9_market_twin_loop(app)))
     yield
+    await shutdown_notifications(app)
     for task in app.state.runtime_tasks:
         task.cancel()
     try:

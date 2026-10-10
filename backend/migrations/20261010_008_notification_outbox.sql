@@ -98,4 +98,5 @@ CREATE TRIGGER notification_outbox_erasure AFTER INSERT ON commercial_erased_use
     FOR EACH ROW EXECUTE FUNCTION notification_outbox_erase();
 ALTER TABLE notification_outbox ENABLE ALWAYS TRIGGER notification_outbox_insert_update;
 ALTER TABLE notification_outbox ENABLE ALWAYS TRIGGER notification_outbox_no_delete;
+ALTER TABLE commercial_erased_users ENABLE ALWAYS TRIGGER notification_outbox_erasure;
 COMMIT;

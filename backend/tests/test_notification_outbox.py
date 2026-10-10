@@ -77,6 +77,8 @@ def notifications(setup, monkeypatch):
     client.app.state.db_pool = pool
     from app.moderator_approvals import router
     client.app.include_router(router)
+    from app import notification_worker
+    monkeypatch.setattr(notification_worker, "schedule_sweep", lambda _: None)
     yield client, pool
 
 
@@ -123,3 +125,38 @@ def test_decision_is_idempotently_enqueued_with_ids_and_numeric_result(notificat
     assert len(decision) == 1
     assert decision[0]["payload"] == {"approval_id": row["id"], "result": 2}
     assert "İnceleme" not in str(decision) and "example.test" not in str(decision)
+
+
+@pytest.mark.parametrize("action", ["approve", "reject", "stale", "failed"])
+def test_outbox_error_never_breaks_decision_or_account_change(notifications, action, caplog):
+    client, pool = notifications
+    row = create(client)
+    pool.outbox_fail = True
+    if action == "stale":
+        pool.users["customer"]["auth_version"] += 1
+    if action == "failed":
+        client.app.state._binance_demo_user_state = {"customer": {"connected": True}}
+    path = f"/api/v22/admin/approvals/{row['id']}/" + ("reject" if action == "reject" else "approve")
+    response = client.post(path, headers=headers("owner", "OWNER"),
+                           json={"decision_note": "Red için yeterli not"} if action == "reject" else None)
+    assert response.status_code == (409 if action == "stale" else 200)
+    assert pool.approvals[row["id"]]["status"] == {"approve": "executed", "reject": "rejected", "stale": "stale", "failed": "failed"}[action]
+    assert pool.canonical_changes == (1 if action == "approve" else 0)
+    assert "Notification enqueue failed (RuntimeError)" in caplog.text
+    assert "private@example.test" not in caplog.text and BODY["reason"] not in caplog.text
+
+
+def test_new_time_bucket_gets_a_new_digest_and_persisted_decision_dedupes(notifications):
+    client, pool = notifications
+    row = create(client)
+    pool.bucket += 1
+    pool.users["another"] = copy.deepcopy(pool.users["customer"])
+    create(client, target_user_id="another")
+    assert len(pool.outbox) == 2
+    async def repeated():
+        async with pool.transaction():
+            for _ in range(2):
+                await outbox.enqueue_decision(pool, {"id": row["id"], "requester_user_id": "moderator", "status": "rejected"})
+    import asyncio
+    asyncio.run(repeated())
+    assert len([r for r in pool.outbox.values() if r["kind"] == "approval.decision"]) == 1
