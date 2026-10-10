@@ -120,6 +120,13 @@ class CampaignApprovalItem(BaseModel):
     created_at: datetime
     needs_review: bool
 
+    @field_validator("target_snapshot")
+    @classmethod
+    def empty_target(cls, value: dict[str, None]) -> dict[str, None]:
+        if value:
+            raise ValueError("Campaign approval has no account target")
+        return value
+
 
 ApprovalPage.model_rebuild()
 

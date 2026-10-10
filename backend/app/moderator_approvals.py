@@ -79,12 +79,12 @@ async def cancel_approval(request: Request, approval_id: str = Path(pattern=ID, 
             raise HTTPException(404, "Approval not found")
         if row["status"] != "pending":
             raise HTTPException(409, "Approval is not pending")
-        if row["action_type"] == "campaign.send":
+        expired = await conn.fetchval("SELECT $1::timestamptz <= clock_timestamp()", row["expires_at"])
+        if row["action_type"] == "campaign.send" and not expired:
             from .campaign_service import campaign_row, cancel, payload as campaign_payload
             campaign = await campaign_row(conn, campaign_payload(row)["campaign_id"], actor)
             await cancel(conn, actor, campaign, withdraw=True)
             return approval_item(await approval_row(conn, approval_id))
-        expired = await conn.fetchval("SELECT $1::timestamptz <= clock_timestamp()", row["expires_at"])
         changed = await transition(conn, actor, row, "expired" if expired else "cancelled",
                                    "approval.expired" if expired else "approval.cancelled")
         result = approval_item(changed)

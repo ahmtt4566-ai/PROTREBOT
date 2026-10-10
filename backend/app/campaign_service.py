@@ -114,7 +114,8 @@ async def audience(conn, group: str):
 
 async def preview(conn, request: Request, row, uid):
     users = await audience(conn, row["audience"])
-    token = unsubscribe_token(request.app.state.v22_commercial["secret"], uid, int(row["created_at"].timestamp()))
+    token = unsubscribe_token(request.app.state.v22_commercial["secret"], uid,
+                              int(row["started_at"].timestamp()) if row["started_at"] else None)
     return {"campaign": item(row), "subject": row["subject"], "text": email_text(dict(row), token),
             "audience": row["audience"],
             "content_hash": row["content_hash"],
