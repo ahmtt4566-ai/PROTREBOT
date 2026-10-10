@@ -180,6 +180,13 @@ passed to the settings parser by the template regression test.
 The user bell panel includes critical Demo notifications for failed Stop
 repair (`ACİL KORUMA`), a failed first automation cycle (`AUTO_START_ERROR`),
 and an unexpectedly terminated automation task (`AUTO_LOOP_CRASH`).
+Authenticated manual scans send `SCAN_STARTED` only to the requesting user's
+notification state; global/background scan notifications remain global and are
+never broadcast to user journals. Scanner state, filtering and decisions stay
+unchanged. Auto start/stop notifications follow enabled-state transitions:
+repeated starts/stops do not notify again, while each real stop/start gets a
+fresh notification session. Notification failures are isolated from scanning,
+protection and automation; existing start/stop execution calls are unchanged.
 Notification creation/storage failures are logged and isolated from Stop repair,
 safe position closure and automation recovery; synchronous failures restore the
 notification bookkeeping so retries are not suppressed. Asynchronous PostgreSQL

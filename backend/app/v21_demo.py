@@ -598,7 +598,9 @@ CRITICAL_NOTIFICATION_TARGETS = {
 }
 
 
-def emit_critical_notification(state: dict[str, Any], kind: str, message: str, *, event_id: str) -> None:
+def _emit_notification_safely(
+    state: dict[str, Any], kind: str, message: str, *, event_id: str, label: str,
+) -> None:
     # Notification storage must never interrupt protection or execution recovery.
     snapshot = None
     try:
@@ -612,7 +614,28 @@ def emit_critical_notification(state: dict[str, Any], kind: str, message: str, *
     except Exception as exc:
         if snapshot is not None:
             state["journal"], state["seen_event_ids"], state["notifications"] = snapshot
-        logger.error("Critical Demo notification failed: kind=%s error=%s", kind, type(exc).__name__)
+        logger.error("%s notification failed: kind=%s error=%s", label, kind, type(exc).__name__)
+
+
+def emit_critical_notification(state: dict[str, Any], kind: str, message: str, *, event_id: str) -> None:
+    _emit_notification_safely(state, kind, message, event_id=event_id, label="Critical Demo")
+
+
+def _auto_transition_notification(state: dict[str, Any], was_enabled: bool) -> None:
+    enabled = bool(state["auto"].get("enabled"))
+    if was_enabled == enabled:
+        return
+    try:
+        notifications = state.setdefault("notifications", {})
+        session = uuid.uuid4().hex if enabled else notifications.get("auto_notification_session") or uuid.uuid4().hex
+        notifications["auto_notification_session"] = session
+        _emit_notification_safely(
+            state, "AUTO_STARTED" if enabled else "AUTO_STOPPED",
+            "Demo Auto Trade başlatıldı." if enabled else "Demo Auto Trade durduruldu; mevcut korumalar açık.",
+            event_id=f"auto-session-{session}-{'start' if enabled else 'stop'}", label="Auto Demo",
+        )
+    except Exception as exc:
+        logger.error("Auto Demo notification transition failed: error=%s", type(exc).__name__)
 
 
 def notification_payload(state: dict[str, Any], limit: int = 100) -> list[dict[str, Any]]:
@@ -2117,6 +2140,7 @@ async def run_scanner_cycle(
     timeframe: str = "15m",
     universe: str = "TOP 20",
     symbols: list[str] | None = None,
+    notification_state: dict[str, Any] | None = None,
 ) -> None:
     state = application.state.v21_demo
     scanner = state["scanner"]
@@ -2129,7 +2153,16 @@ async def run_scanner_cycle(
     await scan_lock.acquire()
     start = time.perf_counter()
     scanner.update({"running": True, "active": True, "scan_status": "TARAMA", "last_error": None})
-    emit_notification(state, "SCAN_STARTED", "Demo Auto Trade market taraması başladı.", event_id=f"{today()}-scan-{int(time.time() // SCAN_INTERVAL_SECONDS)}")
+    event_id = f"{today()}-scan-{int(time.time() // SCAN_INTERVAL_SECONDS)}"
+    if notification_state is None:
+        emit_notification(state, "SCAN_STARTED", "Demo Auto Trade market taraması başladı.", event_id=event_id)
+    elif notification_state.get("_user_id"):
+        _emit_notification_safely(
+            notification_state, "SCAN_STARTED", "Demo Auto Trade market taraması başladı.",
+            event_id=event_id, label="Scanner Demo",
+        )
+    else:
+        logger.warning("Scanner notification recipient has no user context; user notification omitted")
     try:
         settings = state["settings"]
         client = market_client_for(application)
@@ -2650,8 +2683,12 @@ async def v21_manual_scan(request: Request, body: ScannerScanRequest | None = No
     symbols = list(dict.fromkeys(symbol for symbol in symbols if symbol)) or None
     if scan_request.universe == "CUSTOM" and not symbols:
         raise HTTPException(status_code=422, detail="CUSTOM scanner universe requires at least one symbol.")
-    await run_scanner_cycle(request.app, timeframe=scan_request.timeframe, universe=scan_request.universe, symbols=symbols)
-    return summary_payload(state_for(request))["scanner"]
+    state = state_for(request)
+    await run_scanner_cycle(
+        request.app, timeframe=scan_request.timeframe, universe=scan_request.universe,
+        symbols=symbols, notification_state=state,
+    )
+    return summary_payload(state)["scanner"]
 
 
 @router.get("/scanner/candidates")
@@ -2780,6 +2817,7 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
         persist_state(state)
         raise HTTPException(409, "Demo hesabı One-way / Tek Yön modunda olmalı.")
     bind_demo_grant(request, state)
+    was_enabled = bool(state["auto"].get("enabled"))
     state["auto"].update({
         "enabled": True,
         "status": "ON",
@@ -2797,7 +2835,7 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
     else:
         state["auto"].pop("strategy_id", None)
     record_event(state, "AUTO_START", "V21 kontrollü otomasyon kullanıcı onayıyla açıldı.", source="USER")
-    emit_notification(state, "AUTO_STARTED", "Demo Auto Trade başlatıldı.", event_id=f"{today()}-auto-start-{int(time.time())}")
+    _auto_transition_notification(state, was_enabled)
     persist_state(state)
     ensure_automation_task(request.app)
     try:
@@ -2823,6 +2861,7 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
 @router.post("/auto/stop")
 async def v21_auto_stop(request: Request) -> dict[str, Any]:
     state = state_for(request)
+    was_enabled = bool(state["auto"].get("enabled"))
     state["auto"].update({
         "enabled": False,
         "status": "OFF",
@@ -2832,7 +2871,7 @@ async def v21_auto_stop(request: Request) -> dict[str, Any]:
         "last_decision": "Yeni otomatik Demo girişleri durduruldu.",
     })
     record_event(state, "AUTO_STOP", "V21 otomatik girişleri durduruldu; mevcut Stop/TP korumaları açık.", source="USER")
-    emit_notification(state, "AUTO_STOPPED", "Demo Auto Trade durduruldu; mevcut korumalar açık.", event_id=f"{today()}-auto-stop-{int(time.time())}")
+    _auto_transition_notification(state, was_enabled)
     persist_state(state)
     return summary_payload(state)
 
