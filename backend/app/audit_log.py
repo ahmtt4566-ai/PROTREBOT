@@ -27,6 +27,8 @@ router = APIRouter(tags=["Administrative audit"])
 AuditAction = Literal[
     "ROLE_CHANGED", "PERMISSION_GRANTED", "PERMISSION_REVOKED",
     "customer.viewed", "customer.subscription.viewed", "customer.payments.viewed",
+    "support.case.viewed", "support.case.taken", "support.case.released",
+    "support.case.status_changed", "support.note.added",
 ]
 AUDIT_ACTIONS: tuple[str, ...] = get_args(AuditAction)
 ACTION_FIELDS = {
@@ -36,6 +38,11 @@ ACTION_FIELDS = {
     "customer.viewed": frozenset(),
     "customer.subscription.viewed": frozenset(),
     "customer.payments.viewed": frozenset(),
+    "support.case.viewed": frozenset(),
+    "support.case.taken": frozenset(),
+    "support.case.released": frozenset(),
+    "support.case.status_changed": frozenset(),
+    "support.note.added": frozenset(),
 }
 
 
@@ -106,7 +113,7 @@ async def write_audit(
         raise ValueError("Invalid audit actor role")
     expected_target = "MODERATOR_PERMISSION" if action in (
         "PERMISSION_GRANTED", "PERMISSION_REVOKED",
-    ) else "USER"
+    ) else "SUPPORT_CASE" if action.startswith("support.") else "USER"
     if target_type != expected_target:
         raise ValueError("Invalid audit target type")
     request_id = str(uuid.UUID(actor.request_id))

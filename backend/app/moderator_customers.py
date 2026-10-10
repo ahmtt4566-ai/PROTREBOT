@@ -113,6 +113,7 @@ async def customer_read_connection(request: Request, identity: ModeratorIdentity
             actor = await conn.fetchrow(
                 """SELECT u.auth_version, u.security->>'role' AS role,
                           COALESCE(u.security->'active' = 'true'::jsonb, FALSE) AS active,
+                          COALESCE(u.security->'email_verified' = 'true'::jsonb, FALSE) AS email_verified,
                           COALESCE(a.payload->'two_factor_enabled' = 'true'::jsonb, FALSE) AS mfa_enabled,
                           EXISTS (SELECT 1 FROM moderator_permissions p
                                   WHERE p.user_id = u.user_id AND p.permission = $2) AS allowed

@@ -32,7 +32,11 @@ def test_audit_migration_is_append_only_and_survives_user_erasure():
     extension = (Path(__file__).parents[1] / "migrations" / "20261010_003_moderator_read_audit_actions.sql").read_text(encoding="utf-8")
     extension_check = re.search(r"CHECK \(action IN \((.*?)\)\)", extension, re.S)
     assert extension_check is not None
-    assert tuple(re.findall(r"'([^']+)'", extension_check.group(1))) == AUDIT_ACTIONS
+    previous_actions = tuple(re.findall(r"'([^']+)'", extension_check.group(1)))
+    support_extension = (Path(__file__).parents[1] / "migrations" / "20261010_005_support_audit_actions.sql").read_text(encoding="utf-8")
+    support_check = re.search(r"CHECK \(action IN \((.*?)\)\)", support_extension, re.S)
+    assert tuple(re.findall(r"'([^']+)'", support_check.group(1))) == AUDIT_ACTIONS
+    assert set(previous_actions) < set(AUDIT_ACTIONS)
     assert set(initial_actions) < set(AUDIT_ACTIONS)
     assert re.search(
         r"CREATE TRIGGER audit_log_append_only BEFORE UPDATE OR DELETE OR TRUNCATE ON audit_log"
