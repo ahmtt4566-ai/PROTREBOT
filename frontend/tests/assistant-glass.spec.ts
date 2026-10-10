@@ -1,5 +1,6 @@
 import {expect, test} from '@playwright/test'
 import {mockAssistant} from './helpers/assistant-api'
+import {openChatFromHint} from './helpers/assistant-ui'
 import {assistantCopy} from '../../ui-copy'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
@@ -13,7 +14,7 @@ for (const width of [1440, 768, 390, 320]) {
     state.chatBody = {reply: 'Salt okunur platform yanıtı.', language: 'tr', sources: []}
     await page.goto('/')
     const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
-    await launcher.click()
+    await openChatFromHint(page)
     const panel = page.getByRole('dialog', {name: 'Kais AI', exact: true})
     const input = panel.getByRole('textbox', {name: assistantCopy.tr.input, exact: true})
     await expect(input).toBeFocused()
@@ -115,7 +116,7 @@ for (const width of [1440, 390]) {
     let release: () => void = () => {}
     state.hold = new Promise<void>(resolve => {release = resolve})
     await page.goto('/')
-    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+    await openChatFromHint(page)
     const panel = page.getByRole('dialog', {name: 'Kais AI', exact: true})
     await expect(panel).toHaveCSS('animation-name', width >= 768 ? 'assistant-popover-in' : 'assistant-sheet-in')
     await panel.getByRole('textbox').fill('Platform kullanımı')
@@ -141,7 +142,7 @@ test('Opaque fallback remains readable when backdrop support rule is unavailable
       }
     }
   })
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   const panel = page.getByRole('dialog', {name: 'Kais AI', exact: true})
   await expect(panel).toHaveCSS('background-color', 'rgb(12, 24, 32)')
   await expect(panel).toHaveCSS('backdrop-filter', 'none')
@@ -156,7 +157,7 @@ test('Clipboard denial is explicitly surfaced without affecting chat or saving f
     }}, configurable: true})
   })
   await page.goto('/')
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   const panel = page.getByRole('dialog', {name: 'Kais AI', exact: true})
   await panel.getByRole('textbox').fill('Platform kullanımı')
   await panel.getByRole('button', {name: assistantCopy.tr.send, exact: true}).click()

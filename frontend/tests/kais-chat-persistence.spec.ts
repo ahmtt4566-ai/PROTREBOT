@@ -1,5 +1,6 @@
 import {expect, test, type Page} from '@playwright/test'
 import {approval, mockAssistant, openChat} from './helpers/assistant-api'
+import {openChatFromHint} from './helpers/assistant-ui'
 import {CHAT_MAX_AGE_MS, chatStorageKey, type StoredChatMessage} from '../src/kais-chat-storage'
 import {assistantCopy} from '../../ui-copy'
 
@@ -120,7 +121,7 @@ async function send(page: Page, content: string) {
 
 async function openAt(page: Page, url: string) {
   await page.goto(url)
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   await expect(dialog(page).getByRole('textbox')).toBeEnabled()
 }
 
@@ -153,7 +154,7 @@ for (const width of [1440, 390]) {
     await send(page, 'Plan ve kredi hakkında bilgi istiyorum.')
     expect(JSON.parse((await stored(page))!).messages).toHaveLength(2)
     await page.reload()
-    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+    await openChatFromHint(page)
     await expect(dialog(page).locator('.assistantMessage')).toHaveCount(2)
     await expect(dialog(page).locator('.assistantEmpty')).toHaveCount(0)
     await expect(dialog(page)).toContainText('Plan ve kredi hakkında bilgi istiyorum.')
@@ -174,7 +175,7 @@ test('Reset removes local history and the empty welcome survives reload', async 
   await expect(dialog(page).locator('.assistantEmpty')).toBeVisible()
   expect(await stored(page)).toBeNull()
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   await expect(dialog(page).locator('.assistantMessage')).toHaveCount(0)
   await expect(dialog(page).locator('.assistantEmpty')).toBeVisible()
   expect(await stored(page)).toBeNull()
@@ -204,7 +205,7 @@ test('Changing the verified user deletes every foreign chat version and never sh
   await expect(dialog(page)).toContainText('Eski mesaj 0')
   state.userId = 'new-assistant-member'
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   await expect(dialog(page).locator('.assistantMessage')).toHaveCount(0)
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('kais-chat:')))).toEqual([])
   await send(page, 'Yeni kullanıcı plan bilgisi')
@@ -229,7 +230,7 @@ test('Only the latest 50 messages persist, Unicode content is capped at 4000 and
     return {role: message.role, content: Array.from(message.content).slice(0, 12).join('')}
   }))
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   await expect(dialog(page).locator('.assistantMessage')).toHaveCount(50)
 })
 
@@ -311,7 +312,7 @@ test('Confirmation proof is never serialized, even when echoed in the completed 
   expect(raw).not.toContain('confirmation_token')
   expect(raw).not.toContain('"decision"')
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   await expect(dialog(page).getByRole('button', {name: 'Onayla', exact: true})).toHaveCount(0)
   expect(state.confirmations).toEqual([])
 })
@@ -349,7 +350,7 @@ test('Assistant API 401 deletes only its current user history, and a different r
   expect(await page.evaluate(() => localStorage.getItem('kais-chat:v1:unrelated-user'))).not.toBeNull()
   state.userId = 'reauthenticated-member'; state.chatStatus = 200
   await page.reload()
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   await expect(dialog(page).locator('.assistantEmpty')).toBeVisible()
   expect(await stored(page)).toBeNull()
 })
@@ -375,7 +376,7 @@ test('Native cross-tab storage events apply last-writer history and reset withou
     expect(await stored(peer)).toBeNull()
     for (const tab of [page, peer]) {
       await tab.reload()
-      await tab.getByRole('button', {name: 'Kais AI', exact: true}).click()
+      await openChatFromHint(tab)
       await expect(dialog(tab).locator('.assistantMessage')).toHaveCount(0)
       await expect(dialog(tab).locator('.assistantEmpty')).toBeVisible()
       expect(await stored(tab)).toBeNull()
@@ -410,7 +411,7 @@ test('Real AuthGate logout button clears history and real login as another user 
   await page.getByRole('button', {name: 'GÜVENLİ GİRİŞ', exact: true}).click()
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key) || sessionStorage.getItem(key), SESSION_KEY)).toBe('cookie-session:signed-in-second-member')
   expect(await page.evaluate(() => document.cookie)).not.toContain('mock-signed-user-session')
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   await expect(dialog(page).locator('.assistantEmpty')).toBeVisible()
   await expect(dialog(page).locator('.assistantMessage')).toHaveCount(0)
   expect(await chatKeys(page)).toEqual([])
@@ -436,7 +437,7 @@ test('Profile refresh 401 wipes chat and signed cookie, retaining only a harmles
   state.userId = 'profile-verified-member'
   await seedUserCookie(page)
   await page.evaluate(() => window.dispatchEvent(new Event('protrebot-access-refresh')))
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   await expect(dialog(page).locator('.assistantEmpty')).toBeVisible()
   await send(page, 'Doğrulanmış yeni oturum')
   expect(await page.evaluate(() => localStorage.getItem('kais-chat:v1:profile-verified-member'))).not.toBeNull()
@@ -465,7 +466,7 @@ test('Real logout in one tab stops the receiving tab, and later submit or reload
     const peerState = await setup(peer, true)
     await openAt(peer, AUTH_URL)
     await page.evaluate(() => window.dispatchEvent(new Event('protrebot-access-refresh')))
-    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+    await openChatFromHint(page)
     await expect(dialog(page).getByRole('textbox')).toBeEnabled()
     await send(page, 'İki sekmeli çıkış öncesi')
     await expect(dialog(peer).locator('.assistantMessage')).toHaveCount(2)
@@ -505,7 +506,7 @@ test('Changing the shared token stops the receiving tab until the new user is ve
     expect(await chatKeys(peer)).toEqual([])
     await peer.evaluate(() => window.dispatchEvent(new Event('protrebot-access-refresh')))
     await expect(peer.locator('.assistantLauncher .kaisEye')).toHaveAttribute('data-state', 'idle')
-    await peer.getByRole('button', {name: 'Kais AI', exact: true}).click()
+    await openChatFromHint(peer)
     await expect(dialog(peer).locator('.assistantEmpty')).toBeVisible()
     await send(peer, 'Yeni token ile temiz sohbet')
     expect(await peer.evaluate(() => localStorage.getItem('kais-chat:v1:token-replacement-member'))).not.toBeNull()

@@ -167,6 +167,8 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
   const [messages, setMessages] = useState<Message[]>(initial.messages)
   const [storageProblem, setStorageProblem] = useState(intro.problem)
   const [open, setOpen] = useState(false)
+  const [greetingOpenRequest, setGreetingOpenRequest] = useState(0)
+  const [greetingVisible, setGreetingVisible] = useState(false)
   const [draft, setDraft] = useState('')
   const [usage, setUsage] = useState<Usage | null>(null)
   const [issue, setIssue] = useState<Issue | null>(null)
@@ -491,14 +493,15 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
     '--assistant-dialog-height': `${placement.height}px`, '--assistant-arrow-left': `${placement.arrowLeft}px`,
     '--assistant-origin-y': placement.above ? '100%' : '0%'} as CSSProperties
 
-  const launcher = <button ref={launcherRef} type="button" className="assistantLauncher" aria-label={copy.open} data-motion-paused={motionPaused} aria-describedby={unread ? 'assistant-checkin-unread' : undefined} aria-haspopup="dialog" aria-expanded={open} onClick={openChat}><KaisEye size={56} state={eyeState} unreadBadge={unread > 0}/>
+  const launcher = <button ref={launcherRef} type="button" className="assistantLauncher" aria-label={copy.open} data-motion-paused={motionPaused} aria-describedby={unread ? 'assistant-checkin-unread' : undefined} aria-expanded={greetingVisible} onClick={() => setGreetingOpenRequest(value => value + 1)}><KaisEye size={56} state={eyeState} unreadBadge={unread > 0}/>
       {showIntro && !open && !privateFocus && <span className="assistantIntro" aria-hidden="true">{copy.title}</span>}
       {unread > 0 && <span id="assistant-checkin-unread" className="assistantBadge" role="status" aria-label={copy.proactiveUnread}>{unread}</span>}
     </button>
   return <>
     {launcherTarget === undefined ? launcher : launcherTarget && createPortal(launcher, launcherTarget)}
-    <KaisGreeting userId={userId} enabled={!expired && eyeState !== 'off' && eyeState !== 'error'}
-      chatOpen={open} anchorRef={launcherRef} anchorHost={launcherTarget} motionPaused={motionPaused} onOpen={openChat}/>
+    <KaisGreeting enabled={!expired && eyeState !== 'off' && eyeState !== 'error'}
+      chatOpen={open} anchorRef={launcherRef} anchorHost={launcherTarget} motionPaused={motionPaused}
+      openRequest={greetingOpenRequest} onVisibilityChange={setGreetingVisible} onOpen={openChat}/>
     {open && createPortal(<dialog ref={dialog} className="assistantDialog" style={style} data-assistant-chat data-side={placement.above ? 'above' : 'below'} data-motion-paused={motionPaused} data-compact-viewport={viewport.height < 500 || undefined} role="dialog" aria-label={copy.title} aria-labelledby="assistant-title"
       onCancel={event => {event.preventDefault(); if (settingsOpen) {setSettingsOpen(false); settingsButton.current?.focus()} else setOpen(false)}}
       onClick={event => {if (event.target === event.currentTarget) setOpen(false)}}>

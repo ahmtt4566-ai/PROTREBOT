@@ -1,93 +1,202 @@
-import {useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject} from 'react'
+import {useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject} from 'react'
 import {createPortal} from 'react-dom'
 import {X} from 'lucide-react'
 import './kais-greeting.css'
 
-const SHOW_DELAY_MS = 2000
-const VISIBLE_MS = 8000
-const MAX_WIDTH = 280
-const GAP = 12
+const SHOW_DELAY_MS = 2500
+const VISIBLE_MS = 7000
+const MAX_WIDTH = 300
+const GAP = 16
+const SESSION_KEY = 'kaisAiHintShown'
+const DISMISSED_KEY = 'kaisAiHintDismissedUntil'
+const DISMISS_MS = 7 * 24 * 60 * 60 * 1000
 const GREETING = 'Merhaba, ben Kais AI. Bugün sana nasıl yardımcı olabilirim?'
+type Phase = 'hidden' | 'entering' | 'visible' | 'closing'
 
 type Props = {
-  userId?: string
   enabled: boolean
   chatOpen: boolean
   anchorRef: RefObject<HTMLButtonElement | null>
   anchorHost?: HTMLElement | null
   motionPaused?: boolean
+  openRequest?: number
+  onVisibilityChange?: (shown: boolean) => void
   onOpen: () => void
 }
 
-function localDate() {
-  const date = new Date()
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+function storageWarning(error: unknown) {
+  console.warn('Kais AI hint storage unavailable; continuing without persistence', error instanceof Error ? error.name : 'StorageError')
 }
 
-export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anchorHost, motionPaused = false, onOpen}: Props) {
-  const key = `protrebot-kais-greeting:${userId ? encodeURIComponent(userId) : 'general'}`
-  const [visible, setVisible] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
+function automaticAllowed() {
+  let seen = false
+  let dismissedUntil = 0
+  try { seen = sessionStorage.getItem(SESSION_KEY) === '1' }
+  catch (error) { storageWarning(error) }
+  try {
+    const value = localStorage.getItem(DISMISSED_KEY)
+    if (value !== null) {
+      const timestamp = Number(value)
+      if (Number.isFinite(timestamp) && timestamp >= 0) dismissedUntil = timestamp
+      else console.warn('Kais AI hint dismissal timestamp invalid; ignoring presentation preference')
+    }
+  } catch (error) { storageWarning(error) }
+  return !seen && dismissedUntil <= Date.now()
+}
+
+export default function KaisGreeting({enabled, chatOpen, anchorRef, anchorHost, motionPaused = false,
+  openRequest = 0, onVisibilityChange, onOpen}: Props) {
+  const [phase, setPhase] = useState<Phase>('hidden')
+  const [cycle, setCycle] = useState(0)
+  const [hovered, setHovered] = useState(false)
+  const [touched, setTouched] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const [hidden, setHidden] = useState(document.hidden)
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  const [progress, setProgress] = useState(1)
+  const automaticShown = useRef(false)
+  const waitingRemaining = useRef(SHOW_DELAY_MS)
+  const visibleRemaining = useRef(VISIBLE_MS)
+  const previousCycle = useRef(0)
+  const previousRequest = useRef(openRequest)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const [placement, setPlacement] = useState({left: GAP, top: GAP, width: MAX_WIDTH, arrow: GAP, fits: false})
-  const shown = visible && enabled && !chatOpen && !dismissed
+  const shown = phase !== 'hidden' && !chatOpen
+  const paused = hovered || touched || focused
+  const pathname = window.location.pathname
+  const authPage = /^\/(?:login|register|signup|forgot-password|reset-password|verify-email|email-verification)(?:\/|$)/i.test(pathname)
+
+  const show = useCallback(() => {
+    if (!anchorRef.current?.isConnected) return
+    automaticShown.current = true
+    try { sessionStorage.setItem(SESSION_KEY, '1') }
+    catch (error) { storageWarning(error) }
+    setCycle(value => value + 1)
+    setPhase(value => value === 'hidden' ? 'entering' : value === 'closing' ? 'visible' : value)
+  }, [anchorRef])
+
+  const close = useCallback(() => setPhase(value => value === 'hidden' ? value : 'closing'), [])
 
   useEffect(() => {
-    if (chatOpen) setDismissed(true)
-    if (!enabled || chatOpen || dismissed) { setVisible(false); return }
-    // Local presentation metadata only: user-scoped date, no assistant/network request.
-    try {
-      if (localStorage.getItem(key) === localDate()) return
-    } catch (error) {
-      if (!(error instanceof DOMException)) throw error
-      console.warn('Kais AI greeting disabled: local storage unavailable', error.name)
-      return
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const visibility = () => setHidden(document.hidden)
+    const motion = () => setReducedMotion(preference.matches)
+    document.addEventListener('visibilitychange', visibility)
+    preference.addEventListener('change', motion)
+    return () => {
+      document.removeEventListener('visibilitychange', visibility)
+      preference.removeEventListener('change', motion)
     }
-    let phase: 'waiting' | 'showing' | 'done' = 'waiting'
-    let remaining = SHOW_DELAY_MS
+  }, [])
+
+  useEffect(() => {
+    if (previousRequest.current === openRequest) return
+    previousRequest.current = openRequest
+    if (!chatOpen) show()
+  }, [openRequest, chatOpen, show])
+
+  useEffect(() => { if (chatOpen) setPhase('hidden') }, [chatOpen])
+  useEffect(() => { onVisibilityChange?.(shown && placement.fits) }, [shown, placement.fits, onVisibilityChange])
+
+  useEffect(() => {
+    if (!enabled || chatOpen || authPage || automaticShown.current || !automaticAllowed()) return
     let started: number | undefined
     let timer: number | undefined
+    let fired = false
     const pause = () => {
       if (timer !== undefined) window.clearTimeout(timer)
       timer = undefined
-      if (started !== undefined) remaining = Math.max(0, remaining - (performance.now() - started))
+      if (started !== undefined) waitingRemaining.current = Math.max(0, waitingRemaining.current - (performance.now() - started))
       started = undefined
-    }
-    const advance = () => {
-      timer = undefined
-      started = undefined
-      if (document.hidden) { remaining = 0; return }
-      if (phase === 'showing') {
-        phase = 'done'
-        setVisible(false)
-        return
-      }
-      if (!anchorRef.current?.isConnected) { phase = 'done'; return }
-      try {
-        const today = localDate()
-        if (localStorage.getItem(key) === today) { phase = 'done'; return }
-        localStorage.setItem(key, today)
-      } catch (error) {
-        if (!(error instanceof DOMException)) throw error
-        console.warn('Kais AI greeting disabled: local storage unavailable', error.name)
-        phase = 'done'
-        return
-      }
-      phase = 'showing'
-      remaining = VISIBLE_MS
-      setVisible(true)
-      resume()
     }
     const resume = () => {
-      if (document.hidden || phase === 'done' || timer !== undefined) return
+      if (document.hidden || fired || automaticShown.current || timer !== undefined) return
       started = performance.now()
-      timer = window.setTimeout(advance, remaining)
+      timer = window.setTimeout(() => {
+        fired = true
+        timer = undefined
+        started = undefined
+        waitingRemaining.current = 0
+        if (!document.hidden && !automaticShown.current && automaticAllowed()) show()
+      }, waitingRemaining.current)
     }
     const visibility = () => { if (document.hidden) pause(); else resume() }
     document.addEventListener('visibilitychange', visibility)
     resume()
-    return () => { phase = 'done'; pause(); document.removeEventListener('visibilitychange', visibility) }
-  }, [key, enabled, chatOpen, dismissed, anchorRef])
+    return () => {
+      pause()
+      document.removeEventListener('visibilitychange', visibility)
+    }
+  }, [enabled, chatOpen, authPage, cycle, show])
+
+  useEffect(() => {
+    if (phase !== 'entering' && phase !== 'closing') return
+    const timer = window.setTimeout(() => {
+      if (phase === 'entering') setPhase('visible')
+      else {
+        if (bubbleRef.current?.contains(document.activeElement)) anchorRef.current?.focus({preventScroll: true})
+        setHovered(false); setTouched(false); setFocused(false)
+        setPhase('hidden')
+      }
+    }, reducedMotion ? 150 : phase === 'entering' ? 200 : 300)
+    return () => window.clearTimeout(timer)
+  }, [phase, reducedMotion, anchorRef])
+
+  // Cleanup captures elapsed time before pause/reset, so resuming never grants a fresh lifetime.
+  useEffect(() => {
+    if (previousCycle.current !== cycle) {
+      previousCycle.current = cycle
+      visibleRemaining.current = VISIBLE_MS
+      setProgress(1)
+    }
+    if (phase !== 'visible' || paused || chatOpen) return
+    let started: number | undefined
+    let timer: number | undefined
+    let frame: number | undefined
+    const tick = () => {
+      if (started === undefined) return
+      setProgress(Math.max(0, visibleRemaining.current - (performance.now() - started)) / VISIBLE_MS)
+      frame = requestAnimationFrame(tick)
+    }
+    const pause = () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+      if (frame !== undefined) cancelAnimationFrame(frame)
+      timer = undefined
+      frame = undefined
+      if (started !== undefined) visibleRemaining.current = Math.max(0, visibleRemaining.current - (performance.now() - started))
+      started = undefined
+      setProgress(visibleRemaining.current / VISIBLE_MS)
+    }
+    const resume = () => {
+      if (document.hidden || timer !== undefined) return
+      started = performance.now()
+      if (!reducedMotion) tick()
+      timer = window.setTimeout(() => {
+        timer = undefined
+        started = undefined
+        visibleRemaining.current = 0
+        if (frame !== undefined) cancelAnimationFrame(frame)
+        frame = undefined
+        setProgress(0)
+        close()
+      }, visibleRemaining.current)
+    }
+    const visibility = () => { if (document.hidden) pause(); else resume() }
+    document.addEventListener('visibilitychange', visibility)
+    resume()
+    return () => { pause(); document.removeEventListener('visibilitychange', visibility) }
+  }, [phase, paused, chatOpen, cycle, reducedMotion, close])
+
+  useEffect(() => {
+    if (!shown) return
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      close()
+    }
+    document.addEventListener('keydown', escape)
+    return () => document.removeEventListener('keydown', escape)
+  }, [shown, close])
 
   useLayoutEffect(() => {
     if (!shown || !bubbleRef.current) return
@@ -96,7 +205,7 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
     const update = () => {
       if (document.hidden) return
       const button = anchorRef.current
-      const anchor = button?.getBoundingClientRect()
+      const anchor = (button?.querySelector('.kaisEye') ?? button)?.getBoundingClientRect()
       if (!anchor) {
         setPlacement(previous => previous.fits ? {...previous, fits: false} : previous)
         return
@@ -106,15 +215,10 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
       const viewTop = viewport?.offsetTop ?? 0
       const viewWidth = viewport?.width ?? window.innerWidth
       const viewHeight = viewport?.height ?? window.innerHeight
-      const width = Math.min(MAX_WIDTH, Math.max(0, viewWidth - GAP * 2))
+      const width = viewWidth <= 480 ? Math.max(0, viewWidth - GAP * 2) : Math.min(MAX_WIDTH, viewWidth - GAP * 2)
       element.style.width = `${width}px`
       const left = Math.max(viewLeft + GAP, Math.min(anchor.right - width, viewLeft + viewWidth - GAP - width))
-      const header = button?.closest('header')
-      const controls = Array.from(header?.querySelectorAll<HTMLElement>('button, a, input, [role="button"]') ?? [])
-        .filter(control => control.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}))
-      const bottom = Math.max(anchor.bottom, header?.getBoundingClientRect().bottom ?? anchor.bottom,
-        ...controls.map(control => control.getBoundingClientRect().bottom))
-      const top = bottom + GAP
+      const top = anchor.bottom + 10
       const arrow = Math.max(GAP, Math.min(anchor.left + anchor.width / 2 - left, width - GAP))
       const fits = anchor.width > 0 && anchor.height > 0 && width > 0 &&
         top >= viewTop + GAP && top + element.offsetHeight <= viewTop + viewHeight - GAP
@@ -158,17 +262,27 @@ export default function KaisGreeting({userId, enabled, chatOpen, anchorRef, anch
     }
   }, [shown, anchorRef, anchorHost])
 
-  const dismiss = () => { setDismissed(true); setVisible(false) }
   const style: CSSProperties & {'--kais-greeting-arrow': string} = {left: placement.left, top: placement.top,
     width: placement.width, visibility: placement.fits ? 'visible' : 'hidden', '--kais-greeting-arrow': `${placement.arrow}px`}
   return createPortal(<div ref={bubbleRef} role="status" aria-live="polite" aria-atomic="true" lang="tr"
     className={shown ? 'kaisGreeting' : 'kaisGreetingAnnouncer'} data-kais-greeting={shown || undefined}
-    data-motion-paused={motionPaused} style={shown ? style : undefined}>
+    data-phase={phase} data-paused={paused || hidden} data-motion-paused={motionPaused} style={shown ? style : undefined}
+    onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+    onTouchStart={() => setTouched(true)} onTouchEnd={() => setTouched(false)} onTouchCancel={() => setTouched(false)}
+    onFocus={() => setFocused(true)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false) }}>
     {shown && <>
+      <span className="kaisGreetingArrow" aria-hidden="true"/>
+      <div className="kaisGreetingBrand"><span aria-hidden="true"/>Kais AI</div>
       <button type="button" className="kaisGreetingOpen" aria-label="Karşılama mesajı, sohbeti aç"
-        onClick={() => { dismiss(); onOpen() }}>{GREETING}</button>
-      <button type="button" className="kaisGreetingClose" aria-label="Kais AI karşılama balonunu kapat"
-        onClick={() => { dismiss(); anchorRef.current?.focus({preventScroll: true}) }}><X aria-hidden="true" size={16}/></button>
+        onClick={() => { close(); onOpen() }}>{GREETING}</button>
+      <button type="button" className="kaisGreetingLink" onClick={() => { close(); onOpen() }}>Sohbeti aç →</button>
+      <button type="button" className="kaisGreetingClose" aria-label="Bildirimi kapat"
+        onClick={() => {
+          try { localStorage.setItem(DISMISSED_KEY, String(Date.now() + DISMISS_MS)) }
+          catch (error) { storageWarning(error) }
+          close()
+        }}><X aria-hidden="true" size={12} strokeWidth={1.5}/></button>
+      <div className="kaisGreetingProgress" aria-hidden="true"><span style={{transform: `scaleX(${progress})`}}/></div>
     </>}
   </div>, document.body)
 }

@@ -1475,7 +1475,7 @@ Bu regresyonlar iki build sonrası `frontend` klasöründen
 ile üretim bundle'ı ve mock API üzerinden doğrulanır; gerçek ödeme veya emir
 gönderilmez.
 Kais karşılama balonunun yerleşim RAF döngüsü gizli sekmede durur ve sekme
-görünür olduğunda yeniden başlar; 2 saniyelik bekleme ve 8 saniyelik görünür
+görünür olduğunda yeniden başlar; 2,5 saniyelik bekleme ve 7 saniyelik tam görünür
 yaşam süresi yalnızca görünür sekmede ilerler. Karşılama testlerinin API,
 harici HTTP ve WebSocket bağlantıları offline fixture'larla izole edilir.
 
@@ -1971,12 +1971,22 @@ Sağ-alt floating yerleşimi veya ekrana
 göre küçültme yoktur. Erişilebilir adı her dilde `Kais AI` olur. İlk sekme
 oturumunda küçük etiket 5 saniye görünür; `sessionStorage` ile reload ve
 header değişimlerinde tekrarlanmaz. Kalıcı düğme yazısı yoktur.
-Gözün altındaki sabit karşılama balonu yalnız oturum açıkken yaklaşık 2 saniye
-sonra çıkar ve 8 saniye görünür. Kullanıcıya özel `protrebot-kais-greeting:<id>`
-localStorage anahtarında yerel tarih tutularak günde bir kez gösterilir; depolama
-engelliyse gösterilmez. Gizli sekmede süreler durur, reduced-motion animasyonu
-kapatır. X balonu kapatır; metin veya göz mevcut sohbeti açar. Balon LLM/API
-çağrısı yapmaz, sohbet açıkken gösterilmez ve sayfa odağını kendiliğinden almaz.
+Gözün altındaki Kais AI bildirimi 2,5 saniye sonra çıkar; 200 ms açılışın
+ardından 7 saniye tam görünür kalır ve 300 ms opacity geçişiyle kapanır.
+`sessionStorage.kaisAiHintShown` aynı sekmede otomatik gösterimi tek seferle
+sınırlar. X, `localStorage.kaisAiHintDismissedUntil` ile otomatik gösterimi
+7 gün erteler; Esc yalnız mevcut bildirimi kapatır. Depolama hataları uyarı
+olarak kaydedilir ve bildirimi devre dışı bırakmaz. Göz yalnız bildirimi açar
+ve süreyi sıfırlar; SVG, göz animasyonları ve CSS değişmez. Mesaj veya
+`Sohbeti aç →` düğmesi mevcut sohbet akışını açar. Bildirimin açılması API
+isteği yapmaz; sohbet açıkken veya giriş/kayıt/şifre/e-posta doğrulama
+rotalarında kendiliğinden gösterilmez. Ortak modal-açık durumu bulunmadığından
+diğer modallar için bir global bekleme mekanizması eklenmemiştir.
+Hover, dokunma, kutu içindeki odak ve gizli sekme kalan süreyi durdurur;
+ayrılınca aynı süreden devam eder. Otomatik açılış odağı taşımaz.
+Reduced-motion yalnız 150 ms opacity geçişi kullanır, süre çizgisini animasyonsuz
+gösterir. Bildirim masaüstünde 300 px, 480 px ve altında iki yanda 16 px boşlukla
+yerleşir; gözün 10 px altında, tek katmanlı bir karttır.
 Sohbet geçmişi yalnız tarayıcıda `kais-chat:v1:<encodeURIComponent(userId)>`
 localStorage kaydında `{version: 1, savedAt, messages}` olarak tutulur; sunucuya
 arşiv gönderilmez. Son 50 tamamlanmış mesaj, mesaj başına 4000 Unicode karakter

@@ -1,4 +1,5 @@
 import {expect, test, type Page} from '@playwright/test'
+import {openChatFromHint} from './helpers/assistant-ui'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 
@@ -49,7 +50,7 @@ for (const width of [1440, 390]) {
     await page.screenshot({path: testInfo.outputPath(`kais-header-${width}.png`)})
     await expect(launcher).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
     expect(await launcher.evaluate(element => getComputedStyle(element, '::before').display)).toBe('none')
-    await launcher.click()
+    await openChatFromHint(page)
     await expect(page.getByRole('dialog', {name: 'Kais AI'})).toBeVisible()
     const panelEye = page.locator('.assistantHeader .kaisEye')
     await expect(panelEye).toHaveClass(/kaisHeaderEye/)

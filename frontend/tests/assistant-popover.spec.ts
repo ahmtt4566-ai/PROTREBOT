@@ -1,5 +1,6 @@
 import {expect, test, type Page} from '@playwright/test'
 import {mockAssistant} from './helpers/assistant-api'
+import {openChatFromHint} from './helpers/assistant-ui'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 
@@ -32,7 +33,7 @@ for (const width of [1440, 390]) {
     const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
     const anchor = await launcher.boundingBox()
     await page.screenshot({path: testInfo.outputPath(`kais-popover-closed-${width}.png`)})
-    await launcher.click()
+    await openChatFromHint(page)
     const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
     await expect(dialog.getByRole('textbox', {name: 'Kais AI mesajın'})).toBeFocused()
     await expect(dialog.locator('.assistantHeader > .kaisHeaderEye')).toHaveCSS('width', '36px')
@@ -62,7 +63,7 @@ for (const width of [1440, 390]) {
     await page.keyboard.press('Escape')
     await expect(dialog).not.toBeVisible()
     await expect(launcher).toBeFocused()
-    await launcher.click()
+    await openChatFromHint(page)
     await expect(dialog).toBeVisible()
     await page.mouse.click(2, 2)
     await expect(dialog).not.toBeVisible()
@@ -74,7 +75,7 @@ test('Small desktop viewport contains the popover and keeps the composer visible
   await page.setViewportSize({width: 800, height: 420})
   await page.emulateMedia({reducedMotion: 'reduce'})
   await prepare(page)
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
   await expect(dialog.getByRole('textbox', {name: 'Kais AI mesajın'})).toBeFocused()
   const box = await dialog.boundingBox()
@@ -91,7 +92,7 @@ test('New title eye tracks and blinks, while reduced motion disables popover ani
   await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'))
   await page.emulateMedia({reducedMotion: 'no-preference'})
   await prepare(page)
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
   await expect(dialog.getByRole('textbox', {name: 'Kais AI mesajın'})).toBeFocused()
   const eye = dialog.locator('.assistantHeader > .kaisHeaderEye')
@@ -114,7 +115,7 @@ for (const [width, height] of [[800, 420], [1280, 600], [1440, 900], [768, 844],
     const state = await mockAssistant(page)
     state.chatBody = {reply: 'Uzun platform yanıtı.\n'.repeat(80), language: 'tr', sources: []}
     await page.goto('/')
-    await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+    await openChatFromHint(page)
     const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
     const input = dialog.getByRole('textbox', {name: 'Kais AI mesajın', exact: true})
     const send = dialog.getByRole('button', {name: 'Kais AI mesajını gönder', exact: true})
@@ -162,7 +163,7 @@ for (const [width, height] of [[800, 420], [1280, 600], [1440, 900], [768, 844],
 test('Content, secret warning and assistant response remain in the popover with one eye design', async ({page}) => {
   await page.emulateMedia({reducedMotion: 'reduce'})
   await prepare(page)
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
   const composer = dialog.getByRole('textbox', {name: 'Kais AI mesajın'})
   await expect(composer).toBeFocused()
@@ -181,7 +182,7 @@ test('Greeting opens at the top; only appended messages scroll down, not reopeni
   await page.emulateMedia({reducedMotion: 'reduce'})
   await prepare(page)
   const launcher = page.getByRole('button', {name: 'Kais AI', exact: true})
-  await launcher.click()
+  await openChatFromHint(page)
   const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
   const composer = dialog.getByRole('textbox', {name: 'Kais AI mesajın'})
   const log = dialog.getByRole('log')
@@ -211,7 +212,7 @@ test('Greeting opens at the top; only appended messages scroll down, not reopeni
   await expect.poll(atBottom).toBe(true)
   await log.evaluate(element => { element.scrollTop = 0 })
   await page.keyboard.press('Escape')
-  await launcher.click()
+  await openChatFromHint(page)
   await expect(composer).toBeFocused()
   await expect.poll(() => log.evaluate(element => element.scrollTop)).toBe(0)
   await composer.fill('Bir soru daha')

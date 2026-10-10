@@ -1,5 +1,6 @@
 import {expect, test} from '@playwright/test'
 import {mockAssistant} from './helpers/assistant-api'
+import {openChatFromHint} from './helpers/assistant-ui'
 
 test.use({baseURL: 'http://127.0.0.1:4175'})
 
@@ -113,19 +114,14 @@ for (const width of [1440, 768, 390, 320]) {
     const anchor = await launcher.boundingBox()
     const greeting = await bubble.boundingBox()
     expect(anchor).not.toBeNull(); expect(greeting).not.toBeNull()
-    expect(greeting!.x).toBeGreaterThanOrEqual(12)
-    expect(greeting!.x + greeting!.width).toBeLessThanOrEqual(width - 12)
-    const headerBottom = await launcher.evaluate(element => {
-      const header = element.closest('header')!
-      return Math.max(header.getBoundingClientRect().bottom, ...Array.from(
-        header.querySelectorAll<HTMLElement>('button, a, input, [role="button"]'))
-        .filter(control => control.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}))
-        .map(control => control.getBoundingClientRect().bottom))
-    })
-    expect(greeting!.y).toBeCloseTo(headerBottom + 12, 1)
+    expect(greeting!.x).toBeGreaterThanOrEqual(16)
+    expect(greeting!.x + greeting!.width).toBeLessThanOrEqual(width - 16)
+    const eyeBox = (await launcher.locator('.kaisEye').boundingBox())!
+    expect(greeting!.y).toBeCloseTo(eyeBox.y + eyeBox.height + 10, 1)
+    expect(greeting!.width).toBe(width <= 480 ? width - 32 : 300)
     const greetingArrow = await bubble.evaluate(element => Number.parseFloat(getComputedStyle(element).getPropertyValue('--kais-greeting-arrow')))
     expect(greeting!.x + greetingArrow).toBeCloseTo(anchor!.x + anchor!.width / 2, 1)
-    await launcher.click()
+    await openChatFromHint(page)
     const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
     await expect(dialog).toBeVisible()
     await expect(dialog.locator('.assistantHeader > .kaisHeaderEye')).toHaveCSS('width', '36px')

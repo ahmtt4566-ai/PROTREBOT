@@ -1,5 +1,6 @@
 import {expect, test} from '@playwright/test'
 import {mockAssistant} from './helpers/assistant-api'
+import {openChatFromHint} from './helpers/assistant-ui'
 
 test.use({baseURL: 'http://127.0.0.1:4174'})
 
@@ -16,7 +17,7 @@ for (const language of ['tr', 'en'] as const) {
       state.chatBody = {reply: 'Suggestion fixture response.', language, sources: []}
       await page.goto('/')
       await page.evaluate(language => { document.documentElement.lang = language }, language)
-      await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+      await openChatFromHint(page)
       const dialog = page.getByRole('dialog', {name: 'Kais AI', exact: true})
       const suggestions = dialog.locator('.assistantSuggestions')
       await expect(suggestions).toHaveAttribute('aria-label', language === 'tr' ? 'Hazır sorular' : 'Suggested questions')

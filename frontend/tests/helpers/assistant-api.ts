@@ -1,5 +1,6 @@
 import {expect, type Page} from '@playwright/test'
 import {demoAccount, demoHistory, demoReadFixtures, demoSummary} from './demo-api'
+import {openChatFromHint} from './assistant-ui'
 
 type ApiCall = {path: string; body: Record<string, unknown>}
 type MockState = {
@@ -17,6 +18,9 @@ export const checkInMessage = {id: 'owned-status-check-in', reply: '1 açık poz
   language: 'tr', sources: ['get_my_positions', 'get_protection_status'], fetched_at: '2026-10-03T00:00:00Z', stale: false}
 
 export async function mockAssistant(page: Page, remembered = false): Promise<MockState> {
+  await page.route('https://**', route => route.abort())
+  // Keep sockets local and open: immediate close races the client's clock-controlled keepalive.
+  await page.routeWebSocket('**', socket => socket.onMessage(() => {}))
   const state: MockState = {
     userId: 'assistant-member', remaining: 19, chatStatus: 200,
     chatBody: {reply: '**Plan**\nYanıt düz metindir.', language: 'tr', sources: ['get_plans']},
@@ -127,7 +131,7 @@ export async function mockAssistant(page: Page, remembered = false): Promise<Moc
 
 export async function openChat(page: Page) {
   await page.goto('/')
-  await page.getByRole('button', {name: 'Kais AI', exact: true}).click()
+  await openChatFromHint(page)
   const dialog = page.getByRole('dialog', {name: 'Kais AI'})
   await expect(dialog.getByRole('textbox', {name: 'Kais AI mesajın'})).toBeEnabled()
   return dialog
