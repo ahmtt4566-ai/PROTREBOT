@@ -25,8 +25,8 @@ class ReadModel(BaseModel):
 
 
 class CustomerSummary(ReadModel):
-    user_id: str
-    email_masked: str
+    user_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
+    email_masked: str = Field(max_length=184, pattern=r"^(?:\*{3}|[A-Za-z0-9*]\*{3}@[A-Za-z0-9.-]+)$")
     role: Literal["CUSTOMER"]
     active: bool = Field(strict=True)
     created_at: datetime | None
@@ -36,13 +36,13 @@ class CustomerSummary(ReadModel):
 
 class CustomerPage(ReadModel):
     items: list[CustomerSummary]
-    total: int
-    limit: int
-    offset: int
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=50)
+    offset: int = Field(ge=0)
 
 
 class CustomerSubscription(ReadModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
     plan: Literal["TRIAL", "MASTER_MODE"] | None
     subscription_status: Literal["TRIALING", "ACTIVE", "PAST_DUE", "UNPAID", "CANCELLED", "EXPIRED"] | None
     current_period_end: datetime | None
@@ -50,7 +50,7 @@ class CustomerSubscription(ReadModel):
 
 
 class CustomerPayments(ReadModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
     payment_status: Literal["PAID", "FAILED", "veri yok"]
     last_failed_payment_at: datetime | None
 
