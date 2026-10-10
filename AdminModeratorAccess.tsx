@@ -4,8 +4,8 @@ import {MODERATOR_PERMISSIONS, permissionLabels, type ModeratorPermission} from 
 
 type Grants = {user_id: string; permissions: ModeratorPermission[]}
 
-export default function AdminModeratorAccess({id, role, onChanged, onBusyChange}: {
-  id: string; role: string; onChanged: () => Promise<void>; onBusyChange: (busy: boolean) => void
+export default function AdminModeratorAccess({id, role, onChanged, onBusyChange, disabled = false}: {
+  id: string; role: string; onChanged: () => Promise<void>; onBusyChange: (busy: boolean) => void; disabled?: boolean
 }) {
   const [grants, setGrants] = useState<Grants | null>(null)
   const [error, setError] = useState('')
@@ -26,7 +26,7 @@ export default function AdminModeratorAccess({id, role, onChanged, onBusyChange}
     return () => controller.abort()
   }, [role, load])
   const run = async (operation: () => Promise<void>) => {
-    if (inFlight.current) return
+    if (inFlight.current || disabled) return
     inFlight.current = true; setBusy(true); onBusyChange(true); setError('')
     try {await operation()}
     catch (failure) {setError(failure instanceof Error ? failure.message : 'İşlem tamamlanamadı. Yeniden deneyin.')}
@@ -47,11 +47,11 @@ export default function AdminModeratorAccess({id, role, onChanged, onBusyChange}
   })
   return <section aria-label="Moderatör rolü ve izinleri">
     <h3>Moderatör erişimi</h3>
-    <div className="adminAccountActions"><button disabled={busy || role === 'OWNER'} onClick={changeRole}>{role === 'MODERATOR' ? 'Moderatörlüğü kaldır' : 'Moderatör yap'}</button></div>
-    {role === 'MODERATOR' && grants && <fieldset disabled={busy}><legend>Moderatör izinleri</legend>
+    <div className="adminAccountActions"><button disabled={busy || disabled || role === 'OWNER'} onClick={changeRole}>{role === 'MODERATOR' ? 'Moderatörlüğü kaldır' : 'Moderatör yap'}</button></div>
+    {role === 'MODERATOR' && grants && <fieldset disabled={busy || disabled}><legend>Moderatör izinleri</legend>
       {MODERATOR_PERMISSIONS.map(permission => <p key={permission}><label><input type="checkbox" checked={grants.permissions.includes(permission)} onChange={event => changePermission(permission, event.target.checked)}/> {permissionLabels[permission]}</label></p>)}
     </fieldset>}
     {role === 'MODERATOR' && !grants && !error && <p role="status">İzinler yükleniyor...</p>}
-    {error && <p className="adminAccountError" role="alert">{error} {role === 'MODERATOR' && <button disabled={busy} onClick={() => void run(() => load())}>Yeniden dene</button>}</p>}
+    {error && <p className="adminAccountError" role="alert">{error} {role === 'MODERATOR' && <button disabled={busy || disabled} onClick={() => void run(() => load())}>Yeniden dene</button>}</p>}
   </section>
 }

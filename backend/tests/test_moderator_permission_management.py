@@ -62,10 +62,18 @@ def test_permission_write_restrictions(setup, method, actor, role, target, statu
 
 def test_permission_read_failure_exposes_no_data_or_private_warning(setup, caplog):
     client, pool = setup
-    pool.fail = True
+    fetch = pool.fetch
+    async def broken(sql, *args):
+        if "SELECT permission FROM moderator_permissions" in sql:
+            raise RuntimeError("private@example.test secret-token")
+        return await fetch(sql, *args)
+    pool.fetch = broken
     result = client.get("/api/v22/admin/users/moderator/permissions", headers=headers("owner", "OWNER"))
     assert result.status_code == 503
     assert "permissions" not in result.json()
+    assert "Moderator permission read failed (RuntimeError)" in caplog.text
+    assert "private@example.test" not in caplog.text
+    assert "secret-token" not in caplog.text
 
 
 @pytest.mark.parametrize("method", ["POST", "DELETE"])
