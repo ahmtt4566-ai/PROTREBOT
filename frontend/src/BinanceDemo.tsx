@@ -1,9 +1,10 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, BarChart3, Bell, Calculator, CircleDollarSign, ClipboardList, Crosshair, Gauge, History, LockKeyhole, Play, Radio, RefreshCw, Save, Send, Settings2, ShieldCheck, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, Zap } from 'lucide-react'
+import { Activity, BarChart3, Bell, Calculator, ClipboardList, Crosshair, Gauge, History, LockKeyhole, Play, Radio, RefreshCw, Save, Send, Settings2, ShieldCheck, Target, TestTube2, TriangleAlert, UnlockKeyhole, Zap } from 'lucide-react'
 import { API_BASE } from './api'
 import OriginalDemoControls, {checkedOriginalStatus, ORIGINAL_DEMO_ID, type DemoStrategy} from '../../OriginalDemoControls'
 import {checkDemoResponse, demoRequest, prepareDemoTrading, startDemoAutomation} from '../../demo-request'
 import '../../demo-recovery.css'
+import DemoInfoCards from '../../DemoInfoCards'
 
 const API = `${API_BASE}/binance-demo`
 const V21_API = `${API_BASE}/v21`
@@ -828,14 +829,14 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
       <button className={tab === 'certificate' ? 'active' : ''} onClick={() => setTab('certificate')}><ShieldCheck/><span><b>SERTİFİKA</b><small>Sağlık · Tatbikat · Kanıt</small></span></button>
     </nav>
 
-    <section className="v21Pulse">
+    {tab !== 'trade' && <section className="v21Pulse">
       <span><i className={v21?.stream.status === 'CANLI' ? 'on' : ''}/><small>AKIŞ</small><b>{v21?.stream.status || 'BEKLENİYOR'}</b></span>
       <span><small>OTOMASYON</small><b>{v21?.auto.enabled ? 'ÇALIŞIYOR' : 'KAPALI'}</b></span>
       <span><small>GÜNLÜK DEMO</small><b>{v21?.daily.auto_entries ?? 0} / {v21?.settings.daily_trade_limit ?? 6}</b></span>
       <span><small>RİSK BÜTÇESİ</small><b>{fmt(v21?.daily.remaining_loss_budget)} USDT</b></span>
       <span><small>DEMO KANIT</small><b>%{v21?.certificate.score ?? 0}</b></span>
       <strong>GERÇEK PARA: 0 USDT · GERÇEK EMİR KANALI YOK</strong>
-    </section>
+    </section>}
 
     <section className="v21Card v21AutoBotDashboard" aria-label="Auto Trade Bot">
       <header><div><span>DEMO / TESTNET ONLY</span><h2>AUTO TRADE BOT</h2></div><b className={autoStatus === 'ON' ? 'v21Running' : autoStatus === 'PAUSED' ? 'demoLoss' : 'v21Stopped'}>{autoStatusLabel}</b></header>
@@ -1069,14 +1070,7 @@ export default function BinanceDemo({active,symbol,analysis,chart}:{active:boole
     <div className={`demoMessage demoMessage-${readError ? 'error' : messageKind}`} role={readError ? 'alert' : undefined}>{readError || messageKind === 'error' ? <TriangleAlert/> : messageKind === 'ok' ? <ShieldCheck/> : <Activity/>}<span>{readError || message}</span>{readError && <button type="button" onClick={() => void retryDemoReads()}>Demo verilerini yeniden getir</button>}</div>
     <div className="demoCredentialActions"><button type="button" disabled={busy || v21Busy || !status?.configured} onClick={() => void quickDemo()}>Demo bağlantısını hazırla</button><p>Yalnız Demo bağlantısını ve süreli emir iznini hazırlar. Emir göndermez; Live değişmez.</p></div>
 
-    <section className={`demoAccountStrip ${tab !== 'trade' ? 'demoTabHidden' : ''}`}>
-      <article><Wallet/><span><small>SANAL CÜZDAN</small><b>{fmt(account?.wallet_balance)} USDT</b></span></article>
-      <article><CircleDollarSign/><span><small>KULLANILABİLİR</small><b>{fmt(account?.available_balance)} USDT</b></span></article>
-      <article><Activity/><span><small>AÇIK PnL</small><b className={(account?.unrealized_pnl || 0) >= 0 ? 'demoProfit' : 'demoLoss'}>{(account?.unrealized_pnl || 0) >= 0 ? '+' : ''}{fmt(account?.unrealized_pnl)} USDT</b></span></article>
-      <article><Crosshair/><span><small>POZİSYON</small><b>{account?.reconciliation?.reconciled_active_positions ?? 0} / {status?.limits?.max_open_positions ?? '—'}</b></span></article>
-      <article><Target/><span><small>AÇIK EMİRLER</small><b>{(account?.open_orders.length || 0)+(account?.open_algo_orders.length || 0)}</b></span></article>
-      <article className={account?.hedge_mode ? 'demoModeBad' : 'demoModeGood'}><ShieldCheck/><span><small>POZİSYON MODU</small><b>{account ? account.hedge_mode ? 'HEDGE · DEĞİŞTİR' : 'ONE-WAY · UYGUN' : '—'}</b></span></article>
-    </section>
+    {tab === 'trade' && <DemoInfoCards account={account} summary={v21} maxPositions={status?.limits?.max_open_positions} format={fmt}/>}
 
     {chart && tab === 'trade' && <section className="demoLiveChart">
       <header><div><span>CANLI MUM GRAFİĞİ · EMA20 / EMA50 / EMA200</span><h3>{symbol.replace('USDT','/USDT')} Analiz ve Emir Seviyeleri</h3></div><div><b className={analysis?.direction === 'SHORT' ? 'demoLoss' : analysis?.direction === 'LONG' ? 'demoProfit' : ''}>{analysis?.direction || 'HESAPLANIYOR'}</b><small>Giriş {fmt(analysis?.entry)} · Stop {fmt(analysis?.stop_loss)} · TP3 {fmt(analysis?.tp3)}</small></div></header>

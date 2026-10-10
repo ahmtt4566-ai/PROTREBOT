@@ -199,6 +199,15 @@ summaries produce a recoverable in-panel error, not a workspace crash or
 invented trading limits. Account snapshots cannot replace verified status
 limits. Demo requests have a 30-second deadline and never retry mutations.
 
+The Demo trading desk uses one nine-card account/status grid shared by both
+frontend entrypoints: five columns on desktop, three below 1200px, and two
+below 701px. Missing snapshots display an em dash; the cards are read-only.
+The old overlapping account/status strips and their gradient footer are absent
+from this view; connection/lock badges and emergency stop remain on a transparent
+header instead of a gradient band. Demo chart grids are subdued; EMA curves remain, while only
+Stop, resistance and directional entry levels have price-axis labels.
+Other analysis charts and all trading/automation safety gates are unchanged.
+
 For the production UI, enter the Demo API Key and Secret Key and click
 **Demo bağlantısını hazırla**. This explicit action tests/saves only TESTNET
 credentials, activates/connects Demo and obtains the existing temporary Demo

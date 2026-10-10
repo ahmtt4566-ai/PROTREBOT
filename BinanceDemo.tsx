@@ -1,10 +1,11 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, Award, BarChart3, Bell, Calculator, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Crosshair, FlaskConical, Gauge, History, LayoutDashboard, LineChart, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, ScrollText, Search, Send, Settings2, ShieldAlert, ShieldCheck, Sparkles, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, X, Zap } from 'lucide-react'
+import { Activity, Award, BarChart3, Bell, Calculator, CheckCircle2, ChevronDown, ClipboardList, Crosshair, FlaskConical, Gauge, History, LayoutDashboard, LineChart, LockKeyhole, Play, Radar, Radio, RefreshCw, Save, ScrollText, Search, Send, Settings2, ShieldAlert, ShieldCheck, Sparkles, Target, TestTube2, TriangleAlert, UnlockKeyhole, Wallet, X, Zap } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, loadDemoCredentials, saveDemoCredentials, userSessionToken } from './api'
 import {useKaisErrorReaction, useKaisWorkspaceReaction} from './useKaisPageReactions'
 import OriginalDemoControls, {checkedOriginalStatus, ORIGINAL_DEMO_ID, type DemoStrategy} from './OriginalDemoControls'
 import {checkDemoResponse, demoRequest, prepareDemoTrading, startDemoAutomation} from './demo-request'
 import './demo-recovery.css'
+import DemoInfoCards from './DemoInfoCards'
 
 const API = `${API_BASE}/binance-demo`
 const V21_API = `${API_BASE}/v21`
@@ -1066,15 +1067,6 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
     </section>}
 
     {tab === 'trade' && <>
-    <section className="v21Pulse">
-      <span><i className={v21?.stream.status === 'CANLI' ? 'on' : ''}/><small>AKIŞ</small><b>{v21?.stream.status || 'BEKLENİYOR'}</b></span>
-      <span><small>OTOMASYON</small><b>{v21?.auto.enabled ? 'ÇALIŞIYOR' : 'KAPALI'}</b></span>
-      <span><small>GÜNLÜK DEMO</small><b>{v21?.daily.auto_entries ?? 0} / {v21?.settings.daily_trade_limit ?? 6}</b></span>
-      <span><small>RİSK BÜTÇESİ</small><b>{fmt(v21?.daily.remaining_loss_budget)} USDT</b></span>
-      <span><small>DEMO KANIT</small><b>%{v21?.certificate.score ?? 0}</b></span>
-      <strong>SANAL BAKİYE: 0 USDT · GERÇEK EMİR KANALI YOK</strong>
-    </section>
-
     <nav className="v21Workflow" aria-label="Trading workflow">
       <div className="v21WorkflowTitle"><span>TRADING WORKFLOW</span><small>Current operating path</small></div>
       <div className="v21WorkflowSteps">
@@ -1154,14 +1146,7 @@ export default function BinanceDemo({active,symbol,analysis,chart,markets,onSymb
       <div><span><small>Order ID</small><b>{lastOrder.order_id ?? '—'}</b></span><span><small>Parite</small><b>{lastOrder.symbol ?? symbol}</b></span><span><small>Yön</small><b>{lastOrder.side ?? '—'}</b></span><span><small>Tip</small><b>{lastOrder.type ?? form.orderType}</b></span><span><small>Miktar</small><b>{lastOrder.quantity ?? '—'}</b></span><span><small>Fiyat</small><b>{lastOrder.price ?? 'MARKET'}</b></span><span><small>Durum</small><b>{lastOrder.status ?? '—'}</b></span></div>
     </section>}
 
-    {!isolatedRisk && <section className={`demoAccountStrip ${tab !== 'trade' ? 'demoTabHidden' : ''}`}>
-      <article><Wallet/><span><small>WALLET</small><b>{fmt(account?.wallet_balance)} USDT</b><em>Demo equity</em></span></article>
-      <article><CircleDollarSign/><span><small>AVAILABLE</small><b>{fmt(account?.available_balance)} USDT</b><em>Free margin</em></span></article>
-      <article><Activity/><span><small>UNREALIZED PNL</small><b className={(account?.unrealized_pnl || 0) >= 0 ? 'demoProfit' : 'demoLoss'}>{(account?.unrealized_pnl || 0) >= 0 ? '+' : ''}{fmt(account?.unrealized_pnl)} USDT</b><em>Live mark</em></span></article>
-      <article><Crosshair/><span><small>OPEN POSITIONS</small><b>{account?.reconciliation?.reconciled_active_positions ?? 0}</b><em>Max {status?.limits?.max_open_positions ?? '—'}</em></span></article>
-      <article><Target/><span><small>AÇIK EMİRLER</small><b>{(account?.open_orders.length || 0)+(account?.open_algo_orders.length || 0)}</b></span></article>
-      <article className={account?.hedge_mode ? 'demoModeBad' : 'demoModeGood'}><ShieldCheck/><span><small>POZİSYON MODU</small><b>{account ? account.hedge_mode ? 'HEDGE · DEĞİŞTİR' : 'ONE-WAY · UYGUN' : '—'}</b></span></article>
-    </section>}
+    {!isolatedRisk && tab === 'trade' && <DemoInfoCards account={account} summary={v21} maxPositions={status?.limits?.max_open_positions} format={fmt}/>}
 
     {!isolatedRisk && chart && <section className="demoLiveChart">
       <header><div><span>CANLI MUM GRAFİĞİ · EMA20 / EMA50 / EMA200</span><h3>{symbol.replace('USDT','/USDT')} Analiz ve Emir Seviyeleri</h3></div><div className="demoChartHeaderMeta"><span><small>MARKET STATUS</small><b className={status?.connected ? 'demoProfit' : 'demoLoss'}>{status?.connected ? 'CONNECTED' : 'N/A'}</b></span><span><small>DIRECTION</small><b className={analysis?.direction === 'SHORT' ? 'demoLoss' : analysis?.direction === 'LONG' ? 'demoProfit' : ''}>{analysis?.direction || 'N/A'}</b></span><span><small>CONFIDENCE</small><b>{analysis?.confidence !== undefined ? `%${fmt(analysis.confidence)}` : qualityCandidate?.confidence_value !== undefined ? `%${fmt(qualityCandidate.confidence_value)}` : 'N/A'}</b></span><span><small>TIMEFRAME</small><b>N/A</b></span></div></header>

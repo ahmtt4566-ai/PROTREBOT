@@ -23,7 +23,7 @@ type Health = {status:string;version:string;mode:string;testnet:string;live_guar
 
 const format = (value:number) => value.toLocaleString('tr-TR',{maximumFractionDigits:value < 10 ? 5 : 2})
 
-function TestnetMarketChart({symbol,interval,onAnalysis,showLevels=true,showEma=true}:{symbol:string;interval:string;onAnalysis:(analysis:Analysis|null)=>void;showLevels?:boolean;showEma?:boolean}) {
+function TestnetMarketChart({symbol,interval,onAnalysis,showLevels=true,showEma=true,demoPresentation=false}:{symbol:string;interval:string;onAnalysis:(analysis:Analysis|null)=>void;showLevels?:boolean;showEma?:boolean;demoPresentation?:boolean}) {
   const host = useRef<HTMLDivElement>(null)
   const [stream,setStream] = useState<'YÜKLENİYOR'|'CANLI'|'HATA'>('YÜKLENİYOR')
   const [updated,setUpdated] = useState('—')
@@ -36,23 +36,23 @@ function TestnetMarketChart({symbol,interval,onAnalysis,showLevels=true,showEma=
     const chart = createChart(host.current,{
       autoSize:true,
       layout:{background:{type:ColorType.Solid,color:'#fffef9'},textColor:'#49614f'},
-      grid:{vertLines:{color:'#edf1e8'},horzLines:{color:'#edf1e8'}},
+      grid:{vertLines:{color:demoPresentation ? 'rgba(237,241,232,.22)' : '#edf1e8'},horzLines:{color:demoPresentation ? 'rgba(237,241,232,.22)' : '#edf1e8'}},
       rightPriceScale:{borderColor:'#d8e3d7'},timeScale:{borderColor:'#d8e3d7',timeVisible:true,secondsVisible:false},
       crosshair:{vertLine:{color:'#70a882'},horzLine:{color:'#70a882'}},
     })
     const candles = chart.addSeries(CandlestickSeries,{upColor:'#0caf62',downColor:'#ef594a',wickUpColor:'#0caf62',wickDownColor:'#ef594a',borderVisible:false})
     const volume = chart.addSeries(HistogramSeries,{priceFormat:{type:'volume'},priceScaleId:''})
     volume.priceScale().applyOptions({scaleMargins:{top:.82,bottom:0}})
-    const ema20 = chart.addSeries(LineSeries,{color:'#16a560',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'EMA20'})
-    const ema50 = chart.addSeries(LineSeries,{color:'#f3a712',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'EMA50'})
-    const ema200 = chart.addSeries(LineSeries,{color:'#6f91ad',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'EMA200'})
+    const ema20 = chart.addSeries(LineSeries,{color:'#16a560',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:demoPresentation ? '' : 'EMA20'})
+    const ema50 = chart.addSeries(LineSeries,{color:'#f3a712',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:demoPresentation ? '' : 'EMA50'})
+    const ema200 = chart.addSeries(LineSeries,{color:'#6f91ad',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:demoPresentation ? '' : 'EMA200'})
 
     const applyAnalysis = (analysis:Analysis) => {
       ema20.setData(showEma ? analysis.series.ema20.map(point => ({time:point.time as never,value:point.value})) : [])
       ema50.setData(showEma ? analysis.series.ema50.map(point => ({time:point.time as never,value:point.value})) : [])
       ema200.setData(showEma ? analysis.series.ema200.map(point => ({time:point.time as never,value:point.value})) : [])
       priceLines.forEach(line => candles.removePriceLine(line))
-      const line = (price:number,color:string,title:string,width:1|2|3=2,style=2) => candles.createPriceLine({price,color,lineWidth:width,lineStyle:style,axisLabelVisible:true,title})
+      const line = (price:number,color:string,title:string,width:1|2|3=2,style=2) => candles.createPriceLine({price,color,lineWidth:width,lineStyle:style,axisLabelVisible:!demoPresentation || title === 'STOP' || title === 'DİRENÇ' || title.endsWith(' GİRİŞ'),title})
       priceLines = showLevels ? [
         line(analysis.entry,'#078b4c',`${analysis.direction} GİRİŞ`,3,0), line(analysis.stop_loss,'#ed4f42','STOP',3,0),
         line(analysis.tp1,'#28a657','TP1'),line(analysis.tp2,'#28a657','TP2'),line(analysis.tp3,'#28a657','TP3'),
@@ -90,7 +90,7 @@ function TestnetMarketChart({symbol,interval,onAnalysis,showLevels=true,showEma=
     void load()
     const timer = window.setInterval(() => void load(),15000)
     return () => {active=false;window.clearInterval(timer);chart.remove();onAnalysis(null)}
-  },[symbol,interval,onAnalysis,showLevels,showEma])
+  },[symbol,interval,onAnalysis,showLevels,showEma,demoPresentation])
 
   return <div className="v26ChartShell">
     <div className="v26ChartStatus"><span className={stream === 'CANLI' ? 'live' : stream === 'HATA' ? 'error' : ''}><i/>{stream}</span><em>{error || `Binance Futures piyasa verisi · 15 sn yenileme · ${updated}`}</em></div>
@@ -189,7 +189,7 @@ export default function TestnetFirstApp() {
         <div className="v26Intervals">{['1m','5m','15m','1h','4h'].map(item => <button key={item} className={interval === item ? 'active' : ''} onClick={() => setInterval(item)}>{item}</button>)}</div>
       </section>
       <Suspense fallback={<div className="v26Loading"><RefreshCw className="spin"/>Testnet merkezi hazırlanıyor…</div>}>
-        <BinanceDemo active symbol={symbol} analysis={analysis} chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis}/>}/>
+        <BinanceDemo active symbol={symbol} analysis={analysis} chart={<TestnetMarketChart symbol={symbol} interval={interval} onAnalysis={setAnalysis} demoPresentation/>}/>
       </Suspense>
     </>}
 
