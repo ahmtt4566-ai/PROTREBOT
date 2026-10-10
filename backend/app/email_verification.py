@@ -280,7 +280,7 @@ async def change_pending_email(request, response, email: str, password: str) -> 
     async with registration_guard(request, email), store.edit(request, proof["sub"]) as doc:
         user = await load_user(request, proof["sub"], doc)
         row = doc.get("registration_pending", {}).get(digest(token))
-        if (not pending_valid(row, proof, user) or not user or user.get("role") != "CUSTOMER" or not user.get("active")
+        if (not pending_valid(row, proof, user) or not user or user.get("role") not in {"CUSTOMER", "MODERATOR"} or not user.get("active")
                 or user.get("email_verified") or doc.get("two_factor_enabled")
                 or row["version"] != int(user.get("auth_version", 1))):
             raise HTTPException(401, "Parola doğrulanamadı veya kayıt oturumunun süresi doldu.")

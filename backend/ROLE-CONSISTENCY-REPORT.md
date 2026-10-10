@@ -12,6 +12,11 @@ type-b or frontend findings has been fixed in this stage.
 
 ## Authority and snapshot decisions
 
+Stage 5 follow-up: pending-registration email correction accepts MODERATOR
+under the same password, version, active, verification and MFA guards as CUSTOMER.
+Erasure ownership classification also recognizes MODERATOR: a different user ID
+cannot be matched through a shared email. OWNER protections remain unchanged.
+
 Production entrypoint is [render.yaml:8](../render.yaml#L8):
 `rootDir: backend`, `uvicorn app.main:app`. Middleware authenticates protected
 requests using the canonical PostgreSQL security row before route handlers

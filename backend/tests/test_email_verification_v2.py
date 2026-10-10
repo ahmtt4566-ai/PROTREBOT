@@ -82,9 +82,11 @@ def allow_next_send(setup, uid):
     alter_doc(setup, lambda doc: doc.update(verification_last_sent=time.time() - 61), uid)
 
 
-def test_pending_email_correction_preserves_account_invalidates_old_links_and_requires_password(setup):
+@pytest.mark.parametrize("role", ["CUSTOMER", "MODERATOR"])
+def test_pending_email_correction_preserves_account_invalidates_old_links_and_requires_password(setup, role):
     client, old_link = fresh_link(setup)
     uid = user_id(client)
+    alter_doc(setup, lambda doc: doc["auth_overlay"].update(role=role), uid)
     old_cookie = client.cookies.get(REGISTRATION_PENDING_COOKIE)
     allow_next_send(setup, uid)
     body = {"new_email": "corrected@example.test", "current_password": "Wrong-password-123!"}

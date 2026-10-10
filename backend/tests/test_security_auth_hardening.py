@@ -1198,8 +1198,12 @@ class AccountErasureTests(unittest.IsolatedAsyncioTestCase):
         flow.assert_not_awaited()
 
     async def test_owned_records_from_other_accounts_are_not_erased_by_email(self):
-        row = {"id": "other", "role": "OWNER", "email": self.user["email"]}
-        self.assertFalse(erasure.owned(row, self.user))
+        for role in ("OWNER", "MODERATOR", "CUSTOMER"):
+            with self.subTest(role=role):
+                row = {"id": "other", "role": role, "email": self.user["email"]}
+                self.assertFalse(erasure.owned(row, self.user))
+                row["id"] = self.user["id"]
+                self.assertTrue(erasure.owned(row, self.user))
         row = {"id": "profile", "user_id": "other", "email": self.user["email"]}
         self.assertFalse(erasure.owned(row, self.user))
         self.assertEqual(erasure.retained({"cost_usd": "1.23", "message": "private"})["cost_usd"], "1.23")

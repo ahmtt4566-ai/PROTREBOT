@@ -55,7 +55,7 @@ def owned(row: Any, user: dict[str, Any]) -> bool:
         return True
     if any(row.get(key) for key in ("user_id", "userId", "_user_id", "owner_user_id", "ownerUserId")):
         return False
-    if row.get("role") in {"OWNER", "CUSTOMER"} and row.get("id"):
+    if row.get("role") in {"OWNER", "MODERATOR", "CUSTOMER"} and row.get("id"):
         return False
     return bool(email and str(row.get("email") or "").casefold() == email)
 
