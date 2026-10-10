@@ -187,6 +187,14 @@ unchanged. Auto start/stop notifications follow enabled-state transitions:
 repeated starts/stops do not notify again, while each real stop/start gets a
 fresh notification session. Notification failures are isolated from scanning,
 protection and automation; existing start/stop execution calls are unchanged.
+The bell panel distinguishes loading, empty, error and populated states.
+Failed refreshes retain the previous list with a stale-data warning; failed
+single/bulk read requests restore the prior read flags and show a short error.
+Polling cannot overwrite a pending read operation. Notification titles and
+severity come from a fixed event-type presentation map on every read, including
+old journal records: daily loss 5/10 are warnings, 15/20 are critical; unknown
+events use an informational system title. No journal migration or trading
+decision changes are required.
 Notification creation/storage failures are logged and isolated from Stop repair,
 safe position closure and automation recovery; synchronous failures restore the
 notification bookkeeping so retries are not suppressed. Asynchronous PostgreSQL

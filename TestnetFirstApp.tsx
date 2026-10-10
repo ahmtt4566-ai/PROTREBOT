@@ -46,7 +46,28 @@ type Analysis = {
 type Health = {status:string;version:string;mode:string;testnet:string;live_guard:string;paper:string;database:string;cloud_evidence:string;web_access:string}
 type ConnectionStatus = {connections?:Record<'TESTNET'|'LIVE',{configured:boolean;active:boolean;last_test_ok:boolean;api_key_masked?:string;last_error?:string|null;storage?:string;account?:{active_positions?:number}|null}>;vault?:{ready:boolean;reason?:string|null}}
 type NotificationItem = {id:string;type:string;severity:'success'|'warning'|'error'|'critical'|'info';title:string;message:string;timestamp:string|null;read:boolean;target:string}
-type NotificationResponse = {items:NotificationItem[];unread:number}
+type NotificationPanelState = 'loading'|'empty'|'error'|'data'
+const notificationLevelLabels = {critical:'KRİTİK',error:'KRİTİK',warning:'UYARI',success:'BAŞARILI',info:'BİLGİ'}
+
+function isNotificationItem(value:unknown):value is NotificationItem {
+  return value !== null && typeof value === 'object'
+    && 'id' in value && typeof value.id === 'string' && value.id.length > 0
+    && 'type' in value && typeof value.type === 'string'
+    && 'severity' in value && typeof value.severity === 'string' && ['success','warning','error','critical','info'].includes(value.severity)
+    && 'title' in value && typeof value.title === 'string'
+    && 'message' in value && typeof value.message === 'string'
+    && 'timestamp' in value && (value.timestamp === null || typeof value.timestamp === 'string')
+    && 'read' in value && typeof value.read === 'boolean'
+    && 'target' in value && typeof value.target === 'string'
+}
+
+function notificationItems(payload:unknown):NotificationItem[] {
+  if (!payload || typeof payload !== 'object' || !('items' in payload)
+    || !Array.isArray(payload.items) || !payload.items.every(isNotificationItem)) {
+    throw new Error('Bildirim yanıtı geçersiz.')
+  }
+  return payload.items
+}
 const ANALYSIS_TIMEOUT_MS = 30000
 
 const format = (value:number) => value.toLocaleString('tr-TR',{maximumFractionDigits:value < 10 ? 5 : 2})
@@ -481,12 +502,20 @@ export default function TestnetFirstApp() {
   const [demoVerification,setDemoVerification] = useState({kind:'info',message:''})
   const [connectionStatus,setConnectionStatus] = useState<ConnectionStatus|null>(null)
   const [notifications,setNotifications] = useState<NotificationItem[]>([])
+  const [notificationState,setNotificationState] = useState<NotificationPanelState>('loading')
+  const [notificationError,setNotificationError] = useState('')
+  const [notificationReadError,setNotificationReadError] = useState('')
+  const [notificationReadBusy,setNotificationReadBusy] = useState(false)
   const [notificationsOpen,setNotificationsOpen] = useState(false)
   const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
   const [headerHidden,setHeaderHidden] = useState(false)
   const [complianceOpen,setComplianceOpen] = useState(false)
   const [complianceTab,setComplianceTab] = useState<'risk'|'privacy'|'terms'|'support'>('risk')
   const notificationRef = useRef<HTMLDivElement>(null)
+  const notificationItemsRef = useRef<NotificationItem[]>([])
+  const notificationController = useRef<AbortController|null>(null)
+  const notificationReadInFlight = useRef(false)
+  const notificationLoaded = useRef(false)
   const marketPickerRef = useRef<HTMLDivElement>(null)
   const headerScrollYRef = useRef(0)
   const unreadNotifications = notifications.filter(item => !item.read).length
@@ -615,13 +644,30 @@ export default function TestnetFirstApp() {
   }
 
   const refreshNotifications = async () => {
+    if (notificationController.current || notificationReadInFlight.current) return
+    const controller = new AbortController()
+    notificationController.current = controller
+    setNotificationState('loading')
     try {
       const headers = new Headers(); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`)
-      const response = await fetch(`${API_BASE}/v21/notifications?limit=100`,{headers})
-      if (!response.ok) return
-      const payload = await response.json() as NotificationResponse
-      if (Array.isArray(payload.items)) setNotifications(payload.items)
-    } catch {}
+      const response = await fetch(`${API_BASE}/v21/notifications?limit=100`,{headers,signal:controller.signal})
+      if (!response.ok) throw new Error('Bildirimler yüklenemedi.')
+      const items = notificationItems(await response.json())
+      if (controller.signal.aborted) return
+      notificationItemsRef.current = items
+      setNotifications(items)
+      notificationLoaded.current = true
+      setNotificationError('')
+      setNotificationState(items.length ? 'data' : 'empty')
+    } catch {
+      if (controller.signal.aborted) return
+      setNotificationError(notificationLoaded.current
+        ? 'Bildirimler güncellenemedi; önceki liste gösteriliyor.'
+        : 'Bildirimler yüklenemedi. Yeniden deneyin.')
+      setNotificationState('error')
+    } finally {
+      if (notificationController.current === controller) notificationController.current = null
+    }
   }
 
   const saveDemoCredentials = async () => {
@@ -685,6 +731,8 @@ export default function TestnetFirstApp() {
     return () => {
       marketRefreshController.current?.abort()
       marketRefreshController.current = null
+      notificationController.current?.abort()
+      notificationController.current = null
       window.clearInterval(timer)
       window.clearInterval(notificationTimer)
       window.removeEventListener('protrebot-open-exchange-settings',openExchangeSettings)
@@ -701,12 +749,46 @@ export default function TestnetFirstApp() {
     settings: {view:'setup',selector:'.connectionCenter'},
   }[target] || {view:'trading',selector:'.v26MarketBar'})
 
+  const markNotificationsRead = async (path:string,ids:string[]):Promise<boolean> => {
+    if (notificationReadInFlight.current) return false
+    notificationReadInFlight.current = true
+    notificationController.current?.abort()
+    notificationController.current = null
+    setNotificationReadBusy(true)
+    setNotificationReadError('')
+    const previous = new Map(notificationItemsRef.current.filter(item => ids.includes(item.id)).map(item => [item.id,item.read]))
+    const optimistic = notificationItemsRef.current.map(item => previous.has(item.id) ? {...item,read:true} : item)
+    notificationItemsRef.current = optimistic
+    setNotifications(optimistic)
+    setNotificationState(notificationError ? 'error' : optimistic.length ? 'data' : 'empty')
+    try {
+      const headers = new Headers(); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`)
+      const response = await fetch(`${API_BASE}/v21/notifications/${path}`,{method:'POST',headers})
+      if (!response.ok) throw new Error('Okundu bilgisi kaydedilemedi.')
+      notificationItems(await response.json())
+      return true
+    } catch {
+      const restored = notificationItemsRef.current.map(item => {
+        const read = previous.get(item.id)
+        return read === undefined ? item : {...item,read}
+      })
+      notificationItemsRef.current = restored
+      setNotifications(restored)
+      setNotificationReadError('Okundu bilgisi kaydedilemedi; değişiklik geri alındı.')
+      return false
+    } finally {
+      notificationReadInFlight.current = false
+      setNotificationReadBusy(false)
+    }
+  }
+
   const openNotification = async (item:NotificationItem) => {
-    setNotifications(current => current.map(entry => entry.id === item.id ? {...entry,read:true} : entry))
+    if (notificationReadInFlight.current) return
     setNotificationsOpen(false)
-    try { const headers = new Headers(); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`); await fetch(`${API_BASE}/v21/notifications/${encodeURIComponent(item.id)}/read`,{method:'POST',headers}) } catch {}
+    const saved = await markNotificationsRead(`${encodeURIComponent(item.id)}/read`,[item.id])
     const destination = notificationTarget(item.target)
     navigate(destination.view)
+    if (!saved) setNotificationsOpen(true)
     window.setTimeout(() => {
       const target = document.querySelector(destination.selector)
       if (!target) return
@@ -717,8 +799,7 @@ export default function TestnetFirstApp() {
   }
 
   const markAllNotificationsRead = async () => {
-    setNotifications(current => current.map(item => ({...item,read:true})))
-    try { const headers = new Headers(); const token = userSessionToken(); if (token) headers.set('Authorization',`Bearer ${token}`); await fetch(`${API_BASE}/v21/notifications/read-all`,{method:'POST',headers}) } catch {}
+    await markNotificationsRead('read-all',notificationItemsRef.current.map(item => item.id))
   }
 
   useEffect(() => {
@@ -801,9 +882,12 @@ export default function TestnetFirstApp() {
         <button className="v26Refresh" aria-label="Piyasa verisini yenile" title="Piyasa verisini yenile" onClick={refresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''}/></button>
         <div className="v26Notifications" ref={notificationRef}>
           <button className={`v26NotificationButton${unreadNotifications ? ' hasUnread' : ''}`} type="button" aria-label={`Bildirimler${unreadNotifications ? `, ${unreadNotifications} okunmamış` : ''}`} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}><Bell/>{unreadNotifications > 0 && <span className="v26NotificationBadge">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</button>
-          {notificationsOpen && <section className="v26NotificationPanel" role="dialog" aria-label="Bildirimler">
-            <header><div><small>DURUM MERKEZİ</small><h2>Bildirimler</h2></div><div><span>{unreadNotifications}</span>{unreadNotifications > 0 && <button type="button" onClick={() => void markAllNotificationsRead()}>TÜMÜ OKUNDU</button>}</div></header>
-            {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <button type="button" key={item.id} className={`v26NotificationItem ${item.severity}${item.read ? ' isRead' : ''}`} onClick={() => void openNotification(item)}><i><Bell/></i><span><b>{item.title}</b>{item.severity === 'critical' && <strong className="v26NotificationCritical">KRİTİK</strong>}<p>{item.message}</p><small>{item.timestamp ? new Date(item.timestamp).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</small></span></button>)}</div> : <div className="v26NotificationEmpty"><Bell/><b>Bildirim yok</b><p>Gerçek bir sistem olayı oluştuğunda burada görünecek.</p></div>}
+          {notificationsOpen && <section className="v26NotificationPanel" role="dialog" aria-label="Bildirimler" data-state={notificationState} aria-busy={notificationState === 'loading' || notificationReadBusy}>
+            <header><div><small>DURUM MERKEZİ</small><h2>Bildirimler</h2></div><div><span>{unreadNotifications}</span><button type="button" aria-label="Bildirimleri yenile" title="Bildirimleri yenile" disabled={notificationState === 'loading' || notificationReadBusy} onClick={() => void refreshNotifications()}><RefreshCw/></button>{unreadNotifications > 0 && <button type="button" disabled={notificationReadBusy} onClick={() => void markAllNotificationsRead()}>TÜMÜ OKUNDU</button>}</div></header>
+            {notificationState === 'loading' && <div className="v26NotificationEmpty" role="status"><RefreshCw className="spin"/><b>{notificationLoaded.current ? 'Bildirimler güncelleniyor…' : 'Bildirimler yükleniyor…'}</b></div>}
+            {notificationState === 'error' && <div className="v26NotificationStatus" role="alert"><b>{notificationError}</b><button type="button" onClick={() => void refreshNotifications()}>YENİDEN DENE</button></div>}
+            {notificationReadError && <div className="v26NotificationStatus" role="alert"><b>{notificationReadError}</b></div>}
+            {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <button type="button" disabled={notificationReadBusy} key={item.id} className={`v26NotificationItem ${item.severity}${item.read ? ' isRead' : ''}`} onClick={() => void openNotification(item)}><i><Bell/></i><span><b>{item.title}</b>{item.severity === 'critical' && <strong className="v26NotificationCritical">KRİTİK</strong>}{item.severity !== 'critical' && <strong className="v26NotificationSeverity">{notificationLevelLabels[item.severity]}</strong>}<p>{item.message}</p><small>{item.timestamp ? new Date(item.timestamp).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</small></span></button>)}</div> : notificationState === 'empty' && <div className="v26NotificationEmpty"><Bell/><b>Bildirim yok</b><p>Gerçek bir sistem olayı oluştuğunda burada görünecek.</p></div>}
           </section>}
         </div>
         <div className="v26HeaderProfileSlot" />

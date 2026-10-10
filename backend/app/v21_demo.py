@@ -584,18 +584,22 @@ def emit_notification(state: dict[str, Any], kind: str, message: str, *, event_i
     return record_event(state, "NOTIFICATION", message, reason=f"{kind}:{event_id}", event_id=f"notification-{event_id}", source="NOTIFICATION")
 
 
-NOTIFICATION_TARGETS = {
-    "API": "system-health", "DATABASE": "system-health", "STREAM": "system-health",
-    "SCAN": "execution-status", "AUTO": "execution-status", "KILL_SWITCH": "risk-management",
-    "CONSECUTIVE_LOSSES": "risk-management", "DAILY_LOSS": "risk-management",
-    "ROTATION": "trade-history", "TRADE": "trade-history", "FILL": "trade-history",
+NOTIFICATION_PRESENTATION = {
+    "ACİL KORUMA": ("critical", "Acil koruma gerekiyor", "risk-management"),
+    "AUTO_LOOP_CRASH": ("critical", "Otomasyon beklenmedik şekilde durdu", "execution-status"),
+    "AUTO_START_ERROR": ("critical", "Otomasyon başlatılamadı", "execution-status"),
+    "DAILY_LOSS_5": ("warning", "Günlük zarar %5'e ulaştı", "risk-management"),
+    "DAILY_LOSS_10": ("warning", "Günlük zarar %10'a ulaştı", "risk-management"),
+    "DAILY_LOSS_15": ("critical", "Günlük zarar %15'e ulaştı", "risk-management"),
+    "DAILY_LOSS_20": ("critical", "Günlük zarar %20'ye ulaştı", "risk-management"),
+    "KILL_SWITCH": ("critical", "Acil durdurma koruması etkin", "risk-management"),
+    "CONSECUTIVE_LOSSES": ("critical", "Ardışık zarar sınırına ulaşıldı", "risk-management"),
+    "ROTATION": ("success", "Pozisyon rotasyonla kapatıldı", "trade-history"),
+    "SCAN_STARTED": ("info", "Piyasa taraması başladı", "execution-status"),
+    "AUTO_STARTED": ("success", "Demo otomasyonu başlatıldı", "execution-status"),
+    "AUTO_STOPPED": ("info", "Demo otomasyonu durduruldu", "execution-status"),
 }
-
-CRITICAL_NOTIFICATION_TARGETS = {
-    "ACİL KORUMA": "risk-management",
-    "AUTO_LOOP_CRASH": "execution-status",
-    "AUTO_START_ERROR": "execution-status",
-}
+DEFAULT_NOTIFICATION_PRESENTATION = ("info", "Sistem bildirimi", "execution-status")
 
 
 def _emit_notification_safely(
@@ -645,13 +649,12 @@ def notification_payload(state: dict[str, Any], limit: int = 100) -> list[dict[s
         if event.get("kind") != "NOTIFICATION":
             continue
         notification_type = str(event.get("reason") or "INFO").split(":", 1)[0]
-        normalized_type = notification_type.upper()
-        severity = "critical" if notification_type in CRITICAL_NOTIFICATION_TARGETS else "error" if any(token in normalized_type for token in ("ERROR", "FAIL", "KILL", "LOSS", "RISK")) else "warning" if any(token in normalized_type for token in ("STOP", "WARNING", "ROTATION")) else "info"
+        severity, title, target = NOTIFICATION_PRESENTATION.get(notification_type.upper(), DEFAULT_NOTIFICATION_PRESENTATION)
         items.append({
             "id": str(event.get("id")), "type": notification_type, "severity": severity,
-            "title": notification_type.replace("_", " "), "message": event.get("message", ""),
+            "title": title, "message": event.get("message", ""),
             "timestamp": event.get("created_at"), "read": str(event.get("id")) in read_ids,
-            "target": CRITICAL_NOTIFICATION_TARGETS.get(notification_type) or next((target for prefix, target in NOTIFICATION_TARGETS.items() if normalized_type.startswith(prefix)), "execution-status"),
+            "target": target,
         })
         if len(items) >= limit:
             break
