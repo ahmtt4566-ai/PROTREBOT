@@ -209,6 +209,13 @@ identity binding can resolve earlier unverified evidence. Binding failures are
 logged and never interrupt closure or protection cleanup. Safety closes, direct
 exchange closes and missing/ambiguous identities remain unverified. Previously
 counted conservative losses are not retracted when later evidence resolves.
+An authenticated legacy Demo user can acknowledge stale observer errors from
+the Otopilot warning using `DEMO HATAYI SIFIRLA`. The reset requires explicit
+risk acknowledgement, an armed Demo grant, configured credentials and One-way
+mode while automation is off. It durably clears only error markers and logs
+the acknowledgement; results, loss counter and pause latch remain unchanged.
+Invalid accounting or a new error during persistence rejects the reset.
+Starting automation still requires its separate existing confirmation.
 
 The user bell panel includes critical Demo notifications for failed Stop
 repair (`ACİL KORUMA`), a failed first automation cycle (`AUTO_START_ERROR`),

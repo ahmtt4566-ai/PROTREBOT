@@ -176,6 +176,11 @@ class AutoStartRequest(BaseModel):
     strategy_id: str | None = None
 
 
+class ObserverErrorResetRequest(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=40)
+    acknowledged: bool = Field(strict=True)
+
+
 class BacktestRequest(BaseModel):
     symbol: str = Field(default="BTCUSDT", min_length=5, max_length=20)
     interval: Literal["1m", "5m", "15m", "1h", "4h"] = "15m"
@@ -1436,6 +1441,7 @@ def _observe_legacy_results(
         return changed
     except Exception as exc:
         error = type(exc).__name__
+        state["_legacy_result_error_generation"] = state.get("_legacy_result_error_generation", 0) + 1
         errors = state.setdefault("legacy_result_observer_errors", [])
         if error not in errors:
             errors.append(error)
@@ -2709,6 +2715,10 @@ def summary_payload(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "version": "21.0.0", "mode": "BINANCE_FUTURES_DEMO_ONLY", "settings": state["settings"],
         "auto": state["auto"], "risk": state.get("risk", {}), "notifications": {**notifications, "items": notification_items},
+        "result_observer": {
+            "reset_required": bool(state.get("legacy_result_observer_errors") or state.get("legacy_loss_guard", {}).get("error")),
+            "errors": list(state.get("legacy_result_observer_errors", [])),
+        },
         "scanner": scanner_payload, "stream": state["stream"], "daily": daily_metrics(state),
         "account": {
             "wallet_balance": snapshot.get("wallet_balance"), "available_balance": snapshot.get("available_balance"),
@@ -2955,6 +2965,86 @@ async def v21_demo_smoke_test(request: Request) -> dict[str, Any]:
     record_event(state, "PAPER_SMOKE", f"{symbol} Demo smoke paper pozisyonu açıldı; Stop {position['stop_loss']} · TP {position['targets'][-1]}.", symbol=symbol, side=position["direction"], price=position["entry_price"], source="SMOKE_TEST")
     persist_state(state)
     return {"ok": True, "position": position, "open_position_count": len(state["paper_positions"]), "demo_only": True, "real_trading_locked": True}
+
+
+@router.post("/auto/errors/reset")
+async def v21_observer_error_reset(request: Request, body: ObserverErrorResetRequest) -> dict[str, Any]:
+    state = state_for(request)
+    if not state.get("_user_id"):
+        raise HTTPException(401, "Doğrulanmış kullanıcı oturumu gerekli.")
+    if not body.acknowledged or body.confirmation.strip().upper() != "DEMO HATAYI SIFIRLA":
+        raise HTTPException(422, "Hatayı onaylamak için DEMO HATAYI SIFIRLA yazın.")
+    if not _legacy_auto_selected(state) or state["auto"].get("enabled"):
+        raise HTTPException(409, "Hata sıfırlama için eski Demo otomasyonu kapalı olmalı.")
+    demo = demo_state_for(request)
+    if demo.get("_user_id") != state["_user_id"]:
+        raise HTTPException(409, "Demo kullanıcı context'i eşleşmiyor.")
+    if not armed(demo):
+        raise HTTPException(423, "Önce 10 dakikalık DEMO emir kilidini açın.")
+    if not credentials_configured(request):
+        raise HTTPException(412, "Binance Futures Demo anahtarları ayarlı değil.")
+    snapshot = await account_snapshot(client_for(request))
+    if snapshot.get("hedge_mode"):
+        raise HTTPException(409, "Demo hesabı One-way / Tek Yön modunda olmalı.")
+    errors = list(state.get("legacy_result_observer_errors", []))
+    guard = copy.deepcopy(state.get("legacy_loss_guard", {}))
+    error = guard.get("error")
+    generation = state.get("_legacy_result_error_generation", 0)
+    if not errors and not error:
+        return summary_payload(state)
+    candidate = {**state, "legacy_result_observer_errors": []}
+    if guard:
+        candidate["legacy_loss_guard"] = {**guard, "error": None}
+    probe = {
+        "_user_id": state["_user_id"], "settings": state["settings"],
+        "risk": copy.deepcopy(state["risk"]), "auto": copy.deepcopy(state["auto"]),
+        "legacy_trade_results": state.get("legacy_trade_results", {}),
+        "legacy_result_observer_errors": [],
+    }
+    if guard:
+        probe["legacy_loss_guard"] = copy.deepcopy(candidate["legacy_loss_guard"])
+    try:
+        update_legacy_loss_guard(probe, demo, datetime.now(timezone.utc))
+    except Exception as exc:
+        logger.exception("Legacy observer reset rejected: accounting remains invalid")
+        raise HTTPException(409, "Hesaplama verisi hâlâ geçersiz; hata kilidi korunuyor.") from exc
+    journal = copy.deepcopy(state.get("legacy_result_journal", {"journal": [], "seen_event_ids": []}))
+    try:
+        record_event(
+            journal, "LEGACY_OBSERVER_ERROR_RESET",
+            "Kullanıcı gözlemci hatasını ve eksik sonuç riskini onaylayarak hata kaydını sıfırladı; "
+            "ardışık zarar kilidi, sayaç ve işlem sonuçları değiştirilmedi. Otomasyon ayrıca elle başlatılmalı.",
+            reason=", ".join(errors or [str(error)]), source="USER",
+        )
+        candidate["legacy_result_journal"] = journal
+        tasks = getattr(getattr(state.get("_app"), "state", None), "_v21_persistence_tasks", set())
+        if tasks:
+            await asyncio.gather(*tuple(tasks))
+        persist_state(candidate)
+        tasks = getattr(getattr(state.get("_app"), "state", None), "_v21_persistence_tasks", set())
+        if tasks:
+            await asyncio.gather(*tuple(tasks))
+        if (
+            state.get("_legacy_result_error_generation", 0) != generation
+            or state.get("legacy_result_observer_errors", []) != errors
+            or state.get("legacy_loss_guard", {}).get("error") != error
+        ):
+            persist_state(state)
+            tasks = getattr(getattr(state.get("_app"), "state", None), "_v21_persistence_tasks", set())
+            if tasks:
+                await asyncio.gather(*tuple(tasks))
+            logger.warning("Legacy observer reset raced with a new error; acknowledgement required again")
+            raise HTTPException(409, "Yeni gözlemci hatası oluştu; güncel uyarıyı yeniden onaylayın.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Legacy observer reset persistence failed; error lock retained")
+        raise HTTPException(503, "Hata kaydı sıfırlanamadı; kilit korunuyor.") from exc
+    state["legacy_result_observer_errors"] = []
+    if guard:
+        state["legacy_loss_guard"]["error"] = None
+    state["legacy_result_journal"] = journal
+    return summary_payload(state)
 
 
 @router.post("/auto/start")
