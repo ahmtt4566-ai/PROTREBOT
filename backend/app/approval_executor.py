@@ -16,16 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 async def requester_valid(conn, row):
-    grant = await conn.fetchrow(
-        "SELECT user_id FROM moderator_permissions WHERE user_id = $1 AND permission = $2 FOR SHARE",
-        row["requester_user_id"], "approvals.create",
-    )
     requester = await conn.fetchrow(
         """SELECT u.security->>'role' AS role, u.security->'active' = 'true'::jsonb AS active,
            EXISTS (SELECT 1 FROM moderator_permissions p WHERE p.user_id = u.user_id
                    AND p.permission = 'approvals.create') AS allowed
            FROM commercial_auth_users u WHERE u.user_id = $1 FOR SHARE OF u /* AS requester_allowed */""",
         row["requester_user_id"],
+    )
+    grant = await conn.fetchrow(
+        "SELECT user_id FROM moderator_permissions WHERE user_id = $1 AND permission = $2 FOR SHARE",
+        row["requester_user_id"], "approvals.create",
     )
     return grant is not None and requester is not None and requester["role"] == "MODERATOR" and requester["active"] is True and requester["allowed"] is True
 

@@ -186,7 +186,7 @@ async def owner_connection(request: Request):
         async with pool.acquire() as conn, conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock(71010006)")
             row = await conn.fetchrow(
-                "SELECT auth_version, security FROM commercial_auth_users WHERE user_id = $1 FOR SHARE",
+                "SELECT auth_version, security FROM commercial_auth_users WHERE user_id = $1",
                 owner["id"],
             )
             if not row or row["auth_version"] != owner["auth_version"]:

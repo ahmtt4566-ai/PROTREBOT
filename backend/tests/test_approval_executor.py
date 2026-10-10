@@ -106,12 +106,14 @@ def test_approval_audit_failure_does_not_claim_request(approvals):
     assert pool.approvals[row["id"]]["status"] == "pending" and pool.canonical_changes == 0
 
 
-def test_agent_failure_invalidates_sessions_and_explicit_retry_does_not_touch_canonical(approvals):
+@pytest.mark.parametrize("failure", ["persist", "local_save"])
+def test_agent_failure_invalidates_sessions_and_explicit_retry_does_not_touch_canonical(approvals, failure):
     client, pool = approvals
     row = create(client)
     rt = client.app.state.v22_commercial
     rt["state"]["agents"] = [{"id": "agent", "user_id": "customer", "status": "ACTIVE", "token_version": 1}]
-    with patch.object(auth, "persist_v22_commercial", AsyncMock(return_value=False)):
+    fault = patch.object(auth, "persist_v22_commercial", AsyncMock(return_value=False)) if failure == "persist" else patch.object(auth, "save_state", side_effect=RuntimeError("local save unavailable"))
+    with fault:
         result = approve(client, row)
     assert result.status_code == 200 and result.json()["status"] == "failed"
     assert result.json()["result_code"] == "agents_revoke_pending" and result.json()["needs_review"] is True
@@ -158,16 +160,17 @@ def test_owner_detail_reads_subscription_warning_and_real_summary(approvals):
     assert client.get("/api/v22/admin/approvals/summary", headers=OWNER).json() == {"pending_count": 1}
 
 
-def test_db_self_decision_check_model_and_erasure_tombstone(approvals):
+@pytest.mark.parametrize("erased", ["customer", "moderator"])
+def test_db_self_decision_check_model_and_erasure_tombstone(approvals, erased):
     client, pool = approvals
     row = create(client)
     with pytest.raises(AssertionError, match="DB CHECK"):
         asyncio.run(pool.fetchrow("UPDATE approval_requests SET status", row["id"], "approved", "moderator", None, None, 1))
     from app import account_erasure
     with patch.object(account_erasure, "table_exists", AsyncMock(return_value=False)):
-        asyncio.run(account_erasure.erase_database(client.app, {"id": "customer", "email": "customer@example.test"}))
+        asyncio.run(account_erasure.erase_database(client.app, {"id": erased, "email": erased + "@example.test"}))
     assert pool.approvals[row["id"]]["reason"] == "" and pool.approvals[row["id"]]["decision_note"] == ""
-    assert "customer" in pool.erased
+    assert erased in pool.erased
 
 
 def test_internal_already_desired_state_is_idempotent_and_rechecked_target_race_is_stale(approvals):
@@ -208,3 +211,34 @@ def test_agent_exception_is_sanitized_and_failed_requests_are_never_automaticall
         assert approve(client, row).status_code == 409
         assert cleanup.await_count == 1
     assert pool.canonical_changes == 1
+
+
+def test_requester_role_is_locked_before_grant_matching_existing_permission_mutations(approvals):
+    client, pool = approvals
+    row = create(client)
+    assert approve(client, row).status_code == 200
+    locks = [sql for sql in pool.queries if "FOR SHARE" in sql]
+    assert len(locks) == 4
+    for role_lock, permission_lock in zip(locks[::2], locks[1::2]):
+        assert "FROM commercial_auth_users u" in role_lock
+        assert "FROM moderator_permissions" in permission_lock
+
+
+@pytest.mark.parametrize("operation", ["reject", "cancel", "expire", "stale"])
+def test_each_nonexecution_transition_rolls_back_if_audit_cannot_persist(approvals, operation):
+    client, pool = approvals
+    row = create(client)
+    if operation == "expire":
+        pool.approvals[row["id"]]["expires_at"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    if operation == "stale":
+        pool.users["customer"]["auth_version"] += 1
+    previous = copy.deepcopy(pool.approvals[row["id"]])
+    pool.audit_fail = True
+    if operation == "cancel":
+        response = client.post(f"/api/mod/approvals/{row['id']}/cancel", headers=H)
+    elif operation == "reject":
+        response = client.post(f"/api/v22/admin/approvals/{row['id']}/reject", headers=OWNER, json={"decision_note": "Yeniden inceleme"})
+    else:
+        response = approve(client, row)
+    assert response.status_code == 503
+    assert pool.approvals[row["id"]] == previous and pool.canonical_changes == 0
