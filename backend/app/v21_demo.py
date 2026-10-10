@@ -9,6 +9,7 @@ restart and requires both the short-lived DEMO arm and a second explicit
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import math
@@ -392,7 +393,14 @@ def _queue_v21_snapshot(state: dict[str, Any], user_id: str, payload: dict[str, 
         return True
     task = loop.create_task(_persist_v21_snapshot_db(application, user_id, payload))
     tasks.add(task)
-    task.add_done_callback(tasks.discard)
+    def snapshot_done(completed: asyncio.Task[Any]) -> None:
+        tasks.discard(completed)
+        if not completed.cancelled():
+            error = completed.exception()
+            if error is not None:
+                logger.error("Demo snapshot persistence failed: error=%s", type(error).__name__)
+
+    task.add_done_callback(snapshot_done)
     return True
 
 
@@ -583,6 +591,29 @@ NOTIFICATION_TARGETS = {
     "ROTATION": "trade-history", "TRADE": "trade-history", "FILL": "trade-history",
 }
 
+CRITICAL_NOTIFICATION_TARGETS = {
+    "ACİL KORUMA": "risk-management",
+    "AUTO_LOOP_CRASH": "execution-status",
+    "AUTO_START_ERROR": "execution-status",
+}
+
+
+def emit_critical_notification(state: dict[str, Any], kind: str, message: str, *, event_id: str) -> None:
+    # Notification storage must never interrupt protection or execution recovery.
+    snapshot = None
+    try:
+        snapshot = (
+            list(state.get("journal", [])),
+            list(state.get("seen_event_ids", [])),
+            copy.deepcopy(state.get("notifications", {})),
+        )
+        if emit_notification(state, kind, message, event_id=event_id) is not None:
+            persist_state(state)
+    except Exception as exc:
+        if snapshot is not None:
+            state["journal"], state["seen_event_ids"], state["notifications"] = snapshot
+        logger.error("Critical Demo notification failed: kind=%s error=%s", kind, type(exc).__name__)
+
 
 def notification_payload(state: dict[str, Any], limit: int = 100) -> list[dict[str, Any]]:
     read_ids = {str(item) for item in state.get("notifications", {}).get("read_ids", [])}
@@ -592,12 +623,12 @@ def notification_payload(state: dict[str, Any], limit: int = 100) -> list[dict[s
             continue
         notification_type = str(event.get("reason") or "INFO").split(":", 1)[0]
         normalized_type = notification_type.upper()
-        severity = "error" if any(token in normalized_type for token in ("ERROR", "FAIL", "KILL", "LOSS", "RISK")) else "warning" if any(token in normalized_type for token in ("STOP", "WARNING", "ROTATION")) else "info"
+        severity = "critical" if notification_type in CRITICAL_NOTIFICATION_TARGETS else "error" if any(token in normalized_type for token in ("ERROR", "FAIL", "KILL", "LOSS", "RISK")) else "warning" if any(token in normalized_type for token in ("STOP", "WARNING", "ROTATION")) else "info"
         items.append({
             "id": str(event.get("id")), "type": notification_type, "severity": severity,
             "title": notification_type.replace("_", " "), "message": event.get("message", ""),
             "timestamp": event.get("created_at"), "read": str(event.get("id")) in read_ids,
-            "target": next((target for prefix, target in NOTIFICATION_TARGETS.items() if normalized_type.startswith(prefix)), "execution-status"),
+            "target": CRITICAL_NOTIFICATION_TARGETS.get(notification_type) or next((target for prefix, target in NOTIFICATION_TARGETS.items() if normalized_type.startswith(prefix)), "execution-status"),
         })
         if len(items) >= limit:
             break
@@ -1553,6 +1584,10 @@ async def ensure_stop_protection(application: Any, snapshot: dict[str, Any], *, 
             plan["recovery_attempts"] = int(plan.get("recovery_attempts", 0)) + 1
             plan["last_error"] = str(exc)
             record_event(state, "ACİL KORUMA", f"{symbol} Stop onarımı başarısız; pozisyon korunmasız ve yeniden denenecek.", symbol=symbol, source="RISK_ENGINE")
+            emit_critical_notification(
+                state, "ACİL KORUMA", f"{symbol} Stop onarımı başarısız; pozisyon korunmasız ve yeniden denenecek.",
+                event_id=f"unprotected-{plan.get('id')}-{symbol}",
+            )
             try:
                 await close_symbol_position(client, symbol, str(position.get("position_side") or "BOTH"))
                 confirmation = response_rows(await client.signed("GET", "/fapi/v3/positionRisk", {"symbol": symbol}))
@@ -2202,9 +2237,19 @@ def _automation_task_done(application: Any, task: asyncio.Task[Any]) -> None:
     if not isinstance(state, dict):
         return
     message = f"V21 automation loop beklenmedik şekilde durdu: {error}"
+    logger.error("Demo automation loop crashed: error=%s", type(error).__name__)
     state["auto"].update({"last_error": str(error)[:220], "last_decision": message})
     record_event(state, "AUTO_LOOP_CRASH", message, source="SYSTEM")
     persist_state(state)
+    crash_id = uuid.uuid4().hex
+    for user_id, user_state in _v21_user_store(application).items():
+        if str(user_state.get("_user_id") or "") != user_id:
+            continue
+        auto = user_state.get("auto", {})
+        if auto.get("enabled") and auto.get("user_confirmed"):
+            emit_critical_notification(
+                user_state, "AUTO_LOOP_CRASH", message, event_id=f"auto-loop-crash-{crash_id}",
+            )
 
 
 def ensure_automation_task(application: Any) -> asyncio.Task[Any]:
@@ -2767,6 +2812,10 @@ async def v21_auto_start(request: Request, body: AutoStartRequest) -> dict[str, 
         })
         state["scanner"].update({"scan_status": "HATA", "last_error": error, "active": False, "running": False})
         record_event(state, "AUTO_START_ERROR", f"İlk Demo taraması başarısız: {error}", source="SYSTEM")
+        emit_critical_notification(
+            state, "AUTO_START_ERROR", f"İlk Demo taraması başarısız: {error}",
+            event_id=f"auto-start-error-{state['auto'].get('started_at')}",
+        )
         persist_state(state)
     return summary_payload(state)
 

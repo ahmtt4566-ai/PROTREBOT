@@ -45,7 +45,7 @@ type Analysis = {
 }
 type Health = {status:string;version:string;mode:string;testnet:string;live_guard:string;paper:string;database:string;cloud_evidence:string;web_access:string}
 type ConnectionStatus = {connections?:Record<'TESTNET'|'LIVE',{configured:boolean;active:boolean;last_test_ok:boolean;api_key_masked?:string;last_error?:string|null;storage?:string;account?:{active_positions?:number}|null}>;vault?:{ready:boolean;reason?:string|null}}
-type NotificationItem = {id:string;type:string;severity:'success'|'warning'|'error'|'info';title:string;message:string;timestamp:string|null;read:boolean;target:string}
+type NotificationItem = {id:string;type:string;severity:'success'|'warning'|'error'|'critical'|'info';title:string;message:string;timestamp:string|null;read:boolean;target:string}
 type NotificationResponse = {items:NotificationItem[];unread:number}
 const ANALYSIS_TIMEOUT_MS = 30000
 
@@ -803,7 +803,7 @@ export default function TestnetFirstApp() {
           <button className={`v26NotificationButton${unreadNotifications ? ' hasUnread' : ''}`} type="button" aria-label={`Bildirimler${unreadNotifications ? `, ${unreadNotifications} okunmamış` : ''}`} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}><Bell/>{unreadNotifications > 0 && <span className="v26NotificationBadge">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</button>
           {notificationsOpen && <section className="v26NotificationPanel" role="dialog" aria-label="Bildirimler">
             <header><div><small>DURUM MERKEZİ</small><h2>Bildirimler</h2></div><div><span>{unreadNotifications}</span>{unreadNotifications > 0 && <button type="button" onClick={() => void markAllNotificationsRead()}>TÜMÜ OKUNDU</button>}</div></header>
-            {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <button type="button" key={item.id} className={`v26NotificationItem ${item.severity}${item.read ? ' isRead' : ''}`} onClick={() => void openNotification(item)}><i><Bell/></i><span><b>{item.title}</b><p>{item.message}</p><small>{item.timestamp ? new Date(item.timestamp).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</small></span></button>)}</div> : <div className="v26NotificationEmpty"><Bell/><b>Bildirim yok</b><p>Gerçek bir sistem olayı oluştuğunda burada görünecek.</p></div>}
+            {notifications.length ? <div className="v26NotificationList">{notifications.map(item => <button type="button" key={item.id} className={`v26NotificationItem ${item.severity}${item.read ? ' isRead' : ''}`} onClick={() => void openNotification(item)}><i><Bell/></i><span><b>{item.title}</b>{item.severity === 'critical' && <strong className="v26NotificationCritical">KRİTİK</strong>}<p>{item.message}</p><small>{item.timestamp ? new Date(item.timestamp).toLocaleString('tr-TR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</small></span></button>)}</div> : <div className="v26NotificationEmpty"><Bell/><b>Bildirim yok</b><p>Gerçek bir sistem olayı oluştuğunda burada görünecek.</p></div>}
           </section>}
         </div>
         <div className="v26HeaderProfileSlot" />

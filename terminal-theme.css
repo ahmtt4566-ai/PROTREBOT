@@ -8556,6 +8556,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .v26App .v26NotificationItem.isRead { opacity: .68; }
 .v26App .v26NotificationItem.warning > i { background: rgba(245, 190, 85, .12); color: var(--terminal-warning, #f5be55); }
 .v26App .v26NotificationItem.error > i { background: rgba(239, 143, 134, .12); color: var(--terminal-negative, #ef8f86); }
+.v26App .v26NotificationItem.critical > i { background: rgba(239, 143, 134, .2); color: var(--terminal-negative, #ef8f86); }
+.v26App .v26NotificationCritical { display: inline-block; margin-left: 7px; color: var(--terminal-negative, #ef8f86); font-size: 9px; }
 .v26App .v26NotificationItem.info > i { background: rgba(126, 211, 247, .12); color: var(--terminal-info, #7ed3f7); }
 .v26App .v26NotificationBadge { position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--terminal-negative, #ef8f86); color: #071116; font-size: 9px; font-weight: 800; display: grid; place-items: center; }
 .v26App .v26NotificationButton { position: relative; }

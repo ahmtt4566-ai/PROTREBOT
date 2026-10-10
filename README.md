@@ -177,6 +177,18 @@ passed to the settings parser by the template regression test.
 
 ## Kais Original v2 Demo controls
 
+The user bell panel includes critical Demo notifications for failed Stop
+repair (`ACİL KORUMA`), a failed first automation cycle (`AUTO_START_ERROR`),
+and an unexpectedly terminated automation task (`AUTO_LOOP_CRASH`).
+Notification creation/storage failures are logged and isolated from Stop repair,
+safe position closure and automation recovery; synchronous failures restore the
+notification bookkeeping so retries are not suppressed. Asynchronous PostgreSQL
+snapshot failures are logged; an in-memory notification does not prove durable
+delivery. A loop crash is retained in the global system journal and server log
+even without a user recipient. Only matching, confirmed active user automation
+contexts receive that crash notification. Execution decisions and risk gates
+are unchanged; the panel shows a red critical icon and a `KRİTİK` label.
+
 Public market reads use a single bounded request budget across upstream hosts.
 Owners can diagnose the original signed-request transport without entering
 credentials via `GET /api/exchange-connections/time-status?mode=TESTNET` (or
