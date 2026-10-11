@@ -999,6 +999,13 @@ async def restore_v25_state(application: Any) -> bool:
         row = await pool.fetchrow("SELECT payload FROM application_state_snapshots WHERE state_key = $1", V25_SNAPSHOT_KEY)
         if row is not None:
             payload = row["payload"]
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            if not isinstance(payload, dict):
+                raise ValueError("Invalid PostgreSQL recovery payload.")
+            revision = payload.get("persistence_revision", 0)
+            if type(revision) not in (int, str) or not 0 <= int(revision) <= 9_223_372_036_854_775_807:
+                raise ValueError("Invalid PostgreSQL recovery revision.")
             restored = sanitized_state(payload)
             state.update(restored)
         state["_app"] = application
@@ -1007,6 +1014,7 @@ async def restore_v25_state(application: Any) -> bool:
         state["recovery_error"] = None
         return True
     except Exception:
+        state["recovery_loaded"] = False
         state["recovery_ready"] = False
         state["recovery_error"] = "PostgreSQL recovery failed."
         return False

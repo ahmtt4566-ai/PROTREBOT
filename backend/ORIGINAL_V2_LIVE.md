@@ -68,6 +68,17 @@ the database is ahead. Never force a larger revision over unknown persisted
 positions, intents or daily-loss state. A missing row can already be inserted
 by the existing upsert; a missing table requires separately approved schema work.
 
+On startup, PostgreSQL JSONB text is decoded before restoring the shared LIVE
+snapshot. The saved revision is authoritative: revision 374 is restored as 374,
+and the next write submits 375 through the unchanged revision guard. Previously,
+JSONB text was treated as a non-object and silently replaced by initial state,
+including revision zero, while recovery was marked successful. This affected
+both General Auto Trade and Original V2. Invalid JSON, non-object records or
+invalid revisions now leave recovery blocked instead of resetting local state.
+Restore is read-only; daily-loss events, plans, intents, emergency and Original
+daily/fill-lock records are retained. Entry authority still requires fresh gates,
+ARM and the applicable owner confirmation after restart.
+
 LIVE status polling reads local state, not Binance. Previously each full account
 refresh made six signed reads (`account`, `positionRisk`, bulk `openOrders`,
 `openAlgoOrders`, `positionSide/dual`, `symbolConfig`), plus `multiAssetsMargin`

@@ -2265,6 +2265,84 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertFalse(asyncio.run(restore_v25_state(unavailable)))
         self.assertFalse(unavailable.state.v25_execution["recovery_ready"])
 
+    def test_v25_restart_restores_database_json_revision_before_next_write(self):
+        stored = initial_state()
+        stored.update(persistence_revision=374, emergency={"active": True, "reason": "daily-loss", "triggered_at": "saved"})
+        stored["events"] = [{"kind": "LIVE_POSITION_CLOSED", "realized_pnl": -12, "created_at": "2026-10-11T10:00:00+00:00"}]
+        stored["plans"] = {"saved-position": {"status": "OPEN", "quantity": "0.01"}}
+        stored["intents"] = {"saved-lock": {"status": "UNKNOWN"}}
+        stored["original_v2_live"] = {
+            "enabled": True, "daily_loss_percent": 3,
+            "daily": {"date": "2026-10-11", "net_income": -12, "locked": True},
+            "fill_lock": {"active": True, "id": "saved-fill-lock"},
+        }
+        original_json = json.dumps(stored)
+        database_payload = [original_json]
+
+        class Pool:
+            async def fetchrow(self, query, *args):
+                if query.lstrip().startswith("SELECT"):
+                    return {"payload": database_payload[0]}
+                submitted = json.loads(args[1])
+                if submitted["persistence_revision"] < json.loads(database_payload[0])["persistence_revision"]:
+                    return None
+                database_payload[0] = args[1]
+                return {"write_status": "UPDATED"}
+
+        async def restart():
+            state = initial_state()
+            state.update(persistence_revision=43, recovery_loaded=False, recovery_ready=False)
+            state["lock"] = asyncio.Lock()
+            lock = state["lock"]
+            application = SimpleNamespace(state=SimpleNamespace(db_pool=Pool(), v25_execution=state))
+            self.assertTrue(await v25_execution.restore_v25_state(application))
+            self.assertEqual(state["persistence_revision"], 374)
+            self.assertEqual(database_payload[0], original_json)
+            self.assertIs(state["lock"], lock)
+            self.assertEqual(state["events"], stored["events"])
+            self.assertEqual(state["plans"]["saved-position"]["quantity"], "0.01")
+            self.assertEqual(state["intents"], stored["intents"])
+            self.assertEqual(state["emergency"], stored["emergency"])
+            self.assertEqual(state["original_v2_live"]["daily"], stored["original_v2_live"]["daily"])
+            self.assertEqual(state["original_v2_live"]["fill_lock"], stored["original_v2_live"]["fill_lock"])
+            self.assertEqual(state["original_v2_live"]["daily_loss_percent"], 3)
+            self.assertFalse(state["original_v2_live"]["enabled"])
+            self.assertTrue(state["original_v2_live"]["paused"])
+            self.assertTrue(state["real_trading_locked"])
+            self.assertFalse(state["auto"]["enabled"])
+            self.assertFalse(state["recovery_ready"])
+            self.assertEqual(await v25_execution.persist_state_awaited(state), "UPDATED")
+            self.assertEqual(state["persistence_revision"], 375)
+            persisted = json.loads(database_payload[0])
+            self.assertEqual(persisted["persistence_revision"], 375)
+            self.assertEqual(persisted["events"], stored["events"])
+            self.assertEqual(persisted["intents"], stored["intents"])
+            self.assertEqual(persisted["emergency"], stored["emergency"])
+            self.assertEqual(persisted["original_v2_live"]["daily"], stored["original_v2_live"]["daily"])
+            self.assertEqual(persisted["original_v2_live"]["fill_lock"], stored["original_v2_live"]["fill_lock"])
+
+        asyncio.run(restart())
+
+    def test_v25_recovery_rejects_invalid_database_payload_without_resetting_state(self):
+        invalid_payloads = ["not-json", "[]", "null", None, {"persistence_revision": "bad"},
+                            {"persistence_revision": -1}, {"persistence_revision": True},
+                            {"persistence_revision": 9_223_372_036_854_775_808}]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                pool = SimpleNamespace(fetchrow=AsyncMock(return_value={"payload": payload}))
+                state = initial_state()
+                state.update(persistence_revision=43, recovery_loaded=False)
+                state["plans"] = {"local-position": {"quantity": "0.01"}}
+                application = SimpleNamespace(state=SimpleNamespace(db_pool=pool, v25_execution=state))
+                self.assertFalse(asyncio.run(v25_execution.restore_v25_state(application)))
+                self.assertFalse(state["recovery_loaded"])
+                self.assertFalse(state["recovery_ready"])
+                self.assertEqual(state["persistence_revision"], 43)
+                self.assertEqual(state["plans"], {"local-position": {"quantity": "0.01"}})
+                pool.fetchrow.assert_awaited_once_with(
+                    "SELECT payload FROM application_state_snapshots WHERE state_key = $1", v25_execution.V25_SNAPSHOT_KEY,
+                )
+
     def test_v25_recovery_failure_and_missing_snapshot_do_not_authorize_entries(self):
         from app.v25_execution import execute_live_order, restore_v25_state
         from fastapi import HTTPException
