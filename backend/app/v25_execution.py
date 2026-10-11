@@ -4930,6 +4930,71 @@ async def v25_status(request: Request) -> dict[str, Any]:
     return public_status(request.app, request)
 
 
+def history_record_warning(errors: list[dict[str, str]], symbol: str, field: str) -> None:
+    logger.warning("LIVE history skipped invalid record field: %s", field)
+    errors.append({"symbol": symbol, "message": f"Geçmiş kaydındaki geçersiz {field} alanı atlandı; diğer kayıtlar okunmaya devam ediyor."})
+
+
+def history_order_id(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError("Invalid order identity")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str) and value.strip().isascii() and value.strip().isdecimal():
+        result = int(value.strip())
+    else:
+        raise ValueError("Invalid order identity")
+    if result < 0:
+        raise ValueError("Invalid order identity")
+    return result or None
+
+
+def history_tracked_identities(
+    plans: dict[str, Any], errors: list[dict[str, str]],
+) -> tuple[set[int], set[str]]:
+    order_ids: set[int] = set()
+    client_ids: set[str] = set()
+    for plan in plans.values():
+        if not isinstance(plan, dict):
+            history_record_warning(errors, "*", "plan")
+            continue
+        for field in ("exchange_order_ids", "entry_order_id", "close_client_order_ids", "entry_client_order_id"):
+            value = plan.get(field)
+            # Legacy JSONB snapshots can contain null or a single identity instead of a list.
+            values = value if isinstance(value, list) else [value]
+            invalid = False
+            for item in values:
+                try:
+                    if field in {"exchange_order_ids", "entry_order_id"}:
+                        order_id = history_order_id(item)
+                        if order_id is not None:
+                            order_ids.add(order_id)
+                    elif item is not None and item != "":
+                        if not isinstance(item, str):
+                            raise ValueError("Invalid client identity")
+                        client_ids.add(item)
+                except ValueError:
+                    invalid = True
+            if invalid:
+                history_record_warning(errors, "*", field)
+    return order_ids, client_ids
+
+
+def history_project_row(row: dict[str, Any], fields: dict[str, str]) -> dict[str, Any]:
+    result = {}
+    for target, source in fields.items():
+        value = row.get(source)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, (str, int, float))
+            or isinstance(value, float) and not math.isfinite(value)
+        ):
+            raise ValueError(source)
+        result[target] = value
+    return result
+
+
 @router.get("/history")
 async def v25_history(
     request: Request,
@@ -4939,7 +5004,10 @@ async def v25_history(
     """Read-only Binance history for fills without a matching V25 plan."""
     execution_owner(request)
     state = request.app.state.v25_execution
-    client = client_for(request.app, request)
+    try:
+        client = client_for(request.app, request)
+    except LiveExchangeError as exc:
+        raise safe_exchange_error(exc) from exc
     requested_symbol = normalize_symbol(symbol) if symbol else None
     known_symbols = {
         str(item.get("symbol") or "").upper()
@@ -4969,20 +5037,7 @@ async def v25_history(
             errors = [{"symbol": "*", "message": sanitized_exception_message(exc)}]
             bootstrap_income = {}
         symbols = sorted(set(item for item in known_symbols if item.endswith("USDT")) | set(bootstrap_income))[:12]
-    tracked_order_ids = {
-        int(order_id)
-        for plan in state.get("plans", {}).values()
-        if isinstance(plan, dict)
-        for order_id in [*plan.get("exchange_order_ids", []), plan.get("entry_order_id")]
-        if str(order_id).isdigit()
-    }
-    tracked_client_ids = {
-        str(client_id)
-        for plan in state.get("plans", {}).values()
-        if isinstance(plan, dict)
-        for client_id in [plan.get("entry_client_order_id"), *plan.get("close_client_order_ids", [])]
-        if client_id
-    }
+    tracked_order_ids, tracked_client_ids = history_tracked_identities(state.get("plans", {}), errors)
     external_trades: list[dict[str, Any]] = []
     external_income: list[dict[str, Any]] = []
     for item_symbol in symbols:
@@ -4995,34 +5050,38 @@ async def v25_history(
         for row in response_rows(trades_payload):
             if not isinstance(row, dict):
                 continue
-            order_id = int(row.get("orderId") or 0) if str(row.get("orderId") or "").isdigit() else 0
-            client_order_id = str(row.get("clientOrderId") or "")
+            try:
+                order_id = history_order_id(row.get("orderId"))
+                client_order_id = row.get("clientOrderId")
+                if client_order_id is not None and not isinstance(client_order_id, str):
+                    raise ValueError("clientOrderId")
+                projected = history_project_row(row, {
+                    "trade_id": "id", "side": "side", "price": "price", "quantity": "qty",
+                    "realized_pnl": "realizedPnl", "commission": "commission",
+                    "commission_asset": "commissionAsset", "time": "time", "position_side": "positionSide",
+                })
+            except ValueError:
+                history_record_warning(errors, item_symbol, "userTrades")
+                continue
             if order_id in tracked_order_ids or client_order_id in tracked_client_ids:
                 continue
             external_trades.append({
                 "symbol": item_symbol,
-                "trade_id": row.get("id"),
-                "order_id": order_id or None,
-                "side": row.get("side"),
-                "price": row.get("price"),
-                "quantity": row.get("qty"),
-                "realized_pnl": row.get("realizedPnl"),
-                "commission": row.get("commission"),
-                "commission_asset": row.get("commissionAsset"),
-                "time": row.get("time"),
-                "position_side": row.get("positionSide"),
+                "order_id": order_id,
+                **projected,
             })
         for row in response_rows(income_payload):
             if not isinstance(row, dict) or str(row.get("incomeType") or "") != "REALIZED_PNL":
                 continue
-            external_income.append({
-                "symbol": item_symbol,
-                "income": row.get("income"),
-                "asset": row.get("asset"),
-                "time": row.get("time"),
-                "transaction_id": row.get("tranId"),
-                "info": row.get("info"),
-            })
+            try:
+                projected = history_project_row(row, {
+                    "income": "income", "asset": "asset", "time": "time",
+                    "transaction_id": "tranId", "info": "info",
+                })
+            except ValueError:
+                history_record_warning(errors, item_symbol, "income")
+                continue
+            external_income.append({"symbol": item_symbol, **projected})
     return {
         "read_only": True,
         "label": "EXTERNAL / NOT MANAGED BY V25",

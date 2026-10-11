@@ -125,6 +125,18 @@ Final Decision remains a read-only analysis result and never submits an order.
 Legacy maximum-loss and daily-loss controls are USDT amounts, not percentages;
 the dedicated Original risk and daily-loss controls are percentages.
 
+### Read-only history compatibility
+
+`GET /api/v25/history` reads the restored LIVE snapshot and Binance read-only
+history; it does not query a separate history table or require a new migration.
+The snapshot's order identity fields accept old missing/null values and single
+identities as well as current lists. Existing managed-order filtering is retained.
+Malformed identities or exchange rows are isolated, logged without raw record
+values, and reported in the response's `errors` list while valid rows remain
+available. Missing optional exchange fields remain null, not invented numbers.
+Connection setup errors retain their explicit HTTP status instead of becoming
+an uncaught 500. The history endpoint never mutates plans or sends orders.
+
 ### Former 45-failure backend baseline
 
 The failures were stale test contracts, not 45 demonstrated exchange defects:
