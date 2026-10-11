@@ -43,7 +43,7 @@ async function setup(page:Page,{enabled=true,stripeEnabled=true,submitFails=fals
   await page.goto('/pricing',{waitUntil:'domcontentloaded'})
   if (stripeEnabled) await expect(page.getByRole('button',{name:'START MASTER MODE'})).toBeVisible()
   else if (enabled) await expect(page.getByRole('region',{name:'Binance ile ödeme'})).toBeVisible()
-  else await expect(page.getByText('Ödeme yakında açılacak.',{exact:true})).toBeVisible()
+  else await expect(page.getByRole('button',{name:'Ödeme yakında açılacak',exact:true})).toBeVisible()
   return {calls,assistant}
 }
 
@@ -55,9 +55,10 @@ test('Missing Pay ID hides the method and preserves Stripe buttons',async ({page
   expect(calls).toEqual([])
 })
 
-test('Unconfigured Stripe hides both plans and security note; Binance offers 30 days without trial',async ({page}) => {
+test('Unconfigured Stripe shows Turkish MASTER MODE preview without Stripe trial; Binance offers 30 days',async ({page}) => {
   const {calls,assistant} = await setup(page,{stripeEnabled:false})
-  await expect(page.locator('.subscriptionPlan')).toHaveCount(0)
+  await expect(page.getByRole('region',{name:'MASTER MODE planı'})).toBeVisible()
+  await expect(page.getByText('119.90 USD',{exact:true})).toBeVisible()
   await expect(page.getByRole('button',{name:'START FREE TRIAL'})).toHaveCount(0)
   await expect(page.getByRole('button',{name:'START MASTER MODE'})).toHaveCount(0)
   await expect(page.locator('.subscriptionSecurityNote')).toHaveCount(0)
@@ -65,22 +66,32 @@ test('Unconfigured Stripe hides both plans and security note; Binance offers 30 
   await page.getByRole('button',{name:'Binance ile öde',exact:true}).click()
   expect(calls.map(call => call.body)).toEqual([null])
   expect(assistant.requests.filter(path => /^POST .*subscription/.test(path))).toEqual([])
-  await page.getByRole('button',{name:'BILLING',exact:true}).click()
+  await page.getByRole('button',{name:'ABONELİK',exact:true}).click()
   await expect(page.getByRole('region',{name:'Binance ile ödeme'})).toBeVisible()
   await expect(page.getByRole('heading',{name:'Manage billing'})).toHaveCount(0)
   await expect(page.getByText('Billing history is managed in Stripe',{exact:true})).toHaveCount(0)
   await expect(page.getByText('Secure Stripe billing',{exact:true})).toHaveCount(0)
 })
 
-test('No configured payment method shows a quiet unavailable message in pricing and billing',async ({page}) => {
-  const {calls} = await setup(page,{stripeEnabled:false,enabled:false})
-  await expect(page.locator('.subscriptionPlan')).toHaveCount(0)
+test('No configured method retains a priced Turkish plan with disabled payment in pricing and billing',async ({page}) => {
+  const {calls,assistant} = await setup(page,{stripeEnabled:false,enabled:false})
+  await expect(page.locator('.subscriptionPlan')).toHaveCount(1)
+  const card = page.getByRole('region',{name:'MASTER MODE planı'})
+  await expect(card.getByText('119.90 USD',{exact:true})).toBeVisible()
+  await expect(card.getByText('/ ay',{exact:true})).toBeVisible()
+  await expect(card.getByRole('listitem')).toHaveCount(4)
+  await expect(card.getByRole('button',{name:'Ödeme yakında açılacak',exact:true})).toBeDisabled()
   await expect(page.getByRole('region',{name:'Binance ile ödeme'})).toHaveCount(0)
   await expect(page.getByRole('alert')).toHaveCount(0)
-  await page.getByRole('button',{name:'BILLING',exact:true}).click()
-  await expect(page.getByText('Ödeme yakında açılacak.',{exact:true})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'MASTER MODE ile çalışma alanını aç.'})).toBeVisible()
+  await expect(page.locator('.subscriptionPage')).not.toContainText('Choose your access level')
+  await page.getByRole('button',{name:'ABONELİK',exact:true}).click()
+  await expect(page.getByRole('button',{name:'Ödeme yakında açılacak',exact:true})).toBeDisabled()
+  await expect(page.getByRole('heading',{name:'Abonelik yönetimi'})).toBeVisible()
+  await expect(page.getByText('119.90 USD',{exact:true})).toBeVisible()
   await expect(page.getByRole('heading',{name:'Manage billing'})).toHaveCount(0)
   expect(calls).toEqual([])
+  expect(assistant.requests.filter(path => /^POST .*subscription/.test(path))).toEqual([])
 })
 
 test('Stripe configuration becoming available restores the unchanged plans and security note',async ({page}) => {
@@ -103,10 +114,25 @@ test('Configuration API failure never invents available methods or an empty conf
     headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*'},
   }))
   await page.reload({waitUntil:'domcontentloaded'})
-  await expect(page.getByRole('alert')).toContainText('Ödeme yöntemleri şu anda yüklenemiyor.')
+  await expect(page.getByRole('alert')).toContainText('Ödeme yöntemleri yüklenemedi.')
   await expect(page.getByRole('button',{name:'START FREE TRIAL'})).toHaveCount(0)
   await expect(page.getByRole('region',{name:'Binance ile ödeme'})).toHaveCount(0)
-  await expect(page.getByText('Ödeme yakında açılacak.',{exact:true})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'Ödeme yakında açılacak',exact:true})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'Ödeme bilgileri yüklenemedi',exact:true})).toBeDisabled()
+})
+
+test('Old backend missing configuration keeps plan visible with explicit retry, not a configured-method fallback',async ({page}) => {
+  await setup(page)
+  await page.route('**/api/v22/subscription/config',route => route.fulfill({
+    status:404,json:{detail:'Not Found'},
+    headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*'},
+  }))
+  await page.reload({waitUntil:'domcontentloaded'})
+  await expect(page.getByRole('alert')).toContainText('Ödeme yöntemleri yüklenemedi.')
+  await expect(page.getByText('119.90 USD',{exact:true})).toBeVisible()
+  await expect(page.getByRole('button',{name:'Ödeme bilgileri yüklenemedi',exact:true})).toBeDisabled()
+  await expect(page.getByRole('button',{name:'Yeniden dene',exact:true})).toBeVisible()
+  await expect(page.getByRole('button',{name:'START FREE TRIAL'})).toHaveCount(0)
 })
 
 test('Server payment data and copyable note lead to pending without entitlement or Stripe writes',async ({page}) => {

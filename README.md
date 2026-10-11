@@ -164,7 +164,10 @@ The subscription screen reads `/api/v22/subscription/config`; Stripe plan/trial
 cards and billing controls are shown only when the existing Stripe configuration
 guard passes. No Stripe checkout/webhook behavior is changed. With only Binance
 configured, its card advertises a paid 30-day period, not a free trial. With both
-methods disabled, the screen says "Ödeme yakında açılacak." Configuration API
+methods disabled, pricing and billing retain a Turkish MASTER MODE preview with
+the catalog price (119.90 USD / month), features and a disabled
+"Ödeme yakında açılacak" button. The preview never grants access, creates a trial,
+or invokes payment APIs. Stripe-configured screens remain unchanged. Configuration API
 failures remain explicit errors with retry, not a false disabled-method result.
 
 For the local UI, set `BINANCE_MANUAL_PAY_ID` to your own Pay ID in the **backend**

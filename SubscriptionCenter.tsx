@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, CreditCard, ExternalLink, Lock, Receipt, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
-import { SUBSCRIPTION_PLANS, type PlanCode } from './subscription'
+import { PLAN_BY_CODE, SUBSCRIPTION_PLANS, type PlanCode } from './subscription'
 import BinanceManualPayment from './BinanceManualPayment'
 
 type SubscriptionView = {
@@ -20,6 +20,20 @@ type PaymentMethods = { stripe_enabled: boolean; binance_enabled: boolean }
 
 const formatDate = (value?: string | null, locale = 'en-US') => value ? new Date(value).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Not available'
 const daysRemaining = (value?: string | null) => value ? Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / 86400000)) : 0
+const masterFeaturesTr = ['Master Trade analiz çalışma alanı', 'Premium işlem çalışma alanı', 'Pozisyon ve risk takibi', 'Sunucuda doğrulanan MASTER MODE erişimi']
+
+function MasterPlanPreview({disabledLabel}: {disabledLabel?: string}) {
+  const plan = PLAN_BY_CODE.MASTER_MODE
+  return <section className="subscriptionPlans" aria-label="MASTER MODE planı">
+    <article className="subscriptionPlan subscriptionPlanFeatured">
+      <header><span>MASTER MODE</span><h2>MASTER MODE</h2><p>Analiz ve işlem yönetimi için premium çalışma alanı.</p></header>
+      <div className="subscriptionPrice"><strong>{plan.monthlyPrice.toFixed(2)} USD</strong><span>/ ay</span></div>
+      <ul>{masterFeaturesTr.map(feature => <li key={feature}><Check/>{feature}</li>)}</ul>
+      <small className="subscriptionTerms">Bu kart erişim açmaz veya ücret almaz. Ödeme yöntemi kullanılabilir olduğunda başvurabilirsiniz.</small>
+      {disabledLabel && <button type="button" disabled>{disabledLabel}</button>}
+    </article>
+  </section>
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = userSessionToken()
@@ -56,7 +70,8 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
     }).catch(exception => {
       if (!controller.signal.aborted) {
         setPaymentMethods(null)
-        setMethodsError(exception instanceof Error ? exception.message : 'Ödeme yöntemleri yüklenemedi.')
+        console.warn('Billing method configuration failed:', exception instanceof Error ? exception.message : 'Unknown error')
+        setMethodsError('Ödeme yöntemleri yüklenemedi.')
       }
     })
     return () => controller.abort()
@@ -129,7 +144,9 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
   const binanceEnabled = paymentMethods?.binance_enabled === true
   const paymentFeedback = methodsError ? <p className="subscriptionFeedback subscriptionFeedbackError" role="alert">{methodsError}{' '}<button type="button" onClick={() => setLoadAttempt(value => value + 1)}>Yeniden dene</button></p>
     : !paymentMethods ? <p role="status">Ödeme yöntemleri yükleniyor…</p>
-    : !stripeEnabled && !binanceEnabled ? <p className="subscriptionCallout" role="status">Ödeme yakında açılacak.</p> : null
+    : null
+  const unavailableLabel = methodsError ? 'Ödeme bilgileri yüklenemedi' : !paymentMethods ? 'Ödeme yöntemleri yükleniyor…'
+    : !binanceEnabled ? 'Ödeme yakında açılacak' : undefined
   const endDate = formatDate(subscription?.current_period_end, binancePaid ? 'tr-TR' : 'en-US')
   const activePlan = subscription?.plan ? SUBSCRIPTION_PLANS.find(plan => plan.code === subscription.plan) : null
   const nextPayment = subscription?.next_payment_amount != null ? `$${subscription.next_payment_amount.toFixed(2)}` : 'Not available'
@@ -137,6 +154,29 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
   const emptyPlanTitle = subscription ? 'No active plan' : subscriptionLoading ? 'Loading plan' : 'Plan unavailable'
   const accessLabel = hasAccess ? 'Enabled' : subscription ? 'Closed' : 'Not available'
   const loadFeedback = loadError && <p className="subscriptionFeedback subscriptionFeedbackError" role="alert">{loadError}{' '}<button type="button" onClick={() => setLoadAttempt(attempt => attempt + 1)} disabled={subscriptionLoading}>Retry subscription</button></p>
+
+  if (mode === 'billing' && !stripeEnabled) {
+    const trStatus: Record<string, string> = {ACTIVE:'Aktif', TRIALING:'Deneme dönemi', PAST_DUE:'Ödeme gecikti', UNPAID:'Ödenmedi', CANCELLED:'İptal edildi', EXPIRED:'Süresi doldu'}
+    const expiry = subscription?.current_period_end || subscription?.trial_end
+    return <main className="subscriptionPage subscriptionBilling">
+      <header className="subscriptionPageHeader"><div><span>ABONELİK</span><h1>Abonelik yönetimi</h1><p>MASTER MODE planınızı, erişiminizi ve ödeme seçeneklerini buradan takip edin.</p></div><button onClick={() => onNavigate('pricing')}><Sparkles/>PLANLARI GÖR</button></header>
+      <section className={`subscriptionStatusCard subscriptionStatus-${status.toLowerCase()}`}>
+        <div className="subscriptionPlanHeading"><div><small>MEVCUT PLAN</small><h2>{subscription?.plan ? 'MASTER MODE' : 'Aktif plan yok'}</h2></div><span className="subscriptionStatusBadge">{subscriptionLoading ? 'Yükleniyor' : loadError ? 'Bilgi alınamadı' : trStatus[status] || '—'}</span></div>
+        <div className="subscriptionStatusTop">
+          <div><small>MASTER MODE ERİŞİMİ</small><strong>{subscription ? hasAccess ? 'Açık' : 'Kapalı' : '—'}</strong></div>
+          <div><small>BİTİŞ TARİHİ</small><strong>{expiry ? formatDate(expiry, 'tr-TR') : '—'}</strong></div>
+          <div><small>ÖDEME YÖNTEMİ</small><strong>{binancePaid ? 'Binance ile ödendi' : '—'}</strong></div>
+          <div><small>ERİŞİM DÖNEMİ</small><strong>{binancePaid ? '30 gün · elle yenileme' : '—'}</strong></div>
+        </div>
+        {binancePaid && <div className="subscriptionCallout"><b>Binance ile ödendi</b><span>MASTER MODE erişiminiz {formatDate(expiry,'tr-TR')} tarihinde sona erer. Otomatik yenileme veya otomatik ücretlendirme yoktur.</span></div>}
+        {hasAccess && <button className="subscriptionSecondaryAction" onClick={() => onNavigate('master-trade')}><ShieldCheck/>MASTER TRADE’E GİT</button>}
+      </section>
+      <MasterPlanPreview disabledLabel={unavailableLabel}/>
+      {authenticated && binanceEnabled && <BinanceManualPayment/>}
+      {paymentFeedback}
+      {loadError && <p className="subscriptionFeedback subscriptionFeedbackError" role="alert">Abonelik bilgileri yüklenemedi. <button type="button" onClick={() => setLoadAttempt(value => value + 1)}>Yeniden dene</button></p>}
+    </main>
+  }
 
   if (mode === 'billing') return <main className="subscriptionPage subscriptionBilling">
     <header className="subscriptionPageHeader"><div><span>BILLING</span><h1>Subscription control center</h1><p>{binancePaid || !stripeEnabled ? 'MASTER MODE erişiminizi ve bitiş tarihinizi buradan takip edin.' : 'Review your plan, Master Trade access, renewal timing, and Stripe-managed billing from one place.'}</p></div><button onClick={() => onNavigate('pricing')}><Sparkles />VIEW PLANS</button></header>
@@ -162,7 +202,8 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
   </main>
 
   return <main className="subscriptionPage subscriptionPricing">
-    <header className="subscriptionPageHeader"><div><span>MASTER TRADE</span><h1>Choose your access level.</h1><p>{stripeEnabled ? 'Secure Stripe billing, immediate entitlement updates, and clear renewal terms for every subscription.' : 'MASTER MODE için ödeme seçenekleri.'}</p></div><button onClick={() => onNavigate('billing')}><CreditCard />BILLING</button></header>
+    <header className="subscriptionPageHeader"><div><span>MASTER TRADE</span><h1>{stripeEnabled ? 'Choose your access level.' : 'MASTER MODE ile çalışma alanını aç.'}</h1><p>{stripeEnabled ? 'Secure Stripe billing, immediate entitlement updates, and clear renewal terms for every subscription.' : 'Plan özelliklerini inceleyin ve kullanılabilir ödeme yöntemini seçin.'}</p></div><button onClick={() => onNavigate('billing')}><CreditCard />{stripeEnabled ? 'BILLING' : 'ABONELİK'}</button></header>
+    {!stripeEnabled && <MasterPlanPreview disabledLabel={unavailableLabel}/>}
     {stripeEnabled && <section className="subscriptionPlans">{SUBSCRIPTION_PLANS.map(plan => <article className={`subscriptionPlan ${plan.code === 'MASTER_MODE' ? 'subscriptionPlanFeatured' : ''}`} key={plan.code}>
       <header><span>{plan.code === 'TRIAL' ? 'LIMITED-TIME ACCESS' : 'FULL ACCESS'}</span><h2>{plan.name}</h2><p>{plan.description}</p></header>
       <div className="subscriptionPrice"><strong><small>$</small>{plan.code === 'TRIAL' ? '0' : '119.90'}</strong><span>{plan.code === 'TRIAL' ? 'today' : '/month'}</span></div>
@@ -175,6 +216,6 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
     {!stripeEnabled && authenticated && binanceEnabled && <BinanceManualPayment/>}
     {stripeEnabled && <div className="subscriptionSecurityNote"><ShieldCheck /><span><b>SECURE STRIPE BILLING</b><small>Stripe collects and stores payment details. The platform never stores card numbers or security codes.</small></span></div>}
     {paymentFeedback}
-    {loadFeedback}{notice && <p className="subscriptionFeedback">{notice}</p>}{error && <p className="subscriptionFeedback subscriptionFeedbackError">{error}</p>}
+    {stripeEnabled ? loadFeedback : loadError && <p className="subscriptionFeedback subscriptionFeedbackError" role="alert">Abonelik bilgileri yüklenemedi. <button type="button" onClick={() => setLoadAttempt(value => value + 1)}>Yeniden dene</button></p>}{notice && <p className="subscriptionFeedback">{notice}</p>}{error && <p className="subscriptionFeedback subscriptionFeedbackError">{error}</p>}
   </main>
 }
