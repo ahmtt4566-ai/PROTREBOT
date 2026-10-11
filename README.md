@@ -181,6 +181,48 @@ Stripe is intentionally hidden while any of `STRIPE_SECRET_KEY`,
 `STRIPE_WEBHOOK_SECRET`, `APP_BASE_URL`, or
 `STRIPE_PRICE_MASTER_MODE_MONTHLY` is blank, or the Stripe SDK is unavailable.
 
+### Local manual-payment sandbox
+
+Use the ignored `.env.binance-local`, not the existing `.env` containing other
+connections. The sandbox uses the separate loopback PostgreSQL database
+`binance_manual_local_test` on port `55439` and a separate local data directory.
+Both payment access and notifications are enabled. Provider keys are empty.
+`BINANCE_MANUAL_EMAIL_QUEUE_ONLY=true` leaves Binance emails pending with zero
+delivery attempts while the bell channel and lifecycle sweep continue to run.
+This mode is rejected in hosted/production environments or outside explicitly
+named loopback test databases. Disabling it restores the existing sender/retry
+behavior. This is not an email-delivery test.
+
+Start backend and frontend in separate terminals from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --env-file .env.binance-local --host 127.0.0.1 --port 8011
+npm run dev -- --config vite.binance-local.config.ts
+```
+
+The prepared local PostgreSQL server must also be running. Port `8011`/`5183`
+keeps existing development servers untouched. Use a private browser window at
+`http://127.0.0.1:5183/pricing` so existing localhost cookies do not interfere.
+The local HTTP configuration does not enforce production HTTPS-cookie mode;
+canonical database ownership, authentication and payment-decision checks remain
+unchanged. Never reuse sandbox settings/accounts in production.
+
+1. Sign in with the prepared test customer, choose **Binance ile öde** and copy
+   the reference. **Do not transfer money**: the sandbox Pay ID is deliberately
+   not a real Binance Pay ID.
+2. Simulate payment by entering a unique test transaction number such as
+   `LOCAL-MANUAL-001`. Submit it; the status must be **Bekliyor**, with no access.
+3. In a second private browser/profile, sign in with the test OWNER. Open
+   `/admin?section=binance-payments`; select the pending card.
+4. In this sandbox only, tick the simulated payment-check confirmation and
+   approve. OWNER role checks and the normal transaction/audit still execute.
+5. Refresh the customer's billing page. It must show **Binance ile ödendi**,
+   a 30-day end date and enabled MASTER MODE access. Approval must not introduce
+   a free trial. Zil notifications appear; email entries remain queued.
+6. Use a new unique transaction number for each further test. The automatically
+   verified smoke-test payment belongs to a separate probe user, not the manual
+   test customer. No history is silently erased between runs.
+
 `backend/app/binance_manual_payments.py` provides isolated PostgreSQL request
 creation, transaction submission and a bounded expiry sweep. Authenticated routes
 in `backend/app/binance_manual_routes.py` expose configuration, the user's latest

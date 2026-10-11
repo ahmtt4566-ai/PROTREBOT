@@ -37,7 +37,8 @@ class WorkerPool(OutboxPool):
         if "WITH due AS" in sql:
             self.check(sql)
             candidates = [r for r in self.outbox.values() if r["status"] in ("pending", "failed")
-                          and r["attempts"] < 8 and r["next_attempt_at"] <= self.now]
+                          and r["attempts"] < 8 and r["next_attempt_at"] <= self.now
+                          and (not args[1] or r["kind"] != "payment.binance.email")]
             if not candidates:
                 return None
             row = candidates[0]
@@ -71,6 +72,28 @@ def worker_notifications(notifications):
 
 def run(client, **options):
     asyncio.run(worker.process_due(client.app, **options))
+
+
+def test_binance_email_queue_only_is_scoped_to_local_test_database(monkeypatch):
+    monkeypatch.setenv("BINANCE_MANUAL_EMAIL_QUEUE_ONLY", "true")
+    monkeypatch.setenv("PROTREBOT_ENVIRONMENT", "test")
+    for name in ("APP_ENV", "ENVIRONMENT", "NODE_ENV", "VERCEL_ENV", "RAILWAY_ENVIRONMENT_NAME", "RENDER", "VERCEL", "DYNO"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres@127.0.0.1:55439/binance_manual_local_test")
+    conn = AsyncMock()
+    asyncio.run(worker.claim(conn))
+    assert conn.fetchrow.call_args.args[2] is True
+    assert "kind <> 'payment.binance.email'" in conn.fetchrow.call_args.args[0]
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres@production.invalid/binance_manual_local_test")
+    with pytest.raises(RuntimeError, match="isolated local"):
+        asyncio.run(worker.claim(conn))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres@127.0.0.1:55439/binance_manual_local_test")
+    monkeypatch.setenv("RENDER", "true")
+    with pytest.raises(RuntimeError, match="isolated local"):
+        asyncio.run(worker.claim(conn))
+    monkeypatch.delenv("RENDER")
+    monkeypatch.setenv("BINANCE_MANUAL_EMAIL_QUEUE_ONLY", "false")
+    assert worker.binance_email_queue_only() is False
 
 
 def test_two_workers_do_not_send_twice_and_sent_rows_are_not_mutated(worker_notifications):

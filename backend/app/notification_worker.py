@@ -2,15 +2,28 @@ import asyncio
 import json
 import logging
 import os
+from urllib.parse import urlsplit
 
 from .email_service import EmailDeliveryError
 from .notification_email import send_notification
+from .web_security import env_flag, production_or_hosted_environment
 
 logger = logging.getLogger(__name__)
 BACKOFF_SECONDS = (60, 300, 900, 3600, 21600)
 ERROR_CODES = {"provider_unavailable", "provider_timeout", "provider_rejected", "invalid_response", "delivery_error"}
 LEASE_SECONDS = 120
 SWEEP_COOLDOWN_SECONDS = 15
+
+
+def binance_email_queue_only():
+    if not env_flag("BINANCE_MANUAL_EMAIL_QUEUE_ONLY"):
+        return False
+    database = urlsplit(os.getenv("DATABASE_URL", ""))
+    if production_or_hosted_environment() or os.getenv("PROTREBOT_ENVIRONMENT", "").lower() not in {"test", "development"} \
+            or database.scheme != "postgresql" or database.hostname not in {"127.0.0.1", "::1"} \
+            or database.path not in {"/binance_manual_local_test", "/binance_stage5_test"}:
+        raise RuntimeError("Binance email queue-only mode requires an isolated local test database")
+    return True
 
 
 async def recover_leases(conn):
@@ -30,6 +43,7 @@ async def claim(conn):
         """WITH due AS (
              SELECT id FROM notification_outbox WHERE status IN ('pending','failed') AND attempts < 8
                AND kind <> 'campaign.info'
+               AND ($2 = false OR kind <> 'payment.binance.email')
                AND next_attempt_at <= clock_timestamp() ORDER BY next_attempt_at,id FOR UPDATE SKIP LOCKED LIMIT 1
            )
            UPDATE notification_outbox o SET status = 'sending', attempts = attempts + 1,
@@ -38,7 +52,7 @@ async def claim(conn):
                THEN o.payload || jsonb_build_object('count',(
                  SELECT COUNT(*) FROM approval_requests WHERE status = 'pending' AND expires_at > clock_timestamp()))
                ELSE o.payload END
-           FROM due WHERE o.id = due.id RETURNING o.*""", LEASE_SECONDS,
+           FROM due WHERE o.id = due.id RETURNING o.*""", LEASE_SECONDS, binance_email_queue_only(),
     )
 
 
