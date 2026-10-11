@@ -23,10 +23,12 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import math
 import os
+import re
 import time
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -543,7 +545,17 @@ def _signed_query(secret_key: str, params: dict[str, Any]) -> str:
 
 def _safe_exchange_message(payload: Any, api_key: str) -> str:
     code = payload.get("code") if isinstance(payload, dict) else None
-    return exchange_rejection_message(code)
+    message = exchange_rejection_message(code)
+    if code == -2015 and isinstance(payload.get("msg"), str):
+        match = re.search(r"\brequest ip:\s*([0-9a-fA-F:.]+)", payload["msg"], re.IGNORECASE)
+        if match:
+            try:
+                address = ipaddress.ip_address(match.group(1).rstrip("."))
+            except ValueError:
+                address = None
+            if address is not None and address.is_global:
+                message += f" IP kısıtlaması varsa Binance'in bildirdiği şu çıkış IP'sini ekleyin: {address}."
+    return message
 
 
 def exchange_rejection_message(code: Any) -> str:
@@ -575,6 +587,11 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
         response = await asyncio.wait_for(request(), timeout=BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS)
     except asyncio.TimeoutError as exc:
         raise VaultError("Binance bağlantı isteği zaman aşımına uğradı.") from exc
+    except httpx.ProxyError as exc:
+        logger.warning("Binance signed verification proxy failed: path=%s error_type=%s", path, type(exc).__name__)
+        raise VaultError("Binance doğrulaması için sabit IP proxy bağlantısı kurulamadı. Sunucunun proxy erişimini ve ayarını kontrol edin.") from exc
+    except httpx.TimeoutException as exc:
+        raise VaultError("Binance bağlantı isteği zaman aşımına uğradı.") from exc
     except httpx.RequestError as exc:
         raise VaultError("Binance sunucusuna ulaşılamadı.") from exc
     if response.status_code >= 400:
@@ -582,6 +599,13 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
             payload = response.json()
         except ValueError:
             payload = None
+        code = payload.get("code") if isinstance(payload, dict) else None
+        if not isinstance(code, int):
+            if response.status_code == 451:
+                raise VaultError("Binance sunucunun bulunduğu bölgeden erişime izin vermiyor (HTTP 451).")
+            if response.status_code >= 500:
+                raise VaultError(f"Binance doğrulama servisi geçici sunucu hatası döndürdü (HTTP {response.status_code}); tekrar deneyin.")
+            raise VaultError(f"Binance doğrulama erişimini reddetti (HTTP {response.status_code}); key, IP izinleri ve Futures yetkisini kontrol edin.")
         raise VaultError(_safe_exchange_message(payload, api_key))
     try:
         return response.json()

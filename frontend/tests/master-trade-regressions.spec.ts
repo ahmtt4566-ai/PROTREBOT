@@ -216,6 +216,7 @@ test('Master Trade connection deletion requires deactivation and explicit confir
     }
     await route.fulfill({json:{ok:true}})
   })
+
   await page.goto('/master-trade?tab=baglanti',{waitUntil:'domcontentloaded'})
   const card = page.locator('.masterTradeLiveConnectionCard')
   await expect(card.getByRole('button',{name:'Anahtarı sil',exact:true})).toBeDisabled()
@@ -230,6 +231,52 @@ test('Master Trade connection deletion requires deactivation and explicit confir
   expect(writes).toEqual(['/api/exchange-connections/deactivate','/api/exchange-connections/credentials'])
   expect(fixture.mutations).toEqual([])
 })
+
+for (const failure of ['futures', 'invalid-key', 'ip', 'server', 'network', 'reflected-credentials'] as const) {
+    test(`connection ${failure} failure is shown next to credentials even when status refresh hangs`, async ({page}) => {
+      const fixture = await setup(page)
+      let failed = false
+      let release: (() => void) | undefined
+      const writes: string[] = []
+      const reasons = {
+        futures: 'Binance Futures yetkisi kapalı; API anahtarında Futures işlem iznini açın.',
+        'invalid-key': 'Binance API anahtarı geçersiz; API Key ve Secret Key bilgilerini kontrol edin.',
+        ip: 'Binance API anahtarı, IP izni veya Futures yetkisi doğrulanamadı. IP kısıtlaması varsa şu IP’yi ekleyin: 8.8.8.8.',
+        server: 'Sunucu hatası (HTTP 500)',
+        network: 'Bağlantı servisine ulaşılamadı',
+        'reflected-credentials': 'Key veya secret hatalı. [GİZLİ] [GİZLİ]',
+      }
+      await page.route('**/api/v25/status', async route => {
+        if (failed) await new Promise<void>(resolve => {release = resolve})
+        await route.fallback()
+      })
+      await page.route('**/api/exchange-connections/save', async route => {
+        writes.push(new URL(route.request().url()).pathname)
+        failed = true
+        if (failure === 'network') await route.abort('failed')
+        else if (failure === 'server') await route.fulfill({status: 500, contentType: 'text/html', body: '<html>Internal Server Error</html>'})
+        else await route.fulfill({status: 502, json: {detail: failure === 'reflected-credentials'
+          ? 'Key veya secret hatalı. offline-private-api-key offline-private-secret' : reasons[failure]}})
+      })
+      await page.goto('/master-trade?tab=baglanti', {waitUntil: 'domcontentloaded'})
+      const card = page.locator('.masterTradeLiveConnectionCard')
+      await card.getByPlaceholder('Paste API key').fill('offline-private-api-key')
+      await card.getByPlaceholder('Paste secret key').fill('offline-private-secret')
+      await card.getByRole('checkbox').check()
+      try {
+        await card.getByRole('button', {name: 'CONNECT ACCOUNT', exact: true}).click()
+        const alert = card.getByRole('alert')
+        await expect(alert).toContainText(reasons[failure])
+        await expect(alert).toBeInViewport()
+        expect(writes).toEqual(['/api/exchange-connections/save'])
+        expect(fixture.mutations).toEqual([])
+        const body = await page.locator('body').innerText()
+        expect(body).not.toContain('offline-private-api-key')
+        expect(body).not.toContain('offline-private-secret')
+        await expect(card.getByPlaceholder('Paste secret key')).toHaveAttribute('type', 'password')
+      } finally {release?.()}
+    })
+  }
 
 test('LIVE maximum loss is labelled in USDT and emergency close warning is explicit before any request', async ({page}) => {
   const fixture = await setup(page)

@@ -80,6 +80,16 @@ Key fields cannot be revealed; arbitrary upstream error messages are replaced
 with controlled Turkish messages. LIVE safety events are projected into the
 OWNER's notification bell with durable read status.
 
+Connection failures are shown immediately beside the Master Trade credential
+form, before background status refresh completes. Verification requests have a
+longer bounded client timeout to cover the four default 15-second read-only
+checks. Key/secret fields remain masked and known credentials are redacted from
+displayed error text. Proxy, network, invalid-response and server failures have
+Turkish explanations. Signed requests never fall back to a different egress
+transport. Binance code -2015 is ambiguous (key, IP or permissions); an IP hint
+is shown only when Binance explicitly reports a valid public request IP.
+No static IP is invented, and the code does not change live proxy settings.
+
 Recovery checks Original TP prices, quantities, close/reduce-only flags,
 working type and order identity, not just their IDs. A changed target pauses
 entries without closing positions. An already-installed TP1 is not resized or

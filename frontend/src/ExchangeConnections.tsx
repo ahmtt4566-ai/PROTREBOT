@@ -5,6 +5,8 @@ import {
   RefreshCw, ShieldCheck, TestTube2, Trash2, WalletCards,
 } from 'lucide-react'
 import { API_BASE, ownerAccessToken } from './api'
+import {fetchWithTimeout} from '../../master-trade-request'
+import {CONNECTION_REQUEST_TIMEOUT_MS, connectionFailureMessage, connectionHttpMessage, redactConnectionMessage} from './exchange-connection-errors'
 
 type Mode = 'TESTNET'|'LIVE'
 type AccountSummary = {
@@ -64,18 +66,19 @@ export default function ExchangeConnections() {
     if (options.body) headers.set('Content-Type','application/json')
     const ownerToken = ownerAccessToken()
     if (ownerToken) headers.set('X-ProTreBot-Owner',ownerToken)
-    const controller = new AbortController()
-    const timeout = window.setTimeout(() => controller.abort(),15000)
     let response:Response
     try {
-      response = await fetch(`${API_BASE}/exchange-connections${path}`,{...options,headers,signal:controller.signal})
+      response = await fetchWithTimeout(`${API_BASE}/exchange-connections${path}`,{...options,headers},
+        isConnectionAction(path) ? CONNECTION_REQUEST_TIMEOUT_MS : undefined)
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') throw new Error('Borsa kasası yanıt vermedi. Backend ve PostgreSQL bağlantısını kontrol edin.')
-      throw error
-    } finally {
-      window.clearTimeout(timeout)
+      throw new Error(connectionFailureMessage(error,[forms[selected].apiKey,forms[selected].secretKey]))
     }
-    const payload = await response.json().catch(() => null) as T|{detail?:unknown}|null
+    let payload:T|{detail?:unknown}|null
+    try {payload = await response.json() as T|{detail?:unknown}|null}
+    catch (error) {
+      throw new Error(response.ok ? connectionFailureMessage(error,[forms[selected].apiKey,forms[selected].secretKey])
+        : connectionHttpMessage(response.status,'Sunucu geçerli bir hata açıklaması döndürmedi.',[forms[selected].apiKey,forms[selected].secretKey]))
+    }
     if (!response.ok) {
       if (response.status === 429) {
         const retryAfter = Number(response.headers.get('Retry-After'))
@@ -84,7 +87,7 @@ export default function ExchangeConnections() {
         throw new Error(rateLimitMessage(seconds || null))
       }
       const detail = payload && typeof payload === 'object' && 'detail' in payload ? payload.detail : payload
-      throw new Error(errorText(detail))
+      throw new Error(connectionHttpMessage(response.status,errorText(detail),[forms[selected].apiKey,forms[selected].secretKey]))
     }
     return payload as T
   }
@@ -122,6 +125,7 @@ export default function ExchangeConnections() {
       ? {mode:selected,api_key:form.apiKey,secret_key:form.secretKey}
       : {mode:selected}
     const result = await call<{ok:boolean;message:string;account:AccountSummary}>('/test',{method:'POST',body:JSON.stringify(body)})
+    if (result?.ok !== true || !result.account) throw new Error('Binance bağlantı testi başarıyla doğrulanmadı; bağlantı kapalı kaldı.')
     setNotice({kind:'ok',text:`${result.message} Bakiye ${money(result.account.wallet_balance)} USDT.`})
   })
 
@@ -132,7 +136,7 @@ export default function ExchangeConnections() {
     const next = await call<ConnectionStatus & {message:string}>('/save',{method:'POST',body:JSON.stringify({mode:selected,api_key:form.apiKey,secret_key:form.secretKey,confirmation})})
     setStatus(next)
     setForms(current => ({...current,[selected]:emptyForm()}))
-    setNotice({kind:'ok',text:next.message})
+    setNotice({kind:'ok',text:redactConnectionMessage(next.message,[form.apiKey,form.secretKey])})
   })
 
   const activateConnection = () => execute(`activate-${selected}`,async () => {
@@ -178,7 +182,7 @@ export default function ExchangeConnections() {
       <aside className={status?.vault.ready ? 'ready' : 'wait'}><Database/><b>{status?.vault.ready ? 'KASA HAZIR' : 'KASA BEKLİYOR'}</b><span>{status?.vault.storage || 'PostgreSQL bağlantısı'}</span></aside>
     </header>
 
-    <div className={`exchangeNotice ${notice.kind}`}><span>{notice.kind === 'ok' ? <CheckCircle2/> : <AlertTriangle/>}</span><b>{notice.text}</b><button onClick={() => refresh()} disabled={Boolean(busy)}><RefreshCw className={busy ? 'spin' : ''}/>YENİLE</button></div>
+    <div className={`exchangeNotice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}><span>{notice.kind === 'ok' ? <CheckCircle2/> : <AlertTriangle/>}</span><b>{redactConnectionMessage(notice.text,[form.apiKey,form.secretKey])}</b><button onClick={() => refresh()} disabled={Boolean(busy)}><RefreshCw className={busy ? 'spin' : ''}/>YENİLE</button></div>
 
     <section className="exchangeModeSwitch">
       <button className={selected === 'TESTNET' ? 'active testnet' : ''} onClick={() => setSelected('TESTNET')}><TestTube2/><span><small>ÖNCE BURADA DENE</small><b>BINANCE FUTURES TESTNET</b><em>Sanal bakiye · gerçek para yok</em></span></button>

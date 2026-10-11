@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { AlertTriangle, CheckCircle2, CircleDollarSign, KeyRound, LockKeyhole, Power, RefreshCw, Send, ShieldAlert, ShieldCheck, TriangleAlert, UnlockKeyhole, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
 import { fetchWithTimeout } from '../../master-trade-request'
+import {CONNECTION_REQUEST_TIMEOUT_MS, connectionFailureMessage, connectionHttpMessage, redactConnectionMessage} from './exchange-connection-errors'
 import { liveCopy } from '../../ui-copy'
 import { MasterTradeLiveLayout } from '../../MasterTradeLayout'
 import {useKaisErrorReaction} from '../../useKaisPageReactions'
@@ -127,6 +128,7 @@ function errorMessage(payload: unknown, fallback: string): string {
 
 export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
   const [originalNotice, setOriginalNotice] = useState('')
+  const [connectionNotice, setConnectionNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string} | null>(null)
   const {freeTrial} = useMemberAccess()
   const tradingDefaults = useTradingPreferences()
   const defaultsApplied = useRef(false)
@@ -186,8 +188,23 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (rateLimitSeconds !== null && rateLimitSeconds > 0 && base === CONNECTIONS && isConnectionAction(path)) throw new Error(rateLimitMessage(rateLimitSeconds))
     const headers = new Headers(options.headers)
     if (options.body) headers.set('Content-Type', 'application/json')
-    const response = await fetchWithTimeout(`${base}${path}`, {...options, headers})
-    const payload:unknown = await response.json()
+    const connectionAction = base === CONNECTIONS && isConnectionAction(path)
+    let response: Response
+    try {
+      response = await fetchWithTimeout(`${base}${path}`, {...options, headers}, connectionAction ? CONNECTION_REQUEST_TIMEOUT_MS : undefined)
+    } catch (error) {
+      if (connectionAction) throw new Error(connectionFailureMessage(error, [credentials.apiKey, credentials.secretKey]))
+      throw error
+    }
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch (error) {
+      if (connectionAction) throw new Error(response.ok
+        ? connectionFailureMessage(error, [credentials.apiKey, credentials.secretKey])
+        : connectionHttpMessage(response.status, 'Sunucu geçerli bir hata açıklaması döndürmedi.', [credentials.apiKey, credentials.secretKey]))
+      throw error
+    }
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get('Retry-After'))
       const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 0
@@ -200,6 +217,9 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
           && payload.detail.code === 'LIVE_AUTO_MFA_REQUIRED') {
         throw new LiveAutoMfaRequired()
       }
+      if (connectionAction) throw new Error(connectionHttpMessage(response.status,
+        errorMessage(payload, 'Sunucu bir sebep bildirmedi; bağlantı ve kasa durumunu kontrol edin.'),
+        [credentials.apiKey, credentials.secretKey]))
       const statusLabel = response.status === 423
         ? 'LIVE KİLİTLİ / GATE BLOCKED'
         : response.status === 502
@@ -262,14 +282,21 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (actionInFlight.current) return
     actionInFlight.current = true
     setBusy(key)
+    const connectionAction = ['test', 'save', 'connect', 'connect-save'].includes(key)
+    if (connectionAction) setConnectionNotice({kind: 'info', text: 'Binance bağlantısı doğrulanıyor; hiçbir emir gönderilmiyor.'})
     try {
       await action()
       if (!await refresh()) throw new Error('İşlem sonrasında LIVE durumu doğrulanamadı; tekrar göndermeden önce durumu kontrol edin.')
       setNotice({kind: 'ok', text: success})
+      if (connectionAction) setConnectionNotice({kind: 'ok', text: success})
     }
     catch (error) {
+      const message = connectionAction ? connectionFailureMessage(error, [credentials.apiKey, credentials.secretKey])
+        : error instanceof Error ? error.message : 'LIVE işlemi tamamlanamadı.'
+      setNotice({kind: 'error', text: message})
+      if (connectionAction) setConnectionNotice({kind: 'error', text: message})
       if (!(error instanceof LiveAutoMfaRequired)) await refresh()
-      setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE işlemi tamamlanamadı.'})
+      setNotice({kind: 'error', text: message})
     }
     finally { actionInFlight.current = false; setBusy('') }
   }
@@ -339,7 +366,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
   const testConnection = () => run('test', async () => {
     const body = credentials.apiKey && credentials.secretKey ? {mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey} : {mode: 'LIVE'}
-    const result = await call<{fingerprint?: string | null; account?: {tested_at?: string}}>(CONNECTIONS, '/test', {method: 'POST', body: JSON.stringify(body)})
+    const result = await call<{ok?: boolean; fingerprint?: string | null; account?: {tested_at?: string}}>(CONNECTIONS, '/test', {method: 'POST', body: JSON.stringify(body)})
+    if (result?.ok !== true) throw new Error('Binance bağlantı testi başarıyla doğrulanmadı; bağlantı kapalı kaldı.')
     setTestResult({testedAt: result.account?.tested_at, fingerprint: result.fingerprint})
   }, 'LIVE API erişimi doğrulandı; test bağlantısı emir oluşturmadı.')
 
@@ -825,6 +853,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
         <strong className={`masterTradeLiveConnectionStatus ${connected ? 'masterTradeLiveConnected' : ''}`}><i className={connected ? 'connected' : ''} /> {connected ? 'CONNECTED' : 'NOT CONNECTED'}</strong>
       </div>
 
+      {(connectionNotice || liveConnection?.last_error) && <div className={`liveNotice ${connectionNotice?.kind ?? 'error'}`}
+        role={connectionNotice?.kind === 'info' || connectionNotice?.kind === 'ok' ? 'status' : 'alert'}>
+        <TriangleAlert aria-hidden="true"/><span>{connectionNotice?.text ?? redactConnectionMessage(liveConnection.last_error, [credentials.apiKey, credentials.secretKey])}</span>
+      </div>}
       <div className="masterTradeLiveCredentialBlock">
         <div className="masterTradeLiveCredentialLabel"><span className="masterTradeLiveKicker">CREDENTIALS</span><small>Use a key with Futures permissions only.</small></div>
         <div className="masterTradeLiveApiGrid">
