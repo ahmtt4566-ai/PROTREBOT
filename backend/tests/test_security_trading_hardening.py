@@ -48,6 +48,7 @@ MUTATIONS = [
     "v25_arm", "v25_disarm", "v25_recovery_check", "v25_order",
     "v25_auto_start", "v25_auto_stop", "v25_close", "v25_emergency",
     "v25_emergency_clear", "v25_adopt_external_position_preview", "v25_adopt_external_position",
+    "v25_recover_session",
 ]
 
 
@@ -78,6 +79,120 @@ def test_sensitive_reads_deny_other_session(route):
     with pytest.raises(HTTPException) as error:
         asyncio.run(getattr(live, route)(request))
     assert error.value.status_code == 403
+
+
+def test_same_owner_session_recovery_keeps_records_and_entries_locked():
+    from app import account_settings
+
+    async def recover():
+        state = owned_state()
+        state["lock"] = asyncio.Lock()
+        state["recovery_loaded"] = True
+        state["persistence_revision"] = 374
+        state["events"] = [{"kind": "LIVE_POSITION_CLOSED", "realized_pnl": -12}]
+        state["original_v2_live"] = {"enabled": False, "daily": {"locked": True}, "fill_lock": {"active": True}}
+        state["live_session_authorization"].update(fingerprint="SHA256:same", trading_account_id="BINANCE:LIVE:same")
+        request = request_for(state, token="new-session")
+        request.app.state.db_pool.fetchrow = AsyncMock(return_value={"write_status": "UPDATED"})
+        snapshot = {"positions": [], "open_orders": [], "open_algo_orders": [], "open_algo_orders_available": True}
+        with patch.object(live, "authenticated_user", return_value=request.state.member), \
+             patch.object(account_settings, "require_totp", new=AsyncMock()) as mfa, \
+             patch.object(live, "session_credentials_for_request", return_value=("offline-key", "offline-secret")), \
+             patch.object(live, "credential_fingerprint", return_value="SHA256:same"), \
+             patch.object(live, "session_account_identity", return_value="BINANCE:LIVE:same"), \
+             patch.object(live, "authenticated_live_expiry", return_value=time.time() + 3600), \
+             patch.object(vault, "_verify_request_credentials", new=AsyncMock(return_value={"account_identity": "same"})), \
+             patch.object(live, "client_for_with_credentials", return_value=object()), \
+             patch.object(live, "account_snapshot", new=AsyncMock(return_value=snapshot)) as account, \
+             patch.object(live, "execute_live_order", new=AsyncMock()) as orders:
+            result = await live.v25_recover_session(request, SimpleNamespace(confirmation="LIVE OTURUMUNU GERİ BAĞLA", totp_code="123456"))
+        assert result == {"ok": True, "entries_enabled": False, "orders_created": False}
+        assert state["live_session_authorization"]["session_id"] == vault.session_id(request)
+        assert state["persistence_revision"] == 375
+        sql, key, payload = request.app.state.db_pool.fetchrow.await_args.args
+        assert "WHERE COALESCE" in sql and key == "v25_live:state"
+        persisted = json.loads(payload)
+        assert persisted["persistence_revision"] == 375
+        assert persisted["original_v2_live"]["daily"]["locked"]
+        assert persisted["original_v2_live"]["fill_lock"]["active"]
+        assert persisted["events"][1]["realized_pnl"] == -12
+        assert state["events"][1]["realized_pnl"] == -12
+        assert state["original_v2_live"]["daily"]["locked"]
+        assert state["original_v2_live"]["fill_lock"]["active"]
+        assert state["real_trading_locked"] and not state["live_auto_trade"]
+        assert state["armed_until"] == 0 and not state["auto"]["enabled"]
+        assert state["web_consent"] == live.initial_state()["web_consent"]
+        assert state["policy_ack_digest"] is None
+        mfa.assert_awaited_once()
+        assert account.await_args.kwargs["cached"] is False
+        orders.assert_not_awaited()
+
+    asyncio.run(recover())
+
+
+@pytest.mark.parametrize("failure,status", [
+    ("other_owner", 403), ("different_key", 403), ("different_account", 403),
+    ("active_auto", 409), ("armed", 409), ("open_plan", 409), ("unknown_execution", 409),
+    ("positions", 409), ("open_orders", 409), ("open_algo_orders", 409), ("missing_algos", 409),
+    ("mfa", 401), ("confirmation", 422), ("expired_auth", 401),
+    ("recovery_unavailable", 503), ("skipped_write", 503), ("database_error", 503),
+    ("exchange_timeout", 502),
+    ("concurrent_revision", 409), ("concurrent_arm", 409),
+])
+def test_session_recovery_failures_preserve_old_owner_and_records(failure, status):
+    from app import account_settings
+
+    async def recover():
+        state = owned_state()
+        state["lock"] = asyncio.Lock()
+        state["recovery_loaded"] = True
+        state["live_session_authorization"].update(fingerprint="SHA256:same", trading_account_id="BINANCE:LIVE:same")
+        request = request_for(state, token="new-session", user="bob" if failure == "other_owner" else "alice")
+        snapshot = {"positions": [], "open_orders": [], "open_algo_orders": [], "open_algo_orders_available": True}
+        if failure in {"positions", "open_orders", "open_algo_orders"}:
+            snapshot[failure] = [{"symbol": "BTCUSDT"}]
+        if failure == "missing_algos":
+            snapshot["open_algo_orders_available"] = False
+        if failure == "active_auto":
+            state["auto"].update(enabled=True, session_until=time.time() + 60)
+        if failure == "armed":
+            state["armed_until"] = time.time() + 60
+        if failure == "open_plan":
+            state["plans"] = {"saved": {"status": "OPEN"}}
+        if failure == "unknown_execution":
+            state["reconciliation_required"] = True
+        if failure == "recovery_unavailable":
+            state["recovery_loaded"] = False
+        before = copy.deepcopy({key: value for key, value in state.items() if key != "lock"})
+        async def read_account(*args, **kwargs):
+            if failure == "concurrent_revision":
+                state["persistence_revision"] += 1
+            if failure == "concurrent_arm":
+                state["armed_until"] = time.time() + 60
+            return snapshot
+        with patch.object(live, "authenticated_user", return_value=request.state.member), \
+             patch.object(account_settings, "require_totp", new=AsyncMock(side_effect=HTTPException(401, "offline MFA") if failure == "mfa" else None)), \
+             patch.object(live, "session_credentials_for_request", return_value=("offline-key", "offline-secret")), \
+             patch.object(live, "credential_fingerprint", return_value="SHA256:other" if failure == "different_key" else "SHA256:same"), \
+             patch.object(live, "authenticated_live_expiry", return_value=time.time() - 1 if failure == "expired_auth" else time.time() + 3600), \
+             patch.object(vault, "_verify_request_credentials", new=AsyncMock(return_value={"account_identity": "other" if failure == "different_account" else "same"}, side_effect=vault.VaultError("offline timeout") if failure == "exchange_timeout" else None)), \
+             patch.object(live, "client_for_with_credentials", return_value=object()), \
+             patch.object(live, "account_snapshot", new=AsyncMock(side_effect=read_account)), \
+             patch.object(live, "persist_state_awaited", new=AsyncMock(return_value="SKIPPED" if failure == "skipped_write" else "UPDATED", side_effect=RuntimeError("offline database") if failure == "database_error" else None)) as persist, \
+             patch.object(live, "execute_live_order", new=AsyncMock()) as orders:
+            with pytest.raises(HTTPException) as error:
+                await live.v25_recover_session(request, SimpleNamespace(confirmation="wrong" if failure == "confirmation" else "LIVE OTURUMUNU GERİ BAĞLA", totp_code="123456"))
+        assert error.value.status_code == status
+        if failure == "concurrent_revision":
+            before["persistence_revision"] = state["persistence_revision"]
+        if failure == "concurrent_arm":
+            before["armed_until"] = state["armed_until"]
+        assert {key: value for key, value in state.items() if key != "lock"} == before
+        if failure not in {"skipped_write", "database_error"}:
+            persist.assert_not_awaited()
+        orders.assert_not_awaited()
+
+    asyncio.run(recover())
 
 
 def test_idle_claim_is_reserved_before_connect_await():

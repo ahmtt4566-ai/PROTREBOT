@@ -79,6 +79,21 @@ Restore is read-only; daily-loss events, plans, intents, emergency and Original
 daily/fill-lock records are retained. Entry authority still requires fresh gates,
 ARM and the applicable owner confirmation after restart.
 
+If a new login is blocked by the saved session owner, the explicit
+`POST /api/v25/session/recover` operation requires the same canonical OWNER,
+fresh required 2FA and `LIVE OTURUMUNU GERI BAGLA` (the UI sends the Turkish
+confirmation). It verifies the same saved key fingerprint and trading account,
+LIVE permissions and a fresh complete account snapshot including algo orders.
+Active entry authority, unresolved plans/execution, any open position/order or
+state changes during verification block recovery. A guarded durable write must
+succeed before the local session binding changes. Read/status routes do not
+transfer ownership; other users, accounts and keys remain denied.
+Recovery preserves loss history, positions/plans, intents and safety latches.
+It removes entry authorization, ARM, consent and policy acknowledgement, leaves
+the connection unverified and never starts automation or submits an order.
+The owner must separately reconnect and complete all normal entry gates.
+Exchange/proxy timeouts are separate errors; recovery does not bypass them.
+
 LIVE status polling reads local state, not Binance. Previously each full account
 refresh made six signed reads (`account`, `positionRisk`, bulk `openOrders`,
 `openAlgoOrders`, `positionSide/dual`, `symbolConfig`), plus `multiAssetsMargin`

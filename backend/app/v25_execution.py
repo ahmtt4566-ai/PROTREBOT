@@ -5372,6 +5372,82 @@ async def connect_read_only_for_request(application: Any, request: Request, *, a
         raise safe_exchange_error(exc) from exc
 
 
+@router.post("/session/recover")
+async def v25_recover_session(request: Request, body: AutoStartConfirmation) -> dict[str, Any]:
+    from . import account_settings, exchange_connections, original_v2_live
+
+    user = authenticated_user(request, owner=True)
+    state = request.app.state.v25_execution
+    if user.get("role") != "OWNER" or (state.get("live_session_authorization") or {}).get("user_id") != str(user["id"]):
+        raise HTTPException(403, "Yalnız aynı OWNER kendi LIVE oturumunu geri bağlayabilir.")
+    async with state["lock"]:
+        authorization = dict(state.get("live_session_authorization") or {})
+        starting_revision = state.get("persistence_revision", 0)
+        if authorization.get("user_id") != str(user["id"]):
+            raise HTTPException(403, "Yalnız aynı OWNER kendi LIVE oturumunu geri bağlayabilir.")
+        if not authorization.get("session_id") or not session_id(request):
+            raise HTTPException(403, "LIVE oturum sahiplik kanıtı eksik.")
+        if body.confirmation != "LIVE OTURUMUNU GERİ BAĞLA":
+            raise HTTPException(422, "LIVE oturumu geri bağlama onayı gerekli.")
+        await account_settings.require_totp(request, user, body.totp_code or "", required=True)
+        if not state.get("recovery_loaded") or getattr(request.app.state, "db_pool", None) is None:
+            raise HTTPException(503, "Kalıcı LIVE durumu yüklenmeden oturum geri bağlanamaz.")
+        if auto_session_is_active(state) or state.get("live_auto_trade") or original_v2_live.running(state) or float(state.get("armed_until") or 0) > time.time():
+            raise HTTPException(409, "Aktif LIVE giriş yetkisi varken oturum geri bağlanamaz.")
+        if state.get("reconciliation_required") or unresolved_execution_evidence(state) or any(
+            not isinstance(plan, dict) or str(plan.get("status") or "").upper() not in {"KAPANDI", "İPTAL", "CLOSED", "CANCELLED", "CLOSED_CONFIRMED"}
+            for plan in state.get("plans", {}).values()
+        ):
+            raise HTTPException(409, "Açık veya belirsiz LIVE kayıtları varken manuel inceleme gerekli.")
+        api_key, secret_key = session_credentials_for_request(request, "LIVE", active_only=False)
+        fingerprint = credential_fingerprint(api_key) if api_key else None
+        if not usable_live_credentials((api_key, secret_key)) or not authorization.get("fingerprint") or normalize_consent_fingerprint(fingerprint) != normalize_consent_fingerprint(authorization["fingerprint"]):
+            raise HTTPException(403, "Aynı LIVE anahtarı yeni oturumda kayıtlı olmalı.")
+        expiry = authenticated_live_expiry(request)
+        if expiry is None or expiry <= time.time():
+            raise HTTPException(401, "Güncel OWNER oturumu doğrulanamadı.")
+        try:
+            verified = await exchange_connections._verify_request_credentials(request, "LIVE", api_key, secret_key)
+        except exchange_connections.VaultError as exc:
+            raise exchange_connections._exchange_test_http_exception(exc) from exc
+        account_identity = str(verified.get("account_identity") or "")
+        trading_account_id = f"BINANCE:LIVE:{account_identity[:160]}" if account_identity else session_account_identity(request, "LIVE", fingerprint or "")
+        if not trading_account_id or trading_account_id != authorization.get("trading_account_id"):
+            raise HTTPException(403, "Aynı LIVE işlem hesabı doğrulanamadı.")
+        client = client_for_with_credentials(request.app, (api_key, secret_key), request=request)
+        try:
+            snapshot = await account_snapshot(client, cached=False, source="session_recovery")
+        except (LiveExchangeError, BinanceDemoError) as exc:
+            raise safe_exchange_error(exc) from exc
+        if snapshot.get("open_algo_orders_available") is not True or any(
+            not isinstance(snapshot.get(key), list) or snapshot[key]
+            for key in ("positions", "open_orders", "open_algo_orders")
+        ):
+            raise HTTPException(409, "Açık pozisyon/emir var veya tam hesap durumu doğrulanamadı; oturum devredilmedi.")
+        if state.get("persistence_revision", 0) != starting_revision or state.get("live_session_authorization") != authorization or state.get("live_auto_trade") or auto_session_is_active(state) or float(state.get("armed_until") or 0) > time.time():
+            raise HTTPException(409, "Doğrulama sırasında LIVE durumu değişti; oturum devredilmedi.")
+        candidate = dict(state)
+        candidate["events"] = list(state.get("events", []))
+        candidate["auto"] = {**state["auto"], "enabled": False, "session_until": 0.0, "busy": False}
+        candidate.update(real_trading_locked=True, live_auto_trade=False, armed_until=0.0,
+                         auto_authorization=initial_state()["auto_authorization"],
+                         web_consent=initial_state()["web_consent"], policy_ack_digest=None,
+                         connected=False, snapshot_session_id="", _app=request.app)
+        candidate["live_session_authorization"] = {
+            **authorization, "session_id": session_id(request), "auth_version": user.get("auth_version"),
+            "auth_expires_at_epoch": expiry,
+        }
+        add_event(candidate, "LIVE_SESSION_RECOVERED", "Aynı OWNER ve LIVE hesap yeni oturuma geri bağlandı; yeni girişler kapalı.", actor=str(user["id"]))
+        try:
+            result = await persist_state_awaited(candidate)
+        except Exception as exc:
+            raise HTTPException(503, "LIVE oturum kaydı doğrulanamadı; eski sahiplik korundu.") from exc
+        if result not in {"INSERTED", "UPDATED"}:
+            raise HTTPException(503, "LIVE oturum kaydı doğrulanamadı; eski sahiplik korundu.")
+        state.update(candidate)
+    return {"ok": True, "entries_enabled": False, "orders_created": False}
+
+
 @router.post("/connect/read-only")
 async def v25_connect(request: Request) -> dict[str, Any]:
     user = execution_owner(request)

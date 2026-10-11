@@ -399,6 +399,21 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     await refresh()
   }, 'Binance Connected; hesap salt-okunur bağlandı ve gerçek emir kilidi korunuyor.')
 
+  const recoverSession = () => {
+    setConfirm({
+      title: 'LIVE oturumunu geri bağla', expected: 'LIVE OTURUMUNU GERİ BAĞLA', mfa: true,
+      message: 'Yalnız aynı OWNER ve aynı LIVE hesap için. Açık pozisyon/emir veya aktif otomasyon varsa sunucu reddeder. Günlük kayıp ve güvenlik kilitleri korunur. Bağlantı, risk izni ve ARM yeniden doğrulanır; otomasyon başlamaz.',
+      action: async code => {
+        const result = await call<{ok: boolean; entries_enabled: boolean; orders_created: boolean}>(V25, '/session/recover', {
+          method: 'POST', body: JSON.stringify({confirmation: 'LIVE OTURUMUNU GERİ BAĞLA', totp_code: code}),
+        })
+        if (result.ok !== true || result.entries_enabled !== false || result.orders_created !== false) throw new Error('Oturum geri bağlama sonucu doğrulanamadı.')
+      },
+    })
+    setConfirmText('')
+    setConfirmCode('')
+  }
+
   const deactivateCredentials = () => {
     setConfirm({
       title: 'LIVE bağlantısını kapat', expected: 'BAĞLANTIYI KAPAT',
@@ -757,7 +772,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
   if (!active) return null
   const statusNotice = !statusVerified
-    ? <div className="liveNotice error" role="alert" data-testid="live-status-unverified"><TriangleAlert aria-hidden="true"/><span>{blocker}</span></div>
+    ? <div className="liveNotice error" role="alert" data-testid="live-status-unverified"><TriangleAlert aria-hidden="true"/><span>{blocker}</span>{[sharedStatusError, notice.text].some(message => message.includes('LIVE kontrolü başka bir kullanıcı veya oturuma ait.')) && <button type="button" className="masterTradeLiveSecondary" onClick={recoverSession} disabled={Boolean(busy)} title="Aynı OWNER ve hesap için 2FA ile oturumu geri bağla"><RefreshCw size={16} aria-hidden="true"/> LIVE oturumunu geri bağla</button>}</div>
     : !liveArmed && status?.live_lock_reason?.message
       ? <div className="liveNotice error" role="alert" data-testid="live-arm-cancellation"><TriangleAlert aria-hidden="true"/><span>{status.live_lock_reason.message}</span></div>
       : status?.account_rate_limit?.pending_verification

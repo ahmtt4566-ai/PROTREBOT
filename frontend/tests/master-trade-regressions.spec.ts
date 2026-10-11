@@ -8,10 +8,10 @@ async function setup(page:Page) {
   await page.route('https://**', route => route.abort())
   await page.routeWebSocket('wss://**', socket => socket.close())
   const mock = await mockAssistant(page)
-  const fixture = {statusCode:200, mutations:[] as string[], requests:mock.requests, liveFields:{} as Record<string,unknown>}
+  const fixture = {statusCode:200, statusDetail:'Status unavailable', mutations:[] as string[], requests:mock.requests, liveFields:{} as Record<string,unknown>}
   const user = {id:'master-owner', role:'OWNER', active:true, email_verified:true}
   await page.route('**/api/v22/{profile,session}', route => route.fulfill({json:{user, access:{isPremium:true, canAccessMasterTrade:true}}}))
-  await page.route('**/api/v25/status', route => route.fulfill({status:fixture.statusCode, json:fixture.statusCode !== 200 ? {detail:'Status unavailable'} : {
+  await page.route('**/api/v25/status', route => route.fulfill({status:fixture.statusCode, json:fixture.statusCode !== 200 ? {detail:fixture.statusDetail} : {
     connected:true, credentials:{configured:true}, real_trading_locked:false, armed:true, live_auto_trade:false,
     execution_state:'ARMED', recovery_ready:true, authorization:{valid:true}, policy_acknowledged:true,
     readiness:{ready:true,gates:[{key:'risk',passed:true},{key:'protection',passed:true}]},
@@ -387,6 +387,32 @@ test('new scanner and market generations start immediately while old JSON remain
   await expect(page.locator('.refWatchlist [data-symbol="BTCUSDT"]')).toHaveCount(1)
   await expect(page.locator('.refWatchlist [data-symbol="BTCUSDT"] .refMarketScore')).toHaveText('—')
   await expect(page.locator('.refWatchlist [data-symbol="ETHUSDT"] .refMarketScore')).toContainText('88')
+})
+
+test('LIVE session recovery requires explicit confirmation and MFA without starting entries', async ({page}) => {
+  const fixture = await setup(page)
+  fixture.statusCode = 403
+  fixture.statusDetail = 'LIVE kontrolü başka bir kullanıcı veya oturuma ait.'
+  fixture.liveFields = {armed:false,real_trading_locked:true,live_auto_trade:false}
+  await page.route('**/api/v25/session/recover', async route => {
+    expect(route.request().method()).toBe('POST')
+    expect(route.request().postDataJSON()).toEqual({confirmation:'LIVE OTURUMUNU GERİ BAĞLA',totp_code:'123456'})
+    fixture.mutations.push('/api/v25/session/recover')
+    fixture.statusCode = 200
+    await route.fulfill({json:{ok:true,entries_enabled:false,orders_created:false}})
+  })
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  await page.getByTestId('live-status-unverified').getByRole('button',{name:'LIVE oturumunu geri bağla',exact:true}).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('otomasyon başlamaz')
+  await expect(dialog.getByRole('button',{name:'CONFIRM',exact:true})).toBeDisabled()
+  await dialog.locator('input').first().fill('LIVE OTURUMUNU GERİ BAĞLA')
+  await expect(dialog.getByRole('button',{name:'CONFIRM',exact:true})).toBeDisabled()
+  await dialog.locator('input[type="password"]').fill('123456')
+  await dialog.getByRole('button',{name:'CONFIRM',exact:true}).click()
+  await expect(page.getByTestId('live-status-unverified')).toHaveCount(0)
+  await expect(page.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true})).toBeDisabled()
+  expect(fixture.mutations).toEqual(['/api/v25/session/recover'])
 })
 
 test('Original runtime shows its scan and approved percentage instead of stale legacy scanner', async ({page}) => {
