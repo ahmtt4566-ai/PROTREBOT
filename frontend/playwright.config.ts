@@ -17,7 +17,7 @@ export default defineConfig({
     {
       command: 'npm --prefix .. run dev -- --mode test --host 127.0.0.1 --port 4174',
       url: 'http://127.0.0.1:4174',
-      reuseExistingServer: false,
+      reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === '1',
     },
     {
       command: 'npm --prefix .. run dev -- --mode auth-e2e --host 127.0.0.1 --port 4175 --strictPort',

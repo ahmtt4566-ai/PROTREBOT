@@ -11,7 +11,7 @@ import AssistantChat from './AssistantChat'
 import ComplianceContent from './ComplianceContent'
 import {useKaisErrorReaction, useKaisWorkspaceReaction} from './useKaisPageReactions'
 import {useTradingPreferences} from './useTradingPreferences'
-import {fetchWithTimeout} from './master-trade-request'
+import {fetchPublicMarketData, fetchWithTimeout} from './master-trade-request'
 import {marketDataResponseError} from './master-trade-data-error'
 import {parseRequiredMarketQuotes} from './master-market-data'
 
@@ -610,7 +610,7 @@ export default function TestnetFirstApp() {
     setLoading(true)
     try {
       const [marketResult,healthResult] = await Promise.allSettled([
-        fetchWithTimeout(`${API_BASE}/markets?limit=100`,{signal:controller.signal}),
+        fetchPublicMarketData(`${API_BASE}/markets?limit=100`,{signal:controller.signal}),
         fetchWithTimeout(`${API_BASE}/health`,{signal:controller.signal}),
       ])
       if (controller.signal.aborted) return

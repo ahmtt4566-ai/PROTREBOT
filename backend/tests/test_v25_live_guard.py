@@ -326,6 +326,33 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertFalse(state["live_auto_trade"])
         self.assertFalse(state["auto"]["enabled"])
 
+    def test_market_failure_records_turkish_arm_reason_without_relaxing_lock(self):
+        state = initial_state()
+        state.update({"armed_until": time.time() + 300, "real_trading_locked": False})
+        lock_live_execution(state, "TRANSIENT_MARKET_DATA_FAILURE")
+        self.assertFalse(v25_execution.is_armed(state))
+        self.assertTrue(state["real_trading_locked"])
+        self.assertTrue(v25_execution.live_execution_blocked(state))
+        self.assertEqual(state["live_lock_reason"]["code"], "TRANSIENT_MARKET_DATA_FAILURE")
+        self.assertIn("Piyasa verisi alınamadığı için ARM iptal edildi", state["live_lock_reason"]["message"])
+
+    def test_expired_arm_records_reason_once_and_never_unlocks(self):
+        state = initial_state()
+        state.update({"armed_until": time.time() - 1, "real_trading_locked": False})
+        self.assertFalse(v25_execution.is_armed(state))
+        reason = state["live_lock_reason"]
+        self.assertEqual(reason["code"], "ARM_EXPIRED")
+        self.assertTrue(state["real_trading_locked"])
+        self.assertFalse(v25_execution.is_armed(state))
+        self.assertIs(state["live_lock_reason"], reason)
+
+    def test_restart_records_reason_but_never_restores_entry_authority(self):
+        restored = sanitized_state({"armed_until": time.time() + 300, "live_auto_trade": True})
+        self.assertEqual(restored["live_lock_reason"]["code"], "SERVER_RESTART")
+        self.assertFalse(v25_execution.is_armed(restored))
+        self.assertTrue(restored["real_trading_locked"])
+        self.assertFalse(restored["live_auto_trade"])
+
     def test_disarm_cancels_pending_owned_limit_entry(self):
         state = initial_state()
         state.update({"armed_until": time.time() + 300, "real_trading_locked": False})
@@ -1413,9 +1440,12 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
                 return Response()
 
         client = BinanceLiveClient(FakeHttp(), "TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")
-        with patch.object(binance_rate_limit, "time", SimpleNamespace(monotonic=lambda: 1000.0)), \
+        now = [1000.0]
+        async def elapsed(seconds):
+            now[0] += seconds
+        with patch.object(binance_rate_limit, "time", SimpleNamespace(monotonic=lambda: now[0])), \
              patch.object(v25_execution, "BINANCE_RATE_LIMITER", binance_rate_limit.BinanceRateLimiter()), \
-             patch.object(v25_execution.asyncio, "sleep", new=AsyncMock()) as sleep:
+             patch.object(v25_execution.asyncio, "sleep", new=AsyncMock(side_effect=elapsed)) as sleep:
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
         sleep.assert_awaited_once()

@@ -207,6 +207,28 @@ def rate_limit_backoff_seconds(exc: LiveRateLimitError, generic_backoff: int) ->
     return generic_backoff
 
 
+def record_live_lock_reason(state: dict[str, Any], code: str) -> None:
+    messages = {
+        "TRANSIENT_MARKET_DATA_FAILURE": "Piyasa verisi alınamadığı için ARM iptal edildi.",
+        "RECONCILIATION_FAILURE": "Binance hesap ve pozisyon bilgileri doğrulanamadığı için ARM iptal edildi.",
+        "USER_SESSION_EXPIRED_OR_UNPROVEN": "Kullanıcı oturumu sona erdiği veya doğrulanamadığı için ARM iptal edildi.",
+        "SESSION_REVOKED_OR_AUTHORITY_UNAVAILABLE": "Oturum yetkisi iptal edildiği veya doğrulanamadığı için ARM iptal edildi.",
+        "ARM_EXPIRED": "ARM izin süresi doldu; yeniden onay gerekiyor.",
+        "USER_DISARM": "ARM sizin durdurma isteğinizle iptal edildi.",
+        "POLICY_CHANGED": "Risk limitleri değiştiği için onaylar ve ARM iptal edildi.",
+        "CONSENT_REVOKED": "Canlı işlem risk izni iptal edildiği için ARM kapatıldı.",
+        "CONSENT_RENEWED": "24 saatlik risk izni yeniden verildiği için önceki ARM sıfırlandı; ARM adımını yeniden onaylayın.",
+        "SERVER_RESTART": "Sunucu yeniden başladığı için ARM iptal edildi; canlı giriş yetkisi yeniden onaylanmalı.",
+        "BINANCE_MARKET_RATE_LIMITED": "Binance piyasa verisi hız sınırına ulaştığı için ARM iptal edildi; bildirilen bekleme süresi uygulanıyor.",
+        "BINANCE_ACCOUNT_RATE_LIMITED": "Binance hesap sorgusu hız sınırına ulaştığı için ARM iptal edildi; hesap durumu yeniden doğrulanmalı.",
+    }
+    state["live_lock_reason"] = {
+        "code": code,
+        "message": messages.get(code, "Canlı işlem güvenlik kontrolü nedeniyle kilitlendi; ARM iptal edildi."),
+        "at": now_iso(),
+    }
+
+
 def lock_live_execution(
     state: dict[str, Any],
     reason: str,
@@ -218,6 +240,7 @@ def lock_live_execution(
     from . import original_v2_live
     if original_v2_live.running(state):
         original_v2_live.pause(state, reason)
+    record_live_lock_reason(state, reason)
     state["armed_until"] = 0.0
     state["real_trading_locked"] = True
     state["live_auto_trade"] = False
@@ -632,6 +655,7 @@ def initial_state() -> dict[str, Any]:
         "persistence_revision": 0,
         "intents": {},
         "armed_until": 0.0,
+        "live_lock_reason": None,
         "auto": {"enabled": False, "busy": False, "cycles": 0, "last_scan": None, "last_scan_stats": None, "confidence_rejection_history": [], "last_skip_reason": None, "last_cycle_stage": "idle", "last_decision": "Kullanıcı onayı bekleniyor.", "last_error": None, "session_until": 0.0},
             "auto_authorization": {"session_id": "", "user_id": "", "fingerprint": "", "expires_at_epoch": 0.0},
         "real_trading_locked": True,
@@ -779,6 +803,8 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
             if not isinstance(plan.get("adoption_snapshot"), dict):
                 plan["adoption_snapshot"] = {}
     # Entry authority never survives a process restart.
+    if payload.get("armed_until") or payload.get("live_auto_trade") or (payload.get("auto") or {}).get("enabled"):
+        record_live_lock_reason(base, "SERVER_RESTART")
     base["auto"]["last_decision"] = "Güvenli yeniden başlatma: canlı otomasyon yeniden onay bekliyor."
     base["real_trading_locked"] = True
     base["live_auto_trade"] = False
@@ -1207,6 +1233,8 @@ def execution_owner(request: Request) -> dict[str, Any]:
 def is_armed(state: dict[str, Any]) -> bool:
     active = float(state.get("armed_until") or 0) > time.time()
     if not active:
+        if float(state.get("armed_until") or 0) > 0:
+            record_live_lock_reason(state, "ARM_EXPIRED")
         state["armed_until"] = 0.0
         if not auto_session_is_active(state):
             state["real_trading_locked"] = True
@@ -1257,6 +1285,29 @@ class BinanceLiveClient:
     async def public_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         if path not in PUBLIC_PATHS:
             raise LiveExchangeError("İzin verilmeyen canlı piyasa API yolu.", http_status=500)
+        if self.application is not None:
+            from .main import market_data_request
+            try:
+                response = await market_data_request(self.application, path, params)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in {418, 429}:
+                    raise LiveRateLimitError("Binance piyasa verisi hız sınırında; yeni giriş gönderilmedi.",
+                                             retry_after=retry_after_seconds(exc.response), exchange_code=-1003) from exc
+                raise LiveExchangeError("Binance piyasa verisi alınamadı; yeni giriş gönderilmedi.",
+                                        http_status=503, transient_read_failure=True) from exc
+            except httpx.RequestError as exc:
+                raise LiveExchangeError("Binance piyasa verisi zaman aşımı veya ağ hatası; yeni giriş gönderilmedi.",
+                                        http_status=503, timed_out=isinstance(exc, httpx.TimeoutException),
+                                        transient_read_failure=True) from exc
+            try:
+                payload = response.json()
+                if path == "/fapi/v1/time":
+                    self.time_offset_ms = int(response.headers["X-Binance-Clock-Offset-Ms"])
+            except (ValueError, KeyError) as exc:
+                raise LiveExchangeError("Binance piyasa verisi yanıtı doğrulanamadı; yeni giriş gönderilmedi.",
+                                        http_status=503, transient_read_failure=True) from exc
+            return payload
         return await self._request("GET", path, params or {}, signed=False)
 
     async def sync_clock(self) -> None:
@@ -1265,11 +1316,7 @@ class BinanceLiveClient:
         async with self._clock_lock:
             if time.monotonic() - self.last_time_sync < 30:
                 return
-            before = int(time.time() * 1000)
-            payload = await self.public_get("/fapi/v1/time")
-            after = int(time.time() * 1000)
-            server_time = int(payload["serverTime"])
-            self.time_offset_ms = server_time - ((before + after) // 2)
+            await self.public_get("/fapi/v1/time")
             self.last_time_sync = time.monotonic()
 
     async def signed(self, method: str, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -1289,11 +1336,7 @@ class BinanceLiveClient:
                 raise LiveExchangeError(str(exc.detail), http_status=exc.status_code) from exc
         await self.sync_clock()
         payload = {key: value for key, value in dict(params or {}).items() if value is not None}
-        payload["timestamp"] = int(time.time() * 1000) + self.time_offset_ms
-        payload["recvWindow"] = 5000
-        query = urlencode(list(payload.items()), doseq=True)
-        signature = hmac.new(self.secret_key.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
-        return await self._request(method, path, payload, signed=True, encoded_query=query, signature=signature)
+        return await self._request(method, path, payload, signed=True)
 
     async def api_key_request(self, method: str, path: str) -> Any:
         """Call the official USER_STREAM endpoints without a request signature."""
@@ -1309,8 +1352,6 @@ class BinanceLiveClient:
         params: dict[str, Any],
         *,
         signed: bool,
-        encoded_query: str = "",
-        signature: str = "",
         api_key_header: bool = False,
     ) -> Any:
         if (signed or api_key_header) and self.background_session:
@@ -1325,11 +1366,19 @@ class BinanceLiveClient:
         if not url.startswith(f"{LIVE_REST_BASE}/"):
             raise LiveExchangeError("Canlı Binance sunucu kilidi doğrulanamadı.", http_status=500)
         headers = {"X-MBX-APIKEY": self.api_key} if signed or api_key_header else {}
-        request_url = f"{url}?{encoded_query}&signature={signature}" if signed else url
         started = time.perf_counter()
         try:
             async with BINANCE_RATE_LIMITER.slot(LIVE_REST_BASE) as rate_limit:
+                if signed:
+                    params = {**params, "timestamp": int(time.time() * 1000) + self.time_offset_ms, "recvWindow": 5000}
+                    query = urlencode(list(params.items()), doseq=True)
+                    signature = hmac.new(self.secret_key.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+                    request_url = f"{url}?{query}&signature={signature}"
+                else:
+                    request_url = url
+                before = int(time.time() * 1000)
                 response = await self.http.request(method, request_url, params=None if signed else params, headers=headers)
+                after = int(time.time() * 1000)
                 rate_limit.observe(response)
         except httpx.TimeoutException as exc:
             transient_read_failure = is_transient_read_request(method, path, exc)
@@ -1387,6 +1436,8 @@ class BinanceLiveClient:
             payload = response.json()
         except (ValueError, json.JSONDecodeError):
             payload = {}
+        if method == "GET" and path == "/fapi/v1/time" and not signed:
+            self.time_offset_ms = int(payload["serverTime"]) - ((before + after) // 2)
         if isinstance(self.diagnostic_state, dict):
             heartbeat = self.diagnostic_state.setdefault("heartbeat", {})
             snapshot = self.diagnostic_state.get("snapshot") if isinstance(self.diagnostic_state.get("snapshot"), dict) else {}
@@ -3621,6 +3672,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "connection": state.get("connection"),
         "stream": state.get("stream"),
         "armed": is_armed(state),
+        "live_lock_reason": state.get("live_lock_reason"),
         "real_trading_locked": bool(state.get("real_trading_locked", True)),
         "live_auto_trade": bool(state.get("live_auto_trade", False)),
         "reconciliation_required": bool(state.get("reconciliation_required", False)),
@@ -4828,6 +4880,7 @@ async def execution_loop(application: Any) -> None:
             state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
             state["connection"]["retry_count"] = int(state["connection"].get("retry_count") or 0) + 1
             lock_reconciliation_failure(state)
+            record_live_lock_reason(state, "BINANCE_MARKET_RATE_LIMITED" if reconciliation_stage == "automatic_cycle" else "BINANCE_ACCOUNT_RATE_LIMITED")
             persist_state(state)
             await asyncio.sleep(rate_limit_backoff_seconds(exc, backoff))
             backoff = min(60, backoff * 2) if exc.retry_after is None else 5
@@ -5237,6 +5290,7 @@ async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any
     state["armed_until"] = 0.0
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
+    record_live_lock_reason(state, "CONSENT_RENEWED")
     add_event(state, "LIVE_WEB_CONSENT", "24 saatlik canlı risk izni verildi; süre veya API key fingerprint değişene kadar korunur.", actor=user["id"])
     persist_state(state)
     return public_status(request.app, request)
@@ -5256,6 +5310,7 @@ async def v25_revoke_web_consent(request: Request, body: Confirmation) -> dict[s
     state["armed_until"] = 0.0
     state["auto"]["enabled"] = False
     state["auto"]["session_until"] = 0.0
+    record_live_lock_reason(state, "CONSENT_REVOKED")
     add_event(state, "LIVE_WEB_CONSENT_REVOKED", "24 saatlik canlı risk izni kaldırıldı; LIVE kilidi kapatıldı.", actor=user["id"])
     persist_state(state)
     return public_status(request.app, request)
@@ -5726,6 +5781,7 @@ async def v25_arm(request: Request, body: Confirmation) -> dict[str, Any]:
         raise HTTPException(423, f"Canlı kilit açılamadı: {pending} bekleniyor.")
     expiry = authenticated_live_expiry(request)
     state["armed_until"] = min(time.time() + LIVE_ARM_SECONDS, expiry) if expiry is not None else time.time() + LIVE_ARM_SECONDS
+    state["live_lock_reason"] = None
     state["real_trading_locked"] = False
     add_event(state, "LIVE_ARM", "Canlı yeni giriş izni 24 saat için açıldı.", actor=user["id"])
     return public_status(request.app, request)
@@ -5738,6 +5794,7 @@ async def v25_disarm(request: Request) -> dict[str, Any]:
     from . import original_v2_live
     if original_v2_live.running(state):
         original_v2_live.pause(state, "OWNER LIVE disarm")
+    record_live_lock_reason(state, "USER_DISARM")
     state["armed_until"] = 0.0
     state["real_trading_locked"] = True
     state["live_auto_trade"] = False

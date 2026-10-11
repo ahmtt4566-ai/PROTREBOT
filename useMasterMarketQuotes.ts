@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react'
 import {API_BASE} from './api'
-import {fetchWithTimeout} from './master-trade-request'
+import {fetchPublicMarketData} from './master-trade-request'
 import {parseMarketQuotes, type MarketQuote} from './master-market-data'
 import {coinDisplayName} from './src/components/coin-symbol'
 import {marketDataResponseError} from './master-trade-data-error'
@@ -19,7 +19,7 @@ export function useMasterMarketQuotes(enabled: boolean): MasterMarketFeed {
       inFlight = true
       retryAt = Date.now() + 3000
       try {
-        const response = await fetchWithTimeout(`${API_BASE}/markets?all=true`, {signal: controller.signal}, 10000)
+        const response = await fetchPublicMarketData(`${API_BASE}/markets?all=true`, {signal: controller.signal}, 10000)
         if (!response.ok) {
           const retry = Number(response.headers.get('Retry-After'))
           retryAt = Date.now() + Math.max(3000, Number.isFinite(retry) && retry > 0 ? retry * 1000 : 30000)

@@ -68,6 +68,28 @@ for (const statusCode of [403,429,503]) test(`HTTP ${statusCode} account polling
   await expect(start).toBeEnabled()
   fixture.statusCode = statusCode
   await expect(start).toBeDisabled({timeout:12000})
+  await expect(page.getByTestId('live-status-unverified')).toBeVisible()
+  await expect(page.locator('.masterTradeFocusConnection')).not.toContainText('UNLOCKED')
+  if (statusCode !== 403) {
+    await expect(page.locator('.masterTradeLiveConfirmations input[type="checkbox"]')).toBeChecked()
+    await expect(page.locator('.masterTradeStepper')).toContainText('ARMED')
+    fixture.statusCode = 200
+    await expect(start).toBeEnabled({timeout:12000})
+  }
+  expect(fixture.mutations).toEqual([])
+})
+
+test('server safety cancellation displays the Turkish reason and leaves start locked', async ({page}) => {
+  const fixture = await setup(page)
+  await page.goto('/master-trade?tab=canli', {waitUntil:'domcontentloaded'})
+  const start = page.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true})
+  await expect(start).toBeEnabled()
+  fixture.liveFields = {armed:false,real_trading_locked:true,emergency:{active:true,reason:'TRANSIENT_MARKET_DATA_FAILURE'},live_lock_reason:{code:'TRANSIENT_MARKET_DATA_FAILURE',message:'Piyasa verisi alınamadığı için ARM iptal edildi.',at:new Date().toISOString()}}
+  await expect(page.getByTestId('live-arm-cancellation')).toContainText('Piyasa verisi alınamadığı için ARM iptal edildi.',{timeout:12000})
+  await expect(start).toBeDisabled()
+  await page.setViewportSize({width:390,height:844})
+  await expect(page.getByTestId('live-arm-cancellation')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   expect(fixture.mutations).toEqual([])
 })
 
@@ -348,6 +370,56 @@ test('new scanner and market generations start immediately while old JSON remain
   await expect(page.locator('.refWatchlist [data-symbol="BTCUSDT"]')).toHaveCount(1)
   await expect(page.locator('.refWatchlist [data-symbol="BTCUSDT"] .refMarketScore')).toHaveText('—')
   await expect(page.locator('.refWatchlist [data-symbol="ETHUSDT"] .refMarketScore')).toContainText('88')
+})
+
+test('market failures and status polls preserve Original inputs and scroll without scanning hidden analysis', async ({page}) => {
+  const fixture = await setup(page)
+  fixture.liveFields = {original_v2_live:{
+    available:true,enabled:false,paused:false,risk_percent:0.5,daily_loss_percent:5,
+    symbols:['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT'],
+  }}
+  let scannerCalls = 0
+  let navigations = 0
+  page.on('framenavigated',frame => {if (frame === page.mainFrame()) navigations++})
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const response = await original(input, init)
+      if (String(input).includes('/exchange-connections/status')) {
+        const read = response.json.bind(response)
+        response.json = async () => {
+          const payload:unknown = await read()
+          await new Promise(resolve => setTimeout(resolve,200))
+          return payload
+        }
+      }
+      return response
+    }
+  })
+  await page.route('**/api/analysis-universe**',route => {
+    scannerCalls++
+    return route.fulfill({status:503,json:{detail:'Upstream cooldown active'}})
+  })
+  await page.route('**/api/{markets*,analysis/**,klines/**}',route =>
+    route.fulfill({status:503,headers:{'Retry-After':'180'},json:{detail:'Piyasa verisi geçici olarak alınamıyor.'}}))
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  const card = page.getByRole('region',{name:'Kais Original V2 LIVE'})
+  const risk = card.getByLabel('İşlem riski (%)',{exact:true})
+  await expect(risk).toBeVisible()
+  await expect(page.locator('.v26OfflineNotice')).toHaveCount(0)
+  await risk.fill('0.65')
+  await card.getByLabel('ORIGINAL V2 CANLI yazın').fill('Henüz onaylamadım')
+  await risk.scrollIntoViewIfNeeded()
+  const scroll = await page.evaluate(() => window.scrollY)
+  expect(scroll).toBeGreaterThan(200)
+  const navigationCount = navigations
+  await page.waitForTimeout(11500)
+  await expect(risk).toHaveValue('0.65')
+  await expect(card.getByLabel('ORIGINAL V2 CANLI yazın')).toHaveValue('Henüz onaylamadım')
+  expect(await page.evaluate(() => window.scrollY)).toBeCloseTo(scroll,0)
+  expect(navigations).toBe(navigationCount)
+  expect(scannerCalls).toBe(0)
+  expect(fixture.mutations).toEqual([])
 })
 
 test('a superseded analysis JSON response cannot overwrite the selected symbol snapshot', async ({page}) => {

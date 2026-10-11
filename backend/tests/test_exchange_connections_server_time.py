@@ -174,22 +174,23 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
 
     def test_owner_time_diagnostic_needs_no_api_keys_and_creates_no_order(self):
         request = self._request()
-        request.app.state.http = FakeBinanceHttp()
+        request.app.state.market_http = FakeBinanceHttp()
         result = asyncio.run(exchange_connections.exchange_server_time_status(request, "TESTNET"))
         self.assertTrue(result["ok"])
         self.assertEqual(result["mode"], "TESTNET")
-        self.assertEqual(request.app.state.http.paths, ["/fapi/v1/time"])
+        self.assertEqual(request.app.state.market_http.paths, ["/fapi/v1/time"])
+        request.app.state.http.get.assert_not_called()
         request.app.state.db_pool.execute.assert_not_called()
 
     def test_time_diagnostic_preserves_safe_proxy_failure_type(self):
         request = self._request()
-        request.app.state.http = FakeBinanceHttp(time_error=httpx.ProxyError("synthetic-secret"))
+        request.app.state.market_http = FakeBinanceHttp(time_error=httpx.ProxyError("synthetic-secret"))
         with self.assertRaises(exchange_connections.HTTPException) as context:
             asyncio.run(exchange_connections.exchange_server_time_status(request, "TESTNET"))
         self.assertEqual(context.exception.status_code, 502)
         self.assertEqual(context.exception.detail["error_type"], "ProxyError")
         self.assertNotIn("synthetic-secret", str(context.exception.detail))
-        self.assertEqual(request.app.state.http.paths, ["/fapi/v1/time"])
+        self.assertEqual(request.app.state.market_http.paths, ["/fapi/v1/time"])
 
     def test_time_diagnostic_rejects_non_owner_before_any_exchange_call(self):
         for member, status in [(None, 401), ({"id": "customer", "role": "CUSTOMER"}, 403)]:
@@ -208,6 +209,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
             state=SimpleNamespace(
                 db_pool=pool,
                 http=AsyncMock(),
+                market_http=FakeBinanceHttp(),
                 exchange_vault={"ready": True, "storage": "POSTGRESQL + FERNET", "reason": None, "loaded_at": "now", "pool_id": id(pool)},
             )
         )

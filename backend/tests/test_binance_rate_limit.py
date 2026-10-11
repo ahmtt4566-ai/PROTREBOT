@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sys
 import unittest
+import httpx
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -54,10 +55,10 @@ class BinanceRateLimitTests(unittest.IsolatedAsyncioTestCase):
             await self._request(Response(429, {"Retry-After": "7"}))
         self.assertEqual(BINANCE_RATE_LIMITER.snapshot(self.HOST)["cooldown_until"], 107.0)
 
-    async def test_retry_after_is_capped(self):
+    async def test_retry_after_above_sixty_seconds_is_honored(self):
         with patch("app.binance_rate_limit.time.monotonic", return_value=100.0):
-            await self._request(Response(429, {"Retry-After": "999999999999"}))
-        self.assertEqual(BINANCE_RATE_LIMITER.snapshot(self.HOST)["cooldown_until"], 160.0)
+            await self._request(Response(429, {"Retry-After": "180"}))
+        self.assertEqual(BINANCE_RATE_LIMITER.snapshot(self.HOST)["cooldown_until"], 280.0)
 
     async def test_missing_retry_after_uses_safe_fallback(self):
         with patch("app.binance_rate_limit.time.monotonic", return_value=100.0):
@@ -79,6 +80,7 @@ class BinanceRateLimitTests(unittest.IsolatedAsyncioTestCase):
         async def delayed_sleep(seconds):
             sleep_started.set()
             await release_sleep.wait()
+            BINANCE_RATE_LIMITER._state_for(self.HOST).cooldown_until = 0
 
         async def call(response):
             async with BINANCE_RATE_LIMITER.slot(self.HOST) as permit:
@@ -96,13 +98,17 @@ class BinanceRateLimitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_request_after_cooldown_can_run(self):
         await self._request(Response(429, {"Retry-After": "1"}))
-        with patch("app.binance_rate_limit.asyncio.sleep", new=AsyncMock()):
+        async def elapsed(seconds):
+            BINANCE_RATE_LIMITER._state_for(self.HOST).cooldown_until = 0
+        with patch("app.binance_rate_limit.asyncio.sleep", new=elapsed):
             await self._request(Response(200))
         self.assertEqual(BINANCE_RATE_LIMITER.snapshot(self.HOST)["cooldown_until"], 0.0)
 
     async def test_concurrent_requests_keep_rate_limit_state_consistent(self):
         responses = [Response(429, {"Retry-After": "3"}), Response(200)]
-        with patch("app.binance_rate_limit.asyncio.sleep", new=AsyncMock()):
+        async def elapsed(seconds):
+            BINANCE_RATE_LIMITER._state_for(self.HOST).cooldown_until = 0
+        with patch("app.binance_rate_limit.asyncio.sleep", new=elapsed):
             await asyncio.gather(*(self._request(response) for response in responses))
         self.assertEqual(BINANCE_RATE_LIMITER.snapshot(self.HOST)["used_weight_1m"], None)
 
@@ -114,6 +120,21 @@ class BinanceRateLimitTests(unittest.IsolatedAsyncioTestCase):
     async def test_logs_never_contain_credentials(self):
         with self.assertNoLogs("app.binance_rate_limit", level=logging.DEBUG):
             await self._request(Response(429, {"Retry-After": "2"}, {"code": -1003}))
+
+    async def test_endpoint_metrics_are_per_host_and_exclude_signatures(self):
+        first = httpx.Response(200, request=httpx.Request("GET", self.HOST + "/fapi/v3/account?signature=private-signature"))
+        other_host = "https://api.binance.com"
+        second = httpx.Response(200, request=httpx.Request("GET", other_host + "/sapi/v1/account/apiRestrictions"))
+        BINANCE_RATE_LIMITER.observe(self.HOST, first)
+        BINANCE_RATE_LIMITER.observe(other_host, second)
+        BINANCE_RATE_LIMITER._state_for(self.HOST).metrics_at -= 60
+        with self.assertLogs("app.binance_rate_limit", level="INFO") as logs:
+            BINANCE_RATE_LIMITER.observe(self.HOST, first)
+        text = " ".join(logs.output)
+        self.assertIn("GET:/fapi/v3/account:200", text)
+        self.assertNotIn("apiRestrictions", text)
+        self.assertNotIn("private-signature", text)
+        self.assertEqual(BINANCE_RATE_LIMITER._state_for(other_host).counts["GET:/sapi/v1/account/apiRestrictions:200"], 1)
 
 
 if __name__ == "__main__":

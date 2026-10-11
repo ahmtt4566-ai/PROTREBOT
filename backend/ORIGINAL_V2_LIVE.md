@@ -89,6 +89,66 @@ Turkish explanations. Signed requests never fall back to a different egress
 transport. Binance code -2015 is ambiguous (key, IP or permissions); an IP hint
 is shown only when Binance explicitly reports a valid public request IP.
 No static IP is invented, and the code does not change live proxy settings.
+Clock synchronization measures only the network round trip, excluding
+rate-limit queue time. Credential checks and LIVE requests generate each
+timestamp and signature after acquiring their rate-limit slot, so waiting
+does not consume the unchanged 5-second receive window. No automatic order
+retry or direct-transport fallback is introduced.
+
+Public LIVE market data now uses only the direct, environment-proxy-disabled
+client. Signed permissions, account reads and order traffic retain the
+configured fixed-IP proxy; there is no signed direct fallback. Public clock
+reads are direct too. No proxy environment value is modified.
+
+A process-wide singleflight cache shares exchange metadata (10 minutes), bulk
+tickers and candles (15 seconds) across users, charts, scanners and LIVE.
+Candle requests up to 500 rows share one upstream series and receive exactly
+their requested latest row count. Candle-boundary expiry prevents reusing the
+previous bar at an Original decision boundary. Expired/failed candle reads do
+not become stale successful trading inputs.
+
+Original's fixed eight symbols have priority over queued general scans. A
+read-only 15-second warmer runs even without users or enabled automation and
+maintains the unchanged 15m/1h/4h frames. It cannot start automation or send
+orders. Public reads are capped at two concurrent upstream calls and do not
+retry the same failed host in a loop.
+
+HTTP 418/429 applies the full valid `Retry-After`, including values above
+60 seconds, across all public paths and symbols. During that interval no
+upstream public request is sent; responses preserve the remaining wait.
+The browser also shares a market-only cooldown without delaying account
+reads or changing execution authority. Public request/cache/status counts are
+logged at most once per minute, including public cooldown periods, as
+`PUBLIC_MARKET_METRICS transport=direct`. The log includes upstream GET counts
+by endpoint and candle interval, cache/shared-waiter counts, Binance's observed
+one-minute request weight and the remaining cooldown. Legacy Spot depth and
+price reads also use the direct public cache, retaining their Spot host.
+Account endpoint/status counts are logged per host as `BINANCE_ACCOUNT_METRICS`;
+queries, API keys and signatures are excluded. `BINANCE_TRANSPORT` records
+whether accounts/orders use QuotaGuard without logging its URL.
+
+An offline one-minute load test with 50 users polling all eight symbols and
+three Original frames every five seconds makes 14,400 internal candle reads
+but only 96 upstream reads. This is not a measurement of Render production,
+does not include unrelated feeds/account traffic, and assumes one backend
+process and a healthy upstream. The cache and cooldown are process-local;
+multiple workers/replicas require a shared coordinator before scaling.
+
+Master Trade does not scan the hidden analysis universe on the LIVE tab.
+Successful account polls replace snapshots without temporarily clearing
+Original's card, preserving typed inputs and scroll. Transient failed polls
+keep the last displayed consent, policy and Original card, but mark the status
+unverified and disable new orders/automation starts. The header also shows
+unverified/locked rather than presenting old ARM as current authority. A 401,
+403 or missing-account response clears the previous account's status. A fresh
+successful poll restores only the actual server state, never synthesizes ARM.
+Market failures never reload the document or reset the live form.
+
+The server exposes `live_lock_reason` with a code, Turkish message and timestamp
+for safety cancellation, ARM expiry, session failure, consent renewal/revocation
+and restart. Renewing 24-hour consent still resets ARM. Entry authority still
+cannot survive a process restart. Safety locks, ownership, MFA, risk limits,
+fresh-data gates and order execution behavior are not relaxed.
 
 Recovery checks Original TP prices, quantities, close/reduce-only flags,
 working type and order identity, not just their IDs. A changed target pauses

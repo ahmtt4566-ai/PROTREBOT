@@ -33,6 +33,7 @@ from .premium_access import public_projection, requires_premium
 from .email_service import validate_app_base_url
 from .binance_rate_limit import BINANCE_RATE_LIMITER
 from .market_universe import MarketUniverseCache, active_usdt_perpetual
+from .public_market_data import PublicMarketData, PUBLIC_PATHS as PUBLIC_MARKET_PATHS, original_market_warm_loop
 from .exchange_connections import (
     clear_vault_cache,
     ensure_exchange_vault,
@@ -1060,6 +1061,7 @@ def build_http_client() -> httpx.AsyncClient:
                 raise ValueError
         except (TypeError, ValueError):
             raise ValueError("Invalid QUOTAGUARD_URL configuration; expected an http(s) proxy URL.") from None
+    logger.info("BINANCE_TRANSPORT public=direct accounts_and_orders=%s", "quotaguard" if quotaguard_url else "direct")
     return _build_http_client(quotaguard_url or None)
 
 
@@ -1107,7 +1109,7 @@ async def lifespan(app: FastAPI):
     app.state.http_loop = asyncio.get_running_loop()
     app.state.market_http = None
     app.state.market_http_loop = None
-    app.state.market_proxy_retry_at = 0.0
+    app.state.public_market_data = PublicMarketData()
     app.state.db_pool = None
     app.state.redis_client = None
     app.state.paper_schema_ready = False
@@ -1188,6 +1190,7 @@ async def lifespan(app: FastAPI):
     await restore_health_snapshot(app)
     app.state.infrastructure_task = asyncio.create_task(infrastructure_loop(app))
     app.state.runtime_tasks = [app.state.infrastructure_task]
+    app.state.runtime_tasks.append(asyncio.create_task(original_market_warm_loop(app, market_data_request)))
     from .notification_worker import schedule_sweep, shutdown_notifications
     from .customer_event_writer import schedule_cleanup, shutdown_events
     schedule_cleanup(app)
@@ -1791,72 +1794,49 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
 
 
 async def market_data_request(application: FastAPI, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
-    """Bound public reads and recover proxy failures without rerouting signed requests."""
-    if path not in {"/fapi/v1/ping", "/fapi/v1/exchangeInfo", "/fapi/v1/ticker/24hr", "/fapi/v1/klines"}:
+    """Share public reads across UI, analysis and LIVE without using the signed proxy."""
+    if path not in PUBLIC_MARKET_PATHS:
         raise ValueError("Market-data transport only accepts public read-only endpoints.")
-    direct = getattr(application.state, "market_proxy_retry_at", 0.0) > time.monotonic()
-    client = await ensure_market_data_http_client(application) if direct else await ensure_http_client(application)
-    proxy_configured = bool(os.getenv("QUOTAGUARD_URL", "").strip())
+    service = getattr(application.state, "public_market_data", None)
+    if service is None:
+        service = application.state.public_market_data = PublicMarketData()
+    return await service.get(path, params, lambda route, values: _fetch_public_market_data(application, service, route, values))
+
+
+async def _fetch_public_market_data(application: FastAPI, service: PublicMarketData, path: str, params: dict[str, Any]) -> httpx.Response:
+    client = await ensure_market_data_http_client(application)
     total_deadline = time.monotonic() + MARKET_DATA_REQUEST_TIMEOUT_SECONDS
-    host_budget = MARKET_DATA_REQUEST_TIMEOUT_SECONDS / max(1, len(FUTURES_MARKET_DATA_APIS))
+    hosts = (BINANCE_API,) if path.startswith("/api/v3/") else FUTURES_MARKET_DATA_APIS
+    host_budget = MARKET_DATA_REQUEST_TIMEOUT_SECONDS / max(1, len(hosts))
     last_error: httpx.HTTPError | None = None
     last_response: httpx.Response | None = None
-    for host in FUTURES_MARKET_DATA_APIS:
-        deadline = min(total_deadline, time.monotonic() + host_budget)
-        for attempt in range(3):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-
-            async def request() -> httpx.Response:
-                async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
-                    response = await client.get(f"{host}{path}", params=params)
-                    rate_limit.observe(response)
-                    return response
-
-            try:
-                response = await asyncio.wait_for(request(), timeout=remaining)
-                last_response = response
-                if response.status_code not in {500, 502, 503, 504}:
-                    return response
-                if proxy_configured and not direct:
-                    logger.warning("Public market proxy returned HTTP %s; switching read-only transport: path=%s", response.status_code, path)
-                    client = await ensure_market_data_http_client(application)
-                    direct = True
-                    application.state.market_proxy_retry_at = time.monotonic() + 30
-                    continue
-                logger.warning(
-                    "Market data upstream response: host=%s status=%s path=%s attempt=%s",
-                    host,
-                    response.status_code,
-                    path,
-                    attempt + 1,
-                )
-                if host != FUTURES_MARKET_DATA_APIS[-1]:
-                    break
-            except asyncio.TimeoutError as exc:
-                last_error = httpx.ReadTimeout(f"Binance Futures market data request timed out via {host}")
-                logger.warning("Market data upstream timeout: host=%s path=%s attempt=%s", host, path, attempt + 1)
-                if host != FUTURES_MARKET_DATA_APIS[-1]:
-                    break
-            except httpx.RequestError as exc:
-                last_error = exc
-                logger.warning("Market data upstream network failure: host=%s path=%s attempt=%s detail=%s", host, path, attempt + 1, type(exc).__name__)
-                if not direct and (proxy_configured or isinstance(exc, httpx.ProxyError)):
-                    client = await ensure_market_data_http_client(application)
-                    direct = True
-                    application.state.market_proxy_retry_at = time.monotonic() + 30
-                    logger.warning("Public market proxy unavailable; switching read-only transport: path=%s", path)
-                    continue
-                if host != FUTURES_MARKET_DATA_APIS[-1]:
-                    break
-            if attempt == 2:
-                break
-            retry_delay = min(0.5 * (2 ** attempt), max(0.0, deadline - time.monotonic()))
-            if retry_delay <= 0:
-                break
-            await asyncio.sleep(retry_delay)
-        logger.warning("Market data host exhausted: host=%s path=%s", host, path)
+    for host in hosts:
+        remaining = min(host_budget, total_deadline - time.monotonic())
+        if remaining <= 0:
+            break
+        try:
+            before = int(time.time() * 1000)
+            frame = params.get("interval", "bulk") if path.endswith("klines") else "bulk"
+            service.counts[f"request:GET:{path}:{frame}"] += 1
+            response = await asyncio.wait_for(client.get(f"{host}{path}", params=params), timeout=remaining)
+            after = int(time.time() * 1000)
+            service.observe(path, response)
+            last_response = response
+            if response.is_success and path == "/fapi/v1/time":
+                response.headers["X-Binance-Clock-Offset-Ms"] = str(int(response.json()["serverTime"]) - ((before + after) // 2))
+            if response.status_code not in {500, 502, 503, 504}:
+                return response
+            logger.warning("Public market upstream response: transport=direct host=%s path=%s status=%s",
+                           host, path, response.status_code)
+        except asyncio.TimeoutError:
+            last_error = httpx.ReadTimeout(f"Binance Futures market data request timed out via {host}")
+            service.counts[f"timeout:{path}"] += 1
+            logger.warning("Public market upstream timeout: transport=direct host=%s path=%s", host, path)
+        except httpx.RequestError as exc:
+            last_error = exc
+            service.counts[f"network_error:{path}"] += 1
+            logger.warning("Public market upstream network failure: transport=direct host=%s path=%s error=%s",
+                           host, path, type(exc).__name__)
     if last_error is not None and last_response is None:
         raise last_error
     if last_response is not None:
@@ -1894,7 +1874,8 @@ def market_data_http_exception(prefix: str, error: httpx.HTTPError) -> HTTPExcep
         message = f"{prefix}: HTTP {status}."
     if detail:
         message = f"{message} {detail}"
-    return HTTPException(status_code=429 if status in {418, 429} else 502 if status >= 500 else status, detail=message)
+    headers = {"Retry-After": response.headers["Retry-After"]} if "Retry-After" in response.headers else None
+    return HTTPException(status_code=429 if status in {418, 429} else 502 if status >= 500 else status, detail=message, headers=headers)
 
 
 async def historical_fetch_candles(symbol: str, interval: str, total_limit: int = 10_000) -> list[dict]:
@@ -3407,11 +3388,7 @@ async def orderbook_intelligence(symbol: str) -> dict:
     if cached and time.monotonic() - cached[0] < 4:
         return {**cached[1], "cached": True}
     try:
-        async with BINANCE_RATE_LIMITER.slot(BINANCE_API) as rate_limit:
-            response = await app.state.http.get(
-                f"{BINANCE_API}/api/v3/depth", params={"symbol": safe_symbol, "limit": 100},
-            )
-            rate_limit.observe(response)
+        response = await market_data_request(app, "/api/v3/depth", {"symbol": safe_symbol, "limit": 100})
         response.raise_for_status()
         raw = response.json()
         bids = [(float(price), float(quantity)) for price, quantity in raw.get("bids", [])[:40]]
@@ -4576,6 +4553,16 @@ async def smart_scan(limit: int = Query(18, ge=6, le=30), interval: str = "15m")
 
 @app.get("/api/analysis-universe")
 async def analysis_universe(interval: str = "15m", limit: int = Query(100, ge=1, le=100)):
+    if interval not in ALLOWED_INTERVALS:
+        raise HTTPException(400, "Desteklenmeyen zaman dilimi")
+    locks = getattr(app.state, "analysis_universe_locks", None)
+    if locks is None:
+        locks = app.state.analysis_universe_locks = {}
+    async with locks.setdefault((interval, limit), asyncio.Lock()):
+        return await _analysis_universe(interval, limit)
+
+
+async def _analysis_universe(interval: str, limit: int):
     """Return cached, read-only technical snapshots for eligible USDT pairs."""
     analysis_started = time.monotonic()
     timing = {
@@ -5144,9 +5131,7 @@ async def liquidity_shield(symbol: str) -> dict:
         "depth_usdt": 0.0, "best_bid": None, "best_ask": None,
     }
     try:
-        async with BINANCE_RATE_LIMITER.slot(BINANCE_API) as rate_limit:
-            response = await app.state.http.get(f"{BINANCE_API}/api/v3/depth", params={"symbol": safe_symbol, "limit": 20})
-            rate_limit.observe(response)
+        response = await market_data_request(app, "/api/v3/depth", {"symbol": safe_symbol, "limit": 20})
         response.raise_for_status()
         order_book = response.json()
         bids = [(float(price), float(quantity)) for price, quantity in order_book["bids"][:20]]
@@ -5896,9 +5881,7 @@ async def decision_archive(limit: int = Query(8, ge=1, le=20)):
 async def latest_price(symbol: str) -> float:
     safe_symbol = "".join(char for char in symbol.upper() if char.isalnum())
     try:
-        async with BINANCE_RATE_LIMITER.slot(BINANCE_API) as rate_limit:
-            response = await app.state.http.get(f"{BINANCE_API}/api/v3/ticker/price", params={"symbol": safe_symbol})
-            rate_limit.observe(response)
+        response = await market_data_request(app, "/api/v3/ticker/price", {"symbol": safe_symbol})
         response.raise_for_status()
         return float(response.json()["price"])
     except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:

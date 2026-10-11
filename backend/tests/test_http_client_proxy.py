@@ -18,6 +18,7 @@ ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.binance_rate_limit import BinanceRateLimiter
+from app.public_market_data import PublicMarketData, PUBLIC_PATHS
 
 
 def load_http_helpers():
@@ -27,6 +28,7 @@ def load_http_helpers():
         "_build_http_client", "build_http_client", "build_market_http_client",
         "_ensure_http_client", "ensure_http_client", "ensure_market_data_http_client",
         "market_data_request", "market_data_http_exception",
+        "_fetch_public_market_data",
     }
     nodes = [
         node for node in ast.parse(source).body
@@ -41,6 +43,7 @@ def load_http_helpers():
         "FastAPI": FastAPI, "HTTPException": HTTPException,
         "logger": logging.getLogger("app.main"),
         "BINANCE_RATE_LIMITER": BinanceRateLimiter(),
+        "PublicMarketData": PublicMarketData, "PUBLIC_MARKET_PATHS": PUBLIC_PATHS,
         "FUTURES_MARKET_DATA_API": "https://primary.test",
         "FUTURES_MARKET_DATA_APIS": ("https://primary.test", "https://fallback.test"),
         "MARKET_DATA_REQUEST_TIMEOUT_SECONDS": 8,
@@ -90,7 +93,7 @@ class HttpClientProxyTests(unittest.TestCase):
             async def get(self, url, params=None):
                 return response
 
-        application = SimpleNamespace(state=SimpleNamespace(http=FastClient()))
+        application = SimpleNamespace(state=SimpleNamespace(market_http=FastClient()))
         result = asyncio.run(main_module.market_data_request(application, "/fapi/v1/ping"))
 
         self.assertIs(result, response)
@@ -101,18 +104,16 @@ class HttpClientProxyTests(unittest.TestCase):
         class FailoverClient:
             async def get(self, url, params=None):
                 requests.append(url)
-                status = 503 if len(requests) <= 3 else 200
+                status = 503 if url.startswith("https://primary.test") else 200
                 return httpx.Response(status, json={"ok": status == 200}, request=httpx.Request("GET", url))
 
-        application = SimpleNamespace(state=SimpleNamespace(http=FailoverClient()))
+        application = SimpleNamespace(state=SimpleNamespace(market_http=FailoverClient()))
         with patch.object(main_module, "FUTURES_MARKET_DATA_APIS", ("https://primary.test", "https://fallback.test")):
             result = asyncio.run(main_module.market_data_request(application, "/fapi/v1/ping"))
 
         self.assertEqual(result.status_code, 200)
         self.assertEqual(requests, [
             "https://primary.test/fapi/v1/ping",
-            "https://fallback.test/fapi/v1/ping",
-            "https://fallback.test/fapi/v1/ping",
             "https://fallback.test/fapi/v1/ping",
         ])
 
@@ -121,12 +122,12 @@ class HttpClientProxyTests(unittest.TestCase):
             async def get(self, url, params=None):
                 await asyncio.Event().wait()
 
-        application = SimpleNamespace(state=SimpleNamespace(http=HangingClient()))
+        application = SimpleNamespace(state=SimpleNamespace(market_http=HangingClient()))
         with patch.object(main_module, "MARKET_DATA_REQUEST_TIMEOUT_SECONDS", 0.01):
             with self.assertRaises(httpx.ReadTimeout):
                 asyncio.run(main_module.market_data_request(application, "/fapi/v1/ping"))
 
-    def test_public_market_data_recovers_from_proxy_failure_without_rerouting_signed_client(self):
+    def test_public_market_data_bypasses_proxy_without_rerouting_signed_client(self):
         requests = []
 
         class ProxyClient:
@@ -145,7 +146,7 @@ class HttpClientProxyTests(unittest.TestCase):
             result = asyncio.run(main_module.market_data_request(application, "/fapi/v1/klines", {"symbol": "BTCUSDT"}))
 
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(requests, [("https://market.test/fapi/v1/klines", {"symbol": "BTCUSDT"})])
+        self.assertEqual(requests, [("https://market.test/fapi/v1/klines", {"symbol": "BTCUSDT", "limit": 500})])
         self.assertIs(application.state.http, signed_client)
 
     def test_proxy_transport_error_is_not_reported_as_binance_http_503(self):
@@ -181,7 +182,7 @@ class HttpClientProxyTests(unittest.TestCase):
                 self.assertEqual(result.status_code, 200)
 
         asyncio.run(run_case())
-        self.assertEqual(requests, ["proxy", "direct", "direct"])
+        self.assertEqual(requests, ["direct"])
 
     def test_signed_endpoints_cannot_use_public_transport(self):
         application = SimpleNamespace(state=SimpleNamespace())
@@ -199,12 +200,12 @@ class HttpClientProxyTests(unittest.TestCase):
                     calls.append(url)
                     return httpx.Response(status, json={"msg": "Synthetic denial"}, request=httpx.Request("GET", url))
 
-            application = SimpleNamespace(state=SimpleNamespace(http=DeniedClient()))
+            application = SimpleNamespace(state=SimpleNamespace(market_http=DeniedClient()))
             with patch.dict(os.environ, {"QUOTAGUARD_URL": "http://synthetic.test:9293"}):
                 result = asyncio.run(main_module.market_data_request(application, "/fapi/v1/klines"))
             self.assertEqual(result.status_code, status)
             self.assertEqual(len(calls), 1)
-            self.assertFalse(hasattr(application.state, "market_http"))
+            self.assertFalse(hasattr(application.state, "http"))
             main_module.BINANCE_RATE_LIMITER.reset()
 
     def test_market_timeout_budget_is_total_not_multiplied_by_hosts(self):
@@ -212,7 +213,7 @@ class HttpClientProxyTests(unittest.TestCase):
             async def get(self, url, params=None):
                 await asyncio.Event().wait()
 
-        application = SimpleNamespace(state=SimpleNamespace(http=HangingClient()))
+        application = SimpleNamespace(state=SimpleNamespace(market_http=HangingClient()))
 
         async def run_case():
             with self.assertRaises(httpx.ReadTimeout):

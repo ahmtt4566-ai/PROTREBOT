@@ -575,11 +575,12 @@ def exchange_rejection_message(code: Any) -> str:
                         "Binance isteği reddetti; bağlantı, yetki ve borsa kurallarını kontrol edin.")
 
 
-async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: str, secret_key: str, timestamp: int) -> Any:
-    query = _signed_query(secret_key, {"timestamp": timestamp, "recvWindow": 5000})
+async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: str, secret_key: str, time_offset_ms: int) -> Any:
     try:
         async def request() -> httpx.Response:
             async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+                timestamp = int(time.time() * 1000) + time_offset_ms
+                query = _signed_query(secret_key, {"timestamp": timestamp, "recvWindow": 5000})
                 response = await http.get(f"{host}{path}?{query}", headers={"X-MBX-APIKEY": api_key})
                 rate_limit.observe(response)
                 return response
@@ -620,8 +621,7 @@ def _server_time_error(response: httpx.Response) -> VaultError:
         except (ValueError, TypeError):
             payload = None
         exchange_code = payload.get("code") if isinstance(payload, dict) else None
-        raw_retry_after = response.headers.get("Retry-After", "").strip()
-        retry_after = retry_after_seconds(response) if raw_retry_after.isdigit() and int(raw_retry_after) <= RATE_LIMIT_MAX_WAIT_SECONDS else None
+        retry_after = retry_after_seconds(response)
         retry_seconds = retry_after or int(SERVER_TIME_CACHE_TTL_SECONDS)
         retry_message = f"Please wait {retry_seconds} seconds before retrying." if retry_after else "Please wait briefly before retrying."
         return BinanceServerTimeRejected(
@@ -655,15 +655,16 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
         if rejected and rejected[0] > now:
             raise BinanceServerTimeRejected(rejected[1], retry_after=rejected[2])
         host = HOSTS[normalized]
-        before = int(time.time() * 1000)
         try:
-            async def request() -> httpx.Response:
+            async def request() -> tuple[httpx.Response, int, int]:
                 async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+                    before = int(time.time() * 1000)
                     response = await http.get(f"{host}/fapi/v1/time")
+                    after = int(time.time() * 1000)
                     rate_limit.observe(response)
-                    return response
+                    return response, before, after
 
-            response = await asyncio.wait_for(request(), timeout=BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS)
+            response, before, after = await asyncio.wait_for(request(), timeout=BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
         except asyncio.TimeoutError as exc:
             raise VaultError("Binance saat servisine ulaşırken zaman aşımı oluştu.") from exc
@@ -707,7 +708,6 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
             server_time = int(time_payload["serverTime"])
         except (TypeError, ValueError) as exc:
             raise VaultError("Binance saat servisi serverTime alanını geçerli bir sayıya dönüştüremedi.") from exc
-        after = int(time.time() * 1000)
         offset = server_time - ((before + after) // 2)
         _SERVER_TIME_CACHE[normalized] = (time.monotonic() + SERVER_TIME_CACHE_TTL_SECONDS, offset)
         return offset
@@ -724,7 +724,7 @@ def withdrawal_permissions_safe(mode: str, account: Any) -> bool:
     )
 
 
-async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: str, secret_key: str) -> dict[str, Any]:
+async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: str, secret_key: str, *, public_http: httpx.AsyncClient | None = None) -> dict[str, Any]:
     normalized = normalize_mode(mode)
     validate_key_pair(api_key, secret_key)
     host = HOSTS[normalized]
@@ -732,14 +732,13 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
     logger.info("LIVE_CONNECTION_TEST TEST_START mode=%s", normalized)
     logger.info("LIVE_CONNECTION_TEST CREDENTIALS_RESOLVED mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     logger.info("LIVE_CONNECTION_TEST SERVER_TIME_START mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
-    offset = await _server_time_offset(http, normalized)
+    offset = await _server_time_offset(public_http if public_http is not None else http, normalized)
     logger.info("LIVE_CONNECTION_TEST SERVER_TIME_DONE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
-    timestamp = int(time.time() * 1000) + offset
     if normalized == "LIVE":
         # API restrictions are a signed Spot SAPI endpoint, not a Futures endpoint.
         restrictions = await _signed_get(
             http, "https://api.binance.com", "/sapi/v1/account/apiRestrictions",
-            api_key, secret_key, timestamp,
+            api_key, secret_key, offset,
         )
         if not isinstance(restrictions, dict) or type(restrictions.get("enableWithdrawals")) is not bool:
             raise VaultError("Binance para çekme izni doğrulanamadı; canlı anahtar reddedildi.")
@@ -752,8 +751,8 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
         # Futures Testnet has no withdrawals and does not implement the SAPI check.
         api_permissions = {"withdrawal_check": "NOT_APPLICABLE_TESTNET", "enableWithdrawals": None}
     logger.info("LIVE_CONNECTION_TEST ACCOUNT_VERIFY_START mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
-    account = await _signed_get(http, host, "/fapi/v3/account", api_key, secret_key, timestamp)
-    position_mode = await _signed_get(http, host, "/fapi/v1/positionSide/dual", api_key, secret_key, timestamp)
+    account = await _signed_get(http, host, "/fapi/v3/account", api_key, secret_key, offset)
+    position_mode = await _signed_get(http, host, "/fapi/v1/positionSide/dual", api_key, secret_key, offset)
     logger.info("LIVE_CONNECTION_TEST ACCOUNT_VERIFY_DONE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     if not isinstance(account, dict):
         raise VaultError("Binance hesap yanıtı geçersiz.")
@@ -780,6 +779,12 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
     }
     logger.info("LIVE_CONNECTION_TEST TEST_RESPONSE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     return result
+
+
+async def _verify_request_credentials(request: Request, mode: str, api_key: str, secret_key: str) -> dict[str, Any]:
+    from .main import ensure_market_data_http_client
+    public_http = await ensure_market_data_http_client(request.app)
+    return await test_binance_credentials(request.app.state.http, mode, api_key, secret_key, public_http=public_http)
 
 
 def _exchange_test_http_exception(exc: VaultError) -> HTTPException:
@@ -930,8 +935,9 @@ async def exchange_connection_status(request: Request) -> dict[str, Any]:
 @router.get("/time-status")
 async def exchange_server_time_status(request: Request, mode: Mode = "TESTNET") -> dict[str, Any]:
     _require_owner_member(request)
+    from .main import ensure_market_data_http_client
     try:
-        offset = await _server_time_offset(request.app.state.http, mode)
+        offset = await _server_time_offset(await ensure_market_data_http_client(request.app), mode)
     except VaultError as exc:
         error = _exchange_test_http_exception(exc)
         detail = error.detail if isinstance(error.detail, dict) else {"detail": error.detail}
@@ -964,7 +970,7 @@ async def exchange_connection_test(request: Request, body: TestCredentialsReques
     if not api_key or not secret_key:
         raise HTTPException(412, "Önce API Key ve Secret Key girin veya kasaya kaydedin.")
     try:
-        account = await test_binance_credentials(request.app.state.http, mode, api_key, secret_key)
+        account = await _verify_request_credentials(request, mode, api_key, secret_key)
     except VaultError as exc:
         raise _exchange_test_http_exception(exc) from exc
     return {
@@ -987,7 +993,7 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
     secret_key = body.secret_key.get_secret_value().strip()
     try:
         validate_key_pair(api_key, secret_key)
-        account = await test_binance_credentials(request.app.state.http, mode, api_key, secret_key)
+        account = await _verify_request_credentials(request, mode, api_key, secret_key)
         encrypted = encrypt_credentials(api_key, secret_key, mode=mode)
     except VaultError as exc:
         if isinstance(exc, BinanceServerTimeRejected):
@@ -1040,7 +1046,7 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
     if not api_key or not secret_key:
         raise HTTPException(412, "Bu kanal için kasada kayıtlı anahtar yok.")
     try:
-        account = await test_binance_credentials(request.app.state.http, mode, api_key, secret_key)
+        account = await _verify_request_credentials(request, mode, api_key, secret_key)
     except VaultError as exc:
         await pool.execute(
             "UPDATE protrebot_exchange_session_vault SET active = FALSE, last_test_ok = FALSE, last_test_at = NOW(), last_error = $3, updated_at = NOW() WHERE session_id = $1 AND mode = $2",
@@ -1101,7 +1107,7 @@ async def exchange_connection_delete(request: Request, body: ConnectionActionReq
     api_key, secret_key = session_credentials(request, mode, active_only=False)
     if api_key and secret_key:
         try:
-            account = await test_binance_credentials(request.app.state.http, mode, api_key, secret_key)
+            account = await _verify_request_credentials(request, mode, api_key, secret_key)
             if int(account.get("active_positions") or 0) > 0:
                 raise HTTPException(409, "Açık pozisyon varken anahtar silinemez. Önce Binance hesabındaki pozisyonları güvenle kapatın.")
         except HTTPException:

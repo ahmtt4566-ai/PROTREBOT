@@ -28,6 +28,7 @@ type LiveStatus = {
   stream?: {status?: string; last_error?: string | null}
   armed?: boolean
   armed_until?: string | null
+  live_lock_reason?: {code: string; message: string; at: string} | null
   real_trading_locked?: boolean
   live_auto_trade?: boolean
   auto?: {enabled?: boolean; status?: string; last_decision?: string; last_error?: string | null; last_scan?: string | null; last_skip_reason?: string | null; last_cycle_stage?: string | null; session_until?: string | null}
@@ -62,7 +63,7 @@ type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MAR
 
 export type SharedLiveStatus = LiveStatus
 export type SharedConnectionStatus = ConnectionStatus
-type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; masterTradeTab?: 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'; sharedStatus?: LiveStatus | null; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
+type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; masterTradeTab?: 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'; sharedStatus?: LiveStatus | null; sharedStatusVerified?: boolean; sharedStatusError?: string; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
 
 const V25 = `${API_BASE}/v25`
 const CONNECTIONS = `${API_BASE}/exchange-connections`
@@ -79,6 +80,7 @@ const activityTime = (value: unknown) => value ? new Date(String(value)).toLocal
 
 export function liveBlockerMessage(status: LiveStatus | null, liveArmed: boolean): string {
   if (status === null) return 'LIVE status is not available.'
+  if (!liveArmed && status.live_lock_reason?.message) return status.live_lock_reason.message
   if (status.emergency?.active) return status.reconciliation_diagnostic?.exception_message && status.emergency.reason === 'LIVE_EXCEPTION'
     ? `${status.emergency.reason}: ${status.reconciliation_diagnostic.exception_message}`
     : status.emergency.reason || 'Emergency stop is active.'
@@ -126,7 +128,7 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
-export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
+export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedStatusVerified = true, sharedStatusError = '', sharedConnections, onRefreshStatus}: Props) {
   const [originalNotice, setOriginalNotice] = useState('')
   const [connectionNotice, setConnectionNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string} | null>(null)
   const {freeTrial} = useMemberAccess()
@@ -143,6 +145,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     }
   }, [active, masterTrade, masterTradeTab, tradingDefaults.preferences, tradingDefaults.untouched])
   const [localStatus, setLocalStatus] = useState<LiveStatus | null>(null)
+  const [localStatusVerified, setLocalStatusVerified] = useState(false)
   const [localConnections, setLocalConnections] = useState<ConnectionStatus | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
   const [credentials, setCredentials] = useState({apiKey: '', secretKey: '', accepted: false})
@@ -171,6 +174,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const confirmationOpen = useRef(false)
   confirmationOpen.current = confirm !== null
   const status = sharedStatus !== undefined ? sharedStatus : localStatus
+  const statusVerified = sharedStatus !== undefined ? sharedStatusVerified : localStatusVerified
   const connections = sharedConnections !== undefined ? sharedConnections : localConnections
 
   useEffect(() => {
@@ -253,11 +257,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       ])
       if (confirmationOpen.current) return
       setLocalStatus(nextStatus)
+      setLocalStatusVerified(true)
       setLocalConnections(nextConnections)
       setPolicyDraft(current => current || nextStatus.policy || {})
       return true
     } catch (error) {
-      setLocalStatus(null)
+      setLocalStatusVerified(false)
       setLocalConnections(null)
       if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
       return false
@@ -335,7 +340,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const protectionState = recoveryRequired ? 'BLOCKED' : noActivePositionOrPlan ? 'READY' : activePlans === 0 ? 'EXTERNAL' : protectionGate ? protectionGate.passed ? 'READY' : 'REQUIRED' : 'UNKNOWN'
   const protectionReady = protectionState === 'READY'
   const exposure = (status?.account?.positions || []).reduce((sum, item) => sum + Math.abs(Number(item.notional || item.positionAmt || 0)), 0)
-  const executionLocked = status === null || status.real_trading_locked !== false
+  const executionLocked = !statusVerified || status === null || status.real_trading_locked !== false
   const gateState = (patterns: RegExp[]) => {
     if (!status) return 'UNKNOWN'
     const gate = status.readiness?.gates?.find(item => patterns.some(pattern => pattern.test(`${item.key} ${item.label}`)))
@@ -343,8 +348,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
   const connectionReady = status !== null && connections !== null && connected
   const connectionState = status === null || connections === null ? 'UNKNOWN' : connected ? 'CONNECTED' : 'NOT CONNECTED'
-  const liveArmed = Boolean((status?.armed || armPendingSync) && !executionLocked)
-  const armState = status === null ? 'UNKNOWN' : liveArmed ? 'READY' : 'LOCKED'
+  const liveArmed = Boolean(status?.armed && status.real_trading_locked === false)
+  const armState = !statusVerified || status === null ? 'UNKNOWN' : liveArmed ? 'READY' : 'LOCKED'
   const riskState = riskGate ? riskGate.passed ? 'READY' : 'BLOCKED' : gateState([/risk/i, /policy/i, /limit/i, /safety/i, /guven/i])
   const exposureGate = gateState([/exposure/i, /notional/i])
   const exposureState = exposureGate !== 'UNKNOWN' ? exposureGate : status === null ? 'UNKNOWN' : exposure === 0 ? 'READY' : 'BLOCKED'
@@ -357,7 +362,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const autoTimeframeMessage = "LIVE Auto Trade yalnızca 15m zaman diliminde çalışır. Başlatmak için timeframe'i 15m seçip politikayı kaydedin."
   const timeframeWarning = !autoTimeframeSupported ? <div className="liveNotice error" role="alert" data-testid="live-auto-timeframe-warning"><TriangleAlert aria-hidden="true"/><span>{autoTimeframeMessage} Timeframe: {selectedAutoTimeframe !== '15m' ? selectedAutoTimeframe : savedAutoTimeframe}.</span></div> : null
   const autoReady = Boolean(!freeTrial && autoTimeframeSupported && status && connections && authorizationValid && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
-  const manualOrderReady = Boolean(!freeTrial && status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
+  const manualOrderReady = Boolean(!freeTrial && statusVerified && status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
   const updatePolicy = () => run('policy', async () => {
@@ -635,7 +640,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     : positions.length === 0
       ? protectionState
       : positionProtectionStates.reduce((worst, current) => protectionPriority.indexOf(current) < protectionPriority.indexOf(worst) ? current : worst, 'PROTECTED')
-  const blocker = freeTrial ? 'LIVE işlem MASTER MODE ile açılır' : liveBlockerMessage(status, liveArmed)
+  const blocker = !statusVerified ? `${sharedStatusError ? `${sharedStatusError} ` : ''}Güncel LIVE durumu doğrulanamadı; ${status ? 'son görülen onaylar gösteriliyor. ' : ''}Yeni emir ve otomasyon başlatma kapalı.` : freeTrial ? 'LIVE işlem MASTER MODE ile açılır' : liveBlockerMessage(status, liveArmed)
   const autoStatusLabel = status === null ? 'UNKNOWN' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : 'OFF'
   const liveState = status === null ? 'UNKNOWN' : emergency || recoveryRequired ? 'BLOCKED' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : liveArmed ? 'ARMED' : readinessReady ? 'READY' : 'LOCKED'
   const activeConfirm = confirm
@@ -747,7 +752,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   )
 
   if (!active) return null
-  if (masterTrade) return <MasterTradeLiveLayout tab={masterTradeTab} step={status?.live_auto_trade ? 3 : !configured || !connected ? 0 : !readinessReady ? 1 : !liveArmed ? 2 : 3} notice={notice.kind !== 'info' ? <div className={`liveNotice masterTradeLiveNotice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.kind === 'error' ? <TriangleAlert/> : <CheckCircle2/>}<span>{notice.text}</span></div> : undefined}><section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
+  const statusNotice = !statusVerified
+    ? <div className="liveNotice error" role="alert" data-testid="live-status-unverified"><TriangleAlert aria-hidden="true"/><span>{blocker}</span></div>
+    : !liveArmed && status?.live_lock_reason?.message
+      ? <div className="liveNotice error" role="alert" data-testid="live-arm-cancellation"><TriangleAlert aria-hidden="true"/><span>{status.live_lock_reason.message}</span></div>
+      : null
+  if (masterTrade) return <MasterTradeLiveLayout tab={masterTradeTab} step={status?.live_auto_trade ? 3 : !configured || !connected ? 0 : !readinessReady ? 1 : !liveArmed ? 2 : 3} notice={<>{statusNotice}{notice.kind !== 'info' ? <div className={`liveNotice masterTradeLiveNotice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.kind === 'error' ? <TriangleAlert/> : <CheckCircle2/>}<span>{notice.text}</span></div> : null}</>}><section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
     <header className={`masterTradeLiveHeader ${liveState.toLowerCase()}`}>
       <div className="masterTradeLiveTitle"><span className="masterTradeLiveKicker">LIVE OPERATIONS / REAL MONEY</span><h2>LIVE AUTO TRADE</h2><p>Binance Futures Mainnet · V25 backend control</p></div>
       <div className="masterTradeLiveHeadline"><span className="liveStateDot" /><strong>{liveState}</strong><small>{status?.live_auto_trade ? executionLocked ? 'SCANNER ACTIVE · LIVE ORDERS LOCKED' : 'AUTO TRADE IS RUNNING' : 'AUTO TRADE IS OFF'}</small></div>

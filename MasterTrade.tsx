@@ -6,7 +6,7 @@ import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDe
 import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradePresentation, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
 import { PremiumWorkspace, useMemberAccess } from './premium-access'
 import {useKaisWorkspaceReaction} from './useKaisPageReactions'
-import { fetchWithTimeout } from './master-trade-request'
+import { fetchPublicMarketData, fetchWithTimeout } from './master-trade-request'
 import { analysisPrice, analysisValue, autoTradePresentation, masterLayoutV2Enabled, MASTER_LAYOUT_DESKTOP_WIDTH, MASTER_MTF_INTERVALS } from './master-trade-presentation'
 import './master-trade-analysis-v2.css'
 import MasterTradeReference from './MasterTradeReference'
@@ -122,7 +122,7 @@ const navigateTab = (tab: MasterTradeTab) => {
 const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
   const results = await Promise.all(MTF_INTERVALS.map(async timeframe => {
     try {
-      const response = await fetchWithTimeout(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal }, 10000)
+      const response = await fetchPublicMarketData(`${API_BASE}/analysis/${symbol}?interval=${timeframe}`, { signal }, 10000)
       if (!response.ok) throw await marketDataResponseError(response)
       const analysis = await response.json() as Analysis
       if (!analysis || typeof analysis.direction !== 'string' || !Number.isFinite(analysis.confidence)) throw new MarketDataFailure('backend', 'Backend geçerli analiz verisi döndürmedi.')
@@ -153,6 +153,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const [performanceSnapshot, setPerformanceSnapshot] = useState<PerformanceSnapshot | null>(null)
   const [dailyPerformance, setDailyPerformance] = useState<PerformanceSnapshot | null>(null)
   const [liveStatus, setLiveStatus] = useState<SharedLiveStatus | null>(null)
+  const [liveStatusVerified, setLiveStatusVerified] = useState(false)
+  const [liveStatusError, setLiveStatusError] = useState('')
   const [liveConnections, setLiveConnections] = useState<SharedConnectionStatus | null>(null)
   const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(null)
   const [markets, setMarkets] = useState<MarketRow[]>([])
@@ -215,7 +217,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       if (!active || inFlight) return
       inFlight = true
       try {
-        const response = await fetchWithTimeout(`${API_BASE}/markets?limit=50`, { signal: controller.signal })
+        const response = await fetchPublicMarketData(`${API_BASE}/markets?limit=50`, { signal: controller.signal })
         if (!response.ok) throw await marketDataResponseError(response,'markets')
         const items = parseRequiredMarketQuotes(await response.json())
         if (!active) return
@@ -236,6 +238,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   }, [draft.market])
 
   useEffect(() => {
+    if (layoutTab !== 'analiz') return
     const controller = new AbortController()
     let active = true
     let inFlight = false
@@ -244,7 +247,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       if (!active || inFlight) return
       inFlight = true
       try {
-        const response = await fetchWithTimeout(`${API_BASE}/analysis-universe?interval=${interval}&limit=40`, { signal: controller.signal }, 15000)
+        const response = await fetchPublicMarketData(`${API_BASE}/analysis-universe?interval=${interval}&limit=40`, { signal: controller.signal }, 15000)
         if (!response.ok) throw new Error('Scanner data unavailable')
         const payload = await response.json() as { results?: ScannerCandidate[] }
         if (active) setScannerCandidates(Array.isArray(payload.results) ? payload.results : [])
@@ -260,7 +263,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     void refreshScanner()
     const timer = window.setInterval(() => void refreshScanner(), 60000)
     return () => { active = false; controller.abort(); window.clearInterval(timer) }
-  }, [interval])
+  }, [interval, layoutTab])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -275,8 +278,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       if (firstLoad) setDataLoading(true)
       try {
         const [candleResponse, analysisResponse, nextMtf] = await Promise.all([
-          fetchWithTimeout(`${API_BASE}/klines/${draft.market}?interval=${interval}&limit=160`, { signal: controller.signal }, 10000),
-          fetchWithTimeout(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }, 10000),
+          fetchPublicMarketData(`${API_BASE}/klines/${draft.market}?interval=${interval}&limit=160`, { signal: controller.signal }, 10000),
+          fetchPublicMarketData(`${API_BASE}/analysis/${draft.market}?interval=${interval}`, { signal: controller.signal }, 10000),
           fetchMtfAnalyses(draft.market, controller.signal),
         ])
         if (!candleResponse.ok) throw await marketDataResponseError(candleResponse)
@@ -316,13 +319,15 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         fetchWithTimeout(`${API_BASE}/exchange-connections/status`),
       ])
       const [accountResponse, connectionResponse] = response
-      setLiveStatus(null)
-      setLiveConnections(null)
-      accountRef.current = null
-      setSnapshot(current => current ? {...current, account:null} : current)
       if (connectionResponse.ok) setLiveConnections(await connectionResponse.json() as SharedConnectionStatus)
+      else setLiveConnections(null)
 
       if (accountResponse.status === 412) {
+        setLiveStatusVerified(false)
+        setLiveStatusError('Canlı hesap yapılandırılmamış; bağlantıyı kontrol edin.')
+        setLiveStatus(null)
+        accountRef.current = null
+        setSnapshot(current => current ? {...current, account:null} : current)
         setAccountSyncState('DATA_UNAVAILABLE')
         setHistorySyncState('UNAVAILABLE')
         setSnapshot(current => current ? { ...current, accountError: 'LIVE ACCOUNT NOT CONFIGURED' } : current)
@@ -331,14 +336,19 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         return false
       }
 
-      const accountPayload = accountResponse.ok ? await accountResponse.json() as SharedLiveStatus & {
+      const accountPayload = await accountResponse.json().catch(() => null) as (SharedLiveStatus & {
         account?:AccountSnapshot; plans?:AccountPlan[]; detail?:unknown;
         journal?:Array<Record<string,unknown>>; performance?:PerformanceSnapshot; daily_performance?:PerformanceSnapshot;
-      } : null
+      }) | null
       if (!accountResponse.ok || !accountPayload) {
+        setLiveStatusVerified(false)
+        if ([401, 403].includes(accountResponse.status)) setLiveStatus(null)
+        accountRef.current = null
+        setSnapshot(current => current ? {...current, account:null} : current)
         const detail = accountPayload && typeof accountPayload.detail === 'string'
           ? accountPayload.detail
-          : `Account data unavailable (HTTP ${accountResponse.status}).`
+          : `Canlı hesap durumu alınamadı (HTTP ${accountResponse.status}).`
+        setLiveStatusError(detail)
         setAccountSyncState('DISCONNECTED')
         setSnapshot(current => current ? { ...current, accountError: detail } : current)
         setHistorySyncState('UNAVAILABLE')
@@ -346,6 +356,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         return false
       }
       setLiveStatus(accountPayload as SharedLiveStatus)
+      setLiveStatusVerified(connectionResponse.ok)
+      setLiveStatusError(connectionResponse.ok ? '' : 'Canlı hesap bağlantısının güncel durumu doğrulanamadı.')
 
     const nextPositions = Array.isArray(accountPayload.account?.positions) ? accountPayload.account.positions : []
     const liveAccount = accountPayload.account ? { ...accountPayload.account, plans: accountPayload.plans } : null
@@ -381,7 +393,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     setDailyPerformance(accountPayload.daily_performance ?? null)
       return connectionResponse.ok
     } catch (error) {
-      setLiveStatus(null)
+      setLiveStatusVerified(false)
+      setLiveStatusError(error instanceof Error ? error.message : 'Canlı durum servisine ulaşılamadı.')
       setLiveConnections(null)
       accountRef.current = null
       setAccountSyncState('DISCONNECTED')
@@ -772,12 +785,12 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             <strong><MasterTradeValue>{tradeDecision.riskReward === null ? '--' : `1 : ${fmtDecisionNumber(tradeDecision.riskReward, 2)}`}</MasterTradeValue></strong>
           </div>
           <div className="masterTradeFocusConnection">
-            {masterLayoutV2 ? <span className="masterTradeConnectionBadge" role="status" data-connected={Boolean(liveStatus?.connected)}>
-              <i aria-hidden="true"/>{liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}
-              {liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'} · {liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}
+            {masterLayoutV2 ? <span className="masterTradeConnectionBadge" role="status" data-connected={Boolean(liveStatusVerified && liveStatus?.connected)}>
+              <i aria-hidden="true"/>{liveStatusVerified && liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}
+              {!liveStatusVerified ? 'DURUM DOĞRULANAMADI' : liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'} · {liveStatusVerified && liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}
             </span> : <>
-            <span className={liveStatus?.connected ? 'positive' : 'muted'}>{liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
-            <strong className={liveStatus?.real_trading_locked === false ? 'positive' : 'warning'}>{liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}{liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}</strong>
+            <span className={liveStatusVerified && liveStatus?.connected ? 'positive' : 'muted'}>{!liveStatusVerified ? 'DURUM DOĞRULANAMADI' : liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
+            <strong className={liveStatusVerified && liveStatus?.real_trading_locked === false ? 'positive' : 'warning'}>{liveStatusVerified && liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}{liveStatusVerified && liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}</strong>
             </>}
           </div>
           {masterTradeOffline && <p className="masterTradeFocusNotice">Market bağlantısı bekleniyor. İşlem kararı ve canlı metrikler veri gelene kadar pasif tutuluyor.</p>}
@@ -978,7 +991,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         </div>
 
         <div className="masterTradeOperationsPanel" id={`master-panel-${layoutTab === 'analiz' ? 'operations' : layoutTab}`} role="tabpanel" aria-labelledby={`master-tab-${layoutTab}`} hidden={layoutTab === 'analiz'}>
-          <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade masterTradeTab={layoutTab} sharedStatus={liveStatus} sharedConnections={liveConnections} onRefreshStatus={async (force = false) => {
+          <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade masterTradeTab={layoutTab} sharedStatus={liveStatus} sharedStatusVerified={liveStatusVerified} sharedStatusError={liveStatusError} sharedConnections={liveConnections} onRefreshStatus={async (force = false) => {
             if (!await refreshAccountData(force)) throw new Error('LIVE durum yenilemesi başarısız; işlem durumunu doğrulayın.')
           }} />
 
