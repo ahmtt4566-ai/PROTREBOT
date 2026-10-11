@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import original_v2_demo_execution as original
 from .strategies import original_v2_demo as strategy
@@ -27,9 +27,17 @@ SOURCE = "ORIGINAL_V2_LIVE"
 class Start(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirmation: str
-    totp_code: str = Field(min_length=6, max_length=32)
+    totp_code: str = Field(min_length=6, max_length=32, repr=False)
     risk_percent: float = Field(default=0.5, gt=0, le=1, allow_inf_nan=False)
     daily_loss_percent: float = Field(default=5, gt=0, le=5, allow_inf_nan=False)
+    session_hours: int = Field(default=1, strict=True)
+
+    @field_validator("session_hours")
+    @classmethod
+    def validate_session_hours(cls, value: int) -> int:
+        if value not in {1, 4, 12, 24}:
+            raise ValueError("Original V2 oturumu 1, 4, 12 veya 24 saat olabilir.")
+        return value
 
 class FillLockApproval(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -79,12 +87,19 @@ def preserve(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 def public_config(state: dict[str, Any]) -> dict[str, Any]:
     config = settings(state)
+    expires = float(config.get("session_expires_at_epoch") or ((state.get("auto") or {}).get("session_until") if running(state) else 0) or 0)
     return {"available": available(), "enabled": running(state),
             "paused": config.get("paused", False), "pause_reason": config.get("pause_reason"),
             "risk_percent": config.get("risk_percent", 0.5), "daily_loss_percent": config.get("daily_loss_percent", 5),
             "daily": copy.deepcopy(config.get("daily")),
             "fill_lock": copy.deepcopy(config.get("fill_lock")),
             "scanner": copy.deepcopy(config.get("scanner")),
+            "session": {"hours": config.get("session_hours", 1),
+                        "started_at": config.get("session_started_at"),
+                        "expires_at": datetime.fromtimestamp(expires, timezone.utc).isoformat() if expires else None,
+                        "remaining_seconds": max(0, int(expires - time.time())) if running(state) else 0,
+                        "authority_limited": config.get("session_authority_limited", False),
+                        "warning_sent": bool(config.get("session_warning_sent"))},
             "symbols": strategy.fixed_profile()["execution_policy"]["allowed_symbols"]}
 
 
@@ -108,6 +123,27 @@ def pause(state: dict[str, Any], reason: str) -> None:
         })
         del config["alerts"][100:]
     live.persist_state(state)
+
+
+def check_session_time(state: dict[str, Any]) -> None:
+    from . import v25_execution as live
+    if not running(state):
+        return
+    config = settings(state)
+    expires = float(config.get("session_expires_at_epoch") or (state.get("auto") or {}).get("session_until") or 0)
+    remaining = expires - time.time()
+    if remaining <= 0:
+        pause(state, "Original V2 oturum süresi doldu; yeni oturum için ARM ve güncel 2FA gerekli.")
+    elif remaining <= 30 * 60 and not config.get("session_warning_sent"):
+        config["session_warning_sent"] = True
+        event = live.add_event(state, "ORIGINAL_SESSION_EXPIRING", "Original V2 LIVE oturumu 30 dakika içinde bitecek; otomatik yenilenmez.", recipient_user_id=config.get("owner_id"), source=SOURCE)
+        config.setdefault("alerts", []).insert(0, {
+            "id": "original-live:" + event["id"], "type": "ORIGINAL_SESSION_EXPIRING", "severity": "WARNING",
+            "title": "Original V2 oturumu bitmek üzere", "message": event["message"],
+            "timestamp": event["created_at"], "target": "master-trade", "read": False,
+        })
+        del config["alerts"][100:]
+        live.persist_state(state)
 
 
 def merge_bell(request: Request, items: list[dict[str, Any]], *, read_id: str | None = None,
@@ -273,6 +309,7 @@ async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
 async def check_entry(application: Any, client: Any, state: dict[str, Any],
                       snapshot: dict[str, Any]) -> None:
     from . import v25_execution as live
+    check_session_time(state)
     require_fill_unlocked(state)
     if not available() or not running(state) or settings(state).get("paused"):
         raise HTTPException(423, "Original V2 LIVE kapalı veya güvenlik kilidi aktif.")
@@ -598,7 +635,8 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
     state = request.app.state.v25_execution
     async with state["lock"]:
         require_fill_unlocked(state)
-        if state["auto"].get("enabled"):
+        check_session_time(state)
+        if live.auto_session_is_active(state) or running(state):
             raise HTTPException(409, "Önce mevcut LIVE otomasyonunu durdurun.")
         allowed, reason = live.live_auto_start_gate(request.app, state, request)
         if not allowed:
@@ -622,6 +660,21 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
             await live._start_live_auto_session(
                 request, live.Confirmation(confirmation="CANLI OTOMATİK"), mfa_verified=True,
             )
+            started = time.time()
+            auth_expiry = (state.get("auto_authorization") or {}).get("auth_expires_at_epoch")
+            consent = live.consent_status(state, request)
+            if not isinstance(auth_expiry, (int, float)) or not math.isfinite(auth_expiry) or auth_expiry <= started or not consent.get("active") or not consent.get("expires_at"):
+                raise HTTPException(423, "Original V2 oturum yetki süresi doğrulanamadı.")
+            consent_expiry = datetime.fromisoformat(consent["expires_at"]).timestamp()
+            requested_expiry = started + body.session_hours * 3600
+            expires = min(requested_expiry, auth_expiry, consent_expiry)
+            if expires <= started:
+                raise HTTPException(423, "Original V2 oturum yetki süresi doldu.")
+            state["auto"].update(session_until=expires, last_decision=f"Original V2 {body.session_hours} saatlik gözetimli oturumu açıldı; gerçek bitiş yetki süresiyle sınırlıdır.")
+            state["auto_authorization"]["expires_at_epoch"] = expires
+            config.update(session_hours=body.session_hours, session_id=uuid.uuid4().hex,
+                          session_started_at=live.now_iso(), session_expires_at_epoch=expires,
+                          session_authority_limited=expires < requested_expiry, session_warning_sent=False)
             config.update(enabled=True, paused=False, pause_reason=None)
             if await live.persist_state_awaited(state) not in {"INSERTED", "UPDATED"}:
                 raise HTTPException(503, "Original V2 kalıcı durum kaydı doğrulanamadı.")

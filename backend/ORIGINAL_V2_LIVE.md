@@ -33,7 +33,8 @@ history stops new entries instead of inventing a signal.
 3. Complete the existing LIVE release checks, consent and policy acknowledgement.
 4. ARM LIVE using the existing confirmation.
 5. In the Original V2 card, choose risk (default 0.5%, maximum 1%) and daily
-   loss (default 5%, maximum 5%; a lower limit is allowed).
+   loss (default 5%, maximum 5%; a lower limit is allowed), and a supervised
+   session of 1, 4, 12 or 24 hours (default 1). Other durations are rejected.
 6. Enter a fresh 2FA code and `ORIGINAL V2 CANLI`, then start.
 
 Risk sizing includes estimated fees and slippage, and cannot exceed the chosen
@@ -42,10 +43,25 @@ The Demo's margin, exposure, position, daily trade and consecutive loss caps
 also apply. Actual stop fills can exceed estimates during gaps or outages;
 this is not a guaranteed maximum realized loss.
 
-The supervised session expires after at most one hour, bounded by the login
-and consent authorization. A restart restores daily loss and alert records,
-not entry authority. Starting again requires the existing ARM gates and fresh
-2FA; the strategy cannot automatically switch to the legacy scanner.
+The Original-only supervised session expires at the earlier of the selected
+duration, signed login expiry and existing consent expiry. Neither login nor
+consent is extended. Missing or expired duration authority fails closed. The
+card shows the selected duration, actual expiry and remaining time, including
+when authority shortened the requested duration. Its local countdown adds no
+network requests. The legacy V25 session remains one hour.
+
+The existing background loop issues one OWNER bell warning when 30 minutes or
+less remain, including while an account cooldown blocks exchange reads. The
+warning latch is persisted with the session and alert; it is checked on the
+next loop tick, not a separate exact-time delivery service. At expiry, new
+entries stop and ARM is cleared without deleting positions, intents, daily
+loss, fill locks or exchange protection. Existing protection monitoring remains
+in place. An active session cannot be extended; reopening an expired/stopped
+session requires all existing ARM gates and a fresh mandatory 2FA code. There
+is no automatic renewal and the strategy cannot switch to the legacy scanner.
+A restart restores daily loss, session metadata and alert records, not entry
+authority. An explicitly opened new session resets only its warning latch,
+not the daily-loss/fill safety latches.
 
 ## Daily loss and emergency stop
 

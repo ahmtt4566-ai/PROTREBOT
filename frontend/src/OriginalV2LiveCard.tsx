@@ -1,4 +1,4 @@
-import {useRef, useState, type FormEvent} from 'react'
+import {useEffect, useRef, useState, type FormEvent} from 'react'
 import {Database} from 'lucide-react'
 
 export type OriginalPersistenceDiagnostics = {
@@ -41,6 +41,7 @@ export type OriginalV2LiveStatus = {
   pause_reason?: string | null
   risk_percent: number
   daily_loss_percent: number
+  session?: {hours: number; started_at?: string | null; expires_at?: string | null; remaining_seconds: number; authority_limited: boolean; warning_sent: boolean} | null
   daily?: {day: string; loss: number; limit: number; locked: boolean} | null
   symbols: string[]
   scanner?: {stage?: string; last_cycle_at?: string; last_scan_at?: string; scanned_symbol_count?: number; candidate_count?: number} | null
@@ -65,6 +66,20 @@ type Props = {
 export default function OriginalV2LiveCard({className, status, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice}: Props) {
   const [risk, setRisk] = useState(String(status.risk_percent))
   const [dailyLoss, setDailyLoss] = useState(String(status.daily_loss_percent))
+  const [hours, setHours] = useState('1')
+  const [clock, setClock] = useState(Date.now)
+  const [sessionClock, setSessionClock] = useState({received: Date.now(), remaining: status.session?.remaining_seconds ?? 0})
+  useEffect(() => {
+    setSessionClock({received: Date.now(), remaining: status.session?.remaining_seconds ?? 0})
+  }, [status.session?.expires_at, status.session?.remaining_seconds, status.enabled])
+  useEffect(() => {
+    if (!status.enabled || !status.session?.expires_at) return
+    const timer = window.setInterval(() => setClock(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [status.enabled, status.session?.expires_at])
+  const remaining = status.enabled ? Math.max(0, Math.ceil(sessionClock.remaining - Math.max(0, clock - sessionClock.received) / 1000)) : 0
+  const remainingText = remaining > 0 ? `${Math.floor(remaining / 3600)} sa ${Math.floor(remaining % 3600 / 60)} dk ${remaining % 60} sn` : status.session?.expires_at ? 'Süre doldu / giriş kapalı' : 'Oturum yok'
+  const renewing = !status.enabled && !!status.session?.expires_at && Date.parse(status.session.expires_at) <= Date.now()
   const [code, setCode] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [busy, setBusy] = useState(false)
@@ -124,7 +139,7 @@ export default function OriginalV2LiveCard({className, status, armed, automation
     onNotice('')
     try {
       const payload = await request(stop ? '/original-v2/stop' : '/original-v2/start', stop ? undefined : {
-        confirmation, totp_code: code, risk_percent: Number(risk), daily_loss_percent: Number(dailyLoss),
+        confirmation, totp_code: code, risk_percent: Number(risk), daily_loss_percent: Number(dailyLoss), session_hours: Number(hours),
       })
       if (!payload || typeof payload !== 'object' || !('enabled' in payload) || payload.enabled !== !stop) {
         throw new Error('Original V2 LIVE sonucu doğrulanamadı. LIVE durumunu yenileyin.')
@@ -156,6 +171,9 @@ export default function OriginalV2LiveCard({className, status, armed, automation
       <span><small>SON DÖNGÜ</small><b>{status.scanner?.last_cycle_at ? new Date(status.scanner.last_cycle_at).toLocaleString('tr-TR') : 'Henüz ölçülmedi'}</b></span>
       <span><small>TARANAN / ADAY</small><b>{status.scanner?.scanned_symbol_count ?? 0} / {status.scanner?.candidate_count ?? 0}</b></span>
       <span><small>YENİ GİRİŞ</small><b>{!status.enabled || blocked || !armed || fillLocked ? 'Kapalı / engelli' : 'Her emir için sunucu kontrolü'}</b></span>
+      <span><small>OTURUM BİTİŞİ</small><b>{status.session?.expires_at ? new Date(status.session.expires_at).toLocaleString('tr-TR') : 'Oturum yok'}</b></span>
+      <span><small>KALAN SÜRE</small><b data-testid="original-session-remaining">{remainingText}</b></span>
+      <span><small>SEÇİLEN OTURUM</small><b>{status.session?.hours ?? 1} saat{status.session?.authority_limited ? ' · Yetki süresiyle sınırlı' : ''}</b></span>
     </div>
     <p>8 sembol · 3x · en fazla %6 stop. TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
     <small>{status.symbols.map(symbol => symbol.replace('USDT', '')).join(' · ')}</small>
@@ -173,12 +191,15 @@ export default function OriginalV2LiveCard({className, status, armed, automation
       <div className="masterTradeLiveSetupGrid">
         <label>İşlem riski (%)<input type="number" min="0.01" max="1" step="0.01" required value={risk} onChange={event => setRisk(event.target.value)} disabled={busy || status.enabled}/></label>
         <label>Günlük kayıp sınırı (%)<input type="number" min="0.01" max="5" step="0.01" required value={dailyLoss} onChange={event => setDailyLoss(event.target.value)} disabled={busy || status.enabled}/></label>
+        <label>Oturum süresi<select aria-label="Oturum süresi" value={status.enabled ? String(status.session?.hours ?? 1) : hours} onChange={event => setHours(event.target.value)} disabled={busy || status.enabled}>
+          {[1, 4, 12, 24].map(value => <option key={value} value={value}>{value} saat</option>)}
+        </select></label>
         <label>2FA kodu<input type="password" data-private="true" autoComplete="one-time-code" required minLength={6} maxLength={32} value={code} onChange={event => setCode(event.target.value)} disabled={busy || status.enabled}/></label>
         <label>ORIGINAL V2 CANLI yazın<input required value={confirmation} onChange={event => setConfirmation(event.target.value)} disabled={busy || status.enabled}/></label>
       </div>
       <p>Önce mevcut LIVE bağlantısı, izinler, politika onayı ve ARM adımını tamamlayın. Borsa ve hesap limitleri ayrıca uygulanır. Açık pozisyon otomatik kapatılmaz.</p>
       <div className="masterTradeLiveSetupFooter">
-        <button type="submit" className="masterTradeLivePrimary" disabled={busy || fillLocked || !status.available || blocked || !armed || automationActive || confirmation !== 'ORIGINAL V2 CANLI'}>Original V2 LIVE aç</button>
+        <button type="submit" className="masterTradeLivePrimary" disabled={busy || status.enabled || fillLocked || !status.available || blocked || !armed || automationActive || confirmation !== 'ORIGINAL V2 CANLI'}>{renewing ? 'Original V2 oturumunu yenile' : 'Original V2 LIVE aç'}</button>
         <button type="button" className="masterTradeLiveSecondary" onClick={() => void act(true)} disabled={busy || !status.enabled}>Acil durdur · Yeni girişleri kapat</button>
       </div>
     </form>

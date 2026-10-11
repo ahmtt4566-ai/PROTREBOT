@@ -52,6 +52,19 @@ def native_plan(**changes):
     return make_plan(**{**defaults, **changes})
 
 
+@pytest.mark.parametrize("hours", [1, 4, 12, 24])
+def test_original_session_duration_choices(hours):
+    body = original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=hours)
+    assert body.session_hours == hours
+    assert original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456").session_hours == 1
+
+
+@pytest.mark.parametrize("hours", [0, 2, 25, -1, 1.5, True, "4"])
+def test_original_rejects_unsupported_session_duration(hours):
+    with pytest.raises(ValidationError):
+        original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=hours)
+
+
 def test_default_disabled(monkeypatch):
     monkeypatch.delenv(original.FLAG, raising=False)
     assert original.available() is False
@@ -545,9 +558,19 @@ def test_live_rejects_data_gap_while_demo_behavior_is_unchanged():
     assert len(results) == 8
 
 
-def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, monkeypatch):
+@pytest.mark.parametrize("hours", [1, 4, 12, 24])
+@pytest.mark.parametrize("authority_hours", [None, 0.5, 2])
+@pytest.mark.parametrize("limit_source", ["login", "consent"])
+def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, monkeypatch, hours, authority_hours, limit_source):
+    now = 2_000_000_000.0
+    monkeypatch.setattr(original.time, "time", lambda: now)
     req = request_for(state)
     state["auto"]["enabled"] = False
+    state["original_v2_live"]["enabled"] = False
+    state["original_v2_live"]["daily"] = {"day": "saved-day", "loss": 12, "locked": False}
+    state["original_v2_live"]["session_id"] = "expired-session"
+    state["original_v2_live"]["session_expires_at_epoch"] = now - 1
+    state["original_v2_live"]["session_warning_sent"] = True
     trace = []
     monkeypatch.setattr(original, "authenticated_user", Mock(return_value={"id": "owner", "role": "OWNER"}))
     monkeypatch.setattr(live, "guard_execution_ownership", Mock())
@@ -559,6 +582,7 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
         assert kwargs == {"mfa_verified": True}
         trace.append("existing-auto")
         state["auto"]["enabled"] = True
+        state["auto_authorization"]["auth_expires_at_epoch"] = now + ((authority_hours or 48) if limit_source == "login" else 48) * 3600
     monkeypatch.setattr(account_settings, "require_totp", code)
     monkeypatch.setattr(live, "_start_live_auto_session", start)
     monkeypatch.setattr(live, "live_auto_start_gate", Mock(return_value=(True, "ready")))
@@ -566,15 +590,30 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
     monkeypatch.setattr(live, "client_for", Mock(return_value=object()))
     monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"wallet_balance": 1000, "unrealized_pnl": 0}))
     monkeypatch.setattr(original, "daily_guard", AsyncMock())
-    response = run(original.start(req, original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456")))
+    consent_hours = (authority_hours or 48) if limit_source == "consent" else 48
+    monkeypatch.setattr(live, "consent_status", Mock(return_value={"active": True, "expires_at": datetime.fromtimestamp(now + consent_hours * 3600, timezone.utc).isoformat()}))
+    response = run(original.start(req, original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=hours)))
     assert response["enabled"]
+    expected_expiry = now + min(hours, authority_hours or 48) * 3600
+    assert state["auto"]["session_until"] == expected_expiry
+    assert state["auto_authorization"]["expires_at_epoch"] == expected_expiry
+    assert response["session"]["hours"] == hours
+    assert response["session"]["remaining_seconds"] == expected_expiry - now
+    assert response["session"]["authority_limited"] is (expected_expiry < now + hours * 3600)
+    assert not response["session"]["warning_sent"]
+    assert state["original_v2_live"]["session_id"] != "expired-session"
+    assert response["daily"]["loss"] == 12
     assert trace == ["2fa", "existing-auto"]
     live.persist_state_awaited.assert_awaited_once_with(state)
 
 
-def test_2fa_failure_never_starts_or_fetches_exchange(state, monkeypatch):
+@pytest.mark.parametrize("renewal", [False, True])
+def test_2fa_failure_never_starts_or_fetches_exchange(state, monkeypatch, renewal):
     req = request_for(state)
     state["auto"]["enabled"] = False
+    state["original_v2_live"]["enabled"] = False
+    if renewal:
+        state["original_v2_live"]["session_expires_at_epoch"] = time.time() - 1
     monkeypatch.setattr(original, "authenticated_user", Mock(return_value={"id": "owner", "role": "OWNER"}))
     monkeypatch.setattr(account_settings, "enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(account_settings, "require_totp", AsyncMock(side_effect=HTTPException(401, "invalid 2fa")))
@@ -583,10 +622,98 @@ def test_2fa_failure_never_starts_or_fetches_exchange(state, monkeypatch):
     monkeypatch.setattr(live, "_start_live_auto_session", start)
     client = Mock()
     monkeypatch.setattr(live, "client_for", client)
-    with pytest.raises(HTTPException):
+    with pytest.raises(HTTPException) as error:
         run(original.start(req, original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456")))
+    assert error.value.status_code == 401
     start.assert_not_awaited()
     client.assert_not_called()
+
+
+def test_original_session_warning_is_once_and_expiry_keeps_positions_and_latches(state, monkeypatch):
+    now = 2_000_000_000.0
+    monkeypatch.setattr(original.time, "time", lambda: now)
+    config = state["original_v2_live"]
+    config.update(session_expires_at_epoch=now + 1801, session_warning_sent=False,
+                  daily={"locked": True}, fill_lock={"active": True})
+    state["plans"] = {"saved": {"symbol": "BTCUSDT", "status": "OPEN"}}
+    state["intents"] = {"saved-intent": {"status": "UNKNOWN"}}
+    original.check_session_time(state)
+    assert not config.get("alerts")
+    monkeypatch.setattr(original.time, "time", lambda: now + 1)
+    original.check_session_time(state)
+    original.check_session_time(state)
+    assert len(config["alerts"]) == 1
+    assert config["alerts"][0]["type"] == "ORIGINAL_SESSION_EXPIRING"
+    assert config["alerts"][0]["read"] is False
+    assert state["events"][0]["recipient_user_id"] == "owner"
+    monkeypatch.setattr(original.time, "time", lambda: now + 1801)
+    original.check_session_time(state)
+    assert not original.running(state)
+    assert not state["auto"]["enabled"] and not state["live_auto_trade"]
+    assert state["real_trading_locked"] and state["armed_until"] == 0
+    assert config["daily"]["locked"] and config["fill_lock"]["active"]
+    assert state["plans"]["saved"]["status"] == "OPEN"
+    assert state["intents"]["saved-intent"]["status"] == "UNKNOWN"
+    assert original.public_config(state)["session"]["remaining_seconds"] == 0
+    count = len(config["alerts"])
+    original.check_session_time(state)
+    assert len(config["alerts"]) == count
+
+
+def test_original_session_clock_does_not_change_legacy_v25(state):
+    del state["original_v2_live"]
+    before = copy.deepcopy({key: value for key, value in state.items() if key != "lock"})
+    original.check_session_time(state)
+    assert {key: value for key, value in state.items() if key != "lock"} == before
+    assert live.LIVE_AUTO_SESSION_SECONDS == 3600
+    assert original.public_config(state)["session"]["expires_at"] is None
+
+
+@pytest.mark.parametrize("invalid_authority", ["missing-login", "expired-login", "missing-consent", "expired-consent"])
+def test_original_start_fails_closed_without_duration_authority(state, monkeypatch, invalid_authority):
+    state["auto"]["enabled"] = False
+    state["original_v2_live"].update(enabled=False, daily={"locked": True, "loss": 12})
+    monkeypatch.setattr(original, "authenticated_user", Mock(return_value={"id": "owner", "role": "OWNER"}))
+    monkeypatch.setattr(account_settings, "enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(account_settings, "require_totp", AsyncMock())
+    monkeypatch.setattr(live, "live_auto_start_gate", Mock(return_value=(True, "ready")))
+    monkeypatch.setattr(live, "live_credentials_status", Mock(return_value=("key", "secret", "fingerprint")))
+    monkeypatch.setattr(live, "client_for", Mock(return_value=object()))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"wallet_balance": 1000}))
+    monkeypatch.setattr(original, "daily_guard", AsyncMock())
+    async def start(*args, **kwargs):
+        state["auto"]["enabled"] = True
+        state["auto_authorization"]["auth_expires_at_epoch"] = None if invalid_authority == "missing-login" else time.time() + (-1 if invalid_authority == "expired-login" else 86400)
+    monkeypatch.setattr(live, "_start_live_auto_session", start)
+    consent = {"active": True, "expires_at": datetime.fromtimestamp(time.time() + 86400, timezone.utc).isoformat()}
+    if invalid_authority == "missing-consent":
+        consent["expires_at"] = None
+    if invalid_authority == "expired-consent":
+        consent["expires_at"] = datetime.fromtimestamp(time.time() - 1, timezone.utc).isoformat()
+    monkeypatch.setattr(live, "consent_status", Mock(return_value=consent))
+    with pytest.raises(HTTPException) as error:
+        run(original.start(request_for(state), original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=24)))
+    assert error.value.status_code == 423
+    assert not original.running(state) and not state["auto"]["enabled"]
+    assert state["real_trading_locked"] and state["armed_until"] == 0
+    assert state["original_v2_live"]["daily"] == {"locked": True, "loss": 12}
+
+
+@pytest.mark.parametrize("hours", [1, 4, 12, 24])
+def test_original_active_session_cannot_be_extended(state, monkeypatch, hours):
+    monkeypatch.setattr(original, "authenticated_user", Mock(return_value={"id": "owner", "role": "OWNER"}))
+    monkeypatch.setattr(account_settings, "enabled", AsyncMock(return_value=True))
+    code = AsyncMock()
+    start = AsyncMock()
+    monkeypatch.setattr(account_settings, "require_totp", code)
+    monkeypatch.setattr(live, "_start_live_auto_session", start)
+    expiry = state["auto"]["session_until"]
+    with pytest.raises(HTTPException) as error:
+        run(original.start(request_for(state), original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=hours)))
+    assert error.value.status_code == 409
+    assert state["auto"]["session_until"] == expiry
+    code.assert_not_awaited()
+    start.assert_not_awaited()
 
 
 @pytest.mark.parametrize("write_status", ["UPDATED", "SKIPPED"])

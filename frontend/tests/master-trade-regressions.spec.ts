@@ -442,6 +442,50 @@ test('Original runtime shows its scan and approved percentage instead of stale l
   expect(fixture.mutations).toEqual([])
 })
 
+for (const hours of [1,4,12,24]) for (const renewal of [false,true]) test(`Original session ${hours} hours ${renewal ? 'renewal' : 'opening'} requires MFA and displays effective expiry`, async ({page}) => {
+  const fixture = await setup(page)
+  const original = {available:true,enabled:false,paused:false,risk_percent:0.5,daily_loss_percent:5,symbols:['BTCUSDT'],
+    session:renewal ? {hours:4,expires_at:new Date(Date.now() - 60000).toISOString(),remaining_seconds:0,authority_limited:false,warning_sent:true} : null}
+  fixture.liveFields = {original_v2_live:original}
+  const expires = new Date(Date.now() + 1800000).toISOString()
+  await page.route('**/api/v25/original-v2/start', async route => {
+    fixture.mutations.push('/api/v25/original-v2/start')
+    expect(route.request().postDataJSON()).toEqual({confirmation:'ORIGINAL V2 CANLI',totp_code:'123456',risk_percent:0.5,daily_loss_percent:5,session_hours:hours})
+    fixture.liveFields = {live_auto_trade:true,auto:{enabled:true},original_v2_live:{...original,enabled:true,
+      session:{hours,expires_at:expires,remaining_seconds:1800,authority_limited:true,warning_sent:false}}}
+    await route.fulfill({json:{enabled:true}})
+  })
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  const card = page.getByRole('region',{name:'Kais Original V2 LIVE'})
+  const duration = card.getByLabel('Oturum süresi',{exact:true})
+  await expect(duration).toBeVisible()
+  await expect(duration).toHaveValue('1')
+  await expect(duration.locator('option')).toHaveText(['1 saat','4 saat','12 saat','24 saat'])
+  await duration.selectOption(String(hours))
+  await card.getByLabel('ORIGINAL V2 CANLI yazın').fill('ORIGINAL V2 CANLI')
+  const start = card.getByRole('button',{name:renewal ? 'Original V2 oturumunu yenile' : 'Original V2 LIVE aç',exact:true})
+  await start.click()
+  expect(fixture.mutations).toEqual([])
+  await card.getByLabel('2FA kodu',{exact:true}).fill('123456')
+  await start.click()
+  await expect(duration).toBeDisabled()
+  await expect(duration).toHaveValue(String(hours))
+  await expect(card.getByTestId('original-runtime-status')).toContainText('Yetki süresiyle sınırlı')
+  await expect(card.getByTestId('original-runtime-status')).not.toContainText('Oturum yok')
+  await expect(card.getByTestId('original-session-remaining')).toContainText('0 sa')
+  if (hours === 24 && !renewal) {
+    await card.getByTestId('original-runtime-status').scrollIntoViewIfNeeded()
+    await page.screenshot({path:test.info().outputPath('original-session-desktop.png')})
+    for (const width of [390,320]) {
+      await page.setViewportSize({width,height:844})
+      await card.getByTestId('original-runtime-status').scrollIntoViewIfNeeded()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({path:test.info().outputPath(`original-session-${width}.png`)})
+    }
+  }
+  expect(fixture.mutations).toEqual(['/api/v25/original-v2/start'])
+})
+
 test('Original persistence diagnostics use one GET and preserve locked trading inputs', async ({page}) => {
   const fixture = await setup(page)
   fixture.liveFields = {original_v2_live:{available:true,enabled:false,paused:true,pause_reason:'Kalıcı kayıt doğrulanamadı.',risk_percent:0.5,daily_loss_percent:5,symbols:['BTCUSDT']}}
@@ -506,6 +550,7 @@ test('market failures and status polls preserve Original inputs and scroll witho
   await expect(risk).toBeVisible()
   await expect(page.locator('.v26OfflineNotice')).toHaveCount(0)
   await risk.fill('0.65')
+  await card.getByLabel('Oturum süresi',{exact:true}).selectOption('24')
   await card.getByLabel('ORIGINAL V2 CANLI yazın').fill('Henüz onaylamadım')
   await risk.scrollIntoViewIfNeeded()
   const scroll = await page.evaluate(() => window.scrollY)
@@ -513,6 +558,7 @@ test('market failures and status polls preserve Original inputs and scroll witho
   const navigationCount = navigations
   await page.waitForTimeout(11500)
   await expect(risk).toHaveValue('0.65')
+  await expect(card.getByLabel('Oturum süresi',{exact:true})).toHaveValue('24')
   await expect(card.getByLabel('ORIGINAL V2 CANLI yazın')).toHaveValue('Henüz onaylamadım')
   expect(await page.evaluate(() => window.scrollY)).toBeCloseTo(scroll,0)
   expect(navigations).toBe(navigationCount)

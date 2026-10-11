@@ -4927,6 +4927,8 @@ async def execution_loop(application: Any) -> None:
         reconciliation_stage = "credential_resolution"
         try:
             state = application.state.v25_execution
+            from . import original_v2_live
+            original_v2_live.check_session_time(state)
             wait_seconds = account_rate_limit_wait_seconds(state)
             if wait_seconds > 0:
                 await background_authorization_active(application, state)
