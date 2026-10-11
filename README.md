@@ -160,6 +160,27 @@ gates or the default-off Original Demo flags.
 
 ## Manual Binance payment (backend approval; access disabled by default)
 
+The subscription screen reads `/api/v22/subscription/config`; Stripe plan/trial
+cards and billing controls are shown only when the existing Stripe configuration
+guard passes. No Stripe checkout/webhook behavior is changed. With only Binance
+configured, its card advertises a paid 30-day period, not a free trial. With both
+methods disabled, the screen says "Ödeme yakında açılacak." Configuration API
+failures remain explicit errors with retry, not a false disabled-method result.
+
+For the local UI, set `BINANCE_MANUAL_PAY_ID` to your own Pay ID in the **backend**
+environment, restart the backend, and sign in. No frontend secret is needed.
+`DATABASE_URL` must point only to your local/test PostgreSQL, never production.
+Keep `BINANCE_MANUAL_ACCESS_ENABLED=false` and
+`BINANCE_MANUAL_NOTIFICATIONS_ENABLED=false` for display-only inspection.
+The existing local test PostgreSQL schema is required for request-history reads
+and creating/submitting requests; setting a Pay ID does not create tables.
+After separately approved local migrations, access can be enabled for an
+OWNER-approved test payment. Notifications additionally require the existing
+Resend settings. These steps do not authorize any migration or live changes.
+Stripe is intentionally hidden while any of `STRIPE_SECRET_KEY`,
+`STRIPE_WEBHOOK_SECRET`, `APP_BASE_URL`, or
+`STRIPE_PRICE_MASTER_MODE_MONTHLY` is blank, or the Stripe SDK is unavailable.
+
 `backend/app/binance_manual_payments.py` provides isolated PostgreSQL request
 creation, transaction submission and a bounded expiry sweep. Authenticated routes
 in `backend/app/binance_manual_routes.py` expose configuration, the user's latest

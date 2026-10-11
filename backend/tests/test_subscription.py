@@ -33,6 +33,32 @@ def stripe_subscription_event(event_id, status, *, plan="MASTER_MODE", customer=
 
 
 class SubscriptionCoreTests(unittest.TestCase):
+    def test_payment_method_config_uses_existing_stripe_guard_without_exposing_secrets(self):
+        settings = {
+            "STRIPE_SECRET_KEY": "offline-key",
+            "STRIPE_WEBHOOK_SECRET": "offline-webhook",
+            "APP_BASE_URL": "http://localhost:5173",
+            "STRIPE_PRICE_MASTER_MODE_MONTHLY": "price_offline",
+            "BINANCE_MANUAL_PAY_ID": "987654321",
+        }
+        request = SimpleNamespace()
+        for missing in (None, *settings.keys()):
+            with self.subTest(missing=missing):
+                env = {key: value for key, value in settings.items() if key != missing}
+                with patch.dict("os.environ", env, clear=True), \
+                        patch.object(v22_commercial, "authenticated_user", return_value={"id": "user-1"}) as authenticate:
+                    result = asyncio.run(v22_commercial.v22_subscription_config(request))
+                    self.assertEqual(result, {
+                        "stripe_enabled": missing in (None, "BINANCE_MANUAL_PAY_ID"),
+                        "binance_enabled": missing != "BINANCE_MANUAL_PAY_ID",
+                    })
+                    authenticate.assert_called_once_with(request)
+                    self.assertEqual(result["stripe_enabled"], v22_commercial.stripe_configured())
+        with patch.dict("os.environ", {}, clear=True), \
+                patch.object(v22_commercial, "authenticated_user", return_value={"id": "user-1"}):
+            self.assertEqual(asyncio.run(v22_commercial.v22_subscription_config(request)),
+                             {"stripe_enabled": False, "binance_enabled": False})
+
     def test_exactly_two_products_and_trial_terms(self):
         self.assertEqual(set(PLAN_CATALOG), {"TRIAL", "MASTER_MODE"})
         self.assertEqual(TRIAL_DAYS, 7)

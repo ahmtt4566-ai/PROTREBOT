@@ -16,6 +16,7 @@ type SubscriptionView = {
   mode?: string
 }
 type ApiError = { detail?: string }
+type PaymentMethods = { stripe_enabled: boolean; binance_enabled: boolean }
 
 const formatDate = (value?: string | null, locale = 'en-US') => value ? new Date(value).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Not available'
 const daysRemaining = (value?: string | null) => value ? Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / 86400000)) : 0
@@ -41,7 +42,26 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
   const [loadError, setLoadError] = useState('')
   const [subscriptionLoading, setSubscriptionLoading] = useState(true)
   const [loadAttempt, setLoadAttempt] = useState(0)
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethods | null>(null)
+  const [methodsError, setMethodsError] = useState('')
   const authenticated = Boolean(userSessionToken())
+  useEffect(() => {
+    const controller = new AbortController()
+    setMethodsError('')
+    void request<PaymentMethods>('/subscription/config', {signal: controller.signal}).then(current => {
+      if (!current || typeof current.stripe_enabled !== 'boolean' || typeof current.binance_enabled !== 'boolean') {
+        throw new Error('Ödeme yöntemleri doğrulanamadı.')
+      }
+      if (!controller.signal.aborted) setPaymentMethods(current)
+    }).catch(exception => {
+      if (!controller.signal.aborted) {
+        setPaymentMethods(null)
+        setMethodsError(exception instanceof Error ? exception.message : 'Ödeme yöntemleri yüklenemedi.')
+      }
+    })
+    return () => controller.abort()
+  }, [authenticated, loadAttempt])
+
   useEffect(() => {
     const refresh = () => setLoadAttempt(value => value + 1)
     window.addEventListener('protrebot-access-refresh', refresh)
@@ -105,6 +125,11 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
   const trialing = status === 'TRIALING'
   const pastDue = status === 'PAST_DUE'
   const binancePaid = subscription?.mode === 'BINANCE_MANUAL'
+  const stripeEnabled = paymentMethods?.stripe_enabled === true
+  const binanceEnabled = paymentMethods?.binance_enabled === true
+  const paymentFeedback = methodsError ? <p className="subscriptionFeedback subscriptionFeedbackError" role="alert">{methodsError}{' '}<button type="button" onClick={() => setLoadAttempt(value => value + 1)}>Yeniden dene</button></p>
+    : !paymentMethods ? <p role="status">Ödeme yöntemleri yükleniyor…</p>
+    : !stripeEnabled && !binanceEnabled ? <p className="subscriptionCallout" role="status">Ödeme yakında açılacak.</p> : null
   const endDate = formatDate(subscription?.current_period_end, binancePaid ? 'tr-TR' : 'en-US')
   const activePlan = subscription?.plan ? SUBSCRIPTION_PLANS.find(plan => plan.code === subscription.plan) : null
   const nextPayment = subscription?.next_payment_amount != null ? `$${subscription.next_payment_amount.toFixed(2)}` : 'Not available'
@@ -114,39 +139,42 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
   const loadFeedback = loadError && <p className="subscriptionFeedback subscriptionFeedbackError" role="alert">{loadError}{' '}<button type="button" onClick={() => setLoadAttempt(attempt => attempt + 1)} disabled={subscriptionLoading}>Retry subscription</button></p>
 
   if (mode === 'billing') return <main className="subscriptionPage subscriptionBilling">
-    <header className="subscriptionPageHeader"><div><span>BILLING</span><h1>Subscription control center</h1><p>{binancePaid ? 'Binance ödemenizi, MASTER MODE erişiminizi ve bitiş tarihinizi buradan takip edin.' : 'Review your plan, Master Trade access, renewal timing, and Stripe-managed billing from one place.'}</p></div><button onClick={() => onNavigate('pricing')}><Sparkles />VIEW PLANS</button></header>
+    <header className="subscriptionPageHeader"><div><span>BILLING</span><h1>Subscription control center</h1><p>{binancePaid || !stripeEnabled ? 'MASTER MODE erişiminizi ve bitiş tarihinizi buradan takip edin.' : 'Review your plan, Master Trade access, renewal timing, and Stripe-managed billing from one place.'}</p></div><button onClick={() => onNavigate('pricing')}><Sparkles />VIEW PLANS</button></header>
     <section className={`subscriptionStatusCard subscriptionStatus-${status.toLowerCase()}`}>
       <div className="subscriptionPlanHeading"><div className="subscriptionPlanHeadingMain"><div className="subscriptionPlanIcon"><Lock /></div><div className="subscriptionPlanHeadingText"><small>CURRENT PLAN</small><h2>{activePlan?.name || emptyPlanTitle}</h2><p>{activePlan?.description || (subscription ? 'Choose a plan to unlock Master Trade access.' : 'Subscription information is not available yet.')}</p></div></div><span className="subscriptionStatusBadge">{statusLabel}</span></div>
       <div className="subscriptionStatusTop"><div><small>MASTER TRADE ACCESS</small><strong>{accessLabel}</strong></div><div><small>{binancePaid ? 'BİTİŞ TARİHİ' : 'NEXT BILLING / RENEWAL'}</small><strong>{trialing ? `${daysRemaining(subscription?.trial_end)} days` : endDate}</strong></div><div><small>{binancePaid ? 'ERİŞİM DÖNEMİ' : 'BILLING INTERVAL'}</small><strong>{binancePaid ? '30 gün · elle yenileme' : subscription?.plan ? 'Monthly' : 'Not available'}</strong></div><div><small>{binancePaid ? 'ÖDEME YÖNTEMİ' : 'NEXT PAYMENT'}</small><strong>{binancePaid ? 'Binance ile ödendi' : nextPayment}</strong></div></div>
       {binancePaid && <div className="subscriptionCallout"><b>Binance ile ödendi</b><span>MASTER MODE erişiminiz {endDate} tarihinde sona erer. Otomatik ücret alınmaz; yenileme elle yapılır.</span></div>}
-      {trialing && <div className="subscriptionCallout"><b>Your free trial ends in {daysRemaining(subscription?.trial_end)} days.</b><span>After the trial, Stripe will automatically charge $119.90/month unless you cancel.</span></div>}
+      {trialing && <div className="subscriptionCallout"><b>Your free trial ends in {daysRemaining(subscription?.trial_end)} days.</b>{stripeEnabled && <span>After the trial, Stripe will automatically charge $119.90/month unless you cancel.</span>}</div>}
       {pastDue && <div className="subscriptionCallout subscriptionCalloutWarning"><b>Payment method update required</b><span>Your Master Trade access remains temporarily available during the payment retry period.</span></div>}
       {status === 'UNPAID' && <div className="subscriptionCallout subscriptionCalloutDanger"><b>Master Trade access is closed</b><span>Your subscription payment could not be recovered. Update your payment method to reactivate it.</span></div>}
       {!binancePaid && subscription?.cancel_at_period_end && <div className="subscriptionCallout"><b>Cancellation scheduled</b><span>Your subscription remains active until {formatDate(subscription.current_period_end || subscription.trial_end)}.</span></div>}
-      <div className="subscriptionFeatureList">{(subscription?.features || ['Secure Stripe billing', 'Account access remains server-authorized', 'No card details are stored by the platform']).map(feature => <span key={feature}><Check />{feature}</span>)}</div>
+      <div className="subscriptionFeatureList">{(subscription?.features || ['Secure Stripe billing', 'Account access remains server-authorized', 'No card details are stored by the platform']).filter(feature => stripeEnabled || !/stripe/i.test(feature)).map(feature => <span key={feature}><Check />{feature}</span>)}</div>
     </section>
     <div className="subscriptionBillingGrid">
-      <section className="subscriptionPanel subscriptionPlanDetails"><header><div><small>PLAN DETAILS</small><h2>{activePlan?.name || (subscription ? 'Subscription options' : emptyPlanTitle)}</h2></div>{activePlan && <span className="subscriptionCurrentBadge">CURRENT PLAN</span>}</header><p>{activePlan?.description || (subscription ? 'No subscription plan is currently active.' : 'Subscription information is not available yet.')}</p>{activePlan?.monthlyPrice != null && subscription?.next_payment_amount != null && <div className="subscriptionPlanPrice"><strong>${subscription.next_payment_amount.toFixed(2)}</strong><span>/ month</span></div>}<div className="subscriptionDetailList"><div><small>MASTER TRADE</small><strong>{hasAccess ? 'Included' : subscription ? 'Not enabled' : 'Not available'}</strong></div><div><small>RENEWAL</small><strong>{formatDate(subscription?.current_period_end || subscription?.trial_end)}</strong></div></div><ul>{(subscription?.features || activePlan?.features || []).map(feature => <li key={feature}><Check />{feature}</li>)}</ul></section>
+      <section className="subscriptionPanel subscriptionPlanDetails"><header><div><small>PLAN DETAILS</small><h2>{activePlan?.name || (subscription ? 'Subscription options' : emptyPlanTitle)}</h2></div>{activePlan && <span className="subscriptionCurrentBadge">CURRENT PLAN</span>}</header><p>{activePlan?.description || (subscription ? 'No subscription plan is currently active.' : 'Subscription information is not available yet.')}</p>{activePlan?.monthlyPrice != null && subscription?.next_payment_amount != null && <div className="subscriptionPlanPrice"><strong>${subscription.next_payment_amount.toFixed(2)}</strong><span>/ month</span></div>}<div className="subscriptionDetailList"><div><small>MASTER TRADE</small><strong>{hasAccess ? 'Included' : subscription ? 'Not enabled' : 'Not available'}</strong></div><div><small>RENEWAL</small><strong>{formatDate(subscription?.current_period_end || subscription?.trial_end)}</strong></div></div><ul>{(subscription?.features || activePlan?.features || []).filter(feature => stripeEnabled || !/stripe/i.test(feature)).map(feature => <li key={feature}><Check />{feature}</li>)}</ul></section>
       {binancePaid ? <section className="subscriptionPanel subscriptionBillingPanel"><header><div><small>ÖDEME VE YENİLEME</small><h2>Binance ile ödendi</h2></div><CreditCard/></header><p>Ödemeniz yönetici tarafından doğrulandı. Bitiş tarihi: {endDate}.</p><p>Otomatik yenileme veya otomatik ücretlendirme yoktur.</p><button type="button" onClick={() => setLoadAttempt(value => value + 1)} disabled={subscriptionLoading}>Abonelik bilgisini yenile</button></section> :
-      <section className="subscriptionPanel subscriptionBillingPanel"><header><div><small>BILLING & PAYMENT</small><h2>Manage billing</h2></div><CreditCard /></header><div className="subscriptionPaymentPlaceholder"><CreditCard /><div><strong>Payment method</strong><span>Payment details are managed securely by Stripe.</span></div></div><div className="subscriptionActionList">{(pastDue || status === 'UNPAID') && <button onClick={openPortal} disabled={busy}><CreditCard />UPDATE PAYMENT METHOD</button>}{authenticated && subscription?.plan && <button onClick={openPortal} disabled={busy}><ExternalLink />MANAGE BILLING PORTAL</button>}{hasAccess && !subscription?.cancel_at_period_end && <button onClick={() => void cancel(false)} disabled={busy}><XCircle />CANCEL AT PERIOD END</button>}{hasAccess && trialing && <button className="subscriptionQuietAction" onClick={() => void cancel(true)} disabled={busy}>CANCEL NOW</button>}<button onClick={() => onNavigate('pricing')}><Sparkles />VIEW PLANS</button></div></section>}
+      stripeEnabled && <section className="subscriptionPanel subscriptionBillingPanel"><header><div><small>BILLING & PAYMENT</small><h2>Manage billing</h2></div><CreditCard /></header><div className="subscriptionPaymentPlaceholder"><CreditCard /><div><strong>Payment method</strong><span>Payment details are managed securely by Stripe.</span></div></div><div className="subscriptionActionList">{(pastDue || status === 'UNPAID') && <button onClick={openPortal} disabled={busy}><CreditCard />UPDATE PAYMENT METHOD</button>}{authenticated && subscription?.plan && <button onClick={openPortal} disabled={busy}><ExternalLink />MANAGE BILLING PORTAL</button>}{hasAccess && !subscription?.cancel_at_period_end && <button onClick={() => void cancel(false)} disabled={busy}><XCircle />CANCEL AT PERIOD END</button>}{hasAccess && trialing && <button className="subscriptionQuietAction" onClick={() => void cancel(true)} disabled={busy}>CANCEL NOW</button>}<button onClick={() => onNavigate('pricing')}><Sparkles />VIEW PLANS</button></div></section>}
     </div>
-    {authenticated && <BinanceManualPayment/>}
-    <div className="subscriptionLowerGrid"><section className="subscriptionPanel subscriptionStatusPanel"><header><div><small>SUBSCRIPTION STATUS</small><h2>Access overview</h2></div><span className="subscriptionStatusBadge">{statusLabel}</span></header><div className="subscriptionStatusRows"><div><span>Subscription status</span><strong className={`subscriptionStatusPill ${hasAccess ? 'isPositive' : 'isNegative'}`}>{statusLabel}</strong></div><div><span>{binancePaid ? 'Bitiş tarihi' : 'Renewal'}</span><strong>{formatDate(subscription?.current_period_end || subscription?.trial_end)}</strong></div><div><span>Master Trade access</span><strong className={`subscriptionStatusPill ${hasAccess ? 'isPositive' : 'isNegative'}`}>{accessLabel}</strong></div></div>{hasAccess && <button className="subscriptionSecondaryAction" onClick={() => onNavigate('master-trade')}><ShieldCheck />GO TO MASTER TRADE</button>}</section>{!binancePaid && <section className="subscriptionPanel subscriptionHistoryPanel"><header><div><small>BILLING HISTORY</small><h2>Recent activity</h2></div><span>Stripe-managed</span></header><div className="subscriptionEmptyState"><div className="subscriptionEmptyIcon"><Receipt /></div><strong>Billing history is managed in Stripe</strong><span>Invoices and payment events are not loaded here. Use the billing portal to view available records.</span></div></section>}</div>
+    {authenticated && binanceEnabled && <BinanceManualPayment/>}
+    {paymentFeedback}
+    <div className="subscriptionLowerGrid"><section className="subscriptionPanel subscriptionStatusPanel"><header><div><small>SUBSCRIPTION STATUS</small><h2>Access overview</h2></div><span className="subscriptionStatusBadge">{statusLabel}</span></header><div className="subscriptionStatusRows"><div><span>Subscription status</span><strong className={`subscriptionStatusPill ${hasAccess ? 'isPositive' : 'isNegative'}`}>{statusLabel}</strong></div><div><span>{binancePaid ? 'Bitiş tarihi' : 'Renewal'}</span><strong>{formatDate(subscription?.current_period_end || subscription?.trial_end)}</strong></div><div><span>Master Trade access</span><strong className={`subscriptionStatusPill ${hasAccess ? 'isPositive' : 'isNegative'}`}>{accessLabel}</strong></div></div>{hasAccess && <button className="subscriptionSecondaryAction" onClick={() => onNavigate('master-trade')}><ShieldCheck />GO TO MASTER TRADE</button>}</section>{!binancePaid && stripeEnabled && <section className="subscriptionPanel subscriptionHistoryPanel"><header><div><small>BILLING HISTORY</small><h2>Recent activity</h2></div><span>Stripe-managed</span></header><div className="subscriptionEmptyState"><div className="subscriptionEmptyIcon"><Receipt /></div><strong>Billing history is managed in Stripe</strong><span>Invoices and payment events are not loaded here. Use the billing portal to view available records.</span></div></section>}</div>
     {loadFeedback}{notice && <p className="subscriptionFeedback">{notice}</p>}{error && <p className="subscriptionFeedback subscriptionFeedbackError">{error}</p>}
   </main>
 
   return <main className="subscriptionPage subscriptionPricing">
-    <header className="subscriptionPageHeader"><div><span>MASTER TRADE</span><h1>Choose your access level.</h1><p>Secure Stripe billing, immediate entitlement updates, and clear renewal terms for every subscription.</p></div><button onClick={() => onNavigate('billing')}><CreditCard />BILLING</button></header>
-    <section className="subscriptionPlans">{SUBSCRIPTION_PLANS.map(plan => <article className={`subscriptionPlan ${plan.code === 'MASTER_MODE' ? 'subscriptionPlanFeatured' : ''}`} key={plan.code}>
+    <header className="subscriptionPageHeader"><div><span>MASTER TRADE</span><h1>Choose your access level.</h1><p>{stripeEnabled ? 'Secure Stripe billing, immediate entitlement updates, and clear renewal terms for every subscription.' : 'MASTER MODE için ödeme seçenekleri.'}</p></div><button onClick={() => onNavigate('billing')}><CreditCard />BILLING</button></header>
+    {stripeEnabled && <section className="subscriptionPlans">{SUBSCRIPTION_PLANS.map(plan => <article className={`subscriptionPlan ${plan.code === 'MASTER_MODE' ? 'subscriptionPlanFeatured' : ''}`} key={plan.code}>
       <header><span>{plan.code === 'TRIAL' ? 'LIMITED-TIME ACCESS' : 'FULL ACCESS'}</span><h2>{plan.name}</h2><p>{plan.description}</p></header>
       <div className="subscriptionPrice"><strong><small>$</small>{plan.code === 'TRIAL' ? '0' : '119.90'}</strong><span>{plan.code === 'TRIAL' ? 'today' : '/month'}</span></div>
       {plan.code === 'TRIAL' ? <div className="subscriptionTrialTerms"><b>7 days free</b><span>Then $119.90/month</span></div> : <div className="subscriptionTrialTerms"><b>Immediate access</b><span>Renews automatically every month</span></div>}
       <ul>{plan.features.map(feature => <li key={feature}><Check />{feature}</li>)}</ul>
       {plan.code === 'TRIAL' && <small className="subscriptionTerms">Payment method required. No charge today. If you do not cancel, Stripe automatically charges $119.90/month after the 7-day trial.</small>}
       <button onClick={() => void startCheckout(plan.code)} disabled={busy}>{plan.code === 'TRIAL' ? 'START FREE TRIAL' : 'START MASTER MODE'}<ExternalLink /></button>
-      {plan.code === 'MASTER_MODE' && authenticated && <BinanceManualPayment/>}
-    </article>)}</section>
-    <div className="subscriptionSecurityNote"><ShieldCheck /><span><b>SECURE STRIPE BILLING</b><small>Stripe collects and stores payment details. The platform never stores card numbers or security codes.</small></span></div>
+      {plan.code === 'MASTER_MODE' && authenticated && binanceEnabled && <BinanceManualPayment/>}
+    </article>)}</section>}
+    {!stripeEnabled && authenticated && binanceEnabled && <BinanceManualPayment/>}
+    {stripeEnabled && <div className="subscriptionSecurityNote"><ShieldCheck /><span><b>SECURE STRIPE BILLING</b><small>Stripe collects and stores payment details. The platform never stores card numbers or security codes.</small></span></div>}
+    {paymentFeedback}
     {loadFeedback}{notice && <p className="subscriptionFeedback">{notice}</p>}{error && <p className="subscriptionFeedback subscriptionFeedbackError">{error}</p>}
   </main>
 }

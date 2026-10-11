@@ -44,6 +44,10 @@ export async function mockAssistant(page: Page, remembered = false): Promise<Moc
       'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS', ...options.headers,
     }})
     if (request.method() === 'OPTIONS') { await respond({status: 204}); return }
+    if (path === '/api/v22/subscription/config') {
+      await respond({json: {stripe_enabled: true, binance_enabled: false}})
+      return
+    }
     const user = {id: state.userId, role: 'CUSTOMER', active: true, email_verified: true,
       email: 'member@example.test', display_name: 'UI Test Member'}
     if (['/api/v22/session', '/api/v22/profile'].includes(path)) {

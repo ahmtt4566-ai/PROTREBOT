@@ -103,6 +103,7 @@ export default function BinanceManualPayment() {
   const status = current?.status
   return <section className="binanceManualPayment" aria-label="Binance ile ödeme">
     <header><div><small>ALTERNATİF ÖDEME</small><h3>Binance ile öde</h3></div><span>Elle onaylı</span></header>
+    <p>30 günlük MASTER MODE · Ücretsiz deneme yok. Otomatik yenileme yok.</p>
     {error && <div className="binanceManualError" role="alert">{error}{' '}
       {!current && <button type="button" onClick={() => setAttempt(value => value + 1)} disabled={loading}>Yeniden dene</button>}
     </div>}

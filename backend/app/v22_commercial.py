@@ -2003,6 +2003,13 @@ def apply_stripe_event(state: dict[str, Any], event: Any) -> bool:
     return True
 
 
+@router.get("/subscription/config")
+async def v22_subscription_config(request: Request):
+    from .binance_manual_routes import method_configuration
+    authenticated_user(request)
+    return {"stripe_enabled": stripe_configured(), "binance_enabled": method_configuration().enabled}
+
+
 @router.get("/subscription")
 async def v22_subscription(request: Request):
     from .member_entitlements import subscription_for_request

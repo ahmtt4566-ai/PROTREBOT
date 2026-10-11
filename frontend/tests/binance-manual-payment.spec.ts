@@ -6,10 +6,14 @@ const requestRow = {
   id:'a'.repeat(32),reference_code:'KT-ABC234',amount:'119.90',currency:'USDT',method:'binance_manual',
   status:'created',transaction_number:null as string|null,expires_at:'2026-10-13T00:00:00Z',
 }
-async function setup(page:Page,{enabled=true,submitFails=false,paid=false,approvedPeriod=false} = {}) {
+async function setup(page:Page,{enabled=true,stripeEnabled=true,submitFails=false,paid=false,approvedPeriod=false} = {}) {
   const assistant = await mockAssistant(page)
   const calls:{path:string;body:unknown}[] = []
   let row:typeof requestRow|null = approvedPeriod ? {...requestRow,status:'approved',transaction_number:'BINANCE-123'} : null
+  await page.route('**/api/v22/subscription/config',route => route.fulfill({
+    json:{stripe_enabled:stripeEnabled,binance_enabled:enabled},
+    headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*'},
+  }))
   await page.route('**/api/v22/subscription',route => route.fulfill({
     json:{status:'EXPIRED',plan:null,master_trade_access:false},
     headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*'},
@@ -37,7 +41,9 @@ async function setup(page:Page,{enabled=true,submitFails=false,paid=false,approv
     await respond(row)
   })
   await page.goto('/pricing',{waitUntil:'domcontentloaded'})
-  await expect(page.getByRole('button',{name:'START MASTER MODE'})).toBeVisible()
+  if (stripeEnabled) await expect(page.getByRole('button',{name:'START MASTER MODE'})).toBeVisible()
+  else if (enabled) await expect(page.getByRole('region',{name:'Binance ile ödeme'})).toBeVisible()
+  else await expect(page.getByText('Ödeme yakında açılacak.',{exact:true})).toBeVisible()
   return {calls,assistant}
 }
 
@@ -47,6 +53,60 @@ test('Missing Pay ID hides the method and preserves Stripe buttons',async ({page
   await expect(page.getByRole('button',{name:'START FREE TRIAL'})).toBeVisible()
   await expect(page.getByRole('button',{name:'START MASTER MODE'})).toBeVisible()
   expect(calls).toEqual([])
+})
+
+test('Unconfigured Stripe hides both plans and security note; Binance offers 30 days without trial',async ({page}) => {
+  const {calls,assistant} = await setup(page,{stripeEnabled:false})
+  await expect(page.locator('.subscriptionPlan')).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'START FREE TRIAL'})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'START MASTER MODE'})).toHaveCount(0)
+  await expect(page.locator('.subscriptionSecurityNote')).toHaveCount(0)
+  await expect(page.getByText('30 günlük MASTER MODE · Ücretsiz deneme yok. Otomatik yenileme yok.')).toBeVisible()
+  await page.getByRole('button',{name:'Binance ile öde',exact:true}).click()
+  expect(calls.map(call => call.body)).toEqual([null])
+  expect(assistant.requests.filter(path => /^POST .*subscription/.test(path))).toEqual([])
+  await page.getByRole('button',{name:'BILLING',exact:true}).click()
+  await expect(page.getByRole('region',{name:'Binance ile ödeme'})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Manage billing'})).toHaveCount(0)
+  await expect(page.getByText('Billing history is managed in Stripe',{exact:true})).toHaveCount(0)
+  await expect(page.getByText('Secure Stripe billing',{exact:true})).toHaveCount(0)
+})
+
+test('No configured payment method shows a quiet unavailable message in pricing and billing',async ({page}) => {
+  const {calls} = await setup(page,{stripeEnabled:false,enabled:false})
+  await expect(page.locator('.subscriptionPlan')).toHaveCount(0)
+  await expect(page.getByRole('region',{name:'Binance ile ödeme'})).toHaveCount(0)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.getByRole('button',{name:'BILLING',exact:true}).click()
+  await expect(page.getByText('Ödeme yakında açılacak.',{exact:true})).toBeVisible()
+  await expect(page.getByRole('heading',{name:'Manage billing'})).toHaveCount(0)
+  expect(calls).toEqual([])
+})
+
+test('Stripe configuration becoming available restores the unchanged plans and security note',async ({page}) => {
+  await setup(page,{stripeEnabled:false})
+  await page.route('**/api/v22/subscription/config',route => route.fulfill({
+    json:{stripe_enabled:true,binance_enabled:true},
+    headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*'},
+  }))
+  await page.reload({waitUntil:'domcontentloaded'})
+  await expect(page.getByRole('button',{name:'START FREE TRIAL'})).toBeVisible()
+  await expect(page.getByRole('button',{name:'START MASTER MODE'})).toBeVisible()
+  await expect(page.getByText('SECURE STRIPE BILLING',{exact:true})).toBeVisible()
+  await expect(page.getByText('7 days free',{exact:true})).toBeVisible()
+})
+
+test('Configuration API failure never invents available methods or an empty configuration',async ({page}) => {
+  await setup(page)
+  await page.route('**/api/v22/subscription/config',route => route.fulfill({
+    status:503,json:{detail:'Ödeme yöntemleri şu anda yüklenemiyor.'},
+    headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*'},
+  }))
+  await page.reload({waitUntil:'domcontentloaded'})
+  await expect(page.getByRole('alert')).toContainText('Ödeme yöntemleri şu anda yüklenemiyor.')
+  await expect(page.getByRole('button',{name:'START FREE TRIAL'})).toHaveCount(0)
+  await expect(page.getByRole('region',{name:'Binance ile ödeme'})).toHaveCount(0)
+  await expect(page.getByText('Ödeme yakında açılacak.',{exact:true})).toHaveCount(0)
 })
 
 test('Server payment data and copyable note lead to pending without entitlement or Stripe writes',async ({page}) => {
@@ -114,6 +174,21 @@ test('Approved Binance subscription displays its real expiry without Stripe mana
     await expect(page.getByRole('button',{name:'MANAGE BILLING PORTAL'})).toHaveCount(0)
     await expect(page.getByText('Cancellation scheduled',{exact:true})).toHaveCount(0)
     await page.screenshot({path:testInfo.outputPath('binance-member-billing.png'),fullPage:true})
+})
+
+test('Configured Stripe trial still sends the original TRIAL checkout and never creates a Binance request',async ({page}) => {
+  const {calls} = await setup(page)
+  let checkout:unknown = null
+  await page.route('**/api/v22/subscription/checkout',async route => {
+    const headers = {'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'POST, OPTIONS'}
+    if (route.request().method() === 'OPTIONS') {await route.fulfill({status:204,headers});return}
+    checkout = route.request().postDataJSON()
+    await route.fulfill({json:{checkout_url:'http://127.0.0.1:4174/billing?checkout=trial'},headers})
+  })
+  await page.getByRole('button',{name:'START FREE TRIAL'}).click()
+  await expect(page).toHaveURL(/billing\?checkout=trial/)
+  expect(checkout).toEqual({plan:'TRIAL',billing_interval:'monthly'})
+  expect(calls).toEqual([])
 })
 
 test('Paid Stripe billing still offers the original portal and cancellation actions',async ({page}) => {
