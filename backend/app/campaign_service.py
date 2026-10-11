@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .audit_log import AuditActor, write_audit
 from .campaign_content import CampaignDraft, content_hash, email_text, unsubscribe_token, validated, warnings
 from .moderator_customers import customer_read_connection
-from .subscription_core import entitlement_snapshot
+from .member_entitlements import resolve
 
 CampaignStatus = Literal["draft", "pending_approval", "sending", "sent", "cancelled", "failed"]
 
@@ -106,7 +106,11 @@ async def audience(conn, group: str):
             {key: value.isoformat() if isinstance(value, datetime) else value for key, value in dict(r).items()}
             for r in rows
         ]}
-        return [u for u in users if entitlement_snapshot(state, u["user_id"])["master_trade_access"]]
+        selected = []
+        for user in users:
+            if (await resolve(conn, state, user["user_id"]))["master_trade_access"]:
+                selected.append(user)
+        return selected
     if group != "all_users":
         raise ValueError("Unsupported audience")
     return users

@@ -41,7 +41,10 @@ def test_audit_migration_is_append_only_and_survives_user_erasure():
     events_check = re.search(r"CHECK \(action IN \((.*?)\)\)", events_extension, re.S)
     campaigns_extension = (Path(__file__).parents[1] / "migrations" / "20261010_013_campaign_permissions_audit.sql").read_text(encoding="utf-8")
     campaigns_check = re.search(r"CHECK \(action IN \((.*?)\)\)", campaigns_extension, re.S)
-    assert tuple(re.findall(r"'([^']+)'", campaigns_check.group(1))) == AUDIT_ACTIONS
+    payments_extension = (Path(__file__).parents[1] / "migrations" / "20261011_002_binance_manual_entitlements.sql").read_text(encoding="utf-8")
+    payments_check = re.search(r"CHECK \(action IN \((.*?)\)\)", payments_extension, re.DOTALL)
+    assert tuple(re.findall(r"'([^']+)'", payments_check.group(1))) == AUDIT_ACTIONS
+    assert set(re.findall(r"'([^']+)'", campaigns_check.group(1))) < set(AUDIT_ACTIONS)
     assert set(re.findall(r"'([^']+)'", events_check.group(1))) < set(AUDIT_ACTIONS)
     assert set(re.findall(r"'([^']+)'", approval_check.group(1))) < set(AUDIT_ACTIONS)
     assert set(re.findall(r"'([^']+)'", support_check.group(1))) < set(AUDIT_ACTIONS)

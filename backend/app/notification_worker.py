@@ -70,7 +70,7 @@ async def deliver(conn, lease, application=None):
         """SELECT security->>'email' AS email FROM commercial_auth_users
            WHERE user_id = $1 AND security->'active' = 'true'::jsonb
              AND security->'email_verified' = 'true'::jsonb
-             AND ($2 = 'approval.decision' OR security->>'role' = 'OWNER')
+             AND ($2 IN ('approval.decision','payment.binance.email','payment.binance.bell') OR security->>'role' = 'OWNER')
              AND NOT EXISTS (SELECT 1 FROM commercial_erased_users e
                WHERE e.user_hash = encode(sha256(convert_to(user_id,'UTF8')),'hex'))
            FOR SHARE""", row["recipient_user_id"], row["kind"],
@@ -80,6 +80,23 @@ async def deliver(conn, lease, application=None):
         return
     payload = row["payload"]
     payload = json.loads(payload) if isinstance(payload, str) else payload
+    if row["kind"] in {"payment.binance.email", "payment.binance.bell"}:
+        from .binance_notifications import content, enabled
+        try:
+            if not enabled():
+                raise EmailDeliveryError("Payment notifications disabled", provider="resend", code="provider_unavailable")
+            payload = await content(conn, row["recipient_user_id"], payload)
+        except (ValueError, EmailDeliveryError) as exc:
+            code = "provider_unavailable" if isinstance(exc, EmailDeliveryError) else "invalid_response"
+            logger.warning("Binance notification source unavailable type=%s", type(exc).__name__)
+            await finish(conn, row, "failed" if row["attempts"] < 8 else "dead", code)
+            return
+        if payload is None:
+            await finish(conn, row, "dead", "nothing_to_notify")
+            return
+        if row["kind"] == "payment.binance.bell":
+            await finish(conn, row, "sent")
+            return
     if row["kind"] == "approval.pending_digest" and payload["count"] == 0:
         await finish(conn, row, "dead", "nothing_to_notify")
         return
@@ -120,6 +137,14 @@ async def process_due(application, *, limit=10, include_campaigns=True):
 
 
 async def sweep_and_arm(application):
+    from .binance_notifications import INTERVAL_SECONDS, enabled, sweep
+    try:
+        payment_notifications = enabled()
+    except ValueError:
+        logger.warning("Binance lifecycle disabled code=invalid_configuration; other notification work continues")
+        payment_notifications = False
+    if payment_notifications:
+        await sweep(application)
     await process_due(application, include_campaigns=False)
     if os.getenv("CAMPAIGN_EMAIL_ENABLED", "false").lower() in ("true", "1", "yes"):
         current = getattr(application.state, "campaign_notification_task", None)
@@ -134,6 +159,8 @@ async def sweep_and_arm(application):
                FROM notification_outbox WHERE status IN ('pending','failed','sending')
                  AND recipient_user_id <> 'ERASED'""",
         )
+        if payment_notifications:
+            delay = INTERVAL_SECONDS if delay is None else min(float(delay), INTERVAL_SECONDS)
         if delay is not None:
             loop = asyncio.get_running_loop()
             application.state.notification_timer = loop.call_later(

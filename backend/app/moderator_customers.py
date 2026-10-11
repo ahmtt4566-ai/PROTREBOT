@@ -222,6 +222,13 @@ async def customer_subscription(
             current_period_end=row["current_period_end"] if row else None,
             cancel_at_period_end=row["cancel_at_period_end"] if row else None,
         )
+        from .member_entitlements import enabled, target_subscription
+        if enabled():
+            sub = await target_subscription(conn, {}, user_id)
+            result = CustomerSubscription(
+                user_id=user_id, plan=sub["plan"], subscription_status=sub["status"],
+                current_period_end=sub.get("current_period_end"), cancel_at_period_end=sub["cancel_at_period_end"],
+            )
         await audit_customer_read(conn, request, user_id, "customer.subscription.viewed")
         return result
 
@@ -244,5 +251,8 @@ async def customer_payments(
             user_id=user_id, payment_status=status if status is not None else "veri yok",
             last_failed_payment_at=row["last_payment_at"] if row and status == "FAILED" else None,
         )
+        from .member_entitlements import enabled, target_subscription
+        if enabled() and (await target_subscription(conn, {}, user_id))["mode"] == "BINANCE_MANUAL":
+            result = CustomerPayments(user_id=user_id, payment_status="PAID", last_failed_payment_at=None)
         await audit_customer_read(conn, request, user_id, "customer.payments.viewed")
         return result

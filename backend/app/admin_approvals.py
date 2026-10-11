@@ -48,6 +48,9 @@ async def approval_detail(request: Request, approval_id: str = Path(pattern=ID, 
                AND status IN ('ACTIVE','TRIALING') AND (current_period_end IS NULL OR current_period_end > clock_timestamp()))""",
             row["target_user_id"],
         )
+        from .member_entitlements import enabled, target_subscription
+        if enabled():
+            subscription = (await target_subscription(conn, {}, row["target_user_id"]))["master_trade_access"]
         return ApprovalDetail(request=approval_item(row), current_target=current,
                               target_changed=current != stored_snapshot(row), active_subscription=subscription)
 

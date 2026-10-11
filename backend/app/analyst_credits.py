@@ -20,7 +20,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .local_storage import DATA_DIR
-from .v22_commercial import access_snapshot, authenticated_user
+from .member_entitlements import access_for_request
+from .v22_commercial import authenticated_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analyst", tags=["Analyst credits"])
@@ -242,7 +243,7 @@ class ConsumeAnalysis(BaseModel):
 
 def member_access(request: Request) -> tuple[dict[str, Any], bool]:
     user = authenticated_user(request)
-    access = access_snapshot(request.app.state.v22_commercial["state"], user)
+    access = access_for_request(request, user)
     return user, bool(access.get("isPremium", access.get("canAccessMasterTrade")))
 
 

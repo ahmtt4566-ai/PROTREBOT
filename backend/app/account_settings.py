@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from . import account_store as store
 from . import v22_commercial as auth
 from .commercial_core import hash_password, issue_token, normalize_email, verify_password, verify_token
-from .subscription_core import entitlement_snapshot
+from .member_entitlements import subscription_for_request
 from .auth_failures import MFA_ACCOUNT, decode_state, enforce_failure_wait, new_state, record_failure
 from .password_policy import validate_new_password
 
@@ -443,7 +443,7 @@ async def close_blocker(request, user):
 
 async def overview(request, user, *, current=True):
     doc = await store.read(request, user["id"]) or store.defaults()
-    sub = entitlement_snapshot(auth.runtime(request)["state"], user["id"])
+    sub = subscription_for_request(request, user)
     sessions = [row for row in doc.get("sessions", {}).values() if not row.get("revoked") and
                 row.get("exp", 0) > time.time() and row.get("auth_version") == int(user.get("auth_version", 1))]
     current_id = token_payload(request).get("jti") if current else None

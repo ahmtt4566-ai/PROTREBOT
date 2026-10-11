@@ -739,15 +739,18 @@ export default function TestnetFirstApp() {
     }
   },[])
 
-  const notificationTarget = (target:string):{view:View;selector:string} => ({
+  const notificationTarget = (target:string):{view:View;selector:string} => {
+    const targets:Record<string,{view:View;selector:string}> = {
     'system-health': {view:'dashboard',selector:'#dashboard-title'},
     'execution-status': {view:'trading',selector:'.v26MarketBar'},
     'demo-trading': {view:'trading',selector:'.binanceDemoDeck'},
     'risk-management': {view:'risk',selector:'.binanceDemoDeck'},
     'trade-history': {view:'performance',selector:'.v21PerformanceCenter'},
-    subscription: {view:'billing',selector:'.subscriptionCenter'},
+    subscription: {view:'billing',selector:'.subscriptionPage'},
     settings: {view:'setup',selector:'.connectionCenter'},
-  }[target] || {view:'trading',selector:'.v26MarketBar'})
+    }
+    return targets[target] || {view:'trading',selector:'.v26MarketBar'}
+  }
 
   const markNotificationsRead = async (path:string,ids:string[]):Promise<boolean> => {
     if (notificationReadInFlight.current) return false
@@ -786,7 +789,11 @@ export default function TestnetFirstApp() {
     if (notificationReadInFlight.current) return
     setNotificationsOpen(false)
     const saved = await markNotificationsRead(`${encodeURIComponent(item.id)}/read`,[item.id])
-    const destination = notificationTarget(item.target)
+    if (/^\/admin\?section=binance-payments&payment=[a-f0-9]{32}$/.test(item.target)) {
+      window.location.assign(item.target)
+      return
+    }
+    const destination = notificationTarget(item.target === '/billing' ? 'subscription' : item.target)
     navigate(destination.view)
     if (!saved) setNotificationsOpen(true)
     window.setTimeout(() => {

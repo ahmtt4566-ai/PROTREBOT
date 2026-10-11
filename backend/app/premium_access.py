@@ -62,6 +62,23 @@ def public_projection(payload: Any, *, allowlist: bool = False) -> Any:
     return payload
 
 
+def public_notification_projection(payload: Any) -> Any:
+    projected = public_projection(payload, allowlist=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list) or not isinstance(projected, dict):
+        return projected
+    visible_types = {"BINANCE_APPROVED", "BINANCE_REJECTED", "BINANCE_RENEWAL"}
+    visible_keys = {"id", "type", "severity", "title", "message", "timestamp", "read", "target"}
+    projected["items"] = [
+        {key: value for key, value in item.items() if key in visible_keys}
+        if isinstance(item, dict) and item.get("type") in visible_types
+        and isinstance(item.get("id"), str) and item["id"].startswith("binance:")
+        and len(item["id"]) == 40 and all(char in "0123456789abcdef" for char in item["id"][8:])
+        else public_projection(item, allowlist=True)
+        for item in payload["items"]
+    ]
+    return projected
+
+
 def requires_premium(path: str, method: str) -> bool:
     if method.upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
         return False

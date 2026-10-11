@@ -21,9 +21,10 @@ from .analyst_credits import AnalystCredits, ConsumeAnalysis, CreditTransaction
 from .analyst_credits import service as credit_service
 from .assistant_config import AssistantConfig, load_assistant_config
 from .exchange_connections import session_id
+from .member_entitlements import access_for_request, subscription_for_request
 from .premium_access import public_projection
 from .subscription_core import parse_datetime
-from .v22_commercial import access_snapshot, authenticated_user, subscription_for_user
+from .v22_commercial import authenticated_user
 
 Language = Literal["tr", "en"]
 
@@ -81,7 +82,7 @@ class AssistantTools:
         return user
 
     def premium(self, user_id: str) -> bool:
-        return bool(access_snapshot(self.request.app.state.v22_commercial["state"], self.user(user_id))["isPremium"])
+        return bool(access_for_request(self.request, self.user(user_id))["isPremium"])
 
     def credits(self) -> AnalystCredits:
         try:
@@ -105,9 +106,8 @@ class AssistantTools:
 
     async def get_my_access(self, user_id: str) -> dict[str, Any]:
         user = self.user(user_id)
-        state = self.request.app.state.v22_commercial["state"]
-        access = access_snapshot(state, user)
-        subscription = subscription_for_user(state, user_id)
+        access = access_for_request(self.request, user)
+        subscription = subscription_for_request(self.request, user)
         return self.result({"plan": subscription["plan"], "status": subscription["status"], "isPremium": bool(access["isPremium"])})
 
     async def get_my_credits(self, user_id: str) -> dict[str, Any]:

@@ -1765,14 +1765,16 @@ async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Requ
 
 @router.get("/session")
 async def v22_session(request: Request):
+    from .member_entitlements import access_for_request
     user = authenticated_user(request)
     state = runtime(request)["state"]
     mode = get_maintenance_mode(getattr(request.app.state, "maintenance", None))
-    return {"user": public_user(user), "license": active_license(state, user["id"]), "access": access_snapshot(state, user), "demo_only": True, "maintenance": {"mode": mode}}
+    return {"user": public_user(user), "license": active_license(state, user["id"]), "access": access_for_request(request, user), "demo_only": True, "maintenance": {"mode": mode}}
 
 
 @router.get("/profile")
 async def v22_profile(request: Request):
+    from .member_entitlements import access_for_request, subscription_for_request
     user = authenticated_user(request)
     state = runtime(request)["state"]
     profile = next((item for item in state.get("profiles", []) if item.get("user_id") == user["id"]), None)
@@ -1782,7 +1784,7 @@ async def v22_profile(request: Request):
         if profile is None:
             profile = {"user_id": user["id"], "preferences": {}}
         profile.setdefault("preferences", {}).update(copy.deepcopy(account["preferences"]))
-    return {"user": public_user(user), "profile": profile, "subscription": subscription_for_user(state, user["id"]), "access": access_snapshot(state, user), "demo_only": True}
+    return {"user": public_user(user), "profile": profile, "subscription": subscription_for_request(request, user), "access": access_for_request(request, user), "demo_only": True}
 
 
 @router.patch("/profile")
@@ -2003,8 +2005,9 @@ def apply_stripe_event(state: dict[str, Any], event: Any) -> bool:
 
 @router.get("/subscription")
 async def v22_subscription(request: Request):
+    from .member_entitlements import subscription_for_request
     user = authenticated_user(request)
-    return subscription_for_user(runtime(request)["state"], user["id"])
+    return subscription_for_request(request, user)
 
 
 @router.post("/subscription/trial")
@@ -2182,7 +2185,18 @@ async def v22_logout(request: Request, response: Response = None):
 @router.get("/admin/overview")
 async def v22_admin_overview(request: Request):
     authenticated_user(request, owner=True)
-    return admin_overview(runtime(request)["state"])
+    state = runtime(request)["state"]
+    overview = admin_overview(state)
+    from .member_entitlements import enabled, target_subscription
+    if enabled():
+        from .binance_manual_admin import owner_connection
+        async with owner_connection(request) as (conn, _):
+            for customer in overview["customers"]:
+                customer["subscription"] = await target_subscription(conn, state, customer["id"])
+        overview["active_subscriptions"] = sum(
+            bool(customer["subscription"]["master_trade_access"]) for customer in overview["customers"]
+        )
+    return overview
 
 
 @router.get("/admin/users/{user_id}/trading-accounts")

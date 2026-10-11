@@ -34,6 +34,7 @@ AuditAction = Literal[
     "customer.events.viewed",
     "campaign.created", "campaign.updated", "campaign.test_sent", "campaign.send_requested",
     "campaign.send_started", "campaign.cancelled", "campaign.completed",
+    "payment.binance.approved", "payment.binance.rejected",
 ]
 AUDIT_ACTIONS: tuple[str, ...] = get_args(AuditAction)
 ACTION_FIELDS = {
@@ -64,6 +65,8 @@ ACTION_FIELDS = {
     "campaign.send_started": frozenset(),
     "campaign.cancelled": frozenset(),
     "campaign.completed": frozenset(),
+    "payment.binance.approved": frozenset({"status"}),
+    "payment.binance.rejected": frozenset({"status"}),
 }
 
 
@@ -121,6 +124,9 @@ def allowed_snapshot(action: AuditAction, value: Mapping[str, Any]) -> dict[str,
     elif action == "approval.executed":
         if result["phase"] not in ("canonical", "completed"):
             raise ValueError("Invalid approval execution phase")
+    elif action.startswith("payment.binance."):
+        if result["status"] not in ("pending", "approved", "rejected"):
+            raise ValueError("Invalid payment audit status")
     return result
 
 
@@ -135,7 +141,7 @@ async def write_audit(
         raise RuntimeError("Audit must share the mutation transaction")
     if actor.role not in ("OWNER", "MODERATOR", "CUSTOMER"):
         raise ValueError("Invalid audit actor role")
-    expected_target = "CAMPAIGN" if action.startswith("campaign.") else "MODERATOR_PERMISSION" if action in (
+    expected_target = "BINANCE_PAYMENT" if action.startswith("payment.binance.") else "CAMPAIGN" if action.startswith("campaign.") else "MODERATOR_PERMISSION" if action in (
         "PERMISSION_GRANTED", "PERMISSION_REVOKED",
     ) else "SUPPORT_CASE" if action.startswith("support.") else "APPROVAL_REQUEST" if action.startswith("approval.") else "USER"
     if target_type != expected_target:

@@ -1,0 +1,44 @@
+.adminBinance { margin: 24px clamp(16px,3vw,40px); color: var(--admin-text); min-width: 0; }
+.adminBinanceIntro, .adminBinanceCards article > header { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.adminBinance h2, .adminBinance h3 { margin: 0 0 8px; }
+.adminBinance p, .adminBinance span, .adminBinance dt, .adminBinance small { color: var(--admin-muted); line-height: 1.6; }
+.adminBinance button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 9px; background: #24313f; color: var(--admin-text); padding: 11px 16px; cursor: pointer; font: inherit; }
+.adminBinance button:disabled { opacity: .45; cursor: not-allowed; }
+.adminBinance button:focus-visible, .adminBinance input:focus-visible, .adminBinance textarea:focus-visible { outline: 2px solid #a6bfff; outline-offset: 3px; }
+.adminBinanceSummary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; margin: 24px 0; }
+.adminBinanceSummary > div { display: grid; gap: 10px; background: var(--admin-elevated,#13222b); border-radius: 14px; padding: 20px; }
+.adminBinanceSummary strong { font-size: 30px; font-variant-numeric: tabular-nums; }
+.adminBinanceTabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
+.adminBinanceTabs button { background: transparent; color: var(--admin-muted); }
+.adminBinanceTabs button[aria-selected=true] { background: #283b55; color: #c7d9ff; }
+.adminBinanceCards { display: grid; gap: 18px; }
+.adminBinanceCards article { min-width: 0; background: var(--admin-elevated,#13222b); border-radius: 16px; padding: clamp(18px,3vw,28px); }
+.adminBinanceCards article:focus { outline: 2px solid #a6bfff; outline-offset: 4px; }
+.adminBinanceCards article > header > div { min-width: 0; overflow-wrap: anywhere; }
+.adminBinanceCards article > header > strong { color: #dbe7ff; font-size: 22px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.adminBinance dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 22px 30px; margin: 24px 0; }
+.adminBinance dt { font-size: 12px; margin-bottom: 6px; }
+.adminBinance dd { margin: 0; overflow-wrap: anywhere; line-height: 1.7; }
+.adminBinance dd button { background: transparent; padding: 4px 8px; margin-left: 6px; vertical-align: middle; }
+.adminBinanceDecision { display: grid; gap: 16px; }
+.adminBinanceCheck { display: flex; align-items: center; gap: 10px; line-height: 1.5; }
+.adminBinanceCheck input { width: 18px; height: 18px; accent-color: #94b7ff; flex-shrink: 0; }
+.adminBinanceRejectLabel { display: grid; gap: 8px; font-size: 13px; }
+.adminBinance textarea { resize: vertical; min-height: 70px; width: 100%; box-sizing: border-box; border: 1px solid #364354; border-radius: 9px; background: #0f1b25; color: var(--admin-text); padding: 12px; font: inherit; }
+.adminBinanceActions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.adminBinanceActions button { min-height: 48px; font-weight: 700; }
+.adminBinanceActions .adminBinanceApprove { background: #496fa8; color: #fff; }
+.adminBinanceActions .adminBinanceReject { background: #47303a; color: #ffd0d6; }
+.adminBinance .adminBinanceError { color: #ffb5c0; }
+.adminBinance .adminBinanceNotice { color: #bed4ff; }
+.adminBinancePagination { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+.adminBinancePagination span { margin-right: auto; }
+@media (max-width: 600px) {
+  .adminBinanceIntro { align-items: flex-start; flex-wrap: wrap; }
+  .adminBinanceSummary { gap: 8px; }
+  .adminBinanceSummary > div { padding: 12px; }
+  .adminBinanceSummary strong { font-size: 24px; }
+  .adminBinanceCards article > header { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .adminBinance dl { grid-template-columns: minmax(0,1fr); gap: 16px; }
+  .adminBinanceTabs button { padding: 10px; font-size: 13px; }
+}

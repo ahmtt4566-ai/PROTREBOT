@@ -18,6 +18,9 @@ DECISION_TEXT = {
 
 
 def notification_content(kind: str, payload: dict) -> tuple[str, str, str]:
+    if kind == "payment.binance.email":
+        from .binance_notification_email import notification_content as payment_content
+        return payment_content(payload)
     base = mail.validate_app_base_url()
     if base != mail.CANONICAL_EMAIL_ORIGIN:
         raise mail.EmailDeliveryError("Canonical notification origin required", provider="resend", code="provider_unavailable")
@@ -43,7 +46,8 @@ def notification_content(kind: str, payload: dict) -> tuple[str, str, str]:
 
 
 def send_notification(*, to_email: str, kind: str, payload: dict, dedupe_key: str) -> None:
-    if os.getenv("APPROVAL_EMAIL_ENABLED", "true").strip().lower() not in ("true", "1", "yes"):
+    sending_flag = "BINANCE_MANUAL_NOTIFICATIONS_ENABLED" if kind == "payment.binance.email" else "APPROVAL_EMAIL_ENABLED"
+    if os.getenv(sending_flag, "false" if kind == "payment.binance.email" else "true").strip().lower() not in ("true", "1", "yes"):
         raise mail.EmailDeliveryError("Notification sending disabled", provider="resend", code="provider_unavailable")
     try:
         selected = mail.validate_configuration()

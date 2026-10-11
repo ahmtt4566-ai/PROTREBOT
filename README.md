@@ -158,6 +158,102 @@ Local preview URLs require a running preview server; they are not deployment
 addresses. These client changes do not alter exchange order paths, LIVE safety
 gates or the default-off Original Demo flags.
 
+## Manual Binance payment (backend approval; access disabled by default)
+
+`backend/app/binance_manual_payments.py` provides isolated PostgreSQL request
+creation, transaction submission and a bounded expiry sweep. Authenticated routes
+in `backend/app/binance_manual_routes.py` expose configuration, the user's latest
+request, creation and submission. Submission alone never grants access.
+Prepare-only migration `backend/migrations/20261011_001_binance_manual_payments.sql`
+must be applied manually after separate approval; no startup migration is wired.
+
+Requests reserve a unique `KT-` reference for exactly 119.90 USDT with method
+`binance_manual`. Only an unexpired ACTIVE MASTER_MODE Stripe subscription blocks
+creation/submission; TRIALING is allowed. One unsubmitted/pending request per user
+is reused. An unsubmitted request expires at 48 hours; pending reviews do not.
+`expire_due` runs on user create/current reads and the bounded payment lifecycle
+sweep every 60 seconds when payment notifications are enabled.
+Service calls own their transaction; late submission commits expiry before
+returning an explicit error. Transaction numbers are trimmed but otherwise retain
+their opaque case/leading zeros. Their unique fingerprints survive privacy
+erasure to prevent reuse, including after rejection.
+
+`backend/app/binance_manual_admin.py` exposes OWNER-only list/approve/reject routes
+at `/api/v22/admin/binance-payments`. Approval requires explicit Binance
+verification; rejection requires a reason. The canonical OWNER check, decision,
+30-day period and audit share one transaction. Retrying a completed decision
+does not extend access or duplicate its audit. Moderators cannot decide payments.
+Prepare-only migration `backend/migrations/20261011_002_binance_manual_entitlements.sql`
+follows `001` and enforces atomic decision/audit/period completion.
+The period starts at the latest of now, the trial end or the manual period end.
+`backend/app/member_entitlements.py` is the shared backend access resolver for
+middleware, execution, analysis credits, account, assistant and admin/moderator
+views and premium campaign audiences. `BINANCE_MANUAL_ACCESS_ENABLED` defaults to
+false; enable only after both migrations are separately approved and applied.
+Only a current approved, non-revoked period can grant manual access. Lookup or
+validation failures deny manual access explicitly; known valid Stripe access
+remains independent of Binance storage. Existing safe-stop middleware policy is
+unchanged. No positive manual access is cached between requests.
+Stripe checkout, webhook, subscription helpers and the seven-day trial are
+unchanged. `AdminBinancePayments.tsx` adds the OWNER-only dark administration
+section with summaries, status tabs, copyable references/transaction numbers,
+explicit Binance verification and mandatory rejection reasons. Failed requests
+never optimistically approve a payment; failed refreshes retain the prior list.
+Pending reviews have no expiry deadline (the 48-hour deadline applies only before
+transaction submission). The member billing screen displays manual payment and
+expiry without Stripe portal/cancellation controls for manual periods.
+The current-payment read API includes the owned approved period, including a
+future period after trial or early renewal; this is display data, not an access
+grant. Stripe snapshots remain unchanged.
+`backend/app/binance_notifications.py` reconciles committed payment sources into
+the existing notification outbox, with distinct email and bell deliveries and
+stable payment/event/recipient/channel dedupe keys. Submission alerts go only to
+active verified OWNER accounts; decisions and 72-hour renewal reminders go only
+to the payment owner. Missing OWNER delivery is logged and retried from the
+durable pending request. Early renewal suppresses the previous period's reminder.
+The existing worker leases/backoff/eight-attempt limit apply; Resend uses a stable
+idempotency key. Email failures do not undo decisions or block the bell channel.
+Reconciliation recovers enqueue failures without provider work in payment
+transactions. Only notification read routes are extended; trading loops are
+unchanged.
+`BINANCE_MANUAL_NOTIFICATIONS_ENABLED` defaults to false. Prepare-only migration
+`backend/migrations/20261011_003_binance_notifications.sql` extends the typed
+outbox kinds/payload contract and adds opaque immutable bell read receipts.
+Apply it only with separate approval after both payment migrations and the
+existing campaign outbox migration, then enable payment access and notifications
+together. The worker keeps a 60-second lifecycle heartbeat even with an empty
+outbox, expires unsubmitted 48-hour requests and schedules reminders.
+Turkish payment emails use the existing Resend sender, canonical origin and
+simple card design. OWNER links select and focus the exact payment card; user
+links open billing. Bell reads remain user-scoped and persist independently of
+trading state.
+`BINANCE_MANUAL_PAY_ID` is read only
+by the backend: missing configuration hides the method; configured requests still
+require the separately approved schema. No sample ID is used. The Turkish card in
+`BinanceManualPayment.tsx` reads amount/Pay ID from the server, supports reference
+copying, and shows pending without refreshing or changing entitlements. The
+existing Stripe buttons and handlers are unchanged. Offline checks:
+`backend/tests/test_binance_manual_payments.py` and the existing
+`backend/tests/test_binance_manual_routes.py`, `backend/tests/test_subscription.py`
+and `backend/tests/test_binance_manual_entitlements.py`,
+plus `frontend/tests/binance-manual-payment.spec.ts` and
+`frontend/tests/binance-manual-admin.spec.ts` using
+`frontend/playwright.binance-manual.config.ts`. The admin tests exercise real
+AuthGate on the separate local development server (not test-mode auth bypass).
+All APIs and external network are mocked. These unit tests check schema text.
+`backend/tests/test_binance_postgres.py` additionally executes all three migrations
+and rollback/reapply in isolated schemas of an explicitly configured loopback
+`binance_stage5_test` database. It never uses the application database URL.
+`backend/tests/test_binance_notifications.py` covers source recovery, owner
+routing, independent bell/email failure, renewal thresholds, expiry boundaries,
+read ownership and Resend content/idempotency. Existing notification worker,
+email and bell UI tests remain regression gates.
+Free-user full notification text is allowed only for source-validated
+`BINANCE_APPROVED`, `BINANCE_REJECTED` and `BINANCE_RENEWAL` bell records.
+Paid signal/trade/analysis content remains filtered in GET and read responses.
+See [the release and rollback checklist](backend/BINANCE-RELEASE.md) for
+backup verification, migration order, settings and non-destructive recovery.
+
 ## Offline backend regression tests
 
 Native Windows spawn/asyncio tests run their unchanged assertions in a

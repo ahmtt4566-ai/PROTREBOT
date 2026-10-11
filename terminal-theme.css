@@ -8324,6 +8324,25 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 }
 .v26App .subscriptionModeSwitch button.active { border-color: rgba(100, 227, 161, .45); background: rgba(100, 227, 161, .12); color: var(--terminal-positive, #64e3a1); }
 .v26App .subscriptionPlans { gap: 10px; }
+.binanceManualPayment { margin-top: 20px; padding: 18px 0 0; color: var(--text, #dce7e9); }
+.binanceManualPayment > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.binanceManualPayment h3 { margin: 5px 0 0; font-size: 18px; }
+.binanceManualPayment small, .binanceManualPayment p, .binanceManualPayment > header > span { color: var(--text-muted, #9aabb2); }
+.binanceManualPayment > header > span { font-size: 12px; }
+.binanceManualDetails { display: grid; gap: 16px; padding: 20px 0; }
+.binanceManualDetails small, .binanceManualDetails strong { display: block; overflow-wrap: anywhere; }
+.binanceManualDetails strong { margin-top: 5px; font-size: 18px; user-select: text; }
+.binanceManualReference { position: relative; padding-right: 40px; }
+.binanceManualReference > button { position: absolute; right: 0; top: 12px; }
+.binanceManualPayment button { cursor: pointer; min-height: 36px; padding: 8px 12px; border: 0; border-radius: 8px; background: rgba(133, 158, 190, .12); color: var(--text, #dce7e9); }
+.binanceManualPayment button:disabled { opacity: .55; cursor: not-allowed; }
+.binanceManualPayment .binanceManualPrimary { background: rgba(101, 147, 224, .18); color: #b8d2ff; width: 100%; }
+.binanceManualPayment form { display: grid; gap: 10px; margin: 16px 0; }
+.binanceManualPayment input { min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid var(--border, #27343a); border-radius: 8px; padding: 12px; background: rgba(9, 16, 21, .65); color: var(--text, #dce7e9); }
+.binanceManualPayment .binanceManualWarning { color: var(--terminal-warning, #f5be55); line-height: 1.6; }
+.binanceManualError { color: #f0a5a5; margin: 12px 0; overflow-wrap: anywhere; }
+.binanceManualPayment .binanceManualRefresh { display: inline-flex; gap: 6px; align-items: center; margin-top: 12px; background: transparent; }
+.binanceManualPayment button:focus-visible, .binanceManualPayment input:focus-visible { outline: 2px solid #b8d2ff; outline-offset: 3px; }
 .v26App .subscriptionPlan {
   padding: 18px;
   border: 1px solid var(--border, #27343a);

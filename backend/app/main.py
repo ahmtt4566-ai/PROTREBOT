@@ -70,6 +70,8 @@ from .moderator_support import router as moderator_support_router
 from .moderator_approvals import router as moderator_approvals_router
 from .admin_approvals import router as admin_approvals_router
 from .notification_admin import router as notification_admin_router
+from .binance_manual_routes import router as binance_manual_router
+from .binance_manual_admin import router as binance_manual_admin_router
 from .moderator_events import router as moderator_events_router
 from .campaign_routes import router as campaign_router
 from .v25_execution import init_v25_execution, restore_v25_state, router as v25_execution_router, shutdown_v25_execution
@@ -1375,9 +1377,14 @@ async def owner_preview_gate(request, call_next):
                 clear_browser_cookie(response, request, USER_SESSION_COOKIE)
             return apply_cors_headers(request, response)
     if protected_member_request:
-        from .v22_commercial import access_snapshot
-        access = access_snapshot(request.app.state.v22_commercial["state"], request.state.member)
+        from .member_entitlements import access as entitlement_access
+        from .member_entitlements import prepare
+
+        proof = await prepare(request, request.state.member)
+        access = entitlement_access(proof.subscription, request.state.member)
         request.state.premium = access["isPremium"]
+        if proof.error and requires_premium(request.url.path, request.method):
+            return apply_cors_headers(request, JSONResponse({"detail": "Üyelik yetkisi doğrulanamadı."}, status_code=503))
         if requires_premium(request.url.path, request.method) and not request.state.premium:
             logger.warning("Premium operation denied user_id=%s path=%s", request.state.member["id"], request.url.path)
             return apply_cors_headers(request, JSONResponse({"detail": "Premium üyelik gerekli.", "code": "PREMIUM_REQUIRED"}, status_code=403))
@@ -1412,12 +1419,16 @@ async def owner_preview_gate(request, call_next):
             await asyncio.gather(*tasks, return_exceptions=True)
     from .customer_event_writer import record_event
     record_event(request, getattr(request.state, "member", None), "api.error", "server_error" if response.status_code >= 500 else "request_failed", "api", response.status_code) if response.status_code >= 500 or response.status_code in (409, 429) else None
-    if protected_member_request and request.method == "GET" and not request.state.premium and response.status_code == 200 and "application/json" in response.headers.get("content-type", "") and not request.url.path.startswith("/api/analyst/") and request.url.path not in {"/api/assistant/usage", "/api/assistant/proactive/preferences"}:
+    notification_response = request.url.path == "/api/v21/notifications" or request.url.path.startswith("/api/v21/notifications/")
+    if protected_member_request and (request.method == "GET" or notification_response) and not request.state.premium and response.status_code == 200 and "application/json" in response.headers.get("content-type", "") and not request.url.path.startswith("/api/analyst/") and request.url.path not in {"/api/assistant/usage", "/api/assistant/proactive/preferences"}:
         chunks = [chunk async for chunk in response.body_iterator]
         body = b"".join(chunk.encode() if isinstance(chunk, str) else chunk for chunk in chunks)
         headers = {key: value for key, value in response.headers.items() if key not in {"content-length", "content-type", "content-encoding"}}
         trading_payload = not request.url.path.startswith(("/api/v22/", "/api/v24/", "/api/v27/", "/api/mod/"))
-        response = JSONResponse(public_projection(json.loads(body), allowlist=trading_payload), status_code=response.status_code, headers=headers)
+        from .premium_access import public_notification_projection
+        payload = json.loads(body)
+        filtered = public_notification_projection(payload) if notification_response else public_projection(payload, allowlist=trading_payload)
+        response = JSONResponse(filtered, status_code=response.status_code, headers=headers)
     if request.url.path.startswith("/api/analyst/") and response.status_code in {401, 403, 409, 422, 429}:
         logger.warning("Analyst request rejected path=%s status=%s", request.url.path, response.status_code)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -1437,6 +1448,8 @@ app.include_router(moderator_support_router)
 app.include_router(moderator_approvals_router)
 app.include_router(admin_approvals_router)
 app.include_router(notification_admin_router)
+app.include_router(binance_manual_router)
+app.include_router(binance_manual_admin_router)
 app.include_router(moderator_events_router)
 app.include_router(campaign_router)
 from .account_settings import router as account_settings_router

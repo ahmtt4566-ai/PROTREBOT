@@ -84,7 +84,8 @@ from .liquidation_risk import isolated_liquidation_risk
 from .web_security import env_flag
 from . import signal_journal as observation
 from .v21_demo import certificate_payload
-from .v22_commercial import authenticated_user, subscription_for_user
+from .v22_commercial import authenticated_user
+from .member_entitlements import subscription_for_request
 from .error_monitoring import build_error_event, log_event, schedule_log_event
 
 
@@ -1164,7 +1165,7 @@ def execution_owner(request: Request) -> dict[str, Any]:
         return member
     user = authenticated_user(request)
     if user.get("role") != "OWNER":
-        subscription = subscription_for_user(request.app.state.v22_commercial["state"], user["id"])
+        subscription = subscription_for_request(request, user)
         if not subscription.get("master_trade_access") and request.method != "GET":
             raise HTTPException(403, "Master Trade aboneliğiniz bu özelliğe erişim vermiyor")
     guard_execution_ownership(request, claim=request.method != "GET")

@@ -2851,12 +2851,16 @@ async def v21_original_dry_run(request: Request, body: AutoStartRequest) -> dict
 async def v21_notifications(request: Request, limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
     state = state_for(request)
     items = notification_payload(state, limit)
+    from .binance_notifications import merge_bell
+    items = await merge_bell(request, items, limit)
     return {"items": items, "unread": sum(1 for item in items if not item["read"]), "demo_only": True}
 
 
 @router.post("/notifications/read-all")
 async def v21_notifications_read_all(request: Request) -> dict[str, Any]:
     state = state_for(request)
+    from .binance_notifications import merge_bell
+    combined = await merge_bell(request, notification_payload(state), read_all=True)
     notifications = state.setdefault("notifications", {"seen": [], "unread": 0, "read_ids": []})
     read_ids = notifications.setdefault("read_ids", [])
     for item in notification_payload(state, 500):
@@ -2865,22 +2869,29 @@ async def v21_notifications_read_all(request: Request) -> dict[str, Any]:
     del read_ids[:-1200]
     notifications["unread"] = 0
     persist_state(state)
-    return {"items": notification_payload(state), "unread": 0, "demo_only": True}
+    combined = [{**item, "read": True} for item in combined]
+    return {"items": combined, "unread": 0, "demo_only": True}
 
 
 @router.post("/notifications/{notification_id}/read")
 async def v21_notification_read(request: Request, notification_id: str) -> dict[str, Any]:
     state = state_for(request)
     items = notification_payload(state, 500)
+    from .binance_notifications import merge_bell
+    if notification_id.startswith("binance:"):
+        items = await merge_bell(request, items, read_id=notification_id)
+        return {"items": items, "unread": sum(1 for item in items if not item["read"]), "demo_only": True}
     if not any(item["id"] == notification_id for item in items):
         raise HTTPException(status_code=404, detail="Bildirim bulunamadı.")
+    combined = await merge_bell(request, notification_payload(state))
     notifications = state.setdefault("notifications", {"seen": [], "unread": 0, "read_ids": []})
     read_ids = notifications.setdefault("read_ids", [])
     if notification_id not in read_ids:
         read_ids.append(notification_id)
     notifications["unread"] = sum(1 for item in notification_payload(state, 500) if not item["read"])
     persist_state(state)
-    return {"items": notification_payload(state), "unread": notifications["unread"], "demo_only": True}
+    items = [{**item, "read": True} if item["id"] == notification_id else item for item in combined]
+    return {"items": items, "unread": sum(1 for item in items if not item["read"]), "demo_only": True}
 
 
 @router.get("/markets")
