@@ -7,6 +7,7 @@ import AuthGate from './AuthGate'
 import EmailVerificationRoute from '../../EmailVerificationRoute'
 import PublicPolicyPage from '../../PublicPolicyPage'
 import { publicPolicyForPath } from '../../compliance-content'
+import {applyPageMetadataForPath} from '../../public-page-metadata'
 import { installAuthorizedFetch } from './api'
 import { MemberAccessProvider } from '../../premium-access'
 import './style.css'
@@ -20,6 +21,7 @@ import './exchange-connections.css'
 import './dark-dashboard.css'
 
 installAuthorizedFetch()
+applyPageMetadataForPath(window.location.pathname)
 const ownerPreview = import.meta.env.VITE_OWNER_PREVIEW === 'true'
 const application = <AuthGate><MemberAccessProvider><TestnetFirstApp/></MemberAccessProvider></AuthGate>
 const gatedApplication = ownerPreview ? <WebAccessGate>{application}</WebAccessGate> : application

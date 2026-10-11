@@ -3,6 +3,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'rea
 import { Activity, ArrowRight, BarChart3, Bitcoin, CircleDollarSign, Coins, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, LogOut, Mail, MailCheck, Pause, Play, ShieldAlert, ShieldCheck, UserRound, Wrench, Zap } from 'lucide-react'
 import { API_BASE, COOKIE_SESSION_PREFIX, USER_SESSION_KEY, clearDemoCredentials, clearUserSessionToken, saveUserSessionToken, userSessionToken } from './api'
 import {withRequestDeadline} from './browser-request'
+import {applyPageMetadataForPath} from './public-page-metadata'
 import {PASSWORD_MAX_LENGTH, passwordPolicyError, passwordRules} from './password-policy'
 import AdminPanel from './AdminPanel'
 import ModeratorPanel from './ModeratorPanel'
@@ -126,6 +127,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [token,setToken] = useState(userSessionToken())
   const [session,setSession] = useState<Session|null>(null)
   const [mode,setMode] = useState<Mode>(() => new URLSearchParams(location.search).has('mfa_challenge') ? 'mfa' : window.location.pathname === '/register' ? 'register' : window.location.pathname === '/forgot-password' ? 'forgot' : window.location.pathname === '/reset-password' ? 'reset' : window.location.pathname === '/verify-email' ? 'verify' : 'login')
+  useEffect(() => {applyPageMetadataForPath(window.location.pathname)})
   const isRegistration = mode === 'register' || mode === 'bootstrap'
   const isGoogleConsent = mode === 'google-consent'
   const [ownerSetupAvailable,setOwnerSetupAvailable] = useState(false)

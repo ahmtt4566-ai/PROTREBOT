@@ -8,7 +8,6 @@ Disallow: /profile
 Disallow: /settings
 Disallow: /master-trade
 Disallow: /billing
-Disallow: /pricing
 Disallow: /login
 Disallow: /register
 Disallow: /forgot-password

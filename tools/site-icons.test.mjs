@@ -13,7 +13,7 @@ function assertPng(buffer, size) {
   assert.equal(buffer.readUInt32BE(20), size)
 }
 
-function assertTransparentPng(buffer, size) {
+function assertIconPng(buffer, size) {
   assertPng(buffer, size)
   assert.equal(buffer[24], 8)
   assert.equal(buffer[25], 6)
@@ -52,17 +52,23 @@ function assertTransparentPng(buffer, size) {
     rows.push(row)
   }
   assert.equal(offset, raw.length)
-  for (const y of [0, size - 1]) for (const x of [0, size - 1]) assert.equal(rows[y][x * 4 + 3], 0)
-  assert.ok(rows.some(row => row.some((value, x) => x % 4 === 3 && value === 255)))
+  for (const row of rows) for (let x = 0; x < size; x++) assert.equal(row[x * 4 + 3], 255)
+  const margin = Math.floor(size * .07)
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    if (x < margin || y < margin || x >= size - margin || y >= size - margin) {
+      assert.deepEqual([...rows[y].subarray(x * 4, x * 4 + 4)], [255, 255, 255, 255])
+    }
+  }
+  assert.ok(rows.some(row => {
+    for (let x = 0; x < size; x++) if (row[x * 4 + 1] > 180 && row[x * 4] < 100) return true
+    return false
+  }), 'Existing green pulse artwork is present')
 }
 
 test('Both entrypoints declare stable same-origin favicon and touch icon URLs in the head', () => {
   const expected = [
-    {rel: 'icon', href: '/favicon.ico', type: 'image/x-icon', sizes: '16x16 32x32 48x48 96x96'},
-    {rel: 'icon', href: '/favicon-96x96.png', type: 'image/png', sizes: '96x96'},
-    {rel: 'icon', href: '/favicon-48x48.png', type: 'image/png', sizes: '48x48'},
-    {rel: 'icon', href: '/favicon-192x192.png', type: 'image/png', sizes: '192x192'},
-    {rel: 'icon', href: '/favicon-512x512.png', type: 'image/png', sizes: '512x512'},
+    {rel: 'icon', href: '/favicon.ico', type: 'image/x-icon', sizes: '48x48'},
+    {rel: 'icon', href: '/icon-512.png', type: 'image/png', sizes: '512x512'},
     {rel: 'apple-touch-icon', href: '/apple-touch-icon.png', sizes: '180x180'},
   ]
   for (const entry of ['../index.html', '../frontend/index.html']) {
@@ -71,6 +77,7 @@ test('Both entrypoints declare stable same-origin favicon and touch icon URLs in
     assert.ok(head, `${entry} has a document head`)
     const links = Array.from(head.matchAll(/<link\b[^>]*>/gi), match =>
       Object.fromEntries(Array.from(match[0].matchAll(/([\w-]+)="([^"]*)"/g), attr => [attr[1], attr[2]])))
+    assert.equal(links.filter(link => link.rel === 'icon' || link.rel === 'apple-touch-icon').length, 3)
     for (const icon of expected) {
       assert.ok(links.some(link => Object.entries(icon).every(([key, value]) => link[key] === value)),
         `${entry} declares ${icon.href}`)
@@ -80,8 +87,8 @@ test('Both entrypoints declare stable same-origin favicon and touch icon URLs in
 })
 
 test('Search and Apple icons are real square PNGs with the declared sizes', () => {
-  for (const size of [48, 96, 192, 512]) assertTransparentPng(asset(`favicon-${size}x${size}.png`), size)
-  assertTransparentPng(asset('apple-touch-icon.png'), 180)
+  for (const size of [192, 512]) assertIconPng(asset(`icon-${size}.png`), size)
+  assertIconPng(asset('apple-touch-icon.png'), 180)
 })
 
 test('Open Graph promotional PNG is exactly 1200 by 630 pixels', () => {
@@ -91,13 +98,13 @@ test('Open Graph promotional PNG is exactly 1200 by 630 pixels', () => {
   assert.equal(png.readUInt32BE(20), 630)
 })
 
-test('Fallback ICO contains bounded PNG entries at every declared browser size', () => {
+test('Fallback ICO contains exactly one bounded 48px PNG entry', () => {
   const ico = asset('favicon.ico')
   assert.equal(ico.readUInt16LE(0), 0)
   assert.equal(ico.readUInt16LE(2), 1)
-  assert.equal(ico.readUInt16LE(4), 4)
-  let offset = 6 + 4 * 16
-  for (const [index, size] of [16, 32, 48, 96].entries()) {
+  assert.equal(ico.readUInt16LE(4), 1)
+  let offset = 6 + 16
+  for (const [index, size] of [48].entries()) {
     const entry = 6 + index * 16
     assert.equal(ico[entry], size)
     assert.equal(ico[entry + 1], size)
@@ -106,7 +113,7 @@ test('Fallback ICO contains bounded PNG entries at every declared browser size',
     const length = ico.readUInt32LE(entry + 8)
     assert.equal(ico.readUInt32LE(entry + 12), offset)
     assert.ok(length > 24 && offset + length <= ico.length)
-    assertTransparentPng(ico.subarray(offset, offset + length), size)
+    assertIconPng(ico.subarray(offset, offset + length), size)
     offset += length
   }
   assert.equal(offset, ico.length)

@@ -7,6 +7,7 @@ import AuthGate from './AuthGate'
 import EmailVerificationRoute from './EmailVerificationRoute'
 import PublicPolicyPage from './PublicPolicyPage'
 import { publicPolicyForPath } from './compliance-content'
+import {applyPageMetadataForPath} from './public-page-metadata'
 import CopyProtection from './CopyProtection'
 import BackToTop from './BackToTop'
 import { MemberAccessProvider } from './premium-access'
@@ -24,6 +25,7 @@ import './branding-overrides.css'
 import './back-to-top.css'
 
 installAuthorizedFetch()
+applyPageMetadataForPath(window.location.pathname)
 installErrorMonitoring()
 const publicPolicy = publicPolicyForPath(window.location.pathname)
 const application = publicPolicy

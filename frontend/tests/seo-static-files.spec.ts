@@ -21,7 +21,7 @@ test('general crawling is allowed while private routes and sensitive query URLs 
   expect(directives).toEqual([
     'Allow: /','Disallow: /api$','Disallow: /api/',
     'Disallow: /admin','Disallow: /dashboard','Disallow: /profile','Disallow: /settings',
-    'Disallow: /master-trade','Disallow: /billing','Disallow: /pricing',
+    'Disallow: /master-trade','Disallow: /billing',
     'Disallow: /login','Disallow: /register','Disallow: /forgot-password',
     'Disallow: /reset-password','Disallow: /verify-email','Disallow: /local-owner-setup',
     'Disallow: /*?*token=','Disallow: /*?*code=','Disallow: /*?*state=',
@@ -37,8 +37,8 @@ test('general crawling is allowed while private routes and sensitive query URLs 
   })
   const allowed = (path:string) => rules.filter(rule => rule.pattern.test(path))
     .sort((left,right) => right.length-left.length || Number(right.allow)-Number(left.allow))[0]?.allow ?? true
-  for (const path of ['/','/?lang=tr','/privacy','/privacy/','/terms','/risk','/new-public-page','/assets/app.js','/og-image.png','/kaistrade-logo.png','/favicon.ico','/favicon-48x48.png','/favicon-96x96.png','/favicon-192x192.png','/favicon-512x512.png','/apple-touch-icon.png','/sitemap.xml','/robots.txt']) expect(allowed(path)).toBe(true)
-  for (const path of ['/login','/register','/forgot-password','/reset-password','/profile','/admin','/admin/users','/dashboard','/settings','/settings/security','/master-trade','/billing','/pricing','/verify-email','/local-owner-setup','/api','/api/v22/session','/api/v22/auth/google/callback','/?google_login=success','/?google_remember=1','/?token=private','/?lang=tr&token=private','/privacy?token=private','/assets/app.js?token=private','/?code=private','/?state=private','/?mfa_challenge=private']) {
+  for (const path of ['/','/?lang=tr','/privacy','/privacy/','/terms','/risk','/pricing','/new-public-page','/assets/app.js','/og-image.png','/kaistrade-logo.png','/favicon.ico','/favicon-48x48.png','/favicon-96x96.png','/favicon-192x192.png','/favicon-512x512.png','/icon-192.png','/icon-512.png','/apple-touch-icon.png','/sitemap.xml','/robots.txt']) expect(allowed(path)).toBe(true)
+  for (const path of ['/login','/register','/forgot-password','/reset-password','/profile','/admin','/admin/users','/dashboard','/settings','/settings/security','/master-trade','/billing','/verify-email','/local-owner-setup','/api','/api/v22/session','/api/v22/auth/google/callback','/?google_login=success','/?google_remember=1','/?token=private','/?lang=tr&token=private','/privacy?token=private','/assets/app.js?token=private','/?code=private','/?state=private','/?mfa_challenge=private']) {
     expect(allowed(path)).toBe(false)
   }
 })
@@ -142,7 +142,7 @@ for (const base of ['http://127.0.0.1:4173','http://127.0.0.1:4175','http://127.
       if (pathname === '/') {
         const home = await request.get(base+'/')
         expect(home.status()).toBe(200)
-        expect(await home.text()).toContain('<title>KaisTrade | AI-Powered Crypto Trading Platform</title>')
+        expect(await home.text()).toContain('<title>KaisTrade | Kripto Analiz ve İşlem Platformu</title>')
         continue
       }
       const policy = publicPolicyForPath(pathname)

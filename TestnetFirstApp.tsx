@@ -3,6 +3,7 @@ import { CandlestickSeries, ColorType, createChart, HistogramSeries, LineSeries,
 import { Activity, BarChart3, Bell, BrainCircuit, CheckCircle2, CircleDollarSign, Cloud, CloudCog, Home, KeyRound, LockKeyhole, Menu, RadioTower, Radar, RefreshCw, Save, ShieldCheck, Sparkles, TestTube2, X } from 'lucide-react'
 import { API_BASE, buildDemoSavePayload, userSessionToken } from './api'
 import {loadWorkspaceWithDeadline, withRequestDeadline} from './browser-request'
+import {applyPageMetadataForPath} from './public-page-metadata'
 import BackButton from './BackButton'
 import CoinAnalysisCenter from './CoinAnalysisCenter'
 import ScannerCenter from './ScannerCenter'
@@ -471,6 +472,7 @@ export default function TestnetFirstApp() {
   },[])
   const initialView = ():View => window.location.pathname === '/pricing' ? 'pricing' : window.location.pathname === '/billing' ? 'billing' : window.location.pathname === '/master-trade' ? 'master-trade' : 'dashboard'
   const [view,setView] = useState<View>(initialView)
+  useEffect(() => {applyPageMetadataForPath(`/${view}`,window.location.pathname)},[view])
   const [masterTradeAccess,setMasterTradeAccess] = useState<'loading'|'granted'|'locked'|'unauthenticated'|'unavailable'>('loading')
   const [accessAttempt,setAccessAttempt] = useState(0)
   const [accessError,setAccessError] = useState('')
@@ -882,7 +884,7 @@ export default function TestnetFirstApp() {
     {tradingDefaults.error && <p className="v26MarketError" role="alert">İşlem tercihleri uygulanamadı: {tradingDefaults.error}</p>}
     {showConnectionNotice && <section className={`v26OfflineNotice ${connectionState}`} role="status" aria-live="polite"><span><i/><b>{connectionState === 'offline' ? 'Sunucu bağlantısı bekleniyor' : connectionState === 'checking' ? 'Sunucu bağlantısı kontrol ediliyor' : 'Sunucu bağlantısı kuruldu'}</b><small>{connectionState === 'offline' ? 'Veriler güncellenemiyor. Bağlantı kurulduğunda otomatik olarak yeniden denenecek.' : connectionState === 'checking' ? 'Sunucu ve piyasa verileri kontrol ediliyor…' : 'Veriler güncellenmeye devam ediyor.'}</small></span>{connectionState !== 'online' && <button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'KONTROL EDİLİYOR…' : 'YENİDEN DENE'}</button>}</section>}
     <header className={`v26Header v26HomeHeader${headerHidden ? ' v26HeaderHidden' : ''}`} data-build-commit={BUILD_COMMIT}>
-      <div className="v26Brand" role="button" tabIndex={0} aria-label="Ana sayfaya dön" onClick={() => navigate('dashboard')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); navigate('dashboard') } }}><span className="v26BrandLogo"><img src="/kaistrade-logo.png" alt="KaiStrade"/></span></div>
+      <div className="v26Brand" role="button" tabIndex={0} aria-label="Ana sayfaya dön" onClick={() => navigate('dashboard')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); navigate('dashboard') } }}><span className="v26BrandLogo"><img src="/kaistrade-logo.png" alt="KaisTrade"/></span></div>
       <div className="v26HomeHeaderStatus" aria-label="Sistem durumu"><i className={connectionState === 'online' && health?.status === 'ok' ? 'ok' : connectionState === 'offline' ? 'error' : 'pending'}/>{connectionState === 'offline' ? 'BAĞLANTI BEKLENİYOR' : connectionState === 'checking' ? 'KONTROL EDİLİYOR' : 'ÇEVRİMİÇİ'}</div>
       <div className="v26HeaderActions">
         <AssistantChat pageContext={view} launcherTarget={view === 'master-trade' && desktopHeader ? masterAssistantHost : undefined}/>

@@ -2,11 +2,11 @@ import {expect, test} from '@playwright/test'
 import {readFileSync} from 'node:fs'
 import {PUBLIC_POLICIES, publicPolicyForPath} from '../../compliance-content'
 import {mockAssistant} from './helpers/assistant-api'
-import {PUBLIC_PAGE_METADATA,publicPageSchema} from '../../public-page-metadata'
+import {PAGE_METADATA,PUBLIC_PAGE_METADATA,publicPageSchema} from '../../public-page-metadata'
 
 test('home page publishes complete KaisTrade metadata before JavaScript in both entrypoints and builds', async ({request,page}) => {
-  const title = 'KaisTrade | AI-Powered Crypto Trading Platform'
-  const description = "Explore KaisTrade's AI-powered crypto analysis, market scanning and trading tools, with demo trading and risk controls for informed market decisions."
+  const title = 'KaisTrade | Kripto Analiz ve İşlem Platformu'
+  const description = 'KaisTrade ile kripto piyasalarını izleyin, yapay zekâ analizlerini inceleyin ve demo işlemlerle stratejilerinizi değerlendirin.'
   for (const base of ['http://127.0.0.1:4173', 'http://127.0.0.1:4175', 'http://127.0.0.1:4176', 'http://127.0.0.1:4177']) {
     const response = await request.get(base)
     expect(response.status()).toBe(200)
@@ -46,9 +46,9 @@ test('home page publishes complete KaisTrade metadata before JavaScript in both 
       '@context': 'https://schema.org', '@type': 'WebSite',
       name: 'KaisTrade', alternateName: 'Kais Trade', url: 'https://kaistrade.com/',
     }])
-    expect(metadata.icons).toHaveLength(6)
-    expect(metadata.icons).toContainEqual({href:'/favicon-48x48.png',type:'image/png',sizes:'48x48'})
-    expect(metadata.icons).toContainEqual({href:'/favicon-512x512.png',type:'image/png',sizes:'512x512'})
+    expect(metadata.icons).toHaveLength(3)
+    expect(metadata.icons).toContainEqual({href:'/favicon.ico',type:'image/x-icon',sizes:'48x48'})
+    expect(metadata.icons).toContainEqual({href:'/icon-512.png',type:'image/png',sizes:'512x512'})
     for (const icon of metadata.icons) {
       if (!icon.href) throw new Error('Icon URL missing')
       const response = await request.get(base+icon.href)
@@ -107,7 +107,7 @@ for (const policy of ['privacy', 'terms', 'risk'] as const) {
           await expect(page.locator(selector)).toHaveAttribute('content',metadata.description)
         }
         await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content',metadata.url)
-        await expect(page.locator('link[rel="icon"][href="/favicon-96x96.png"]')).toHaveCount(1)
+        await expect(page.locator('link[rel="icon"][href="/icon-512.png"]')).toHaveCount(1)
       }
     }
     expect(requests).toEqual([])
@@ -145,6 +145,33 @@ test('SPA policy changes and unmount restore every head value without duplicate 
     await expect(page.locator('script[type="application/ld+json"]')).toHaveCount(1)
     expect(await page.locator('script[type="application/ld+json"]').textContent()).toBe(JSON.stringify(publicPageSchema(pageName)))
   }
+})
+
+test('every workspace and account page has its own short Turkish metadata', async ({page,request}) => {
+  const base = 'http://127.0.0.1:4173'
+  const shell = await (await request.get(base+'/')).text()
+  await page.route(base+'/metadata-navigation', route =>
+    route.fulfill({contentType:'text/html',body:shell.replace('/src/main.tsx','/tests/fixtures/public-page-metadata.tsx')}))
+  await page.route('https://**',route => route.abort())
+  await page.routeWebSocket('**/*',socket => socket.close())
+  await page.goto(base+'/metadata-navigation')
+  const descriptions = Object.values(PAGE_METADATA).map(value => value.description)
+  expect(new Set(descriptions).size).toBe(descriptions.length)
+  for (const [key,metadata] of Object.entries(PAGE_METADATA)) {
+    expect(metadata.title).toContain('KaisTrade')
+    expect(metadata.title).not.toContain('KaiStrade')
+    expect(metadata.description.length).toBeLessThanOrEqual(160)
+    if (key in PUBLIC_PAGE_METADATA) continue
+    await page.getByRole('button',{name:key,exact:true}).click()
+    await expect(page).toHaveTitle(metadata.title)
+    if (key !== 'pricing') await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content','noindex, nofollow')
+    else await expect(page.locator('meta[name="robots"]')).toHaveCount(0)
+    for (const selector of ['meta[name="description"]','meta[property="og:description"]','meta[name="twitter:description"]']) {
+      await expect(page.locator(selector)).toHaveAttribute('content',metadata.description)
+    }
+  }
+  await page.getByRole('button',{name:'pricing',exact:true}).click()
+  await expect(page.locator('meta[name="robots"]')).toHaveCount(0)
 })
 
 test('ordinary login remains protected and badges do not claim encryption strength, 2FA or 24/7 support', async ({page}) => {
