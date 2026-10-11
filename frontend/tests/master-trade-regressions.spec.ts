@@ -232,6 +232,38 @@ test('connection keys stay masked and are cleared once saved even if activation 
   expect(calls).toEqual(['/api/exchange-connections/save','/api/exchange-connections/activate'])
 })
 
+for (const activationStatus of [403,500]) test(`activation HTTP ${activationStatus} with ownership rejection shows session recovery without enabling LIVE`, async ({page}) => {
+  const fixture = await setup(page)
+  fixture.statusCode = 403
+  fixture.statusDetail = 'LIVE kontrolü başka bir kullanıcı veya oturuma ait.'
+  await page.route('**/api/exchange-connections/{save,activate}', async route => {
+    const path = new URL(route.request().url()).pathname
+    fixture.mutations.push(path)
+    await route.fulfill(path.endsWith('/save') ? {json:{ok:true}} : {
+      status:activationStatus,
+      json:{detail:activationStatus === 403 ? `${fixture.statusDetail} Aynı OWNER hesabındaysanız 'LIVE oturumunu geri bağla' düğmesini kullanın; güncel 2FA gerekir.` : 'Internal server error.'},
+    })
+  })
+  await page.goto('/master-trade?tab=baglanti',{waitUntil:'domcontentloaded'})
+  const card = page.locator('.masterTradeLiveConnectionCard')
+  await card.getByPlaceholder('Paste API key').fill('offline-private-api-key')
+  await card.getByPlaceholder('Paste secret key').fill('offline-private-secret')
+  await card.getByRole('checkbox').check()
+  await card.getByRole('button',{name:'CONNECT ACCOUNT',exact:true}).click()
+  await expect.poll(() => fixture.mutations.length).toBe(2)
+  const recovery = page.getByTestId('live-status-unverified').getByRole('button',{name:'LIVE oturumunu geri bağla',exact:true})
+  await expect(recovery).toBeVisible()
+  await expect(card.getByPlaceholder('Paste API key')).toHaveValue('')
+  await expect(card.getByPlaceholder('Paste secret key')).toHaveValue('')
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  await expect(recovery).toBeVisible()
+  await expect(page.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true})).toBeDisabled()
+  await page.setViewportSize({width:390,height:844})
+  await expect(recovery).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  expect(fixture.mutations).toEqual(['/api/exchange-connections/save','/api/exchange-connections/activate'])
+})
+
 test('Master Trade connection deletion requires deactivation and explicit confirmation without any order request', async ({page}) => {
   const fixture = await setup(page)
   let active = true, configured = true

@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).parents[2]
 BACKEND = ROOT / "backend"
@@ -210,6 +212,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
                 db_pool=pool,
                 http=AsyncMock(),
                 market_http=FakeBinanceHttp(),
+                v25_execution={**v25_execution.initial_state(), "lock": asyncio.Lock()},
                 exchange_vault={"ready": True, "storage": "POSTGRESQL + FERNET", "reason": None, "loaded_at": "now", "pool_id": id(pool)},
             )
         )
@@ -292,6 +295,62 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertEqual(context.exception.detail["code"], "BINANCE_RATE_LIMITED")
         self.assertNotIn("HTTP 418", context.exception.detail["detail"])
         self.assertNotIn("HTTP 418", exchange_connections._SESSION_META[session_key]["last_error"])
+
+    def test_live_activate_rejects_old_session_before_exchange_or_vault_mutation(self):
+        request = self._request()
+        state = v25_execution.initial_state()
+        request.app.state.v25_execution = state
+        state["lock"] = asyncio.Lock()
+        authorization = {"user_id": "owner-server-time", "session_id": "previous-session",
+                         "fingerprint": "saved-fingerprint", "trading_account_id": "saved-account"}
+        state["live_session_authorization"] = dict(authorization)
+        session_key = (exchange_connections.session_id(request), "LIVE")
+        exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
+        exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
+        account = {"tested_at": "now", "orders_created": False}
+        with patch.object(exchange_connections, "_verify_request_credentials", new=AsyncMock(return_value=account)) as verify, \
+             patch.object(exchange_connections, "ensure_session_cache", new=AsyncMock()), \
+             patch.object(v25_execution, "account_snapshot", new=AsyncMock()) as snapshot:
+            with self.assertRaises(exchange_connections.HTTPException) as context:
+                asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
+        self.assertEqual(context.exception.status_code, 403)
+        self.assertIn("LIVE oturumunu geri bağla", context.exception.detail)
+        self.assertIn("güncel 2FA", context.exception.detail)
+        verify.assert_not_awaited()
+        snapshot.assert_not_awaited()
+        request.app.state.db_pool.execute.assert_not_awaited()
+        self.assertEqual(state["live_session_authorization"], authorization)
+        self.assertTrue(state["real_trading_locked"])
+
+    def test_live_activate_http_ownership_conflict_is_403_not_500(self):
+        request = self._request()
+        application = FastAPI()
+        for name, value in vars(request.app.state).items():
+            setattr(application.state, name, value)
+        state = application.state.v25_execution
+        state["live_session_authorization"] = {"user_id": "owner-server-time", "session_id": "previous-session"}
+        session_key = (exchange_connections.session_id(request), "LIVE")
+        exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
+        exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
+        application.include_router(exchange_connections.router)
+
+        @application.middleware("http")
+        async def member_context(http_request, call_next):
+            http_request.state.member = request.state.member
+            return await call_next(http_request)
+
+        application.state.db_pool.execute.side_effect = RuntimeError("offline database failure")
+        with patch.object(exchange_connections, "_require_ready", new=AsyncMock(return_value=application.state.db_pool)), \
+             patch.object(exchange_connections, "ensure_session_cache", new=AsyncMock()), \
+             patch.object(exchange_connections, "_verify_request_credentials", new=AsyncMock()) as verify, \
+             TestClient(application, raise_server_exceptions=False) as client:
+            response = client.post("/api/exchange-connections/activate", headers=request.headers,
+                                   json={"mode": "LIVE", "confirmation": "CANLI SALT OKUNUR BAĞLANTIYI AÇ"})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("LIVE oturumunu geri bağla", response.json()["detail"])
+        verify.assert_not_awaited()
+        application.state.db_pool.execute.assert_not_awaited()
+        self.assertEqual(state["live_session_authorization"]["session_id"], "previous-session")
 
     def test_live_activate_connects_read_only_snapshot_without_arming(self):
         request = self._request()

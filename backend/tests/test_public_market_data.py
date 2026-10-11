@@ -213,6 +213,36 @@ def test_original_warmer_only_reads_all_eight_symbols_and_required_frames():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("status", [418, 429, 451, 503])
+def test_original_warm_http_failure_reports_status_without_response_or_url_secrets(caplog, monkeypatch, status):
+    async def run():
+        service = PublicMarketData()
+        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
+        calls = []
+
+        async def request(app, path, params):
+            calls.append(params.copy())
+            response = httpx.Response(status, headers={"Retry-After": "180"},
+                                      json={"msg": "private-upstream-body"},
+                                      request=httpx.Request("GET", "https://offline.invalid/?secret=private-query"))
+            service.observe(path, response)
+            return response
+
+        async def end_iteration(delay):
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr("app.public_market_data.asyncio.sleep", end_iteration)
+        with pytest.raises(asyncio.CancelledError):
+            await original_market_warm_loop(application, request)
+        assert len(calls) == (1 if status in {418, 429} else 8)
+        assert all(item["interval"] == "15m" for item in calls)
+    asyncio.run(run())
+    assert f"status={status}" in caplog.text
+    assert "retry_after_seconds=180" in caplog.text
+    assert "private-upstream-body" not in caplog.text
+    assert "private-query" not in caplog.text
+
+
 def test_priority_universe_matches_immutable_original_profile():
     from app.strategies.original_v2_demo import INTERVALS, fixed_profile
     assert set(ORIGINAL_SYMBOLS) == set(fixed_profile()["execution_policy"]["allowed_symbols"])

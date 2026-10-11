@@ -175,8 +175,11 @@ async def original_market_warm_loop(application, request) -> None:
                                                  {"symbol": symbol, "interval": interval, "limit": 260})
                         response.raise_for_status()
                     except httpx.HTTPError as exc:
-                        logger.warning("ORIGINAL_MARKET_WARM unavailable symbol=%s interval=%s error=%s",
-                                       symbol, interval, type(exc).__name__)
+                        failed_response = exc.response if isinstance(exc, httpx.HTTPStatusError) else None
+                        logger.warning("ORIGINAL_MARKET_WARM unavailable symbol=%s interval=%s error=%s status=%s retry_after_seconds=%s",
+                                       symbol, interval, type(exc).__name__,
+                                       failed_response.status_code if failed_response is not None else None,
+                                       retry_after_seconds(failed_response) if failed_response is not None else None)
                         break
                 if service.retry_at > service.clock():
                     break

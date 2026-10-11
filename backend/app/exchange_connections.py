@@ -1045,6 +1045,15 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
     api_key, secret_key = session_credentials(request, mode, active_only=False)
     if not api_key or not secret_key:
         raise HTTPException(412, "Bu kanal için kasada kayıtlı anahtar yok.")
+    if mode == "LIVE":
+        from .v25_execution import guard_execution_ownership
+
+        try:
+            guard_execution_ownership(request)
+        except HTTPException as exc:
+            if exc.status_code == 403 and exc.detail == "LIVE kontrolü başka bir kullanıcı veya oturuma ait.":
+                raise HTTPException(403, "LIVE kontrolü başka bir kullanıcı veya oturuma ait. Aynı OWNER hesabındaysanız Canlı ekranındaki 'LIVE oturumunu geri bağla' düğmesini kullanın; güncel 2FA gerekir. Bağlantı aktifleştirilmedi.") from exc
+            raise
     try:
         account = await _verify_request_credentials(request, mode, api_key, secret_key)
     except VaultError as exc:
