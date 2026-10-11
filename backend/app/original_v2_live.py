@@ -5,6 +5,7 @@ import copy
 import math
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -28,6 +29,21 @@ class Start(BaseModel):
     totp_code: str = Field(min_length=6, max_length=32)
     risk_percent: float = Field(default=0.5, gt=0, le=1, allow_inf_nan=False)
     daily_loss_percent: float = Field(default=5, gt=0, le=5, allow_inf_nan=False)
+
+class FillLockApproval(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lock_id: str = Field(min_length=1, max_length=64)
+    confirmation: str
+    totp_code: str = Field(min_length=6, max_length=32, repr=False)
+
+
+def fill_locked(state: dict[str, Any]) -> bool:
+    return (settings(state).get("fill_lock") or {}).get("active") is True
+
+
+def require_fill_unlocked(state: dict[str, Any]) -> None:
+    if fill_locked(state):
+        raise HTTPException(423, "Original V2 dolum güvenlik kilidi aktif; OWNER onayı olmadan yeni LIVE giriş açılamaz.")
 
 
 def available() -> bool:
@@ -66,6 +82,7 @@ def public_config(state: dict[str, Any]) -> dict[str, Any]:
             "paused": config.get("paused", False), "pause_reason": config.get("pause_reason"),
             "risk_percent": config.get("risk_percent", 0.5), "daily_loss_percent": config.get("daily_loss_percent", 5),
             "daily": copy.deepcopy(config.get("daily")),
+            "fill_lock": copy.deepcopy(config.get("fill_lock")),
             "symbols": strategy.fixed_profile()["execution_policy"]["allowed_symbols"]}
 
 
@@ -244,6 +261,7 @@ async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
                 step=rules["step"], min_qty=rules["min_qty"], min_notional=rules["min_notional"],
                 estimated_stop_loss_usdt=float(quantity * (abs(entry - stop) + cost_per_unit)),
                 original_risk_budget=float(budget), initial_stop_loss=spec["stop_loss"],
+                original_cost_bps=policy["fee_bps_per_side"] * 2 + policy["slippage_bps_per_side"] * 2,
                 initial_quantity=live.decimal_text(quantity))
     if notional > policy["max_margin_per_trade"] * 3 + 1e-8:
         raise HTTPException(423, "Original V2 marjin limiti aşıldı.")
@@ -253,6 +271,7 @@ async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
 async def check_entry(application: Any, client: Any, state: dict[str, Any],
                       snapshot: dict[str, Any]) -> None:
     from . import v25_execution as live
+    require_fill_unlocked(state)
     if not available() or not running(state) or settings(state).get("paused"):
         raise HTTPException(423, "Original V2 LIVE kapalı veya güvenlik kilidi aktif.")
     await require_owner_authority(application, state)
@@ -265,8 +284,69 @@ async def check_entry(application: Any, client: Any, state: dict[str, Any],
 
 async def persist_required(state: dict[str, Any]) -> None:
     from . import v25_execution as live
-    if await live.persist_state_awaited(state) not in {"INSERTED", "UPDATED"}:
+    try:
+        result = await live.persist_state_awaited(state)
+    except (OSError, RuntimeError) as exc:
+        raise live.LiveExchangeError("Original V2 kalıcı işlem kaydı doğrulanamadı.", http_status=503) from exc
+    if result not in {"INSERTED", "UPDATED"}:
         raise live.LiveExchangeError("Original V2 kalıcı işlem kaydı doğrulanamadı.", http_status=503)
+
+async def audit_fill(state: dict[str, Any], plan: dict[str, Any], position: dict[str, Any]) -> None:
+    """Check the settled entry once, not the smaller remainder after a TP exit."""
+    from . import v25_execution as live
+    if plan.get("original_fill_audit"):
+        return
+    violations = []
+    evidence: dict[str, Any] = {}
+    try:
+        if plan.get("recovered_after_restart"):
+            raise ValueError("Recovered intent has no durable settled-fill audit")
+        entry = Decimal(str(position.get("entry_price")))
+        quantity = Decimal(str(plan["initial_quantity"] if plan.get("original_tp_attempted") else position["quantity"]))
+        stop = Decimal(str(plan["initial_stop_loss"]))
+        budget = Decimal(str(plan["original_risk_budget"]))
+        cost_bps = Decimal(str(plan["original_cost_bps"]))
+        leverage = Decimal(str(plan["leverage"]))
+        if not all(value.is_finite() for value in (entry, quantity, stop, budget, cost_bps, leverage)) \
+                or min(entry, quantity, stop, budget) <= 0 or leverage != 3 or cost_bps < 0:
+            raise ValueError("Invalid fill evidence")
+        stop_percent = abs(entry - stop) / entry * 100
+        risk = quantity * (abs(entry - stop) + entry * cost_bps / 10000)
+        margin = quantity * entry / leverage
+        evidence = {
+            "entry_price": live.decimal_text(entry), "quantity": live.decimal_text(quantity),
+            "stop_percent": live.decimal_text(stop_percent), "risk_usdt": live.decimal_text(risk),
+            "risk_budget_usdt": live.decimal_text(budget), "margin_usdt": live.decimal_text(margin),
+        }
+        if stop_percent > 6:
+            violations.append("Stop mesafesi %6 sınırını aştı")
+        if risk > budget:
+            violations.append("Dolum riski işlem risk bütçesini aştı")
+        if margin < 5:
+            violations.append("Dolum teminatı 5 USDT altına düştü")
+        if (plan["direction"] == "LONG" and stop >= entry) or (plan["direction"] == "SHORT" and stop <= entry):
+            violations.append("İlk stop gerçekleşen giriş yönüyle uyuşmuyor")
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        violations.append("Gerçek dolum risk kanıtı doğrulanamadı")
+    audit = {"id": uuid.uuid4().hex, "checked_at": live.now_iso(), "violations": violations, **evidence}
+    plan["original_fill_audit"] = audit
+    if violations:
+        config = settings(state)
+        previous = config.get("fill_lock") or {}
+        config["fill_lock"] = {
+            "id": audit["id"],
+            "active": True, "created_at": previous.get("created_at") if previous.get("active") else audit["checked_at"],
+            "plan_id": plan["id"], "symbol": plan["symbol"], "violations": violations, "evidence": evidence,
+        }
+        pause(state, f"{plan['symbol']} dolum güvenlik ihlali: {'; '.join(violations)}. Kilit için OWNER onayı gerekli")
+    persisted = False
+    try:
+        await persist_required(state)
+        persisted = True
+    finally:
+        if not persisted:
+            plan.pop("original_fill_audit", None)
+            pause(state, f"{plan['symbol']} dolum risk kontrolünün kalıcı kaydı doğrulanamadı")
 
 
 async def install_targets(client: Any, state: dict[str, Any], plan: dict[str, Any],
@@ -444,6 +524,7 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
         raise HTTPException(403, "Original V2 LIVE için önce 2FA açın.")
     state = request.app.state.v25_execution
     async with state["lock"]:
+        require_fill_unlocked(state)
         if state["auto"].get("enabled"):
             raise HTTPException(409, "Önce mevcut LIVE otomasyonunu durdurun.")
         allowed, reason = live.live_auto_start_gate(request.app, state, request)
@@ -476,6 +557,42 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
             if isinstance(exc, (live.LiveExchangeError, live.BinanceDemoError)):
                 raise live.safe_exchange_error(exc) from exc
             raise
+    return await status(request)
+
+@router.post("/fill-lock/approve")
+async def approve_fill_lock(request: Request, body: FillLockApproval) -> dict[str, Any]:
+    from . import account_settings, v25_execution as live
+    user = authenticated_user(request, owner=True)
+    live.guard_execution_ownership(request, claim=False)
+    state = request.app.state.v25_execution
+    if body.confirmation != "DOLUM RİSKİNİ İNCELEDİM":
+        raise HTTPException(422, "Kilidi kaldırmak için DOLUM RİSKİNİ İNCELEDİM yazın.")
+    async with state["lock"]:
+        config = settings(state)
+        lock = config.get("fill_lock") or {}
+        if config.get("owner_id") != user["id"]:
+            raise HTTPException(403, "Dolum kilidi yalnız ilgili OWNER tarafından kaldırılabilir.")
+        if not fill_locked(state) or lock.get("id") != body.lock_id:
+            raise HTTPException(409, "Dolum kilidi değişti; güncel durumu inceleyin.")
+        await account_settings.require_totp(request, user, body.totp_code, required=True)
+        if not fill_locked(state) or config.get("fill_lock", {}).get("id") != body.lock_id:
+            raise HTTPException(409, "Dolum kilidi doğrulama sırasında değişti.")
+        config["fill_lock"] = {**lock, "active": False, "approved_by": user["id"], "approved_at": live.now_iso()}
+        persisted = False
+        try:
+            await persist_required(state)
+            persisted = True
+        except live.LiveExchangeError:
+            raise HTTPException(503, "Dolum kilidi onayı kalıcı kaydedilemedi; kilit aktif kaldı.") from None
+        finally:
+            if not persisted and config.get("fill_lock", {}).get("id") == body.lock_id:
+                config["fill_lock"] = lock
+                live.persist_state(state)
+        if config.get("fill_lock", {}).get("id") != body.lock_id or fill_locked(state):
+            raise HTTPException(409, "Dolum kilidi kalıcı kayıt sırasında değişti; güncel durumu inceleyin.")
+        live.add_event(state, "ORIGINAL_FILL_LOCK_APPROVED", "OWNER dolum riskini inceleyip kilidi kaldırdı; otomasyon başlamadı.",
+                       actor=user["id"], lock_id=body.lock_id)
+        live.persist_state(state)
     return await status(request)
 
 

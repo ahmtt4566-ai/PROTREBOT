@@ -1316,6 +1316,11 @@ class BinanceLiveClient:
         if (signed or api_key_header) and self.background_session:
             if not await background_authorization_active(self.application, self.diagnostic_state):
                 raise LiveExchangeError("Canlı oturum iptal edildi veya yetki kanıtı doğrulanamadı.", http_status=423)
+        if method == "POST" and path in {"/fapi/v1/order", "/fapi/v1/order/test"} \
+                and not _truthy(params.get("reduceOnly")) and not _truthy(params.get("closePosition")):
+            from . import original_v2_live
+            if original_v2_live.fill_locked(self.diagnostic_state or {}):
+                raise LiveExchangeError("Dolum güvenlik kilidi aktif; yeni LIVE giriş gönderilmedi.", http_status=423)
         url = f"{LIVE_REST_BASE}{path}"
         if not url.startswith(f"{LIVE_REST_BASE}/"):
             raise LiveExchangeError("Canlı Binance sunucu kilidi doğrulanamadı.", http_status=500)
@@ -2113,6 +2118,7 @@ async def live_plan_position(client: BinanceLiveClient, symbol: str) -> dict[str
         "direction": "LONG" if amount > 0 else "SHORT",
         "quantity": decimal_text(abs(amount)),
         "mark_price": position.get("markPrice"),
+        "entry_price": position.get("entryPrice"),
     }
 
 
@@ -2350,6 +2356,7 @@ async def install_protection(
             record_entry_remainder_uncertain(state, plan, exc)
             raise LiveExchangeError("Giriş kalanının iptali/doğrulaması tamamlanamadı; yeni girişler kilitlendi.", exchange_code=exc.exchange_code, unknown_execution=True) from exc
     if original_plan:
+        await original_v2_live.audit_fill(state, plan, position_view)
         await original_v2_live.install_targets(client, state, plan, position_view, existing_algos)
         return
     try:
@@ -2882,7 +2889,7 @@ def recover_plan_from_intent(intent_id: str, intent: dict[str, Any], order: dict
     }
     from . import original_v2_live
     if original_v2_live.plan_is_original(plan):
-        for key in ("initial_stop_loss", "initial_quantity", "original_risk_budget"):
+        for key in ("initial_stop_loss", "initial_quantity", "original_risk_budget", "original_cost_bps"):
             plan[key] = spec.get(key)
         plan["original_tp_attempted"] = True
     return plan
@@ -3472,6 +3479,9 @@ async def fresh_auto_submission_credentials(application: Any, state: dict[str, A
 
 def live_auto_start_gate(application: Any, state: dict[str, Any], request: Request | None = None) -> tuple[bool, str]:
     """Require every entry authority to be valid before opening automation."""
+    from . import original_v2_live
+    if original_v2_live.fill_locked(state):
+        return False, "Original V2 dolum güvenlik kilidi için OWNER onayı gerekli."
     if state.get("real_trading_locked") is not False:
         return False, "Gerçek işlem kilidi açık."
     if live_execution_blocked(state):
@@ -3747,6 +3757,7 @@ async def execute_live_order(
     state = application.state.v25_execution
     if request is not None:
         execution_owner(request)
+    original_v2_live.require_fill_unlocked(state)
     guard_new_entry(getattr(application.state, "maintenance", None))
     if not state.get("recovery_ready", False):
         raise HTTPException(503, "Canlı durum kurtarma tamamlanmadı; yeni emir gönderilmedi.")
@@ -3768,6 +3779,7 @@ async def execute_live_order(
     observation_stage = "ACCOUNT_MODE"
     async with state["lock"]:
         try:
+            original_v2_live.require_fill_unlocked(state)
             if source == "V25_AUTO":
                 ensure_live_auto_symbol_allowed(state, normalize_symbol(body.symbol))
             manual_symbol_scope = [] if source == "MANUAL" else live_auto_symbol_scope(state) if source == "V25_AUTO" else allowed_symbols
@@ -3873,7 +3885,7 @@ async def execute_live_order(
             }
             if original_entry:
                 serializable_spec.update({key: spec[key] for key in (
-                    "initial_stop_loss", "initial_quantity", "original_risk_budget",
+                    "initial_stop_loss", "initial_quantity", "original_risk_budget", "original_cost_bps",
                 )})
             audit_snapshot = MappingProxyType({
                 "decision_id": intent_id,
@@ -3931,6 +3943,7 @@ async def execute_live_order(
                     ensure_live_auto_symbol_allowed(state, spec["symbol"])
 
                 def before_auto_submit() -> None:
+                    original_v2_live.require_fill_unlocked(state)
                     if original_entry:
                         if not original_v2_live.running(state) or not original_v2_live.available() or state.get("real_trading_locked"):
                             raise LiveExchangeError("Original V2 yeni giriş kilidi kapalı.", http_status=423)
@@ -3973,7 +3986,7 @@ async def execute_live_order(
             }
             if original_entry:
                 plan.update({key: serializable_spec[key] for key in (
-                    "initial_stop_loss", "initial_quantity", "original_risk_budget",
+                    "initial_stop_loss", "initial_quantity", "original_risk_budget", "original_cost_bps",
                 )})
             state["plans"] = {plan_id: plan, **state.get("plans", {})}
             add_event(state, "LIVE_ENTRY_RECOVERED" if result.get("recovered") else "LIVE_ENTRY", f"{spec['symbol']} {spec['direction']} {spec['order_type']} canlı emir gönderildi ({source}).", symbol=spec["symbol"], direction=spec["direction"], client_order_id=client_id)
@@ -4667,6 +4680,8 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
         reconcile_monitoring_targets(state, plan, open_algos)
         from . import original_v2_live
         if original_v2_live.plan_is_original(plan):
+            if not entry_remainder_needs_settlement(plan):
+                await original_v2_live.audit_fill(state, plan, position)
             await original_v2_live.verify_targets(client, state, plan, open_algos)
         protection_state, _matched_stops, protection_reason = classify_plan_protection(plan, open_algos)
         plan["protection_state"] = protection_state

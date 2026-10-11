@@ -6,7 +6,9 @@ No migration or live setting is changed by installing this code.
 
 Only a canonical OWNER session can see or operate the Original V2 LIVE card
 in Master Trade / Canli Islem. Customers cannot start or stop this strategy.
-The existing LIVE strategies, manual orders and Demo signal policy are unchanged.
+The existing LIVE strategies, manual orders and Demo signal policy are unchanged
+except that an active Original post-fill safety latch blocks all new LIVE entries
+on the supervising account.
 
 ## Signal and exits
 
@@ -87,22 +89,37 @@ and sends reduce-only closes; Original's entry-only stop does neither.
 It is now directly visible beside Master Trade's Auto Trade controls, rather
 than only being available in the separate legacy LIVE panel.
 
-### Remaining execution limitations (strategy rules unchanged)
+### Post-fill safety latch (strategy rules unchanged)
 
-Offline characterization confirms two post-fill limits are not enforced:
+After the entry remainder settles, actual entry price and filled quantity are
+checked against the immutable initial stop, original risk budget (including
+estimated fees/slippage) and 3x leverage. Stop distance above 6%, risk above its
+budget, or margin below 5 USDT disables all new LIVE entries and creates an OWNER
+notification. Exact thresholds are allowed. Missing or invalid evidence,
+including old recovered intents without cost evidence, fails closed. A plan
+rebuilt solely from an accepted intent has requested quantity, not a durable
+settled-fill audit; it also latches rather than treating that quantity as proof.
 
-- A partially filled order originally sized at 5 USDT margin can settle at
-  4 USDT while its exact 60% TP1 still satisfies Binance minimums.
-- A market fill at 51,000 against a planned entry of 50,000 and fixed stop at
-  47,000 has a 7.84% stop distance. Protection preserves that initial stop;
-  actual fill price is not revalidated against the pre-entry 6% ceiling.
+The open position is never closed or resized by this check. The initial stop,
+60% TP1 and TP3 policy remain unchanged; protective orders and reduce-only
+actions remain allowed. The check is persisted once for the settled entry, not
+repeated against the smaller remainder after TP1. Recovery preserves the latch
+without restoring entry authority. Storage failures pause entries and retry the
+audit; durable TP-attempt recording remains mandatory before TP submission.
 
-These are not changes to the canonical signals or exit policy. Fixing the
-post-fill response requires an explicit decision because an already-open
-position must not be automatically closed, resized or have its stop moved.
-Do not enable Original LIVE until that response has been agreed and verified.
-The estimated risk percentage likewise is not a guarantee for an actual fill
-or a stop executed through a gap.
+Only the supervising canonical OWNER can clear the latch:
+
+1. Inspect the fill metrics, open position and protection directly.
+2. Enter `DOLUM RİSKİNİ İNCELEDİM` and a fresh 2FA code in the Original card.
+3. Select the explicit fill-lock approval button.
+4. Re-authorize LIVE and ARM separately before starting with fresh 2FA; existing
+   tracked-position and all other safety gates still apply.
+
+Approval only acknowledges the current lock; it does not repair the position,
+start automation, ARM, or clear daily-loss restrictions. A new violation during
+verification invalidates the old approval. Persistence failure keeps the lock
+active. Actual stop execution through a gap can still exceed the estimate;
+the risk percentage is not a guaranteed maximum realized loss.
 
 Final Decision remains a read-only analysis result and never submits an order.
 Legacy maximum-loss and daily-loss controls are USDT amounts, not percentages;

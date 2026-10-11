@@ -47,7 +47,8 @@ def request_for(state):
 
 def native_plan(**changes):
     defaults = {"source": original.SOURCE, "initial_stop_loss": "49000", "initial_quantity": "0.010",
-                "entry_order_status": "FILLED"}
+                "entry_order_status": "FILLED", "leverage":3, "original_risk_budget":100,
+                "original_cost_bps":20}
     return make_plan(**{**defaults, **changes})
 
 
@@ -164,7 +165,9 @@ def test_partial_fill_can_leave_actual_margin_below_entry_minimum_without_moving
     assert Decimal(plan["initial_quantity"]) * Decimal("50000") / 3 == Decimal("4")
     assert Decimal(client.algos[1]["quantity"]) == Decimal("0.000144")
     assert plan["stop_loss"] == plan["initial_stop_loss"] == "49000"
-    assert original.running(state)
+    assert not original.running(state)
+    assert original.fill_locked(state)
+    assert "5 USDT" in state["original_v2_live"]["fill_lock"]["violations"][0]
 
 
 def test_fill_slippage_does_not_move_original_stop_but_can_exceed_planned_stop_distance(state):
@@ -182,7 +185,9 @@ def test_fill_slippage_does_not_move_original_stop_but_can_exceed_planned_stop_d
     actual_entry = Decimal("51000")
     assert abs(actual_entry - Decimal(plan["stop_loss"])) / actual_entry * 100 > Decimal("6")
     assert client.algos[0]["triggerPrice"] == "47000"
-    assert original.running(state)
+    assert not original.running(state)
+    assert original.fill_locked(state)
+    assert "%6" in state["original_v2_live"]["fill_lock"]["violations"][0]
 
 
 def test_tp_failure_stops_entries_and_never_closes(state, monkeypatch):

@@ -53,7 +53,7 @@ class PartialFillClient(execution.BinanceLiveClient):
         params = dict(params or {})
         self.calls.append((method, path, params))
         if (method, path) == ("GET", "/fapi/v3/positionRisk"):
-            return [{"symbol": self.position_symbol, "positionAmt": self.quantity, "markPrice": "50000"}]
+            return [{"symbol": self.position_symbol, "positionAmt": self.quantity, "markPrice": "50000", "entryPrice":"50000"}]
         if (method, path) == ("GET", "/fapi/v1/order"):
             return dict(self.order)
         if (method, path) == ("DELETE", "/fapi/v1/order"):
@@ -79,6 +79,7 @@ class PartialFillClient(execution.BinanceLiveClient):
                 "symbol": self.position_symbol,
                 "direction": "LONG" if Decimal(self.quantity) > 0 else "SHORT",
                 "quantity": execution.decimal_text(abs(Decimal(self.quantity))),
+                "entry_price":50000,
             }] if Decimal(self.quantity) != 0 else [],
             "open_orders": [], "open_algo_orders_available": True,
             "algo_orders_quality": "VALID_ROWS", "hedge_mode": False,
