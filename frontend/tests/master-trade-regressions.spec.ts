@@ -389,6 +389,34 @@ test('new scanner and market generations start immediately while old JSON remain
   await expect(page.locator('.refWatchlist [data-symbol="ETHUSDT"] .refMarketScore')).toContainText('88')
 })
 
+test('Original persistence diagnostics use one GET and preserve locked trading inputs', async ({page}) => {
+  const fixture = await setup(page)
+  fixture.liveFields = {original_v2_live:{available:true,enabled:false,paused:true,pause_reason:'Kalıcı kayıt doğrulanamadı.',risk_percent:0.5,daily_loss_percent:5,symbols:['BTCUSDT']}}
+  const methods: string[] = []
+  await page.route('**/api/v25/original-v2/persistence-diagnostics', route => {
+    methods.push(route.request().method())
+    return route.fulfill({json:{read_only:true,build_commit:'offline123456',database_status:'CONNECTED',record_exists:true,database_revision:120,local_revision:100,original_record_exists:true,diagnosis:'DATABASE_AHEAD',last_write:{result:'SKIPPED',submitted_revision:99,checked_at:'2026-10-11T20:00:00Z'}}})
+  })
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  const card = page.getByRole('region',{name:'Kais Original V2 LIVE'})
+  await card.getByLabel('İşlem riski (%)',{exact:true}).fill('0.65')
+  await card.getByLabel('2FA kodu',{exact:true}).fill('123456')
+  await card.getByRole('button',{name:'Kalıcı kayıt teşhisi',exact:true}).click()
+  const result = page.getByTestId('original-persistence-diagnostics')
+  await expect(result).toContainText('Veritabanı yerel durumdan ileride')
+  await expect(result).toContainText('Veritabanı revision: 120')
+  await expect(result).toContainText('Yerel revision: 100')
+  await expect(card.getByLabel('İşlem riski (%)',{exact:true})).toHaveValue('0.65')
+  await expect(card.getByLabel('2FA kodu',{exact:true})).toHaveValue('123456')
+  await expect(card.getByRole('button',{name:'Original V2 LIVE aç',exact:true})).toBeDisabled()
+  await page.setViewportSize({width:390,height:844})
+  await result.scrollIntoViewIfNeeded()
+  await expect(result).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  expect(methods).toEqual(['GET'])
+  expect(fixture.mutations).toEqual([])
+})
+
 test('market failures and status polls preserve Original inputs and scroll without scanning hidden analysis', async ({page}) => {
   const fixture = await setup(page)
   fixture.liveFields = {original_v2_live:{

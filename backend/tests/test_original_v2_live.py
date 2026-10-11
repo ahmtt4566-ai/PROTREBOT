@@ -58,6 +58,67 @@ def test_default_disabled(monkeypatch):
     assert original.running(live.initial_state()) is False
 
 
+@pytest.mark.parametrize("row,diagnosis,exists", [
+    (None, "FIRST_RECORD_MISSING", False),
+    ({"revision": "20", "original_record_exists": True}, "DATABASE_AHEAD", True),
+    ({"revision": "0", "original_record_exists": False}, "NO_REVISION_CONFLICT_OBSERVED", True),
+    ({"revision": "private-invalid-value", "original_record_exists": True}, "INVALID_DATABASE_REVISION", True),
+])
+def test_persistence_diagnostics_reads_metadata_only(state, monkeypatch, row, diagnosis, exists):
+    req = request_for(state)
+    req.app.state.db_pool = SimpleNamespace(fetchrow=AsyncMock(return_value=row), execute=AsyncMock())
+    monkeypatch.setattr(original, "authenticated_user", Mock(return_value={"id": "owner", "role": "OWNER"}))
+    monkeypatch.setattr(live, "guard_execution_ownership", Mock())
+    before = copy.deepcopy({key: value for key, value in state.items() if key != "lock"})
+    response = run(original.persistence_diagnostics(req))
+    assert response["diagnosis"] == diagnosis
+    assert response["record_exists"] is exists
+    assert response["read_only"] is True
+    assert "private-invalid-value" not in str(response)
+    assert {key: value for key, value in state.items() if key != "lock"} == before
+    sql = req.app.state.db_pool.fetchrow.await_args.args[0]
+    assert sql.lstrip().startswith("SELECT")
+    assert "SELECT payload FROM" not in sql
+    req.app.state.db_pool.execute.assert_not_awaited()
+    live.persist_state.assert_not_called()
+    live.persist_state_awaited.assert_not_awaited()
+
+
+def test_persistence_diagnostics_denies_non_owner_before_database(state, monkeypatch):
+    req = request_for(state)
+    req.app.state.db_pool = SimpleNamespace(fetchrow=AsyncMock())
+    def denied(*args, **kwargs):
+        assert kwargs == {"owner": True}
+        raise HTTPException(403, "OWNER required")
+    monkeypatch.setattr(original, "authenticated_user", denied)
+    with pytest.raises(HTTPException) as error:
+        run(original.persistence_diagnostics(req))
+    assert error.value.status_code == 403
+    req.app.state.db_pool.fetchrow.assert_not_awaited()
+
+
+@pytest.mark.parametrize("sqlstate,status", [("42P01", "TABLE_MISSING"), (None, "READ_FAILED")])
+def test_persistence_diagnostics_redacts_database_errors(state, monkeypatch, sqlstate, status):
+    req = request_for(state)
+    error = RuntimeError("password=private-secret postgres://private-host")
+    error.sqlstate = sqlstate
+    req.app.state.db_pool = SimpleNamespace(fetchrow=AsyncMock(side_effect=error))
+    monkeypatch.setattr(original, "authenticated_user", Mock(return_value={"id": "owner"}))
+    monkeypatch.setattr(live, "guard_execution_ownership", Mock())
+    response = run(original.persistence_diagnostics(req))
+    assert response["database_status"] == status
+    assert "private" not in str(response)
+
+
+def test_persistence_diagnostics_is_get_only_and_start_keeps_its_handler():
+    diagnostics = [route for route in original.router.routes if route.endpoint is original.persistence_diagnostics]
+    assert len(diagnostics) == 1
+    assert diagnostics[0].methods == {"GET"}
+    starts = [route for route in original.router.routes if route.path.endswith("/start")]
+    assert len(starts) == 1
+    assert starts[0].endpoint is original.start
+
+
 @pytest.mark.parametrize("field,value", [
     ("risk_percent", 1.001), ("risk_percent", 0), ("risk_percent", float("nan")),
     ("daily_loss_percent", 5.001), ("daily_loss_percent", 0), ("daily_loss_percent", float("inf")),
@@ -65,6 +126,48 @@ def test_default_disabled(monkeypatch):
 def test_hard_percentage_caps(field, value):
     with pytest.raises(ValidationError):
         original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", **{field: value})
+
+
+def test_general_and_original_share_counter_and_delayed_write_cannot_overwrite_newer_state(state):
+    stored = {"revision": 0}
+    async def fetchrow(sql, key, body):
+        import json
+        assert key == "v25_live:state"
+        assert "WHERE COALESCE" in sql
+        assert ") >= COALESCE(" in sql
+        payload = json.loads(body)
+        if payload["persistence_revision"] < stored["revision"]:
+            return None
+        stored["revision"] = payload["persistence_revision"]
+        return {"write_status": "UPDATED"}
+    req = request_for(state)
+    req.app.state.db_pool = SimpleNamespace(fetchrow=fetchrow)
+    general_revision = live._advance_persistence_revision(state)
+    original_revision = live._advance_persistence_revision(state)
+    assert original_revision == general_revision + 1
+    async def exercise():
+        assert await live._persist_state_snapshot(req.app, {"persistence_revision": original_revision}) == "UPDATED"
+        assert await live._persist_state_snapshot(req.app, {"persistence_revision": general_revision}) == "SKIPPED"
+    run(exercise())
+    assert stored["revision"] == original_revision
+    assert state["persistence_revision"] == original_revision
+    assert req.app.state.v25_last_persistence_write["submitted_revision"] == general_revision
+    assert req.app.state.v25_last_persistence_write["result"] == "SKIPPED"
+
+
+@pytest.mark.parametrize("status,diagnosis", [("SKIPPED", "WRITE_SKIPPED_REQUIRES_REVIEW"), ("DATABASE_ERROR", "PREVIOUS_WRITE_FAILED"), ("UPDATED", "NO_REVISION_CONFLICT_OBSERVED")])
+def test_diagnostics_distinguishes_awaited_write_from_old_background_write(state, monkeypatch, status, diagnosis):
+    req = request_for(state)
+    req.app.state.db_pool = SimpleNamespace(fetchrow=AsyncMock(return_value={"revision": "0", "original_record_exists": True}))
+    req.app.state.v25_last_persistence_write = {"result": "SKIPPED", "submitted_revision": 0}
+    req.app.state.v25_last_awaited_persistence_write = {"result": status, "submitted_revision": 0}
+    monkeypatch.setattr(original, "authenticated_user", Mock(return_value={"id": "owner"}))
+    monkeypatch.setattr(live, "guard_execution_ownership", Mock())
+    from fastapi import Response
+    response = Response()
+    result = run(original.persistence_diagnostics(req, response))
+    assert result["diagnosis"] == diagnosis
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 def test_fixed_policy_and_demo_not_mutated(state):

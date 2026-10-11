@@ -11,7 +11,7 @@ import {useKaisErrorReaction} from '../../useKaisPageReactions'
 import {useTradingPreferences} from '../../useTradingPreferences'
 import {preferredRiskMargin} from '../../account-risk-sizing'
 import {useMemberAccess} from '../../premium-access'
-import OriginalV2LiveCard, {type OriginalV2LiveStatus} from './OriginalV2LiveCard'
+import OriginalV2LiveCard, {type OriginalV2LiveStatus, type OriginalPersistenceDiagnostics} from './OriginalV2LiveCard'
 
 class LiveAutoMfaRequired extends Error {
   constructor() {
@@ -839,6 +839,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       status={status.original_v2_live} armed={liveArmed} automationActive={status.live_auto_trade === true}
       blocked={Boolean(busy) || !connected || executionLocked || !readinessReady}
       request={(path, body) => call<unknown>(V25, path, {method: 'POST', ...(body ? {body: JSON.stringify(body)} : {})})}
+      readDiagnostics={() => call<OriginalPersistenceDiagnostics>(V25, '/original-v2/persistence-diagnostics', {method: 'GET', cache: 'no-store'})}
       refresh={() => refresh(false)}
       notice={originalNotice} onNotice={setOriginalNotice}
     />}

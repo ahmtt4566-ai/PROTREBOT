@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import asyncio
 import math
 import os
 import time
@@ -10,7 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import original_v2_demo_execution as original
@@ -516,6 +517,61 @@ async def status(request: Request) -> dict[str, Any]:
     from . import v25_execution as live
     live.guard_execution_ownership(request, claim=False)
     return public_config(request.app.state.v25_execution)
+
+
+@router.get("/persistence-diagnostics")
+async def persistence_diagnostics(request: Request, response: Response = None) -> dict[str, Any]:
+    authenticated_user(request, owner=True)
+    if response is not None:
+        response.headers["Cache-Control"] = "no-store"
+    from . import v25_execution as live
+    live.guard_execution_ownership(request, claim=False)
+    state = request.app.state.v25_execution
+    pool = getattr(request.app.state, "db_pool", None)
+    result = {
+        "read_only": True, "state_key": live.V25_SNAPSHOT_KEY,
+        "build_commit": os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_COMMIT") or None,
+        "database_status": "UNAVAILABLE", "record_exists": None,
+        "database_revision": None, "original_record_exists": None,
+        "local_revision": state.get("persistence_revision", 0),
+        "recovery_loaded": bool(state.get("recovery_loaded")),
+        "last_write": getattr(request.app.state, "v25_last_persistence_write", None),
+        "last_awaited_write": getattr(request.app.state, "v25_last_awaited_persistence_write", None),
+        "diagnosis": "DATABASE_UNAVAILABLE",
+    }
+    if pool is None:
+        return result
+    try:
+        row = await asyncio.wait_for(pool.fetchrow(
+            """SELECT payload->>'persistence_revision' AS revision,
+                      jsonb_typeof(payload->'original_v2_live') = 'object' AS original_record_exists
+               FROM application_state_snapshots WHERE state_key = $1""", live.V25_SNAPSHOT_KEY), timeout=3)
+    except Exception as exc:
+        result["database_status"] = "TABLE_MISSING" if getattr(exc, "sqlstate", None) == "42P01" else "READ_FAILED"
+        result["diagnosis"] = result["database_status"]
+        return result
+    result.update(database_status="CONNECTED", record_exists=row is not None, local_revision=state.get("persistence_revision", 0))
+    if row is None:
+        result.update(original_record_exists=False, diagnosis="FIRST_RECORD_MISSING")
+        return result
+    revision = row["revision"]
+    try:
+        revision = 0 if revision is None or revision == "" else int(revision)
+        if revision < 0 or revision > 9_223_372_036_854_775_807:
+            raise ValueError("Invalid revision")
+    except (ValueError, TypeError, OverflowError):
+        result["diagnosis"] = "INVALID_DATABASE_REVISION"
+        return result
+    result.update(database_revision=revision, original_record_exists=bool(row["original_record_exists"]))
+    if revision > result["local_revision"]:
+        result["diagnosis"] = "DATABASE_AHEAD"
+    elif (result["last_awaited_write"] or {}).get("result") == "SKIPPED":
+        result["diagnosis"] = "WRITE_SKIPPED_REQUIRES_REVIEW"
+    elif (result["last_awaited_write"] or {}).get("result") in {"TABLE_MISSING", "DATABASE_ERROR"}:
+        result["diagnosis"] = "PREVIOUS_WRITE_FAILED"
+    else:
+        result["diagnosis"] = "NO_REVISION_CONFLICT_OBSERVED"
+    return result
 
 
 @router.post("/start")

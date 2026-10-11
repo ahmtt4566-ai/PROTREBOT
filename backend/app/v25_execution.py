@@ -909,7 +909,17 @@ async def persist_state_awaited(state: dict[str, Any]) -> PersistenceWriteResult
     pool = getattr(getattr(application, "state", None), "db_pool", None)
     payload = sanitized_state(state)
     if application is not None and pool is not None:
-        return await _persist_state_snapshot(application, payload)
+        metadata = {"submitted_revision": payload.get("persistence_revision"), "checked_at": now_iso()}
+        try:
+            result = await _persist_state_snapshot(application, payload)
+        except Exception as exc:
+            code = getattr(exc, "sqlstate", None)
+            metadata["result"] = "TABLE_MISSING" if code == "42P01" else "DATABASE_ERROR"
+            application.state.v25_last_awaited_persistence_write = metadata
+            raise
+        metadata["result"] = result
+        application.state.v25_last_awaited_persistence_write = metadata
+        return result
     if os.getenv("DATABASE_URL", "").strip():
         raise RuntimeError("PostgreSQL persistence unavailable.")
     _persist_state_file(payload)
@@ -971,10 +981,12 @@ async def _persist_state_snapshot(
         json.dumps(payload, ensure_ascii=False),
     )
     if row is None:
+        application.state.v25_last_persistence_write = {"result": "SKIPPED", "submitted_revision": payload.get("persistence_revision"), "checked_at": now_iso()}
         return "SKIPPED"
     write_status = str(row["write_status"])
     if write_status not in {"INSERTED", "UPDATED"}:
         raise RuntimeError(f"Unexpected persistence write status: {write_status}")
+    application.state.v25_last_persistence_write = {"result": write_status, "submitted_revision": payload.get("persistence_revision"), "checked_at": now_iso()}
     return write_status
 
 

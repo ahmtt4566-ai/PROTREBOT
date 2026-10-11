@@ -51,6 +51,23 @@ not entry authority. Starting again requires the existing ARM gates and fresh
 
 ### Shared private account reads and rate-limit recovery
 
+OWNER can manually open **Kalici kayit teshisi** on the Original card. It uses
+`GET /api/v25/original-v2/persistence-diagnostics` with the existing authoritative
+OWNER/session and execution-ownership checks; it never writes or enables entries.
+The three-second read selects only revision and whether the Original JSON object
+exists, not its contents. It reports row existence, local/database revisions,
+safe last-write metadata, deployment commit and controlled diagnostic codes.
+Database exception text and credentials are never returned. No periodic poll is
+added. `DATABASE_AHEAD` needs a writer/recovery investigation, not a revision reset.
+
+General Auto Trade and Original share the same in-process revision counter and
+`v25_live:state` row. An older asynchronous write may legitimately be skipped
+after a newer write; this alone does not prove the latest start write failed.
+Multiple workers/overlapping deployments or stale recovery must be checked when
+the database is ahead. Never force a larger revision over unknown persisted
+positions, intents or daily-loss state. A missing row can already be inserted
+by the existing upsert; a missing table requires separately approved schema work.
+
 LIVE status polling reads local state, not Binance. Previously each full account
 refresh made six signed reads (`account`, `positionRisk`, bulk `openOrders`,
 `openAlgoOrders`, `positionSide/dual`, `symbolConfig`), plus `multiAssetsMargin`

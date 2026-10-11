@@ -1,4 +1,30 @@
 import {useRef, useState, type FormEvent} from 'react'
+import {Database} from 'lucide-react'
+
+export type OriginalPersistenceDiagnostics = {
+  read_only: boolean
+  build_commit: string | null
+  database_status: string
+  record_exists: boolean | null
+  database_revision: number | null
+  local_revision: number
+  original_record_exists: boolean | null
+  diagnosis: string
+  last_write: {result: string; submitted_revision: number; checked_at: string} | null
+  last_awaited_write: {result: string; submitted_revision: number; checked_at: string} | null
+}
+
+const diagnosticMessages: Record<string, string> = {
+  DATABASE_UNAVAILABLE: 'Veritabanı bağlantısı hazır değil.',
+  TABLE_MISSING: 'Kalıcı kayıt tablosu bulunamadı; migration incelemesi gerekli.',
+  READ_FAILED: 'Veritabanı sorgusu tamamlanamadı.',
+  FIRST_RECORD_MISSING: 'İlk kalıcı kayıt henüz yok; mevcut veri sıfırlanmamalı.',
+  INVALID_DATABASE_REVISION: 'Kayıttaki revision geçersiz; manuel inceleme gerekli.',
+  DATABASE_AHEAD: 'Veritabanı yerel durumdan ileride; eski durumla yazma engelleniyor.',
+  WRITE_SKIPPED_REQUIRES_REVIEW: 'Son yazma atlandı; gecikmiş yazı veya başka sunucu süreci incelenmeli.',
+  PREVIOUS_WRITE_FAILED: 'Önceki kalıcı yazma başarısız; veritabanı logları incelenmeli.',
+  NO_REVISION_CONFLICT_OBSERVED: 'Bu kontrolde revision çakışması görülmedi.',
+}
 
 export type OriginalV2LiveStatus = {
   available: boolean
@@ -21,19 +47,41 @@ type Props = {
   automationActive: boolean
   blocked: boolean
   request: (path: string, body?: Record<string, unknown>) => Promise<unknown>
+  readDiagnostics: () => Promise<OriginalPersistenceDiagnostics>
   refresh: () => Promise<unknown>
   notice: string
   onNotice: (message: string) => void
 }
 
-export default function OriginalV2LiveCard({className, status, armed, automationActive, blocked, request, refresh, notice, onNotice}: Props) {
+export default function OriginalV2LiveCard({className, status, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice}: Props) {
   const [risk, setRisk] = useState(String(status.risk_percent))
   const [dailyLoss, setDailyLoss] = useState(String(status.daily_loss_percent))
   const [code, setCode] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [busy, setBusy] = useState(false)
   const [approval, setApproval] = useState('')
+  const [diagnostics, setDiagnostics] = useState<OriginalPersistenceDiagnostics | null>(null)
+  const [diagnosing, setDiagnosing] = useState(false)
+  const [diagnosticError, setDiagnosticError] = useState('')
+  const diagnosticFlight = useRef(false)
   const inFlight = useRef(false)
+  const diagnose = async () => {
+    if (diagnosticFlight.current) return
+    diagnosticFlight.current = true
+    setDiagnosing(true)
+    setDiagnostics(null)
+    setDiagnosticError('')
+    try {
+      const result = await readDiagnostics()
+      if (result.read_only !== true || !Number.isSafeInteger(result.local_revision)) throw new Error('Teşhis yanıtı doğrulanamadı.')
+      setDiagnostics(result)
+    } catch {
+      setDiagnosticError('Kalıcı kayıt teşhisi alınamadı; oturum ve sunucu bağlantısını kontrol edin.')
+    } finally {
+      diagnosticFlight.current = false
+      setDiagnosing(false)
+    }
+  }
   const fillLocked = status.fill_lock?.active === true
   const approve = async () => {
     if (inFlight.current || !fillLocked || approval !== 'DOLUM RİSKİNİ İNCELEDİM') return
@@ -116,5 +164,14 @@ export default function OriginalV2LiveCard({className, status, armed, automation
       </div>
     </form>
     {notice && <p role="status">{notice}</p>}
+    <button type="button" className="masterTradeLiveSecondary" onClick={() => void diagnose()} disabled={diagnosing || busy} title="Kalıcı kayıt teşhisi"><Database size={16} aria-hidden="true"/> {diagnosing ? 'Kayıt kontrol ediliyor...' : 'Kalıcı kayıt teşhisi'}</button>
+    {diagnosticError && <p role="alert">{diagnosticError}</p>}
+    {diagnostics && <div role="status" data-testid="original-persistence-diagnostics">
+      <p>{diagnosticMessages[diagnostics.diagnosis] || 'Teşhis sonucu için sunucu incelemesi gerekli.'}</p>
+      <p>Kayıt: {diagnostics.record_exists === null ? 'Doğrulanamadı' : diagnostics.record_exists ? 'Var' : 'Yok'} · Original kaydı: {diagnostics.original_record_exists === null ? 'Doğrulanamadı' : diagnostics.original_record_exists ? 'Var' : 'Yok'}</p>
+      <p>Veritabanı revision: {diagnostics.database_revision ?? 'Doğrulanamadı'} · Yerel revision: {diagnostics.local_revision}</p>
+      <p>Son yazma: {diagnostics.last_write ? `${diagnostics.last_write.result} · revision ${diagnostics.last_write.submitted_revision}` : 'Bu süreçte ölçülmedi'} · Sürüm: {diagnostics.build_commit?.slice(0, 7) || 'Bilinmiyor'}</p>
+      <p>Son beklenen yazma: {diagnostics.last_awaited_write ? `${diagnostics.last_awaited_write.result} · revision ${diagnostics.last_awaited_write.submitted_revision}` : 'Bu süreçte ölçülmedi'}</p>
+    </div>}
   </section>
 }
