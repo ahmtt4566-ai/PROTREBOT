@@ -470,6 +470,8 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
     from . import v25_execution as live
     state = application.state.v25_execution
     config = settings(state)
+    if live.account_rate_limit_active(state):
+        return
     try:
         if credentials is None:
             credentials = await live.auto_session_credentials(application, state)
@@ -478,7 +480,7 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
         if not live.readiness_for(application, state, credentials=credentials)["ready"]:
             raise HTTPException(423, "Original V2 LIVE yayın kapıları kapalı.")
         client = live.client_for_with_credentials(application, credentials)
-        snapshot = await live.account_snapshot(client)
+        snapshot = await live.account_snapshot(client, cached=True, source="original_strategy")
         await check_entry(application, client, state, snapshot)
         at = int(time.time()) // 900 * 900
         if config.get("last_decision_time", -1) >= at:
@@ -499,6 +501,10 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
             await live.execute_live_order(application, body, source=SOURCE, credentials=credentials,
                                           strategy_result=result)
         live.persist_state(state)
+    except live.LiveRateLimitError as exc:
+        if exc.request_method not in {None, "GET"}:
+            pause(state, live.sanitized_exception_message(exc))
+        raise
     except Exception as exc:
         pause(state, live.sanitized_exception_message(exc))
         raise

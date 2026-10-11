@@ -207,6 +207,41 @@ def rate_limit_backoff_seconds(exc: LiveRateLimitError, generic_backoff: int) ->
     return generic_backoff
 
 
+def account_rate_limit_active(state: dict[str, Any]) -> bool:
+    return bool((state.get("account_rate_limit") or {}).get("pending_verification"))
+
+
+def begin_account_rate_limit_wait(state: dict[str, Any], exc: LiveRateLimitError) -> None:
+    now = time.time()
+    wait = state.get("account_rate_limit")
+    if not isinstance(wait, dict) or not wait.get("pending_verification"):
+        protected = bool((state.get("snapshot") or {}).get("positions")) or any(live_plan_is_active(plan) for plan in state.get("plans", {}).values() if isinstance(plan, dict))
+        wait = {"first_failure_epoch": now, "grace_seconds": 30 if protected else 120,
+                "pending_verification": True, "locked": False, "retry_until_epoch": now}
+        state["account_rate_limit"] = wait
+    wait["retry_until_epoch"] = max(wait["retry_until_epoch"], now + (exc.retry_after or 30))
+    wait["message"] = "Binance hesap sorgusu hız sınırında; ARM süresi korunuyor, yeni girişler hesap yeniden doğrulanana kadar kapalı."
+    state["connection"]["last_error"] = wait["message"]
+    add_event(state, "LIVE_ACCOUNT_RATE_LIMIT_WAIT", wait["message"], retry_after_seconds=exc.retry_after)
+
+
+def account_rate_limit_wait_seconds(state: dict[str, Any]) -> float:
+    wait = state.get("account_rate_limit") or {}
+    if not wait.get("pending_verification"):
+        return 0.0
+    now = time.time()
+    deadline = wait["first_failure_epoch"] + wait["grace_seconds"]
+    if now >= deadline and not wait.get("locked"):
+        if float(state.get("armed_until") or 0) > 0 or state["auto"].get("enabled"):
+            lock_live_execution(state, "BINANCE_ACCOUNT_RATE_LIMITED")
+            state["live_lock_reason"]["message"] = "Binance hesap doğrulama kesintisi uzun sürdüğü için ARM iptal edildi; Stop/TP ve hesap durumunu kontrol edin."
+        wait["locked"] = True
+        wait["message"] = "Binance hesap doğrulama kesintisi uzun sürdüğü için ARM iptal edildi; Stop/TP ve hesap durumunu kontrol edin."
+        state["connected"] = False
+    remaining = max(0.0, wait["retry_until_epoch"] - now)
+    return remaining if wait.get("locked") else min(remaining, max(0.0, deadline - now))
+
+
 def record_live_lock_reason(state: dict[str, Any], code: str) -> None:
     messages = {
         "TRANSIENT_MARKET_DATA_FAILURE": "Piyasa verisi alınamadığı için ARM iptal edildi.",
@@ -656,6 +691,7 @@ def initial_state() -> dict[str, Any]:
         "intents": {},
         "armed_until": 0.0,
         "live_lock_reason": None,
+        "account_rate_limit": None,
         "auto": {"enabled": False, "busy": False, "cycles": 0, "last_scan": None, "last_scan_stats": None, "confidence_rejection_history": [], "last_skip_reason": None, "last_cycle_stage": "idle", "last_decision": "Kullanıcı onayı bekleniyor.", "last_error": None, "session_until": 0.0},
             "auto_authorization": {"session_id": "", "user_id": "", "fingerprint": "", "expires_at_epoch": 0.0},
         "real_trading_locked": True,
@@ -1243,7 +1279,8 @@ def is_armed(state: dict[str, Any]) -> bool:
 
 def live_execution_blocked(state: dict[str, Any]) -> bool:
     return bool(
-        state.get("emergency", {}).get("active")
+        account_rate_limit_active(state)
+        or state.get("emergency", {}).get("active")
         or state.get("execution_state") == "UNKNOWN"
         or state.get("reconciliation_required")
     )
@@ -1368,7 +1405,20 @@ class BinanceLiveClient:
         headers = {"X-MBX-APIKEY": self.api_key} if signed or api_key_header else {}
         started = time.perf_counter()
         try:
-            async with BINANCE_RATE_LIMITER.slot(LIVE_REST_BASE) as rate_limit:
+            priority = self.background_session and any(live_plan_is_active(plan) for plan in (self.diagnostic_state or {}).get("plans", {}).values() if isinstance(plan, dict))
+            source = "live_protection" if priority else "live_background" if self.background_session else "live_browser"
+            async with BINANCE_RATE_LIMITER.slot(LIVE_REST_BASE, priority=priority, source=source) as rate_limit:
+                if method == "POST" and path in {"/fapi/v1/order", "/fapi/v1/order/test"} and not _truthy(params.get("reduceOnly")) and not _truthy(params.get("closePosition")):
+                    if account_rate_limit_active(self.diagnostic_state or {}):
+                        raise LiveExchangeError("Hesap yeniden doğrulanana kadar yeni LIVE giriş kapalı.", http_status=423)
+                    if self.background_session and not await background_authorization_active(self.application, self.diagnostic_state):
+                        raise LiveExchangeError("Canlı oturum yetkisi doğrulanamadı; yeni giriş gönderilmedi.", http_status=423)
+                    if isinstance(self.diagnostic_state, dict) and (not is_armed(self.diagnostic_state) or live_execution_blocked(self.diagnostic_state) or self.diagnostic_state.get("real_trading_locked") is not False):
+                        raise LiveExchangeError("Kuyruk beklemesinden sonra LIVE giriş yetkisi kapalı; emir gönderilmedi.", http_status=423)
+                if method != "GET" and self.application is not None:
+                    store = getattr(self.application.state, "live_account_cache", None)
+                    if store is not None:
+                        store.update(value=None, expires=0.0, generation=store.get("generation", 0) + 1)
                 if signed:
                     params = {**params, "timestamp": int(time.time() * 1000) + self.time_offset_ms, "recvWindow": 5000}
                     query = urlencode(list(params.items()), doseq=True)
@@ -1422,7 +1472,11 @@ class BinanceLiveClient:
                     retry_after,
                     self.last_used_weight_1m,
                 )
-                raise LiveRateLimitError(message, retry_after=retry_after, exchange_code=int(code) if isinstance(code, int) else None)
+                error = LiveRateLimitError(message, retry_after=retry_after, exchange_code=int(code) if isinstance(code, int) else None)
+                error.request_method, error.request_path = method, path
+                if method == "GET" and signed and isinstance(self.diagnostic_state, dict):
+                    begin_account_rate_limit_wait(self.diagnostic_state, error)
+                raise error
             unknown = response.status_code >= 500
             if unknown:
                 message = "Emir yürütme sonucu belirsiz; benzersiz emir kimliğiyle sorgulanacak, kör tekrar yapılmayacak."
@@ -1619,7 +1673,58 @@ async def account_snapshot(
     client: Any,
     request_id: str | None = None,
     evidence_state: dict[str, Any] | None = None,
+    *,
+    cached: bool = False,
+    source: str = "entry_verification",
 ) -> dict[str, Any]:
+    application = getattr(client, "application", None)
+    if application is not None:
+        import copy
+        state = application.state.v25_execution
+        authorization = state.get("live_session_authorization") or {}
+        identity = hashlib.sha256(f"{client.api_key}:{client.secret_key}".encode()).hexdigest()
+        key = (identity, authorization.get("user_id"), authorization.get("session_id"))
+        store = getattr(application.state, "live_account_cache", None)
+        if store is None:
+            store = application.state.live_account_cache = {"lock": asyncio.Lock(), "key": None, "value": None, "expires": 0.0, "hits": 0, "refreshes": 0, "generation": 0}
+        async with store["lock"]:
+            wait = state.get("account_rate_limit") or {}
+            if account_rate_limit_active(state) and wait["retry_until_epoch"] > time.time():
+                raise LiveRateLimitError("Binance hesap bekleme süresi devam ediyor; yeni sorgu gönderilmedi.", retry_after=math.ceil(wait["retry_until_epoch"] - time.time()))
+            if cached and not account_rate_limit_active(state) and store["key"] == key and store["value"] is not None and store["expires"] > time.monotonic():
+                store["hits"] += 1
+                return copy.deepcopy(store["value"])
+            started = time.monotonic()
+            generation = store.get("generation", 0)
+            weight_before = getattr(client, "last_used_weight_1m", None)
+            try:
+                result = await _live_account_snapshot(client, request_id, evidence_state)
+            except LiveRateLimitError as exc:
+                store.update(value=None, expires=0.0)
+                if not account_rate_limit_active(state):
+                    begin_account_rate_limit_wait(state, exc)
+                raise
+            except Exception:
+                store.update(value=None, expires=0.0)
+                raise
+            protected = any(live_plan_is_active(plan) for plan in state.get("plans", {}).values() if isinstance(plan, dict))
+            weight_after = getattr(client, "last_used_weight_1m", None)
+            observed_weight = max(120, weight_after - weight_before) if isinstance(weight_before, int) and isinstance(weight_after, int) else 120
+            weight_interval = math.ceil(observed_weight * 60 / max(1, BINANCE_REQUEST_WEIGHT_LIMIT_1M * 0.30))
+            ttl = 10 if protected or result.get("positions") else max(30, weight_interval)
+            if generation == store.get("generation", 0) and result.get("open_algo_orders_available") is True:
+                store.update(key=key, value=copy.deepcopy(result), expires=time.monotonic() + ttl)
+            if account_rate_limit_active(state):
+                account_rate_limit_wait_seconds(state)
+                state["account_rate_limit"] = None
+                add_event(state, "LIVE_ACCOUNT_RATE_LIMIT_RECOVERED", "Binance hesap bilgileri yeniden doğrulandı; önceki ARM süresi uzatılmadı.")
+            store["refreshes"] += 1
+            logger.info("LIVE_ACCOUNT_SNAPSHOT source=%s refresh_seconds=%s elapsed_ms=%s cache_hits=%s upstream_refreshes=%s budget_weight=%s", source, ttl, round((time.monotonic() - started) * 1000), store["hits"], store["refreshes"], observed_weight)
+            return result
+    return await _live_account_snapshot(client, request_id, evidence_state)
+
+
+async def _live_account_snapshot(client: Any, request_id: str | None, evidence_state: dict[str, Any] | None) -> dict[str, Any]:
     result = await exchange_account_snapshot(client, request_id=request_id, evidence_state=evidence_state)
     if result.get("multi_assets_mode") is None:
         payload = await client.signed("GET", "/fapi/v1/multiAssetsMargin")
@@ -3052,7 +3157,7 @@ def readiness(
     snapshot = state.get("snapshot") or {}
     gates = release_gates(
         credentials=bool(consent.get("fingerprint")), consent_active=bool(consent.get("active")),
-        connected=bool(state.get("connected")), one_way=not bool(snapshot.get("hedge_mode", True)),
+        connected=bool(state.get("connected")) and not account_rate_limit_active(state), one_way=not bool(snapshot.get("hedge_mode", True)),
         policy_acknowledged=state.get("policy_ack_digest") == policy_digest(state["policy"]),
         demo_certificate=demo_certificate(application),
     )
@@ -3636,6 +3741,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
     state = application.state.v25_execution
     if request is not None:
         guard_execution_ownership(request)
+    account_rate_limit_wait_seconds(state)
     consent = consent_status(state, request)
     release = readiness(application, state, request)
     raw_snapshot = state.get("snapshot") or {}
@@ -3668,7 +3774,8 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
             "reason": consent.get("reason", "EXPIRED"),
             "scope_match": bool(consent.get("scope_match")),
         },
-        "connected": bool(state.get("connected")) and account_snapshot_ready,
+        "connected": bool(state.get("connected")) and account_snapshot_ready and not account_rate_limit_active(state),
+        "account_rate_limit": state.get("account_rate_limit"),
         "connection": state.get("connection"),
         "stream": state.get("stream"),
         "armed": is_armed(state),
@@ -4060,6 +4167,9 @@ async def execute_live_order(
             outcome, message = live_plan_execution_outcome(plan)
             return {"ok": True, "order": {"order_id": result.get("orderId"), "client_order_id": client_id, "status": result.get("status", plan["status"])}, "plan": plan, "risk_guard": guard, "execution_outcome": outcome, "message": message, "profit_guaranteed": False}
         except (LiveExchangeError, BinanceDemoError) as exc:
+            if isinstance(exc, LiveRateLimitError) and not submission_started and account_rate_limit_active(state):
+                persist_state(state)
+                raise
             if original_entry:
                 original_v2_live.pause(state, sanitized_exception_message(exc))
             observation.emit("candidate", symbol=normalize_symbol(body.symbol), execution_reject=observation_stage)
@@ -4113,6 +4223,8 @@ async def execute_live_order(
 
 async def automatic_cycle(application: Any, credentials: tuple[str, str] | None = None) -> None:
     state = application.state.v25_execution
+    if account_rate_limit_active(state):
+        return
     from . import original_v2_live
     if original_v2_live.running(state):
         await original_v2_live.cycle(application, credentials)
@@ -4172,7 +4284,7 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
     observation_token = None
     try:
         client = client_for_with_credentials(application, credentials)
-        snapshot = await account_snapshot(client)
+        snapshot = await account_snapshot(client, cached=True, source="strategy_scan")
         daily = live_daily_metrics(state)
         observation_token = observation.start_round(state["policy"], snapshot, daily, state.get("plans", {}))
         state["auto"]["last_skip_reason"] = None
@@ -4518,6 +4630,8 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
         state["auto"]["last_scan_stats"]["executed_symbols_count"] = len(executed_symbols)
         state["auto"]["last_cycle_stage"] = "completed"
         state["auto"]["cycles"] += 1
+    except LiveRateLimitError:
+        raise
     except Exception as exc:
         state["auto"]["last_skip_reason"] = "reconcile_failed"
         state["auto"]["last_cycle_stage"] = "error"
@@ -4534,10 +4648,10 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
 async def reconcile(application: Any, credentials: tuple[str, str] | None = None) -> None:
     state = application.state.v25_execution
     client = client_for_with_credentials(application, credentials)
+    protected = bool((state.get("snapshot") or {}).get("positions")) or any(live_plan_is_active(plan) for plan in state.get("plans", {}).values() if isinstance(plan, dict))
     try:
-        snapshot = await account_snapshot(client)
+        snapshot = await account_snapshot(client, cached=not protected, source="protection_reconciliation")
     except LiveRateLimitError as exc:
-        state["connected"] = False
         state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})
         state["auto"].update({"last_skip_reason": "rate_limited", "last_error": str(exc)[:240]})
         persist_state(state)
@@ -4792,6 +4906,14 @@ async def execution_loop(application: Any) -> None:
     while True:
         reconciliation_stage = "credential_resolution"
         try:
+            state = application.state.v25_execution
+            wait_seconds = account_rate_limit_wait_seconds(state)
+            if wait_seconds > 0:
+                await background_authorization_active(application, state)
+                is_armed(state)
+                persist_state(state)
+                await asyncio.sleep(min(5.0, wait_seconds))
+                continue
             recovery_loaded = application.state.v25_execution.get("recovery_loaded", not bool(os.getenv("DATABASE_URL", "").strip()))
             database_unavailable = bool(os.getenv("DATABASE_URL", "").strip()) and getattr(application.state, "db_pool", None) is None
             if not recovery_loaded or database_unavailable:
@@ -4873,6 +4995,10 @@ async def execution_loop(application: Any) -> None:
         except LiveRateLimitError as exc:
             automation_telemetry("AUTOMATION_SKIP reason=binance_rate_limited", reason="binance_rate_limited")
             state = application.state.v25_execution
+            if account_rate_limit_active(state) and exc.request_method in {None, "GET"}:
+                persist_state(state)
+                await asyncio.sleep(min(5.0, account_rate_limit_wait_seconds(state)))
+                continue
             from . import original_v2_live
             if original_v2_live.running(state):
                 original_v2_live.pause(state, sanitized_exception_message(exc))
@@ -5194,7 +5320,7 @@ async def connect_read_only_for_request(application: Any, request: Request, *, a
     try:
         async with state["lock"]:
             client = client_for(application, request)
-            snapshot = await account_snapshot(client)
+            snapshot = await account_snapshot(client, cached=True, source="browser_connect")
             _, _, fingerprint = live_credentials_status(request)
             update_account_snapshot(state, snapshot, session_binding=session_id(request))
             trading_account_id = current_trading_account_id(state, request, fingerprint)
@@ -5216,6 +5342,9 @@ async def connect_read_only_for_request(application: Any, request: Request, *, a
             persist_state(state)
         return public_status(application, request)
     except (LiveExchangeError, BinanceDemoError) as exc:
+        if isinstance(exc, LiveRateLimitError) and account_rate_limit_active(state):
+            persist_state(state)
+            raise safe_exchange_error(exc) from exc
         state["connected"] = False
         state["snapshot_session_id"] = ""
         state["snapshot"] = {}

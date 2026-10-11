@@ -49,6 +49,57 @@ not entry authority. Starting again requires the existing ARM gates and fresh
 
 ## Daily loss and emergency stop
 
+### Shared private account reads and rate-limit recovery
+
+LIVE status polling reads local state, not Binance. Previously each full account
+refresh made six signed reads (`account`, `positionRisk`, bulk `openOrders`,
+`openAlgoOrders`, `positionSide/dual`, `symbolConfig`), plus `multiAssetsMargin`
+when the account response did not prove the mode. The background reconciliation
+loop runs every 10 seconds; connection refreshes and strategy scans also used
+that full bundle. Credential tests and trade/income history are separate reads.
+
+The supervising application now shares successful account snapshots for the
+same credential hash and authorized user/session. Empty accounts refresh no
+more often than every 30 seconds. A conservative initial bundle budget of 120
+weight units reserves at most 30% of the configured 2400/minute limit for these
+idle refreshes; larger observed header deltas lengthen the idle interval. This
+is a local budget estimate, not a claim about every endpoint's official weight
+or other applications using the same proxy IP. The response's actual
+`X-MBX-USED-WEIGHT-1M` remains authoritative for the shared limiter.
+
+Open-position/active-plan reconciliation retains fresh reads every 10 seconds
+after the previous cycle completes and never reuses the browser cache. Its
+signed requests have queue priority over ordinary reads; priority does not
+bypass a Binance cooldown. Entry checks, leverage/margin verification,
+post-order reads and emergency verification remain fresh. Mutations invalidate
+the cache; failures cannot be replaced by an old successful cached snapshot.
+Empty-account scanner reads and concurrent browser refreshes reuse the cache.
+The cache and queue are process-local; additional workers or other services
+sharing the same egress IP need a distributed coordinator or separate budgets.
+
+On a signed GET rate limit, new entries are blocked immediately. A short wait
+retains the original ARM expiry and Original configuration, but does not
+represent the account as currently verified. The UI shows a Turkish waiting
+reason. Recovery requires a complete fresh account read. The grace is 120
+seconds for an empty account and 30 seconds when positions/plans need protection
+monitoring. Exceeding it cancels ARM and pauses entries with a Turkish reason;
+later recovery never rearms automatically. Unknown execution, missing/unproven
+protection, expired/revoked session authority and rejected mutations keep their
+existing immediate safety behavior. Exchange-installed stops are not removed.
+
+Every valid `Retry-After` is honored in full, even beyond the grace period.
+The loop checks local timeout/authority state without sending more Binance
+reads during cooldown. At 80% of the configured minute weight limit, ordinary
+calls wait until the next minute window, or longer if Binance requires it.
+The default signed-request concurrency is now two per host.
+
+`LIVE_ACCOUNT_SNAPSHOT` logs caller source, interval, elapsed time, cache hits,
+upstream refresh count and budget weight. `BINANCE_ACCOUNT_METRICS` logs
+per-host endpoint/status counts, source counts and observed minute weight,
+without keys, signatures or query strings. A local 50-tab concurrency test
+requires only one complete snapshot bundle. These are local test results;
+production counts require collecting these logs after an approved deployment.
+
 UTC opening wallet is reconstructed from the verified current wallet and the
 day's Binance income history. Transfers do not count as trading losses.
 Realized net income plus negative unrealized PnL is compared with the fixed

@@ -21,7 +21,7 @@ def queued_clock(monkeypatch):
     connections._SERVER_TIME_LOCKS.clear()
 
     @asynccontextmanager
-    async def slot(host):
+    async def slot(host, *, priority=False, source="other"):
         clock.now += 8
         yield SimpleNamespace(observe=lambda response: None)
 

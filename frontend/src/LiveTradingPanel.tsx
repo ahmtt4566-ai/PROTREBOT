@@ -29,6 +29,7 @@ type LiveStatus = {
   armed?: boolean
   armed_until?: string | null
   live_lock_reason?: {code: string; message: string; at: string} | null
+  account_rate_limit?: {pending_verification?: boolean; locked?: boolean; message?: string} | null
   real_trading_locked?: boolean
   live_auto_trade?: boolean
   auto?: {enabled?: boolean; status?: string; last_decision?: string; last_error?: string | null; last_scan?: string | null; last_skip_reason?: string | null; last_cycle_stage?: string | null; session_until?: string | null}
@@ -81,6 +82,7 @@ const activityTime = (value: unknown) => value ? new Date(String(value)).toLocal
 export function liveBlockerMessage(status: LiveStatus | null, liveArmed: boolean): string {
   if (status === null) return 'LIVE status is not available.'
   if (!liveArmed && status.live_lock_reason?.message) return status.live_lock_reason.message
+  if (status.account_rate_limit?.pending_verification) return status.account_rate_limit.message || 'Binance hesap doğrulaması bekleniyor; yeni girişler kapalı.'
   if (status.emergency?.active) return status.reconciliation_diagnostic?.exception_message && status.emergency.reason === 'LIVE_EXCEPTION'
     ? `${status.emergency.reason}: ${status.reconciliation_diagnostic.exception_message}`
     : status.emergency.reason || 'Emergency stop is active.'
@@ -756,6 +758,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     ? <div className="liveNotice error" role="alert" data-testid="live-status-unverified"><TriangleAlert aria-hidden="true"/><span>{blocker}</span></div>
     : !liveArmed && status?.live_lock_reason?.message
       ? <div className="liveNotice error" role="alert" data-testid="live-arm-cancellation"><TriangleAlert aria-hidden="true"/><span>{status.live_lock_reason.message}</span></div>
+      : status?.account_rate_limit?.pending_verification
+        ? <div className="liveNotice error" role="alert" data-testid="live-account-rate-limit-wait"><TriangleAlert aria-hidden="true"/><span>{blocker}</span></div>
       : null
   if (masterTrade) return <MasterTradeLiveLayout tab={masterTradeTab} step={status?.live_auto_trade ? 3 : !configured || !connected ? 0 : !readinessReady ? 1 : !liveArmed ? 2 : 3} notice={<>{statusNotice}{notice.kind !== 'info' ? <div className={`liveNotice masterTradeLiveNotice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.kind === 'error' ? <TriangleAlert/> : <CheckCircle2/>}<span>{notice.text}</span></div> : null}</>}><section id="master-trade-live-terminal" className={`masterTradeLiveUx ${advancedOpen ? 'advanced-open' : 'operational'}`} aria-label="LIVE Auto Trade workspace">
     <header className={`masterTradeLiveHeader ${liveState.toLowerCase()}`}>

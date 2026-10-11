@@ -93,6 +93,23 @@ test('server safety cancellation displays the Turkish reason and leaves start lo
   expect(fixture.mutations).toEqual([])
 })
 
+test('short account rate limit keeps ARM checked but blocks start until verified recovery', async ({page}) => {
+  const fixture = await setup(page)
+  await page.goto('/master-trade?tab=canli', {waitUntil:'domcontentloaded'})
+  const start = page.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true})
+  await expect(start).toBeEnabled()
+  fixture.liveFields = {connected:false,readiness:{ready:false},account_rate_limit:{pending_verification:true,locked:false,message:'Binance hesap doğrulaması bekleniyor; ARM korunuyor, yeni girişler kapalı.'}}
+  await expect(page.getByTestId('live-account-rate-limit-wait')).toContainText('ARM korunuyor',{timeout:12000})
+  await expect(start).toBeDisabled()
+  await expect(page.locator('.masterTradeLiveConfirmations input[type="checkbox"]')).toBeChecked()
+  await page.setViewportSize({width:390,height:844})
+  await expect(page.getByTestId('live-account-rate-limit-wait')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  fixture.liveFields = {account_rate_limit:null}
+  await expect(start).toBeEnabled({timeout:12000})
+  expect(fixture.mutations).toEqual([])
+})
+
 test('cancelled live confirmation sends no request and double confirmation sends exactly one', async ({page}) => {
   const fixture = await setup(page)
   await page.goto('/master-trade?tab=canli', {waitUntil:'domcontentloaded'})

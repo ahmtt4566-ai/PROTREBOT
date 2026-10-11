@@ -135,7 +135,7 @@ def test_recovery_audits_final_settled_quantity_not_pending_partial_fill(state, 
     plan.update(stop_algo_id=101, stop_client_id=client.algos[0]["clientAlgoId"])
     state["plans"] = {plan["id"]: plan}
     monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=client))
-    monkeypatch.setattr(live, "account_snapshot", AsyncMock(side_effect=lambda *_: client.snapshot()))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(side_effect=lambda *_, **kwargs: client.snapshot()))
     monkeypatch.setattr(live, "recover_orphan_plans", AsyncMock(return_value=0))
     monkeypatch.setattr(live, "cleanup_orphan_protection_orders", AsyncMock())
     run(live.reconcile(request_for(state).app))

@@ -76,6 +76,135 @@ def shared_auth_pool():
 
 
 class V25LiveGuardCoreTests(unittest.TestCase):
+    def test_account_cache_one_minute_fifty_tabs_refresh_only_twice(self):
+        state = initial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(application=application, api_key="offline-key", secret_key="offline-secret")
+        fetch = AsyncMock(return_value=complete_reconciliation_snapshot())
+        clock = [1000.0]
+
+        async def run():
+            with patch.object(v25_execution, "exchange_account_snapshot", fetch), patch.object(v25_execution.time, "monotonic", side_effect=lambda: clock[0]):
+                for second in range(0, 60, 10):
+                    clock[0] = 1000.0 + second
+                    await asyncio.gather(*(v25_execution.account_snapshot(client, cached=True) for _ in range(50)))
+                self.assertEqual(fetch.await_count, 2)
+                self.assertEqual(application.state.live_account_cache["hits"], 298)
+
+        asyncio.run(run())
+
+    def test_waiting_account_blocks_at_transport_before_sending_entry(self):
+        state = initial_state()
+        state.update(armed_until=time.time() + 300, real_trading_locked=False)
+        v25_execution.begin_account_rate_limit_wait(state, v25_execution.LiveRateLimitError("offline", retry_after=20))
+        http = SimpleNamespace(request=AsyncMock())
+        client = BinanceLiveClient(http, "offline-key", "offline-secret", diagnostic_state=state)
+        with patch.object(v25_execution, "BINANCE_RATE_LIMITER", binance_rate_limit.BinanceRateLimiter()):
+            with self.assertRaises(LiveExchangeError):
+                asyncio.run(client._request("POST", "/fapi/v1/order", {"symbol": "BTCUSDT"}, signed=True))
+        http.request.assert_not_awaited()
+
+    def test_protection_reconciliation_never_reuses_browser_cache(self):
+        state = initial_state()
+        state["snapshot"] = complete_reconciliation_snapshot(positions=[{"symbol": "BTCUSDT"}])
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+        fetch = AsyncMock(return_value=complete_reconciliation_snapshot())
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), patch.object(v25_execution, "account_snapshot", fetch), patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, ("offline", "offline")))
+        self.assertFalse(fetch.await_args.kwargs["cached"])
+
+    def test_short_account_wait_recovers_with_fresh_snapshot_without_extending_arm(self):
+        state = initial_state()
+        state.update(armed_until=1000.0, real_trading_locked=False, connected=True)
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(application=application, api_key="offline-key", secret_key="offline-secret")
+        clock = [100.0]
+        fetch = AsyncMock(side_effect=[complete_reconciliation_snapshot(), v25_execution.LiveRateLimitError("offline", retry_after=20), complete_reconciliation_snapshot()])
+
+        async def run():
+            with patch.object(v25_execution, "exchange_account_snapshot", fetch), patch.object(v25_execution.time, "time", side_effect=lambda: clock[0]):
+                await v25_execution.account_snapshot(client, cached=True)
+                with self.assertRaises(v25_execution.LiveRateLimitError):
+                    await v25_execution.account_snapshot(client)
+                with self.assertRaises(v25_execution.LiveRateLimitError):
+                    await v25_execution.account_snapshot(client, cached=True)
+                self.assertEqual(fetch.await_count, 2)
+                self.assertTrue(v25_execution.live_execution_blocked(state))
+                clock[0] = 120.0
+                await v25_execution.account_snapshot(client, cached=True)
+                self.assertEqual(fetch.await_count, 3)
+                self.assertIsNone(state["account_rate_limit"])
+                self.assertEqual(state["armed_until"], 1000.0)
+                self.assertFalse(v25_execution.live_execution_blocked(state))
+
+        asyncio.run(run())
+
+    def test_long_account_wait_recovery_never_rearms_and_unknowns_are_not_overridden(self):
+        state = initial_state()
+        state.update(armed_until=1000.0, real_trading_locked=False, connected=True)
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(application=application, api_key="offline-key", secret_key="offline-secret")
+        with patch.object(v25_execution.time, "time", return_value=100.0):
+            v25_execution.begin_account_rate_limit_wait(state, v25_execution.LiveRateLimitError("offline", retry_after=180))
+        with patch.object(v25_execution.time, "time", return_value=280.0), patch.object(v25_execution, "exchange_account_snapshot", AsyncMock(return_value=complete_reconciliation_snapshot())):
+            asyncio.run(v25_execution.account_snapshot(client, cached=True))
+            self.assertFalse(v25_execution.is_armed(state))
+            self.assertTrue(state["real_trading_locked"])
+            self.assertTrue(state["emergency"]["active"])
+        v25_execution.lock_live_execution(state, "UNKNOWN_ORDER_STATE", unknown=True)
+        with patch.object(v25_execution.time, "time", return_value=300.0):
+            v25_execution.begin_account_rate_limit_wait(state, v25_execution.LiveRateLimitError("offline", retry_after=180))
+        with patch.object(v25_execution.time, "time", return_value=480.0):
+            v25_execution.account_rate_limit_wait_seconds(state)
+            self.assertEqual(state["live_lock_reason"]["code"], "UNKNOWN_ORDER_STATE")
+
+    def test_account_rate_limit_preserves_arm_but_blocks_entries_and_expires(self):
+        state = initial_state()
+        state.update(armed_until=1000.0, real_trading_locked=False, connected=True)
+        with patch.object(v25_execution.time, "time", return_value=100.0):
+            v25_execution.begin_account_rate_limit_wait(state, v25_execution.LiveRateLimitError("offline", retry_after=180))
+            self.assertTrue(v25_execution.is_armed(state))
+            self.assertTrue(v25_execution.live_execution_blocked(state))
+            self.assertEqual(v25_execution.account_rate_limit_wait_seconds(state), 120)
+            self.assertFalse(state["emergency"]["active"])
+        with patch.object(v25_execution.time, "time", return_value=220.0):
+            self.assertEqual(v25_execution.account_rate_limit_wait_seconds(state), 60)
+            self.assertFalse(v25_execution.is_armed(state))
+            self.assertTrue(state["account_rate_limit"]["locked"])
+            self.assertIn("uzun sürdüğü", state["live_lock_reason"]["message"])
+
+    def test_protection_tracking_rate_limit_has_shorter_grace(self):
+        state = initial_state()
+        state["plans"] = {"original": {"status": "KORUMA AKTİF", "source": "ORIGINAL_V2_LIVE"}}
+        with patch.object(v25_execution.time, "time", return_value=100.0):
+            v25_execution.begin_account_rate_limit_wait(state, v25_execution.LiveRateLimitError("offline", retry_after=60))
+            self.assertEqual(v25_execution.account_rate_limit_wait_seconds(state), 30)
+
+    def test_account_snapshot_fifty_tabs_share_reads_but_entry_checks_are_fresh(self):
+        state = initial_state()
+        state["live_session_authorization"] = {"user_id": "owner", "session_id": "session"}
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(application=application, api_key="offline-key", secret_key="offline-secret")
+        fetch = AsyncMock(return_value=complete_reconciliation_snapshot())
+
+        async def run():
+            with patch.object(v25_execution, "exchange_account_snapshot", fetch):
+                rows = await asyncio.gather(*(v25_execution.account_snapshot(client, cached=True) for _ in range(50)))
+                self.assertEqual(fetch.await_count, 1)
+                rows[0]["positions"].append({"symbol": "MUTATED"})
+                self.assertEqual(rows[1]["positions"], [])
+                await v25_execution.account_snapshot(client)
+                self.assertEqual(fetch.await_count, 2)
+                state["live_session_authorization"]["session_id"] = "other-session"
+                await v25_execution.account_snapshot(client, cached=True)
+                self.assertEqual(fetch.await_count, 3)
+                client.secret_key = "rotated-secret"
+                await v25_execution.account_snapshot(client, cached=True)
+                self.assertEqual(fetch.await_count, 4)
+
+        asyncio.run(run())
+
     def test_external_history_keeps_unmatched_binance_records_read_only(self):
         state = initial_state()
         state["events"] = [{"kind": "ORPHAN_PROTECTION_CLEANUP", "symbol": "4USDT"}]
@@ -1443,13 +1572,13 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         now = [1000.0]
         async def elapsed(seconds):
             now[0] += seconds
-        with patch.object(binance_rate_limit, "time", SimpleNamespace(monotonic=lambda: now[0])), \
+        with patch.object(binance_rate_limit, "time", SimpleNamespace(monotonic=lambda: now[0], time=lambda: now[0])), \
              patch.object(v25_execution, "BINANCE_RATE_LIMITER", binance_rate_limit.BinanceRateLimiter()), \
              patch.object(v25_execution.asyncio, "sleep", new=AsyncMock(side_effect=elapsed)) as sleep:
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
             asyncio.run(client._request("GET", "/fapi/v1/openOrders", {}, signed=False))
         sleep.assert_awaited_once()
-        self.assertAlmostEqual(sleep.await_args.args[0], v25_execution.RATE_LIMIT_PROACTIVE_WAIT_SECONDS, places=2)
+        self.assertAlmostEqual(sleep.await_args.args[0], 21.0, places=2)
 
     def test_unexpected_submit_exception_locks_unknown_and_disables_auto(self):
         state = initial_state()
@@ -2177,7 +2306,9 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             async def request(self, *args, **kwargs):
                 return Response()
 
-        application = SimpleNamespace(state=SimpleNamespace(db_pool=FailedPool(), v25_execution={"heartbeat": {}, "snapshot": {}, "live_session_authorization": {}}))
+        state = initial_state()
+        state.update(armed_until=time.time() + 300, real_trading_locked=False)
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=FailedPool(), v25_execution=state))
         client = BinanceLiveClient(Http(), "api-key-safe", "secret-key-safe", diagnostic_state=application.state.v25_execution, application=application)
         result = asyncio.run(client._request("POST", "/fapi/v1/order", {"symbol": "BTCUSDT", "side": "BUY", "type": "MARKET"}, signed=False))
         self.assertEqual(result["orderId"], 123)

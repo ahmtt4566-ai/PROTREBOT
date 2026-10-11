@@ -108,7 +108,7 @@ class PartialFillTests(unittest.TestCase):
     def reconcile(self, client, state):
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
         with patch.object(execution, "client_for_with_credentials", return_value=client), \
-                patch.object(execution, "account_snapshot", AsyncMock(side_effect=lambda *_: client.snapshot())), \
+                patch.object(execution, "account_snapshot", AsyncMock(side_effect=lambda *_, **kwargs: client.snapshot())), \
                 patch.object(execution, "recover_orphan_plans", AsyncMock(return_value=0)), \
                 patch.object(execution, "cleanup_orphan_protection_orders", AsyncMock()):
             asyncio.run(execution.reconcile(application))

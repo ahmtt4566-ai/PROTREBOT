@@ -40,6 +40,88 @@ class BinanceRateLimitTests(unittest.IsolatedAsyncioTestCase):
         await self._request(response)
         self.assertEqual(BINANCE_RATE_LIMITER.snapshot(self.HOST)["cooldown_until"], 0.0)
 
+    async def test_protection_request_overtakes_browser_reads_without_bypassing_cooldown(self):
+        occupied = asyncio.Event()
+        release = asyncio.Event()
+        order = []
+
+        async def blocker():
+            async with BINANCE_RATE_LIMITER.slot(self.HOST):
+                occupied.set()
+                await release.wait()
+
+        async def reader(name, priority=False):
+            async with BINANCE_RATE_LIMITER.slot(self.HOST, priority=priority):
+                order.append(name)
+
+        with patch("app.binance_rate_limit.BINANCE_MAX_CONCURRENT_REQUESTS_PER_HOST", 1):
+            task = asyncio.create_task(blocker())
+            await occupied.wait()
+            browser = asyncio.create_task(reader("browser"))
+            await asyncio.sleep(0)
+            protection = asyncio.create_task(reader("stop_tp", True))
+            await asyncio.sleep(0)
+            release.set()
+            await asyncio.gather(task, browser, protection)
+        self.assertEqual(order, ["stop_tp", "browser"])
+
+    async def test_priority_is_preserved_after_shared_retry_after_wait(self):
+        release = asyncio.Event()
+        waiting = asyncio.Event()
+        wait_calls = []
+        order = []
+        clock = [100.0]
+        BINANCE_RATE_LIMITER._state_for(self.HOST).cooldown_until = 280.0
+
+        async def elapsed(seconds):
+            wait_calls.append(seconds)
+            if len(wait_calls) == 2:
+                waiting.set()
+            await release.wait()
+            clock[0] = 280.0
+
+        async def reader(name, priority=False):
+            async with BINANCE_RATE_LIMITER.slot(self.HOST, priority=priority):
+                order.append(name)
+
+        with patch("app.binance_rate_limit.time.monotonic", side_effect=lambda: clock[0]), patch("app.binance_rate_limit.asyncio.sleep", new=elapsed):
+            browser = asyncio.create_task(reader("browser"))
+            protection = asyncio.create_task(reader("stop_tp", True))
+            await asyncio.wait_for(waiting.wait(), timeout=1)
+            self.assertEqual(order, [])
+            self.assertEqual(wait_calls, [180.0, 180.0])
+            release.set()
+            await asyncio.gather(browser, protection)
+        self.assertEqual(order, ["stop_tp", "browser"])
+
+    async def test_cancelled_waiter_does_not_block_protection_queue(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocker():
+            async with BINANCE_RATE_LIMITER.slot(self.HOST):
+                started.set()
+                await release.wait()
+
+        async def waiter():
+            async with BINANCE_RATE_LIMITER.slot(self.HOST):
+                return True
+
+        with patch("app.binance_rate_limit.BINANCE_MAX_CONCURRENT_REQUESTS_PER_HOST", 1):
+            task = asyncio.create_task(blocker())
+            await started.wait()
+            cancelled = asyncio.create_task(waiter())
+            await asyncio.sleep(0)
+            cancelled.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await cancelled
+            release.set()
+            await task
+            self.assertTrue(await waiter())
+        state = BINANCE_RATE_LIMITER._state_for(self.HOST)
+        self.assertEqual(state.pending, [])
+        self.assertEqual(state.active, 0)
+
     async def test_http_429_and_418_create_cooldown(self):
         for status_code in (429, 418):
             BINANCE_RATE_LIMITER.reset()
