@@ -1469,6 +1469,8 @@ app.include_router(account_settings_router)
 app.include_router(google_oauth_router)
 app.include_router(v24_commerce_router)
 app.include_router(v25_execution_router)
+from .original_v2_live import router as original_v2_live_router
+app.include_router(original_v2_live_router)
 app.include_router(v27_cloud_router)
 app.include_router(exchange_connections_router)
 app.include_router(analyst_credits_router)

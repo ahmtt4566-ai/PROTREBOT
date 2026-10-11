@@ -10,9 +10,11 @@ import {useKaisErrorReaction} from '../../useKaisPageReactions'
 import {useTradingPreferences} from '../../useTradingPreferences'
 import {preferredRiskMargin} from '../../account-risk-sizing'
 import {useMemberAccess} from '../../premium-access'
+import OriginalV2LiveCard, {type OriginalV2LiveStatus} from './OriginalV2LiveCard'
 
 type LivePolicy = Record<string, unknown>
 type LiveStatus = {
+  original_v2_live?: OriginalV2LiveStatus
   credentials?: {configured?: boolean; fingerprint?: string | null; storage?: string}
   connected?: boolean
   connection?: {last_checked?: string | null; last_error?: string | null; clock_offset_ms?: number | null}
@@ -118,6 +120,7 @@ function errorMessage(payload: unknown, fallback: string): string {
 }
 
 export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
+  const [originalNotice, setOriginalNotice] = useState('')
   const {freeTrial} = useMemberAccess()
   const tradingDefaults = useTradingPreferences()
   const defaultsApplied = useRef(false)
@@ -732,6 +735,14 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       </section>
     </div>
 
+    {status?.original_v2_live?.available && <OriginalV2LiveCard
+      className="masterTradeLiveOriginalCard"
+      status={status.original_v2_live} armed={liveArmed} automationActive={status.live_auto_trade === true}
+      blocked={Boolean(busy) || !connected || executionLocked || !readinessReady}
+      request={(path, body) => call<unknown>(V25, path, {method: 'POST', ...(body ? {body: JSON.stringify(body)} : {})})}
+      refresh={() => refresh(false)}
+      notice={originalNotice} onNotice={setOriginalNotice}
+    />}
     <div className="masterTradeLiveGrid masterTradeLiveDataGrid"><section className="masterTradeLiveSection masterTradeLiveAccountTable"><header><div><span className="masterTradeLiveKicker">LIVE POSITIONS</span><h3>Open positions</h3></div><span className="masterTradeLiveCount">{positions.length}</span></header>{positions.length ? <div className="masterTradeLiveTableWrap"><table><thead><tr><th>Symbol</th><th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Leverage</th><th>Unrealized PnL</th><th>Liquidation</th><th>Margin</th><th>Management</th></tr></thead><tbody>{positions.map((position, index) => { const activePlanForPosition = status?.plans?.find(plan => String(plan.symbol || '').toUpperCase() === String(position.symbol || '').toUpperCase() && !['CLOSED', 'CANCELLED', 'KAPANDI', 'İPTAL'].includes(String(plan.status || '').toUpperCase())); const isExternal = !recoveryRequired && !activePlanForPosition; return <tr key={`${String(position.symbol)}-${index}`}><td><strong>{text(position.symbol)}</strong></td><td><span className={String(position.direction).toUpperCase() === 'SHORT' ? 'short' : 'long'}>{text(position.direction)}</span></td><td>{text(position.quantity)}</td><td>{text(position.entry_price)}</td><td>{text(position.mark_price)}</td><td>{positionLeverage(position)}</td><td className={Number(position.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'}>{money(position.unrealized_pnl)}</td><td>{text(position.liquidation_price)}</td><td>--</td><td>{isExternal && <button type="button" className="liveArmButton" onClick={() => void previewAdoption(String(position.symbol))} disabled={Boolean(busy) || !connected || recoveryRequired}>ADOPT &amp; MANAGE</button>}</td></tr> })}</tbody></table></div> : <div className="masterTradeLiveEmpty"><strong>No open positions</strong><span>Live position data is read from the V25 account snapshot.</span></div>}</section>
 
       <section className="masterTradeLiveSection masterTradeLiveAccountTable"><header><div><span className="masterTradeLiveKicker">OPEN ORDERS</span><h3>Pending orders</h3></div><span className="masterTradeLiveCount">{openOrders.length}</span></header>{openOrders.length ? <div className="masterTradeLiveTableWrap"><table><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th>Price</th><th>Quantity</th><th>Status</th><th>Time</th></tr></thead><tbody>{openOrders.map((order, index) => <tr key={`${String(order.order_id)}-${index}`}><td><strong>{text(order.symbol)}</strong></td><td>{text(order.side)}</td><td>{text(order.type)}</td><td>{text(order.price)}</td><td>{text(order.quantity)}</td><td>{text(order.status)}</td><td>--</td></tr>)}</tbody></table></div> : <div className="masterTradeLiveEmpty"><strong>No open orders</strong><span>Pending order data is read from the V25 account snapshot.</span></div>}</section>

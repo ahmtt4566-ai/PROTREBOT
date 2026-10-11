@@ -12,7 +12,7 @@ import math
 import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Protocol
 
 from fastapi import HTTPException
 
@@ -28,6 +28,10 @@ IDENTITY_FIELDS = (
     "decision_time", "signal_timestamp", "plan_id", "model_version",
 )
 logger = logging.getLogger(__name__)
+
+
+class OriginalMarketClient(Protocol):
+    async def public_get(self, path: str, params: dict[str, Any] | None = None) -> Any: ...
 
 
 def fail(reason: str) -> NoReturn:
@@ -371,7 +375,8 @@ def observe_fill(plan: dict[str, Any], order: dict[str, Any]) -> float:
 
 
 async def candidates(
-    client: demo.BinanceDemoClient, at: int, occupied: set[str],
+    client: OriginalMarketClient, at: int, occupied: set[str],
+    *, require_complete: bool = False,
 ) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
     from .backtest_data import normalize_candles
     from .v25_execution import rank_market_tickers
@@ -400,6 +405,10 @@ async def candidates(
                 fail("INVALID_ORIGINAL_KLINES")
             frames[interval] = series.closed(at)
             series_by_interval[interval] = series
+            if require_complete and (
+                _duplicates or len(frames[interval]) != 259 or not series.history_complete(at)
+            ):
+                fail("INCOMPLETE_ORIGINAL_LIVE_HISTORY")
         results[symbol] = strategy.evaluate(StrategyInput(symbol, at, frames), enabled=True)
         if all(series.history_complete(at) for series in series_by_interval.values()):
             complete.add(symbol)

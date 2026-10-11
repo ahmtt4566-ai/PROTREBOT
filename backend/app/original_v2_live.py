@@ -1,0 +1,455 @@
+"""OWNER-only Original V2 integration; signal policy remains the Demo policy."""
+from __future__ import annotations
+
+import copy
+import math
+import os
+import time
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
+
+from . import original_v2_demo_execution as original
+from .strategies import original_v2_demo as strategy
+from .strategies.contracts import StrategyResult
+from .v22_commercial import authenticated_user
+
+router = APIRouter(prefix="/api/v25/original-v2", tags=["Original V2 LIVE"])
+FLAG = "PROTREBOT_LIVE_KAIS_ORIGINAL_V2_ENABLED"
+SOURCE = "ORIGINAL_V2_LIVE"
+
+
+class Start(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmation: str
+    totp_code: str = Field(min_length=6, max_length=32)
+    risk_percent: float = Field(default=0.5, gt=0, le=1, allow_inf_nan=False)
+    daily_loss_percent: float = Field(default=5, gt=0, le=5, allow_inf_nan=False)
+
+
+def available() -> bool:
+    value = os.getenv(FLAG, "false").strip().lower()
+    if value not in {"true", "false", "1", "0"}:
+        raise HTTPException(503, "Original V2 LIVE ayarı geçersiz.")
+    return value in {"true", "1"}
+
+
+def settings(state: dict[str, Any]) -> dict[str, Any]:
+    return state.get("original_v2_live", {})
+
+
+def running(state: dict[str, Any]) -> bool:
+    return settings(state).get("enabled") is True
+
+
+def plan_is_original(plan: dict[str, Any]) -> bool:
+    return plan.get("source") == SOURCE
+
+
+def preserve(payload: dict[str, Any]) -> dict[str, Any] | None:
+    value = payload.get("original_v2_live")
+    if not isinstance(value, dict):
+        return None
+    result = copy.deepcopy(value)
+    result["enabled"] = False
+    result["paused"] = True
+    result["pause_reason"] = "Yeniden başlatma sonrası 2FA ve ARM gerekli."
+    return result
+
+
+def public_config(state: dict[str, Any]) -> dict[str, Any]:
+    config = settings(state)
+    return {"available": available(), "enabled": running(state),
+            "paused": config.get("paused", False), "pause_reason": config.get("pause_reason"),
+            "risk_percent": config.get("risk_percent", 0.5), "daily_loss_percent": config.get("daily_loss_percent", 5),
+            "daily": copy.deepcopy(config.get("daily")),
+            "symbols": strategy.fixed_profile()["execution_policy"]["allowed_symbols"]}
+
+
+def pause(state: dict[str, Any], reason: str) -> None:
+    from . import v25_execution as live
+    config = settings(state)
+    if not config:
+        return
+    already = config.get("paused") and config.get("pause_reason") == reason
+    config.update(enabled=False, paused=True, pause_reason=reason)
+    state["auto"].update(enabled=False, session_until=0.0)
+    state.update(live_auto_trade=False, real_trading_locked=True, armed_until=0.0)
+    if not already:
+        event = live.add_event(state, "ORIGINAL_LIVE_PAUSED",
+                               f"Original V2 LIVE durduruldu: {reason}. Açık pozisyon otomatik kapatılmadı.",
+                               recipient_user_id=config.get("owner_id"), source=SOURCE)
+        config.setdefault("alerts", []).insert(0, {
+            "id": "original-live:" + event["id"], "type": "ORIGINAL_LIVE_PAUSED", "severity": "CRITICAL",
+            "title": "Original V2 LIVE güvenlik kilidi", "message": event["message"],
+            "timestamp": event["created_at"], "target": "master-trade", "read": False,
+        })
+        del config["alerts"][100:]
+    live.persist_state(state)
+
+
+def merge_bell(request: Request, items: list[dict[str, Any]], *, read_id: str | None = None,
+               read_all: bool = False, limit: int = 100) -> list[dict[str, Any]]:
+    from . import v25_execution as live
+    application = getattr(request, "app", None)
+    state = getattr(getattr(application, "state", None), "v25_execution", {})
+    config = settings(state)
+    if not config:
+        if read_id:
+            raise HTTPException(404, "Bildirim bulunamadı.")
+        return items
+    user = authenticated_user(request)
+    if user.get("role") != "OWNER" or user["id"] != config.get("owner_id"):
+        if read_id:
+            raise HTTPException(404, "Bildirim bulunamadı.")
+        return items
+    alerts = config.get("alerts", [])
+    if read_id and not any(item["id"] == read_id for item in alerts):
+        raise HTTPException(404, "Bildirim bulunamadı.")
+    for alert in alerts:
+        if read_all or alert["id"] == read_id:
+            alert["read"] = True
+    if read_id or read_all:
+        live.persist_state(request.app.state.v25_execution)
+    return sorted([*items, *copy.deepcopy(alerts)], key=lambda item: str(item.get("timestamp") or ""), reverse=True)[:limit]
+
+
+async def require_owner_authority(application: Any, state: dict[str, Any]) -> None:
+    from . import v25_execution as live
+    from .v22_commercial import validate_authoritative_session
+    authorization = state.get("auto_authorization") or {}
+    if authorization.get("user_id") != settings(state).get("owner_id"):
+        raise HTTPException(403, "Original V2 OWNER oturumu değişti.")
+    if not await live.background_authorization_active(application, state):
+        raise HTTPException(403, "Original V2 OWNER oturumu doğrulanamadı.")
+    pool = getattr(application.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(503, "Original V2 OWNER yetkisi doğrulanamadı.")
+    user = await validate_authoritative_session(
+        application, settings(state)["owner_id"], authorization.get("auth_version"),
+    )
+    if user["role"] != "OWNER":
+        raise HTTPException(403, "Original V2 yalnız OWNER tarafından çalıştırılabilir.")
+    if authorization.get("fingerprint") != settings(state).get("fingerprint"):
+        raise HTTPException(423, "Original V2 LIVE hesap bağlantısı değişti.")
+
+
+async def daily_guard(client: Any, state: dict[str, Any], snapshot: dict[str, Any]) -> None:
+    now = datetime.now(timezone.utc)
+    start_ms = int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+    end_ms = int(now.timestamp() * 1000)
+    config = settings(state)
+    wallet = float(snapshot["wallet_balance"])
+    unrealized = float(snapshot["unrealized_pnl"])
+    if not all(math.isfinite(value) for value in (wallet, unrealized)) or wallet <= 0:
+        raise HTTPException(423, "Günlük bakiye doğrulanamadı.")
+    rows = []
+    for page in range(1, 9):
+        batch = await client.signed("GET", "/fapi/v1/income", {
+            "startTime": start_ms, "endTime": end_ms, "limit": 1000, "page": page,
+        })
+        if not isinstance(batch, list):
+            raise HTTPException(423, "Günlük hesap hareketleri doğrulanamadı.")
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+    else:
+        raise HTTPException(423, "Günlük hesap hareketleri eksik; yeni girişler kapalı.")
+    seen, total, pnl = set(), Decimal(0), Decimal(0)
+    for row in rows:
+        if (not isinstance(row, dict) or row.get("asset") != "USDT"
+                or not {"incomeType", "tranId", "time", "income"}.issubset(row)):
+            raise HTTPException(423, "USDT günlük kayıp hesabı doğrulanamadı.")
+        key = (str(row["incomeType"]), str(row["tranId"]))
+        if key in seen or not start_ms <= int(row["time"]) <= end_ms:
+            raise HTTPException(423, "Günlük hesap hareketlerinde çakışma var.")
+        seen.add(key)
+        amount = Decimal(str(row["income"]))
+        if not amount.is_finite():
+            raise HTTPException(423, "Günlük hesap hareketi geçersiz.")
+        total += amount
+        if row["incomeType"] not in {"TRANSFER", "INTERNAL_TRANSFER"}:
+            pnl += amount
+    day = now.date().isoformat()
+    day_state = config.get("daily", {})
+    if day_state.get("day") != day:
+        opening = float(Decimal(str(wallet)) - total)
+        if not math.isfinite(opening) or opening <= 0:
+            raise HTTPException(423, "Gün başlangıç bakiyesi doğrulanamadı.")
+        day_state = {"day": day, "opening_wallet": opening, "locked": False}
+        config["daily"] = day_state
+    limit = day_state["opening_wallet"] * config["daily_loss_percent"] / 100
+    loss = max(0, -float(pnl) - min(0, unrealized))
+    day_state.update(loss=loss, limit=limit)
+    if loss >= limit:
+        day_state["locked"] = True
+    if day_state["locked"]:
+        raise HTTPException(423, "Günlük kayıp sınırı aşıldı; bugün yeni işlem açılmaz.")
+
+
+def execution_policy(state: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
+    fixed = strategy.fixed_profile()["execution_policy"]
+    current = state["policy"]
+    result = {**current, **fixed, "max_stop_distance_pct": 6}
+    for key in ("max_margin_per_trade", "max_positions", "max_same_direction_positions",
+                "max_total_exposure_usdt", "daily_trade_limit", "consecutive_loss_limit", "max_spread_bps"):
+        result[key] = min(current[key], fixed[key])
+    result["max_direction_exposure_usdt"] = current.get("max_direction_exposure_usdt")
+    for key in ("allow_long", "allow_short"):
+        result[key] = current[key] and fixed[key]
+    result["max_trap_score"] = min(current["max_trap_score"], fixed["max_trap_score"])
+    result["daily_loss_limit"] = min(current["daily_loss_limit"], fixed["daily_loss_limit"])
+    for key in ("min_confidence", "fee_bps_per_side", "slippage_bps_per_side", "minimum_net_reward_usdt"):
+        result[key] = max(current[key], fixed[key])
+    result["max_loss_per_trade"] = min(float(snapshot["wallet_balance"]) * settings(state)["risk_percent"] / 100,
+                                      current["max_loss_per_trade"], fixed["max_loss_per_trade"])
+    return result
+
+
+async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
+                     snapshot: dict[str, Any]) -> dict[str, Any]:
+    from . import v25_execution as live
+    original.validate_result(result)
+    if not result.signal.strategy_eligible:
+        raise HTTPException(423, "Original V2 sinyali girişe uygun değil.")
+    spec = await original.build_spec(client, result)
+    policy = execution_policy(state, snapshot)
+    entry, stop = Decimal(spec["entry_price"]), Decimal(spec["stop_loss"])
+    budget = Decimal(str(policy["max_loss_per_trade"]))
+    rules = await live.live_symbol_rules(client, spec["symbol"], "MARKET")
+    # The percentage budget includes estimated commission and slippage, not only stop distance.
+    cost_per_unit = entry * Decimal(str(policy["fee_bps_per_side"] + policy["slippage_bps_per_side"])) * 2 / 10000
+    quantity = live.floor_step(min(Decimal(spec["quantity"]), budget / (abs(entry - stop) + cost_per_unit),
+                                  Decimal(str(policy["max_margin_per_trade"])) * 3 / entry), rules["step"] * 5)
+    partial = live.floor_step(quantity * Decimal("0.60"), rules["step"])
+    if quantity < rules["min_qty"] or partial < rules["min_qty"] or partial * entry < rules["min_notional"]:
+        raise HTTPException(423, "Original V2 TP1 %60 miktarı borsa minimumunu karşılamıyor.")
+    margin = float(quantity * entry / 3)
+    if margin < 5:
+        raise HTTPException(423, "Original V2 risk bütçesi minimum marjini karşılamıyor.")
+    notional = float(quantity * entry)
+    net_reward = float(quantity * abs(Decimal(spec["targets"][0]) - entry) - quantity * cost_per_unit)
+    if net_reward < policy["minimum_net_reward_usdt"] or quantity > rules["max_qty"]:
+        raise HTTPException(423, "Original V2 maliyet veya borsa miktar kapısı geçilmedi.")
+    spec.update(quantity=live.decimal_text(quantity), margin_usdt=margin, notional_usdt=float(quantity * entry),
+                step=rules["step"], min_qty=rules["min_qty"], min_notional=rules["min_notional"],
+                estimated_stop_loss_usdt=float(quantity * (abs(entry - stop) + cost_per_unit)),
+                original_risk_budget=float(budget), initial_stop_loss=spec["stop_loss"],
+                initial_quantity=live.decimal_text(quantity))
+    if notional > policy["max_margin_per_trade"] * 3 + 1e-8:
+        raise HTTPException(423, "Original V2 marjin limiti aşıldı.")
+    return spec
+
+
+async def check_entry(application: Any, client: Any, state: dict[str, Any],
+                      snapshot: dict[str, Any]) -> None:
+    from . import v25_execution as live
+    if not available() or not running(state) or settings(state).get("paused"):
+        raise HTTPException(423, "Original V2 LIVE kapalı veya güvenlik kilidi aktif.")
+    await require_owner_authority(application, state)
+    if state.get("real_trading_locked") is not False:
+        raise HTTPException(423, "Original V2 gerçek işlem kilidi kapalı.")
+    if not live.auto_session_active(state) or live.live_execution_blocked(state):
+        raise HTTPException(423, "Original V2 LIVE yürütme izni sona erdi.")
+    await daily_guard(client, state, snapshot)
+
+
+async def persist_required(state: dict[str, Any]) -> None:
+    from . import v25_execution as live
+    if await live.persist_state_awaited(state) not in {"INSERTED", "UPDATED"}:
+        raise live.LiveExchangeError("Original V2 kalıcı işlem kaydı doğrulanamadı.", http_status=503)
+
+
+async def install_targets(client: Any, state: dict[str, Any], plan: dict[str, Any],
+                          position: dict[str, Any], existing_algos: list[dict[str, Any]] | None) -> None:
+    from . import v25_execution as live
+    quantity = Decimal(position["quantity"])
+    if not plan.get("original_tp_attempted"):
+        plan["initial_quantity"] = live.decimal_text(quantity)
+    partial = live.floor_step(Decimal(plan["initial_quantity"]) * Decimal("0.60"), Decimal(plan["step"]))
+    if partial != Decimal(plan["initial_quantity"]) * Decimal("0.60"):
+        pause(state, f"{plan['symbol']} doğrulanan dolum tam %60 TP1 bölünmesine uygun değil")
+        raise live.LiveExchangeError("Original V2 TP1 tam %60 miktarı kurulamadı; pozisyon kapatılmadı.", http_status=423)
+    if partial < Decimal(plan["min_qty"]) or partial * Decimal(str(position["mark_price"])) < Decimal(plan["min_notional"]):
+        pause(state, f"{plan['symbol']} TP1 %60 borsa minimumunu karşılamıyor")
+        raise live.LiveExchangeError("Original V2 TP1 miktarı kurulamadı; pozisyon kapatılmadı.", http_status=423)
+    common = {"algoType": "CONDITIONAL", "symbol": plan["symbol"],
+              "side": "SELL" if plan["direction"] == "LONG" else "BUY",
+              "type": "TAKE_PROFIT_MARKET", "workingType": "MARK_PRICE", "priceProtect": "TRUE"}
+    ids = [plan["stop_algo_id"]]
+    try:
+        # Never reallocate 60% of the remainder on a protection repair or restart.
+        if not plan.get("original_tp_attempted"):
+            plan["original_tp_attempted"] = True
+            await persist_required(state)
+            result = await live.post_entry_protection_algo(client, {
+                **common, "triggerPrice": plan["targets"][0], "quantity": live.decimal_text(partial),
+                "reduceOnly": "true", "clientAlgoId": live.client_id_for("TP12", plan["intent_id"]),
+            }, existing_algos)
+            if not result.get("algoId"):
+                raise live.LiveExchangeError("Original V2 TP1 kimliği doğrulanamadı.", unknown_execution=True)
+            plan["tp12_algo_id"] = int(result["algoId"])
+            plan["tp12_client_id"] = live.client_id_for("TP12", plan["intent_id"])
+            await persist_required(state)
+        if not plan.get("tp12_algo_id"):
+            raise live.LiveExchangeError("Original V2 önceki TP1 kurulumu belirsiz.", unknown_execution=True)
+        ids.append(plan["tp12_algo_id"])
+        result = await live.post_entry_protection_algo(client, {
+            **common, "triggerPrice": plan["targets"][2], "closePosition": "true",
+            "clientAlgoId": live.client_id_for("TP3", plan["intent_id"]),
+        }, existing_algos)
+        if not result.get("algoId"):
+            raise live.LiveExchangeError("Original V2 TP3 kimliği doğrulanamadı.", unknown_execution=True)
+        plan["original_tp3_algo_id"] = int(result["algoId"])
+        ids.append(plan["original_tp3_algo_id"])
+    except Exception as exc:
+        plan.update(protection_state="MISSING", tp_protection_state="UNPROTECTED",
+                    status="STOP AKTİF · ORIGINAL TP DOĞRULANAMADI", last_error=live.sanitized_exception_message(exc))
+        pause(state, f"{plan['symbol']} TP kurulamadı: {live.sanitized_exception_message(exc)}")
+        raise
+    plan.update(protection_ids=ids, monitoring_targets=[], tp_protection_state="EXCHANGE_BACKED",
+                protection_state="MATCHED", status="KORUMA AKTİF", protected_at=live.now_iso(),
+                entry_remainder_pending=False)
+    await persist_required(state)
+
+
+async def verify_targets(client: Any, state: dict[str, Any], plan: dict[str, Any],
+                         rows: list[dict[str, Any]]) -> None:
+    from . import v25_execution as live
+    if plan.get("stop_loss") != plan.get("initial_stop_loss"):
+        pause(state, f"{plan['symbol']} ilk stop değişti")
+        raise live.LiveExchangeError("Original V2 ilk stop değiştirilemez.", unknown_execution=True)
+    if not plan.get("original_tp_attempted"):
+        return
+    ids = {int(row.get("algo_id", row.get("algoId", 0)) or 0) for row in rows}
+    if plan.get("original_tp3_algo_id") not in ids:
+        pause(state, f"{plan['symbol']} TP3 borsada yok")
+    if plan.get("tp12_algo_id") in ids or plan.get("original_tp1_complete"):
+        return
+    if not plan.get("tp12_algo_id"):
+        pause(state, f"{plan['symbol']} TP1 kimliği eksik")
+        return
+    native = await client.signed("GET", "/fapi/v1/algoOrder", {"algoId": plan["tp12_algo_id"]})
+    if not isinstance(native, dict) or int(native.get("algoId") or 0) != plan["tp12_algo_id"]:
+        raise live.LiveExchangeError("Original V2 TP1 geçmişi doğrulanamadı.", unknown_execution=True)
+    actual = int(native.get("actualOrderId") or 0)
+    if actual <= 0:
+        pause(state, f"{plan['symbol']} TP1 yürütme kanıtı yok")
+        return
+    order = await client.signed("GET", "/fapi/v1/order", {"symbol": plan["symbol"], "orderId": actual})
+    allocation = live.floor_step(Decimal(plan["initial_quantity"]) * Decimal("0.60"), Decimal(plan["step"]))
+    if (not isinstance(order, dict) or int(order.get("orderId") or 0) != actual
+            or order.get("symbol") != plan["symbol"] or order.get("side") != ("SELL" if plan["direction"] == "LONG" else "BUY")
+            or not live._truthy(order.get("reduceOnly")) or order.get("status") != "FILLED"
+            or Decimal(str(order.get("executedQty", 0))) != allocation):
+        pause(state, f"{plan['symbol']} TP1 %60 dolumu doğrulanamadı")
+        return
+    plan["original_tp1_complete"] = True
+    live.persist_state(state)
+
+
+async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
+    from . import v25_execution as live
+    state = application.state.v25_execution
+    config = settings(state)
+    try:
+        if credentials is None:
+            credentials = await live.auto_session_credentials(application, state)
+        if not live.usable_live_credentials(credentials):
+            raise HTTPException(423, "Original V2 LIVE bağlantısı kesildi.")
+        if not live.readiness_for(application, state, credentials=credentials)["ready"]:
+            raise HTTPException(423, "Original V2 LIVE yayın kapıları kapalı.")
+        client = live.client_for_with_credentials(application, credentials)
+        snapshot = await live.account_snapshot(client)
+        await check_entry(application, client, state, snapshot)
+        at = int(time.time()) // 900 * 900
+        if config.get("last_decision_time", -1) >= at:
+            return
+        config["last_decision_time"] = at
+        occupied = {item["symbol"] for item in snapshot["positions"] + snapshot["open_orders"]}
+        eligible, _results = await original.candidates(client, at, occupied, require_complete=True)
+        for candidate, result in eligible[:3]:
+            if not running(state):
+                break
+            signal = result.legacy["analysis"]
+            preview = await build_spec(client, result, state, snapshot)
+            body = live.LiveOrderRequest(
+                symbol=candidate["symbol"], direction=signal["direction"], margin_usdt=preview["margin_usdt"],
+                leverage=3, stop_loss=signal["stop_loss"], tp1=signal["tp1"], tp2=signal["tp2"], tp3=signal["tp3"],
+                intent_id=f"original-live-{config['owner_id']}-{at}-{candidate['symbol']}",
+            )
+            await live.execute_live_order(application, body, source=SOURCE, credentials=credentials,
+                                          strategy_result=result)
+        live.persist_state(state)
+    except Exception as exc:
+        pause(state, live.sanitized_exception_message(exc))
+        raise
+
+
+@router.get("")
+async def status(request: Request) -> dict[str, Any]:
+    authenticated_user(request, owner=True)
+    from . import v25_execution as live
+    live.guard_execution_ownership(request, claim=False)
+    return public_config(request.app.state.v25_execution)
+
+
+@router.post("/start")
+async def start(request: Request, body: Start) -> dict[str, Any]:
+    from . import account_settings, v25_execution as live
+    user = authenticated_user(request, owner=True)
+    if not available():
+        raise HTTPException(423, "Original V2 LIVE sunucu ayarı kapalı.")
+    if body.confirmation != "ORIGINAL V2 CANLI":
+        raise HTTPException(422, "Original V2 onayı için ORIGINAL V2 CANLI yazın.")
+    if not await account_settings.enabled(request, user):
+        raise HTTPException(403, "Original V2 LIVE için önce 2FA açın.")
+    state = request.app.state.v25_execution
+    async with state["lock"]:
+        if state["auto"].get("enabled"):
+            raise HTTPException(409, "Önce mevcut LIVE otomasyonunu durdurun.")
+        allowed, reason = live.live_auto_start_gate(request.app, state, request)
+        if not allowed:
+            raise HTTPException(423, reason)
+        await account_settings.require_totp(request, user, body.totp_code, required=True)
+        previous = settings(state)
+        _, _, fingerprint = live.live_credentials_status(request)
+        if not fingerprint:
+            raise HTTPException(423, "Original V2 için doğrulanmış LIVE bağlantısı gerekli.")
+        if previous and (previous.get("owner_id") != user["id"] or previous.get("fingerprint") != fingerprint):
+            raise HTTPException(423, "Original V2 hesap bağlantısı değişti; günlük limit kaydı korunuyor.")
+        config = {**previous, "owner_id": user["id"], "risk_percent": body.risk_percent,
+                  "fingerprint": fingerprint,
+                  "daily_loss_percent": body.daily_loss_percent, "enabled": False, "paused": False}
+        state["original_v2_live"] = config
+        try:
+            client = live.client_for(request.app, request)
+            await daily_guard(client, state, await live.account_snapshot(client))
+            if config.get("paused"):
+                raise HTTPException(423, "Original V2 başlatma sırasında durduruldu.")
+            await live.v25_auto_start(request, live.Confirmation(confirmation="CANLI OTOMATİK"))
+            config.update(enabled=True, paused=False, pause_reason=None)
+            if await live.persist_state_awaited(state) not in {"INSERTED", "UPDATED"}:
+                raise HTTPException(503, "Original V2 kalıcı durum kaydı doğrulanamadı.")
+        except Exception as exc:
+            pause(state, live.sanitized_exception_message(exc))
+            if isinstance(exc, (live.LiveExchangeError, live.BinanceDemoError)):
+                raise live.safe_exchange_error(exc) from exc
+            raise
+    return await status(request)
+
+
+@router.post("/stop")
+async def stop(request: Request) -> dict[str, Any]:
+    from . import v25_execution as live
+    user = authenticated_user(request, owner=True)
+    live.execution_owner(request)
+    if settings(request.app.state.v25_execution).get("owner_id") != user["id"]:
+        raise HTTPException(409, "Bu hesap için Original V2 LIVE oturumu yok.")
+    pause(request.app.state.v25_execution, "OWNER acil durdurma")
+    if await live.persist_state_awaited(request.app.state.v25_execution) not in {"INSERTED", "UPDATED"}:
+        raise HTTPException(503, "Durdurma kalıcı kaydı doğrulanamadı; LIVE durumunu kontrol edin.")
+    return await status(request)

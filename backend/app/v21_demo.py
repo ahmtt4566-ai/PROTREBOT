@@ -2853,6 +2853,8 @@ async def v21_notifications(request: Request, limit: int = Query(default=100, ge
     items = notification_payload(state, limit)
     from .binance_notifications import merge_bell
     items = await merge_bell(request, items, limit)
+    from .original_v2_live import merge_bell as merge_original_bell
+    items = merge_original_bell(request, items, limit=limit)
     return {"items": items, "unread": sum(1 for item in items if not item["read"]), "demo_only": True}
 
 
@@ -2861,6 +2863,8 @@ async def v21_notifications_read_all(request: Request) -> dict[str, Any]:
     state = state_for(request)
     from .binance_notifications import merge_bell
     combined = await merge_bell(request, notification_payload(state), read_all=True)
+    from .original_v2_live import merge_bell as merge_original_bell
+    combined = merge_original_bell(request, combined, read_all=True)
     notifications = state.setdefault("notifications", {"seen": [], "unread": 0, "read_ids": []})
     read_ids = notifications.setdefault("read_ids", [])
     for item in notification_payload(state, 500):
@@ -2878,12 +2882,19 @@ async def v21_notification_read(request: Request, notification_id: str) -> dict[
     state = state_for(request)
     items = notification_payload(state, 500)
     from .binance_notifications import merge_bell
+    from .original_v2_live import merge_bell as merge_original_bell
+    if notification_id.startswith("original-live:"):
+        items = await merge_bell(request, items)
+        items = merge_original_bell(request, items, read_id=notification_id, limit=500)
+        return {"items": items, "unread": sum(1 for item in items if not item["read"]), "demo_only": True}
     if notification_id.startswith("binance:"):
         items = await merge_bell(request, items, read_id=notification_id)
+        items = merge_original_bell(request, items)
         return {"items": items, "unread": sum(1 for item in items if not item["read"]), "demo_only": True}
     if not any(item["id"] == notification_id for item in items):
         raise HTTPException(status_code=404, detail="Bildirim bulunamadı.")
     combined = await merge_bell(request, notification_payload(state))
+    combined = merge_original_bell(request, combined)
     notifications = state.setdefault("notifications", {"seen": [], "unread": 0, "read_ids": []})
     read_ids = notifications.setdefault("read_ids", [])
     if notification_id not in read_ids:

@@ -188,12 +188,14 @@ async def enabled(request, user):
     return bool(doc and doc.get("two_factor_enabled"))
 
 
-async def require_totp(request, user, code):
-    if not await enabled(request, user):
+async def require_totp(request, user, code, *, required: bool = False):
+    if not required and not await enabled(request, user):
         return
     await auth.enforce_auth_limit(request, "mfa", user["id"])
     valid = False
     async with store.edit(request, user["id"]) as doc:
+        if required and not doc.get("two_factor_enabled"):
+            raise HTTPException(403, "Bu işlem için iki aşamalı doğrulama açık olmalı")
         valid = check_limited_totp(request, doc, code)
     if not valid:
         auth.record_event(request, user, "auth.mfa_failed", "invalid_mfa", "security", 401)

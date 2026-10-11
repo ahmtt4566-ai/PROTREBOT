@@ -190,7 +190,7 @@ export function MasterTradeLiveLayout({tab = 'canli', step, children, notice}: {
       const title = cardTitle(card)
       const summaryText = cardText(card, ['p', 'small'])
       const summary = <summary>{tab === 'canli' && <Icon aria-hidden="true"/>}<span className="masterTradeCardTitle" title={typeof title === 'string' ? title : undefined}>{title}</span>{tab === 'canli' && <small className="masterTradeCardSummary" title={typeof summaryText === 'string' ? summaryText : undefined}>{summaryText}</small>}{locked ? <LockKeyhole aria-hidden="true"/> : <ChevronDown aria-hidden="true"/>}</summary>
-      const secondary = positions || className.includes('masterTradeLiveActivityRail') || tab === 'canli' && workflowStep === null && !className.includes('masterTradeLiveHeader') && !className.includes('masterTradeLiveAssistant')
+      const secondary = positions || className.includes('masterTradeLiveActivityRail') || tab === 'canli' && workflowStep === null && !className.includes('masterTradeLiveHeader') && !className.includes('masterTradeLiveAssistant') && !className.includes('masterTradeLiveOriginalCard')
       const autoTradeTarget = className.split(' ').includes('masterTradeLiveAssistant')
       return <div className="masterTradeLiveSlot" key={card.key} hidden={!visible} data-flow-card={workflowStep ?? undefined} data-flow-expanded={workflowStep === null ? undefined : expanded}
         id={autoTradeTarget ? 'master-trade-auto-trade' : undefined} tabIndex={autoTradeTarget ? -1 : undefined} aria-label={autoTradeTarget ? 'Auto Trade controls' : undefined}>
