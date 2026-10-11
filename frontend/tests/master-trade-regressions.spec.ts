@@ -107,6 +107,148 @@ test('an accepted mutation with a failed status refresh is reported as unverifie
   expect(fixture.mutations).toEqual(['/api/v25/auto/start'])
 })
 
+test('LIVE auto with enabled MFA challenges before activation and sends the fresh code only on confirmation', async ({page}) => {
+  const fixture = await setup(page)
+  const bodies:Record<string,unknown>[] = []
+  let enabled = false
+  await page.route('**/api/v25/auto/start', async route => {
+    const body = route.request().postDataJSON()
+    bodies.push(body)
+    if (!body.totp_code) {
+      await route.fulfill({status:401,json:{detail:{code:'LIVE_AUTO_MFA_REQUIRED',message:'Güncel 2FA kodunu girin.'}}})
+    } else {
+      expect(body).toEqual({confirmation:'CANLI OTOMATİK',totp_code:'123456'})
+      enabled = true
+      fixture.liveFields = {live_auto_trade:true,auto:{enabled:true}}
+      await route.fulfill({json:{ok:true}})
+    }
+  })
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  await page.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true}).click()
+  await page.locator('.liveConfirm input').fill('CANLI OTOMATİK')
+  await page.locator('.liveConfirm').getByRole('button',{name:'CONFIRM',exact:true}).click()
+  const code = page.locator('.liveConfirm input[type="password"]')
+  await expect(code).toBeVisible()
+  expect(enabled).toBe(false)
+  expect(bodies).toEqual([{confirmation:'CANLI OTOMATİK'}])
+  await expect(page.locator('.liveConfirm').getByRole('button',{name:'CONFIRM',exact:true})).toBeDisabled()
+  await code.fill('123456')
+  await page.locator('.liveConfirm input').first().fill('CANLI OTOMATİK')
+  await page.locator('.liveConfirm').getByRole('button',{name:'CONFIRM',exact:true}).click()
+  await expect.poll(() => enabled).toBe(true)
+  expect(bodies.length).toBe(2)
+  await expect(page.locator('.liveConfirm')).toHaveCount(0)
+})
+
+test('cancelling the MFA challenge leaves LIVE auto disabled and does not resend', async ({page}) => {
+  await setup(page)
+  let attempts = 0
+  await page.route('**/api/v25/auto/start', async route => {
+    attempts++
+    await route.fulfill({status:401,json:{detail:{code:'LIVE_AUTO_MFA_REQUIRED'}}})
+  })
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  await page.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true}).click()
+  await page.locator('.liveConfirm input').fill('CANLI OTOMATİK')
+  await page.locator('.liveConfirm').getByRole('button',{name:'CONFIRM',exact:true}).click()
+  await expect(page.locator('.liveConfirm input[type="password"]')).toBeVisible()
+  await page.locator('.liveConfirm').getByRole('button',{name:'CANCEL',exact:true}).click()
+  await expect(page.locator('.liveConfirm')).toHaveCount(0)
+  expect(attempts).toBe(1)
+  await expect(page.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true})).toBeEnabled()
+})
+
+test('connection keys stay masked and are cleared once saved even if activation fails', async ({page}) => {
+  await setup(page)
+  const key = 'offline-private-api-key', secret = 'offline-private-secret'
+  const calls:string[] = []
+  await page.route('**/api/exchange-connections/{save,activate}', async route => {
+    const path = new URL(route.request().url()).pathname
+    calls.push(path)
+    if (path.endsWith('/save')) {
+      expect(route.request().postDataJSON()).toEqual({
+        mode:'LIVE',api_key:key,secret_key:secret,confirmation:'CANLI KASAYA KAYDET',
+      })
+      await route.fulfill({json:{ok:true}})
+    } else {
+      await route.fulfill({status:502,json:{detail:'Binance Futures yetkisi doğrulanamadı.'}})
+    }
+  })
+  await page.goto('/master-trade?tab=baglanti',{waitUntil:'domcontentloaded'})
+  const card = page.locator('.masterTradeLiveConnectionCard')
+  const apiInput = card.getByPlaceholder('Paste API key')
+  const secretInput = card.getByPlaceholder('Paste secret key')
+  await expect(apiInput).toHaveAttribute('type','password')
+  await expect(secretInput).toHaveAttribute('type','password')
+  await apiInput.fill(key)
+  await secretInput.fill(secret)
+  await card.getByRole('checkbox').check()
+  await card.getByRole('button',{name:'CONNECT ACCOUNT',exact:true}).click()
+  await expect(apiInput).toHaveValue('')
+  await expect(secretInput).toHaveValue('')
+  await expect(page.locator('.liveNotice.error').first()).toContainText('Futures yetkisi')
+  const text = await page.locator('body').innerText()
+  expect(text).not.toContain(key)
+  expect(text).not.toContain(secret)
+  expect(calls).toEqual(['/api/exchange-connections/save','/api/exchange-connections/activate'])
+})
+
+test('Master Trade connection deletion requires deactivation and explicit confirmation without any order request', async ({page}) => {
+  const fixture = await setup(page)
+  let active = true, configured = true
+  const writes:string[] = []
+  await page.route('**/api/exchange-connections/status', route => route.fulfill({
+    json:{vault:{ready:true},connections:{LIVE:{active,configured}}},
+  }))
+  await page.route('**/api/exchange-connections/{deactivate,credentials}', async route => {
+    const path = new URL(route.request().url()).pathname
+    writes.push(path)
+    if (path.endsWith('/deactivate')) {
+      expect(route.request().postDataJSON()).toEqual({mode:'LIVE',confirmation:'BAĞLANTIYI KAPAT'})
+      active = false
+      fixture.liveFields = {connected:false,real_trading_locked:true,live_auto_trade:false}
+    } else {
+      expect(active).toBe(false)
+      expect(route.request().method()).toBe('DELETE')
+      expect(route.request().postDataJSON()).toEqual({mode:'LIVE',confirmation:'ANAHTARI KALICI SİL'})
+      configured = false
+      fixture.liveFields = {...fixture.liveFields,credentials:{configured:false}}
+    }
+    await route.fulfill({json:{ok:true}})
+  })
+  await page.goto('/master-trade?tab=baglanti',{waitUntil:'domcontentloaded'})
+  const card = page.locator('.masterTradeLiveConnectionCard')
+  await expect(card.getByRole('button',{name:'Anahtarı sil',exact:true})).toBeDisabled()
+  await card.getByRole('button',{name:'Bağlantıyı kapat',exact:true}).click()
+  await page.locator('.liveConfirm input').fill('BAĞLANTIYI KAPAT')
+  await page.locator('.liveConfirm').getByRole('button',{name:'CONFIRM',exact:true}).click()
+  await expect(card.getByRole('button',{name:'Anahtarı sil',exact:true})).toBeEnabled()
+  await card.getByRole('button',{name:'Anahtarı sil',exact:true}).click()
+  await page.locator('.liveConfirm input').fill('ANAHTARI KALICI SİL')
+  await page.locator('.liveConfirm').getByRole('button',{name:'CONFIRM',exact:true}).click()
+  await expect.poll(() => configured).toBe(false)
+  expect(writes).toEqual(['/api/exchange-connections/deactivate','/api/exchange-connections/credentials'])
+  expect(fixture.mutations).toEqual([])
+})
+
+test('LIVE maximum loss is labelled in USDT and emergency close warning is explicit before any request', async ({page}) => {
+  const fixture = await setup(page)
+  const emergencies:unknown[] = []
+  await page.route('**/api/v25/emergency', async route => {
+    emergencies.push(route.request().postDataJSON())
+    await route.fulfill({json:{ok:true}})
+  })
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  const risk = page.locator('label').filter({hasText:'Risk / trade'}).first()
+  await expect(risk).toContainText('USDT')
+  await expect(risk).not.toContainText('%')
+  await page.getByRole('button',{name:'EMERGENCY STOP',exact:true}).first().click()
+  await expect(page.locator('.liveConfirm')).toContainText('açık bot pozisyonları reduce-only emirle kapatılır')
+  await page.locator('.liveConfirm').getByRole('button',{name:'CANCEL',exact:true}).click()
+  expect(fixture.mutations).toEqual([])
+  expect(emergencies).toEqual([])
+})
+
 test('new scanner and market generations start immediately while old JSON remains pending', async ({page}) => {
   await setup(page)
   await page.addInitScript(() => {

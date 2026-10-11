@@ -28,6 +28,7 @@ def request_for(state, *, user="alice", token="alice-session", role="OWNER", met
         state=SimpleNamespace(member={"id": user, "role": role, "auth_version": 1}),
         headers={"x-protrebot-session": token} if token else {},
         method=method,
+        url=SimpleNamespace(path="/api/v25/auto/start"),
     )
 
 
@@ -62,7 +63,9 @@ def test_other_member_cannot_mutate_shared_controller(route, role):
     request = request_for(state, user="bob", token="bob-session", role=role)
     args = [request] + [None for name in inspect.signature(handler).parameters if name != "request"]
     with patch.object(live, "authenticated_user", return_value=request.state.member), \
-         patch.object(live, "subscription_for_user", return_value={"master_trade_access": True}):
+         patch.object(live, "subscription_for_request", return_value={
+             "master_trade_access": True, "plan": "MASTER_MODE", "status": "ACTIVE",
+         }):
         with pytest.raises(HTTPException) as error:
             asyncio.run(handler(*args))
     assert error.value.status_code == 403
@@ -447,8 +450,9 @@ def test_signed_user_expiry_caps_background_grant_without_adopting_db_version():
     request.headers = {"x-protrebot-session": token}
     with patch.object(live, "live_auto_start_gate", return_value=(True, "")), \
          patch.object(live, "live_credentials_status", return_value=("api-key-safe", "secret-safe", "SHA256:abc")), \
-         patch.object(live, "persist_state"), patch.object(live, "public_status", return_value={}):
-        asyncio.run(live.v25_auto_start(request, live.Confirmation(confirmation="CANLI OTOMATİK")))
+         patch.object(live, "persist_state"), patch.object(live, "public_status", return_value={}), \
+         patch("app.account_settings.enabled", AsyncMock(return_value=False)):
+        asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
     assert state["live_session_authorization"]["auth_version"] == 1
     assert state["live_session_authorization"]["auth_expires_at_epoch"] == expected_expiry
     assert state["auto"]["session_until"] == expected_expiry

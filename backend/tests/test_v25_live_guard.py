@@ -2340,12 +2340,14 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
     def test_vercel_build_targets_current_render_api(self):
         config = json.loads(VERCEL_SOURCE)
         self.assertEqual(config["env"]["VITE_API_BASE"], "/api")
-        self.assertEqual(config["rewrites"][0], {
+        api_rewrites = [rewrite for rewrite in config["rewrites"] if rewrite["source"] == "/api/:path*"]
+        self.assertEqual(api_rewrites, [{
             "source": "/api/:path*",
             "destination": "https://protrebot-rkpt.onrender.com/api/:path*",
-        })
+        }])
+        self.assertLess(config["rewrites"].index(api_rewrites[0]), len(config["rewrites"]) - 1)
         self.assertEqual(config["rewrites"][-1], {
-            "source": "/(.*)", "destination": "/index.html",
+            "source": "/:path((?!sitemap\\.xml$|robots\\.txt$).*)", "destination": "/index.html",
         })
         self.assertNotIn("tradebt8.onrender.com", VERCEL_SOURCE)
 

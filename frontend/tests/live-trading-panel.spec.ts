@@ -50,7 +50,7 @@ const openPanelWithStatus = async (page: Page, state: LiveStatus, mutations: str
       return
     }
     const path = url.pathname
-    if (route.request().method() !== 'GET' && path.startsWith('/api/')) mutations.push(path)
+    if (route.request().method() !== 'GET' && path.startsWith('/api/') && path !== '/api/v25/risk/preview') mutations.push(path)
     const user = {id: 'live-state-ui-owner', role: 'OWNER', active: true, email_verified: true}
     if (path === '/api/v22/session' || path === '/api/v22/profile') {
       await route.fulfill({json: {user, access: {canAccessMasterTrade: true, isPremium: true}}})
@@ -70,8 +70,7 @@ const openPanelWithStatus = async (page: Page, state: LiveStatus, mutations: str
     }
     await route.continue()
   })
-  await page.goto('/master-trade')
-  await page.getByRole('button', {name: /CANLI HAZIRLIK/}).click()
+  await page.goto('/master-trade?tab=canli')
   await expect(page.getByRole('heading', {name: 'LIVE AUTO TRADE'})).toBeVisible()
 }
 

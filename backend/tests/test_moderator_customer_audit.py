@@ -148,8 +148,26 @@ def test_migration_only_extends_action_check_without_modifying_audit_rows_or_tri
     sql = (Path(__file__).parents[1] / "migrations" / "20261010_003_moderator_read_audit_actions.sql").read_text()
     assert "ALTER TABLE audit_log DROP CONSTRAINT audit_log_action_check" in sql
     assert "ALTER TABLE audit_log ADD CONSTRAINT audit_log_action_check" in sql
-    for action in AUDIT_ACTIONS:
+    for action in ("ROLE_CHANGED", "PERMISSION_GRANTED", "PERMISSION_REVOKED",
+                   "customer.viewed", "customer.subscription.viewed", "customer.payments.viewed"):
         assert f"'{action}'" in sql
+    import re
+    migrations = Path(__file__).parents[1] / "migrations"
+    initial_check = re.search(r"CHECK \(action IN \((.*?)\)\)", sql, re.S)
+    assert initial_check is not None
+    previous = set(re.findall(r"'([^']+)'", initial_check.group(1)))
+    for name in (
+        "20261010_005_support_audit_actions.sql", "20261010_007_approval_audit_actions.sql",
+        "20261010_010_customer_event_audit.sql", "20261010_013_campaign_permissions_audit.sql",
+        "20261011_002_binance_manual_entitlements.sql",
+    ):
+        extension = (migrations / name).read_text(encoding="utf-8")
+        check = re.search(r"CHECK \(action IN \((.*?)\)\)", extension, re.S)
+        assert check is not None
+        current = set(re.findall(r"'([^']+)'", check.group(1)))
+        assert previous < current
+        previous = current
+    assert previous == set(AUDIT_ACTIONS)
     assert not any(command in sql.upper() for command in (
         "UPDATE AUDIT_LOG", "DELETE FROM", "TRUNCATE", "DISABLE TRIGGER", "DROP TRIGGER",
     ))

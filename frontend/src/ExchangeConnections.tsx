@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Activity, AlertTriangle, CheckCircle2, Database, Eye, EyeOff,
+  Activity, AlertTriangle, CheckCircle2, Database,
   KeyRound, Link2, LoaderCircle, LockKeyhole, Power, PowerOff,
   RefreshCw, ShieldCheck, TestTube2, Trash2, WalletCards,
 } from 'lucide-react'
@@ -23,9 +23,9 @@ type ConnectionStatus = {
   connections:Record<Mode,Connection>;
   safety:{https_required:boolean;secrets_returned_to_browser:false;connection_test_creates_orders:false;activation_arms_orders:false;live_orders_require_v25_gates:true;withdrawals_supported:false}
 }
-type FormState = {apiKey:string;secretKey:string;showApi:boolean;showSecret:boolean;accepted:boolean}
+type FormState = {apiKey:string;secretKey:string;accepted:boolean}
 
-const emptyForm = ():FormState => ({apiKey:'',secretKey:'',showApi:false,showSecret:false,accepted:false})
+const emptyForm = ():FormState => ({apiKey:'',secretKey:'',accepted:false})
 const money = (value:number|undefined) => value == null ? '—' : value.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:4})
 const date = (value:string|null|undefined) => value ? new Date(value).toLocaleString('tr-TR') : '—'
 
@@ -190,8 +190,8 @@ export default function ExchangeConnections() {
         <div className="exchangeCardHead"><div><KeyRound/><span><small>{selected} API KASASI</small><h3>Anahtar Ekle ve Doğrula</h3></span></div><b className={connection?.configured ? 'ok' : 'wait'}>{connection?.configured ? 'KAYITLI' : 'BOŞ'}</b></div>
         <p className="exchangeHint">Anahtarlar HTTPS ile doğrudan kendi sunucuna gider. Secret Key hiçbir API yanıtında geri gönderilmez ve arayüzde tekrar gösterilmez.</p>
 
-        <label><span>API Key</span><div className="secretInput"><input data-private="true" type={form.showApi ? 'text' : 'password'} value={form.apiKey} onChange={event => patchForm({apiKey:event.target.value})} autoComplete="new-password" placeholder={connection?.configured ? 'Yeni anahtar girmeyeceksen boş bırak' : 'Binance API Key'}/><button onClick={() => patchForm({showApi:!form.showApi})} type="button">{form.showApi ? <EyeOff/> : <Eye/>}</button></div></label>
-        <label><span>Secret Key</span><div className="secretInput"><input data-private="true" type={form.showSecret ? 'text' : 'password'} value={form.secretKey} onChange={event => patchForm({secretKey:event.target.value})} autoComplete="new-password" placeholder={connection?.configured ? 'Kayıtlı secret görüntülenmez' : 'Binance Secret Key'}/><button onClick={() => patchForm({showSecret:!form.showSecret})} type="button">{form.showSecret ? <EyeOff/> : <Eye/>}</button></div></label>
+        <label><span>API Key</span><div className="secretInput"><input data-private="true" type="password" value={form.apiKey} onChange={event => patchForm({apiKey:event.target.value})} autoComplete="new-password" placeholder={connection?.configured ? 'Yeni anahtar girmeyeceksen boş bırak' : 'Binance API Key'}/></div></label>
+        <label><span>Secret Key</span><div className="secretInput"><input data-private="true" type="password" value={form.secretKey} onChange={event => patchForm({secretKey:event.target.value})} autoComplete="new-password" placeholder={connection?.configured ? 'Kayıtlı secret görüntülenmez' : 'Binance Secret Key'}/></div></label>
 
         <label className="exchangeCheck"><input type="checkbox" checked={form.accepted} onChange={event => patchForm({accepted:event.target.checked})}/><span>Secret’ın yalnızca şifreli PostgreSQL kasasında tutulacağını ve kaydettikten sonra tekrar görüntülenmeyeceğini anladım.</span></label>
 
@@ -234,4 +234,3 @@ export default function ExchangeConnections() {
     </section>
   </div>
 }
-

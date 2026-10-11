@@ -102,6 +102,9 @@ def test_unknown_dependency_permission_fails_at_definition():
 
 
 OWNER_ENDPOINTS = [
+    ("GET", "/api/v22/admin/binance-payments", None),
+    ("POST", "/api/v22/admin/binance-payments/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", {"checked_in_binance": True}),
+    ("POST", "/api/v22/admin/binance-payments/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/reject", {"reason": "İnceleme gerekli"}),
     ("GET", "/api/v22/admin/approvals/notifications/summary", None),
     ("GET", "/api/v22/admin/approvals", None),
     ("GET", "/api/v22/admin/approvals/summary", None),

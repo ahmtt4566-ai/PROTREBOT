@@ -155,6 +155,35 @@ def test_partial_entry_tp60_uses_settled_initial_quantity(state):
     assert plan["initial_quantity"] == "0.005"
     assert Decimal(client.algos[1]["quantity"]) == Decimal("0.003")
 
+def test_partial_fill_can_leave_actual_margin_below_entry_minimum_without_moving_stop(state):
+    plan = native_plan(quantity="0.000300", initial_quantity="0.000300",
+                       step="0.000001", min_qty="0.000001", leverage=3)
+    client = PartialFillClient(plan, quantity="0.000240", final_quantity="0.000240")
+    client.order["origQty"] = "0.000300"
+    run(live.install_protection(client, state, plan))
+    assert Decimal(plan["initial_quantity"]) * Decimal("50000") / 3 == Decimal("4")
+    assert Decimal(client.algos[1]["quantity"]) == Decimal("0.000144")
+    assert plan["stop_loss"] == plan["initial_stop_loss"] == "49000"
+    assert original.running(state)
+
+
+def test_fill_slippage_does_not_move_original_stop_but_can_exceed_planned_stop_distance(state):
+    plan = native_plan(entry_order_status="FILLED", entry_price="50000", stop_loss="47000",
+                       initial_stop_loss="47000")
+    client = PartialFillClient(plan, quantity="0.010")
+    native_signed = client.signed
+    async def signed(method, path, params=None):
+        response = await native_signed(method, path, params)
+        if (method, path) == ("GET", "/fapi/v3/positionRisk"):
+            return [{**row, "entryPrice":"51000", "markPrice":"51000"} for row in response]
+        return response
+    client.signed = signed
+    run(live.install_protection(client, state, plan))
+    actual_entry = Decimal("51000")
+    assert abs(actual_entry - Decimal(plan["stop_loss"])) / actual_entry * 100 > Decimal("6")
+    assert client.algos[0]["triggerPrice"] == "47000"
+    assert original.running(state)
+
 
 def test_tp_failure_stops_entries_and_never_closes(state, monkeypatch):
     plan = native_plan()
@@ -195,6 +224,51 @@ def test_tp1_not_reallocated_after_partial_exit(state, monkeypatch):
     assert post.await_count == 1
     assert post.await_args.args[1]["triggerPrice"] == "53000"
     assert plan["initial_quantity"] == "0.010"
+
+def test_installed_tp1_is_not_revalidated_at_new_market_notional(state, monkeypatch):
+    plan = native_plan(original_tp_attempted=True, min_notional="400")
+    plan.update(tp12_algo_id=102, stop_algo_id=101)
+    post = AsyncMock(return_value={"algoId": 103})
+    monkeypatch.setattr(live, "post_entry_protection_algo", post)
+    run(original.install_targets(object(), state, plan,
+                                 {"quantity": "0.004", "mark_price": "50000"}, []))
+    assert post.await_count == 1
+    assert "quantity" not in post.await_args.args[1]
+    assert plan["initial_quantity"] == "0.010"
+
+
+@pytest.mark.parametrize("index,field,value", [
+    (1, "triggerPrice", "51100"), (1, "quantity", "0.005"), (1, "reduceOnly", "false"),
+    (2, "triggerPrice", "53100"), (2, "closePosition", "false"), (2, "workingType", "CONTRACT_PRICE"),
+])
+def test_changed_original_targets_pause_without_closing(state, index, field, value):
+    plan = native_plan()
+    client = PartialFillClient(plan, quantity="0.010")
+    run(live.install_protection(client, state, plan))
+    client.algos[index][field] = value
+    before = len(client.calls)
+    with pytest.raises(live.LiveExchangeError):
+        run(original.verify_targets(client, state, plan, client.snapshot()["open_algo_orders"]))
+    assert not original.running(state)
+    assert plan["tp_protection_state"] == "UNPROTECTED"
+    assert len(client.calls) == before
+    assert client.quantity == "0.010"
+    assert plan["initial_stop_loss"] == "49000"
+
+
+def test_original_protection_identity_survives_restart_without_reallocation(state):
+    plan = native_plan()
+    client = PartialFillClient(plan, quantity="0.010")
+    run(live.install_protection(client, state, plan))
+    state["plans"][plan["id"]] = plan
+    restored = live.sanitized_state(state)
+    restored_plan = restored["plans"][plan["id"]]
+    before = len(client.calls)
+    run(original.verify_targets(client, restored, restored_plan, client.snapshot()["open_algo_orders"]))
+    assert len(client.calls) == before
+    assert Decimal(restored_plan["initial_quantity"]) == Decimal("0.010")
+    assert restored_plan["stop_loss"] == restored_plan["initial_stop_loss"] == "49000"
+    assert not restored["auto"]["enabled"]
 
 
 def income(amount, kind="REALIZED_PNL"):
@@ -343,11 +417,12 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
     async def code(*args, **kwargs):
         assert kwargs == {"required": True}
         trace.append("2fa")
-    async def start(*args):
+    async def start(*args, **kwargs):
+        assert kwargs == {"mfa_verified": True}
         trace.append("existing-auto")
         state["auto"]["enabled"] = True
     monkeypatch.setattr(account_settings, "require_totp", code)
-    monkeypatch.setattr(live, "v25_auto_start", start)
+    monkeypatch.setattr(live, "_start_live_auto_session", start)
     monkeypatch.setattr(live, "live_auto_start_gate", Mock(return_value=(True, "ready")))
     monkeypatch.setattr(live, "live_credentials_status", Mock(return_value=("key", "secret", "fingerprint")))
     monkeypatch.setattr(live, "client_for", Mock(return_value=object()))
@@ -367,7 +442,7 @@ def test_2fa_failure_never_starts_or_fetches_exchange(state, monkeypatch):
     monkeypatch.setattr(account_settings, "require_totp", AsyncMock(side_effect=HTTPException(401, "invalid 2fa")))
     monkeypatch.setattr(live, "live_auto_start_gate", Mock(return_value=(True, "ready")))
     start = AsyncMock()
-    monkeypatch.setattr(live, "v25_auto_start", start)
+    monkeypatch.setattr(live, "_start_live_auto_session", start)
     client = Mock()
     monkeypatch.setattr(live, "client_for", client)
     with pytest.raises(HTTPException):

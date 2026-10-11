@@ -2883,7 +2883,7 @@ async def v21_notification_read(request: Request, notification_id: str) -> dict[
     items = notification_payload(state, 500)
     from .binance_notifications import merge_bell
     from .original_v2_live import merge_bell as merge_original_bell
-    if notification_id.startswith("original-live:"):
+    if notification_id.startswith(("original-live:", "live:")):
         items = await merge_bell(request, items)
         items = merge_original_bell(request, items, read_id=notification_id, limit=500)
         return {"items": items, "unread": sum(1 for item in items if not item["read"]), "demo_only": True}

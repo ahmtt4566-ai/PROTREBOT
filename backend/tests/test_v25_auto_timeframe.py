@@ -5,12 +5,13 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from app import v25_execution as execution  # noqa: E402
+from app import account_settings  # noqa: E402
 
 
 class LiveAutoTimeframeTests(unittest.TestCase):
@@ -25,9 +26,9 @@ class LiveAutoTimeframeTests(unittest.TestCase):
             authenticated_live_expiry=lambda request: time.time() + 600,
             public_status=lambda *args: {},
             persist_state=lambda state: None,
-        ):
+        ), patch.object(account_settings, "enabled", AsyncMock(return_value=False)):
             return asyncio.run(execution.v25_auto_start(
-                request, execution.Confirmation(confirmation=confirmation),
+                request, execution.AutoStartConfirmation(confirmation=confirmation),
             ))
 
     def test_non_15m_returns_explicit_error_without_starting_or_mutating_state(self):
@@ -76,7 +77,7 @@ class LiveAutoTimeframeTests(unittest.TestCase):
                 patch.object(execution, "live_credentials_status") as credentials, \
                 patch.object(execution, "persist_state") as persist:
             with self.assertRaises(execution.HTTPException) as caught:
-                asyncio.run(execution.v25_auto_start(request, execution.Confirmation(confirmation="CANLI OTOMATİK")))
+                asyncio.run(execution.v25_auto_start(request, execution.AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
         self.assertEqual(caught.exception.status_code, 403)
         gate.assert_not_called()
         credentials.assert_not_called()

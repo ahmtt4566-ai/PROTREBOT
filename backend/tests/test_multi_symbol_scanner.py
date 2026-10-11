@@ -220,8 +220,10 @@ class MultiSymbolScannerTests(unittest.TestCase):
                 patch("app.v25_execution.session_id", return_value="offline-session"), \
                 patch("app.v25_execution.authenticated_live_expiry", return_value=time.time() + 600), \
                 patch("app.v25_execution.persist_state"), \
-                patch("app.v25_execution.public_status", return_value={}):
-            asyncio.run(v25_auto_start(request, Confirmation(confirmation="CANLI OTOMATİK")))
+                patch("app.v25_execution.public_status", return_value={}), \
+                patch("app.account_settings.enabled", AsyncMock(return_value=False)):
+            from app.v25_execution import AutoStartConfirmation
+            asyncio.run(v25_auto_start(request, AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
         self.assertTrue(state["auto"]["enabled"])
         self.assertGreater(state["auto"]["session_until"], time.time())
 

@@ -494,6 +494,10 @@ class Confirmation(BaseModel):
     confirmation: str = Field(min_length=1, max_length=80)
 
 
+class AutoStartConfirmation(Confirmation):
+    totp_code: str | None = Field(default=None, max_length=32, repr=False)
+
+
 class LiveOrderRequest(BaseModel):
     symbol: str = Field(min_length=5, max_length=20)
     direction: Literal["LONG", "SHORT"]
@@ -661,6 +665,10 @@ def sanitized_state(payload: Any) -> dict[str, Any]:
     original_settings = original_v2_live.preserve(payload)
     if original_settings is not None:
         base["original_v2_live"] = original_settings
+    if isinstance(payload.get("live_notification_read_ids"), list):
+        base["live_notification_read_ids"] = [
+            value for value in payload["live_notification_read_ids"] if isinstance(value, str) and value.startswith("live:")
+        ][-MAX_EVENTS:]
     try:
         base["persistence_revision"] = max(
             0,
@@ -931,6 +939,12 @@ async def restore_v25_state(application: Any) -> bool:
 
 
 def add_event(state: dict[str, Any], kind: str, message: str, **extra: Any) -> dict[str, Any]:
+    from .live_notifications import KINDS
+    if kind in KINDS:
+        owner_id = ((state.get("live_session_authorization") or {}).get("user_id")
+                    or (state.get("auto_authorization") or {}).get("user_id"))
+        if owner_id:
+            extra.setdefault("recipient_user_id", owner_id)
     row = {"id": uuid.uuid4().hex, "kind": kind, "message": message[:400], "created_at": now_iso(), **extra}
     state.setdefault("events", []).insert(0, row)
     del state["events"][MAX_EVENTS:]
@@ -1339,9 +1353,8 @@ class BinanceLiveClient:
             except (ValueError, json.JSONDecodeError):
                 body = {}
             code = body.get("code") if isinstance(body, dict) else None
-            message = str(body.get("msg") if isinstance(body, dict) else "Binance canlı işlemi reddetti.")
-            if self.api_key:
-                message = message.replace(self.api_key, "[gizli]")
+            from .exchange_connections import exchange_rejection_message
+            message = exchange_rejection_message(code)
             if response.status_code in {429, 418}:
                 await self._record_exchange_error(method, path, params, "RATE_LIMITED", message, code, (time.perf_counter() - started) * 1000)
                 message = "Binance API hız sınırı; yeni emir gönderilmedi. Geri çekilme süresi bekleniyor."
@@ -1399,6 +1412,14 @@ class BinanceLiveClient:
             details={"response_time_ms": round(elapsed_ms, 2), "attempt": 1, "params": params},
         ))
 
+    def safe_request_error(self, error: BaseException) -> str:
+        message = str(error)
+        for value in (self.api_key, self.secret_key):
+            if value:
+                message = message.replace(value, "[gizli]")
+        return sanitized_exception_message(message)
+
+
     async def _record_request_error(self, method: str, path: str, error: BaseException, *, params: dict[str, Any], elapsed_ms: float, timed_out: bool = False, transient_read_failure: bool = False) -> None:
         state = self.diagnostic_state
         if not isinstance(state, dict):
@@ -1419,7 +1440,7 @@ class BinanceLiveClient:
             endpoint=path,
             exception_type="LiveExchangeError",
             httpx_error_type=type(error).__name__,
-            error_message=sanitized_exception_message(str(error)),
+            error_message=self.safe_request_error(error),
             timed_out=timed_out,
             timeout_seconds=timeout_config,
             retry_count=int(connection.get("retry_count") or 0),
@@ -1429,7 +1450,7 @@ class BinanceLiveClient:
         )
         await log_event(getattr(self.application.state, "db_pool", None) if self.application is not None else None, build_error_event(
             source="backend", service="live_trading", kind=type(error).__name__, code="EXCHANGE_TIMEOUT" if timed_out else "EXCHANGE_DOWN",
-            message=str(error), severity="ERROR", route=path, method=method,
+            message=self.safe_request_error(error), severity="ERROR", route=path, method=method,
             user_id=((state or {}).get("live_session_authorization") or {}).get("user_id"),
             context={"exchange": "BINANCE", "symbol": params.get("symbol"), "direction": params.get("side"), "order_type": params.get("type"), "quantity": params.get("quantity"), "price": params.get("price"), "bot": "V25"},
             details={"response_time_ms": round(elapsed_ms, 2), "attempt": 1, "timed_out": timed_out, "params": params},
@@ -5704,7 +5725,13 @@ async def v25_order(request: Request, body: ManualLiveOrderRequest) -> dict[str,
 
 
 @router.post("/auto/start")
-async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]:
+async def v25_auto_start(request: Request, body: AutoStartConfirmation) -> dict[str, Any]:
+    return await _start_live_auto_session(request, body)
+
+
+async def _start_live_auto_session(
+    request: Request, body: Confirmation, *, mfa_verified: bool = False,
+) -> dict[str, Any]:
     user = execution_owner(request)
     if body.confirmation.strip().upper() != "CANLI OTOMATİK":
         raise HTTPException(422, "Otomasyonu açmak için CANLI OTOMATİK yazın.")
@@ -5724,6 +5751,22 @@ async def v25_auto_start(request: Request, body: Confirmation) -> dict[str, Any]
     allowed, reason = live_auto_start_gate(request.app, state, request)
     if not allowed:
         raise HTTPException(423, reason)
+    if not mfa_verified:
+        from . import account_settings
+        if await account_settings.enabled(request, user):
+            code = getattr(body, "totp_code", None)
+            if not code:
+                raise HTTPException(401, detail={
+                    "code": "LIVE_AUTO_MFA_REQUIRED", "message": "LIVE Auto Trade için güncel 2FA kodunu girin.",
+                })
+            await account_settings.require_totp(request, user, code, required=True)
+        if original_v2_live.running(state) or auto_session_is_active(state):
+            raise HTTPException(409, "Canlı otomasyon zaten aktif; mevcut oturum uzatılmadı.")
+        if state["policy"].get("interval") != "15m":
+            raise HTTPException(423, "2FA kontrolü sırasında politika değişti; LIVE Auto Trade yalnız 15m ile başlar.")
+        allowed, reason = live_auto_start_gate(request.app, state, request)
+        if not allowed:
+            raise HTTPException(423, reason)
     state["auto"].update({"enabled": True, "session_until": time.time() + LIVE_AUTO_SESSION_SECONDS, "last_error": None, "last_decision": "Bir saatlik gözetimli canlı tarama başlatıldı."})
     state["live_auto_trade"] = True
     state["real_trading_locked"] = False

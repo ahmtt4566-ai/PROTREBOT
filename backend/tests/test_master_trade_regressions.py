@@ -67,7 +67,7 @@ class MasterTradeRegressionTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(v25, "public_status", return_value={}), \
                 patch.object(v25, "persist_state") as persist:
             with self.assertRaises(HTTPException) as rejected:
-                await v25.v25_auto_start(request, v25.Confirmation(confirmation="CANLI OTOMATİK"))
+                await v25.v25_auto_start(request, v25.AutoStartConfirmation(confirmation="CANLI OTOMATİK"))
         self.assertEqual(rejected.exception.status_code, 409)
         self.assertEqual(state["auto"]["session_until"], deadline)
         self.assertEqual(state["auto_authorization"], authorization)

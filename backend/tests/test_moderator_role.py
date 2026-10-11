@@ -174,6 +174,8 @@ def setup():
     application.include_router(approvals_router)
     from app.notification_admin import router as notification_router
     application.include_router(notification_router)
+    from app.binance_manual_admin import router as binance_payments_router
+    application.include_router(binance_payments_router)
     for route in main.app.routes:
         if getattr(route, "path", "").startswith("/api/v22/admin/"):
             if not any(getattr(existing, "path", None) == route.path

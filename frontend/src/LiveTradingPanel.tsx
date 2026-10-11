@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, CheckCircle2, CircleDollarSign, Eye, EyeOff, KeyRound, LockKeyhole, Power, RefreshCw, Send, ShieldAlert, ShieldCheck, TriangleAlert, UnlockKeyhole, Wallet } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleDollarSign, KeyRound, LockKeyhole, Power, RefreshCw, Send, ShieldAlert, ShieldCheck, TriangleAlert, UnlockKeyhole, Wallet } from 'lucide-react'
 import { API_BASE } from './api'
 import { fetchWithTimeout } from '../../master-trade-request'
 import { liveCopy } from '../../ui-copy'
@@ -11,6 +11,12 @@ import {useTradingPreferences} from '../../useTradingPreferences'
 import {preferredRiskMargin} from '../../account-risk-sizing'
 import {useMemberAccess} from '../../premium-access'
 import OriginalV2LiveCard, {type OriginalV2LiveStatus} from './OriginalV2LiveCard'
+
+class LiveAutoMfaRequired extends Error {
+  constructor() {
+    super('LIVE Auto Trade başlamadı; güncel 2FA doğrulaması gerekiyor.')
+  }
+}
 
 type LivePolicy = Record<string, unknown>
 type LiveStatus = {
@@ -140,12 +146,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [credentials, setCredentials] = useState({apiKey: '', secretKey: '', accepted: false})
   const [order, setOrder] = useState<OrderDraft>(initialOrder(symbol))
   const [policyDraft, setPolicyDraft] = useState<LivePolicy | null>(null)
-  const [confirm, setConfirm] = useState<{title: string;message: string;expected?: string;simple?: boolean;action: () => Promise<void>} | null>(null)
+  const [confirm, setConfirm] = useState<{title: string;message: string;expected?: string;simple?: boolean;mfa?: boolean;action: (code?: string) => Promise<void>} | null>(null)
   const [confirmText, setConfirmText] = useState('')
+  const [confirmCode, setConfirmCode] = useState('')
   const [busy, setBusy] = useState('')
   const [armPendingSync, setArmPendingSync] = useState(false)
   const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null)
-  const [showSecret, setShowSecret] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [externalHistory, setExternalHistory] = useState<ExternalHistory | null>(null)
   const [reviewResult, setReviewResult] = useState<{message: string; notional?: number; estimated_stop_loss_usdt?: number} | null>(null)
@@ -189,6 +195,11 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       throw new Error(rateLimitMessage(seconds || null))
     }
     if (!response.ok) {
+      if (payload && typeof payload === 'object' && 'detail' in payload
+          && payload.detail && typeof payload.detail === 'object' && 'code' in payload.detail
+          && payload.detail.code === 'LIVE_AUTO_MFA_REQUIRED') {
+        throw new LiveAutoMfaRequired()
+      }
       const statusLabel = response.status === 423
         ? 'LIVE KİLİTLİ / GATE BLOCKED'
         : response.status === 502
@@ -241,6 +252,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setOrder(initialOrder(symbol))
     setConfirm(null)
     setConfirmText('')
+    setConfirmCode('')
     void refresh()
     const timer = window.setInterval(() => void refresh(), 10000)
     return () => { if (timer !== undefined) window.clearInterval(timer) }
@@ -256,7 +268,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       setNotice({kind: 'ok', text: success})
     }
     catch (error) {
-      await refresh()
+      if (!(error instanceof LiveAutoMfaRequired)) await refresh()
       setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE işlemi tamamlanamadı.'})
     }
     finally { actionInFlight.current = false; setBusy('') }
@@ -346,11 +358,37 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     if (!credentials.apiKey || !credentials.secretKey) throw new Error('LIVE API Key ve Secret Key birlikte girilmelidir.')
     if (!credentials.accepted) throw new Error('Secret yalnızca şifreli sunucu kasasında tutulur onayını verin.')
     await call(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey, confirmation: 'CANLI KASAYA KAYDET'})})
+    setCredentials({apiKey: '', secretKey: '', accepted: false})
     await refresh()
     await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ'})})
     await refresh()
-    setCredentials({apiKey: '', secretKey: '', accepted: false})
   }, 'Binance Connected; hesap salt-okunur bağlandı ve gerçek emir kilidi korunuyor.')
+
+  const deactivateCredentials = () => {
+    setConfirm({
+      title: 'LIVE bağlantısını kapat', expected: 'BAĞLANTIYI KAPAT',
+      message: 'Yeni emir yetkileri ve otomasyon sıfırlanır. Açık pozisyonlar kapatılmaz; korumaları Binance üzerinden kontrol edin.',
+      action: async () => {
+        await call(CONNECTIONS, '/deactivate', {method: 'POST', body: JSON.stringify({mode:'LIVE', confirmation:'BAĞLANTIYI KAPAT'})})
+      },
+    })
+    setConfirmText('')
+    setConfirmCode('')
+  }
+
+  const deleteCredentials = () => {
+    setConfirm({
+      title: 'LIVE anahtarını sil', expected: 'ANAHTARI KALICI SİL',
+      message: 'Önce bağlantı kapatılmalıdır. Doğrulanmış açık pozisyon varsa sunucu silmeyi reddeder. Şifreli anahtar bu oturumdan kalıcı silinir; gerçek emir gönderilmez.',
+      action: async () => {
+        await call(CONNECTIONS, '/credentials', {method:'DELETE', body:JSON.stringify({mode:'LIVE', confirmation:'ANAHTARI KALICI SİL'})})
+        setCredentials({apiKey:'', secretKey:'', accepted:false})
+        setTestResult(null)
+      },
+    })
+    setConfirmText('')
+    setConfirmCode('')
+  }
 
   const armLive = () => {
     if (freeTrial) {setNotice({kind:'error',text:'LIVE işlem MASTER MODE ile açılır'});return}
@@ -403,12 +441,30 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       setNotice({kind: 'error', text: autoTimeframeMessage})
       return
     }
-    setConfirm({title: 'LIVE AUTO-TRADE onayı', message: 'REAL MONEY WILL BE USED. Otomatik işlemler yalnız mevcut V25 live safety chain üzerinden ilerler.', expected: 'CANLI OTOMATİK', action: async () => { await call(V25, '/auto/start', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI OTOMATİK'})}) }})
+    const confirmation = {
+      title: 'LIVE AUTO-TRADE onayı', message: 'REAL MONEY WILL BE USED. Otomatik işlemler yalnız mevcut V25 live safety chain üzerinden ilerler.',
+      expected: 'CANLI OTOMATİK',
+      action: async (code?: string) => {
+        try {
+          await call(V25, '/auto/start', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI OTOMATİK', ...(code ? {totp_code: code} : {})})})
+        } catch (error: unknown) {
+          if (error instanceof LiveAutoMfaRequired) {
+            setConfirm({...confirmation, mfa: true, message: 'Hesabınızda 2FA açık. LIVE Auto Trade başlamadan önce güncel 2FA kodunu girin.'})
+            setConfirmText('')
+            setConfirmCode('')
+            throw error
+          }
+          throw error
+        }
+      },
+    }
+    setConfirm(confirmation)
     setConfirmText('')
+    setConfirmCode('')
   }
 
   const emergencyStop = () => {
-    setConfirm({title: 'EMERGENCY STOP', message: 'Yeni LIVE submissions bloklanacak, AUTO-TRADE kapanacak ve recovery gerekecek. Mevcut protection yönetimi merkezi backend kurallarına bırakılır.', expected: 'CANLI ACİL DURDUR', action: async () => { await call(V25, '/emergency', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI ACİL DURDUR', close_tracked_positions: true})}) }})
+    setConfirm({title: 'EMERGENCY STOP', message: 'Yeni LIVE işlemler engellenir ve otomasyon durur. Bota ait giriş ve koruma emirleri iptal edilir; doğrulanmış açık bot pozisyonları reduce-only emirle kapatılır. Yalnız yeni girişleri durdurmak için Auto Trade’i veya Original V2’yi durdurun.', expected: 'CANLI ACİL DURDUR', action: async () => { await call(V25, '/emergency', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI ACİL DURDUR', close_tracked_positions: true})}) }})
     setConfirmText('')
   }
 
@@ -513,10 +569,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
 
   const confirmAction = () => {
-    if (actionInFlight.current || !confirm || (!confirm.simple && confirmText.trim().toUpperCase() !== confirm.expected)) return
+    if (actionInFlight.current || !confirm || (!confirm.simple && confirmText.trim().toUpperCase() !== confirm.expected)
+        || (confirm.mfa && confirmCode.length < 6)) return
     const action = confirm.action
-    setConfirm(null); setConfirmText('')
-    void run('confirmed', action, 'LIVE backend safety zinciri işlemi tamamlandı.')
+    const code = confirmCode
+    setConfirm(null); setConfirmText(''); setConfirmCode('')
+    void run('confirmed', () => action(code), 'LIVE backend safety zinciri işlemi tamamlandı.')
   }
 
   const stateRows = [
@@ -567,11 +625,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   ] as const
   const closeCredentialModal = () => {
     setCredentialModalOpen(false)
-    setShowSecret(false)
     setCredentials({apiKey: '', secretKey: '', accepted: false})
   }
   const confirmationModal = activeConfirm && typeof document !== 'undefined' ? createPortal(
-    <div className="liveConfirmBackdrop"><section className="liveConfirm" role="dialog" aria-modal="true"><h2>{activeConfirm.title}</h2><p>{activeConfirm.message}</p>{!activeConfirm.simple && <label>TYPE TO CONFIRM<input autoFocus value={confirmText} onChange={event => setConfirmText(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') confirmAction()}} placeholder={activeConfirm.expected}/></label>}<div><button type="button" onClick={() => {setConfirm(null);setConfirmText('')}}>{activeConfirm.simple ? 'HAYIR' : 'CANCEL'}</button><button type="button" disabled={!activeConfirm.simple && confirmText.trim().toUpperCase() !== activeConfirm.expected} onClick={confirmAction}>{activeConfirm.simple ? 'EVET' : 'CONFIRM'}</button></div></section></div>,
+    <div className="liveConfirmBackdrop"><section className="liveConfirm" role="dialog" aria-modal="true"><h2>{activeConfirm.title}</h2><p>{activeConfirm.message}</p>{!activeConfirm.simple && <label>TYPE TO CONFIRM<input autoFocus value={confirmText} onChange={event => setConfirmText(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') confirmAction()}} placeholder={activeConfirm.expected}/></label>}    {activeConfirm.mfa && <label>2FA kodu<input data-private="true" type="password" autoComplete="one-time-code" maxLength={32} value={confirmCode} onChange={event => setConfirmCode(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') confirmAction()}}/></label>}<div><button type="button" onClick={() => {setConfirm(null);setConfirmText('');setConfirmCode('')}}>{activeConfirm.simple ? 'HAYIR' : 'CANCEL'}</button><button type="button" disabled={(!activeConfirm.simple && confirmText.trim().toUpperCase() !== activeConfirm.expected) || (activeConfirm.mfa && confirmCode.length < 6)} onClick={confirmAction}>{activeConfirm.simple ? 'EVET' : 'CONFIRM'}</button></div></section></div>,
     document.body,
   ) : null
   const credentialModal = credentialModalOpen && typeof document !== 'undefined' ? createPortal(
@@ -580,7 +637,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
         <header><div><small>{liveCopy.configureCredentials}</small><h2 id="live-credentials-title">{liveCopy.credentialsTitle}</h2></div><button type="button" onClick={closeCredentialModal} aria-label={liveCopy.close}>×</button></header>
         <p>{liveCopy.credentialsHint} Gerçek emir gönderilmez.</p>
         <label>{liveCopy.apiKey}<input data-private="true" type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})}/></label>
-        <label>{liveCopy.secretKey}<input data-private="true" type={showSecret ? 'text' : 'password'} autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})}/></label>
+        <label>{liveCopy.secretKey}<input data-private="true" type="password" autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})}/></label>
         <label className="liveCredentialCheck"><input type="checkbox" checked={credentials.accepted} onChange={event => setCredentials({...credentials, accepted: event.target.checked})}/><span>Secret yalnızca şifreli sunucu kasasında tutulur.</span></label>
         <div className="liveCredentialActions"><button type="button" onClick={testConnection} disabled={Boolean(busy)}>{busy === 'test' ? 'TEST EDİLİYOR...' : liveCopy.testConnection}</button><button type="button" className="primary" onClick={connectAndSave} disabled={Boolean(busy)}>{busy === 'connect-save' ? 'BAĞLANIYOR...' : liveCopy.saveAndConnect}</button></div>
         <small className="liveCredentialNote">Test ve kaydetme bağlantı doğrulaması yapar; bu işlemler emir oluşturmaz.</small>
@@ -673,7 +730,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       <div className="masterTradeLiveAssistantCopy"><Power aria-hidden="true"/><div><span className="masterTradeLiveKicker">NEXT BEST ACTION</span><strong>{status?.live_auto_trade ? 'Auto Trade is actively monitoring approved markets.' : liveState === 'BLOCKED' ? 'LIVE is blocked until the backend recovery state is clear.' : !configured || !connected ? 'Connect and verify your LIVE API to continue.' : !readinessReady ? 'Complete the required safety checks before enabling Auto Trade.' : liveArmed ? 'LIVE is armed. Start supervised Auto Trade to continue.' : 'Everything is ready. Arm LIVE Auto Trade to continue.'}</strong><small>{status?.live_auto_trade ? 'STOP remains available at any time.' : blocker}</small></div></div>
       {timeframeWarning}
       {status?.reconciliation_diagnostic && <div className="masterTradeLiveDiagnostic" role="alert"><span className="masterTradeLiveKicker">RECONCILIATION ERROR</span><small>Stage: {text(status.reconciliation_diagnostic.reconciliation_stage)}</small><small>Error: {text(status.reconciliation_diagnostic.exception_message)}</small><small>Source: {text(status.reconciliation_diagnostic.source)}:{text(status.reconciliation_diagnostic.line)}</small></div>}
-      <div className="masterTradeLiveAssistantActions"><button type="button" className="masterTradeLivePrimary" onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{!status?.live_auto_trade && !autoReady ? <LockKeyhole aria-hidden="true"/> : <Power aria-hidden="true"/>}{status?.live_auto_trade ? ' STOP AUTO TRADE' : ' START LIVE AUTO TRADE'}</button><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW REQUIREMENTS</button></div>
+      <div className="masterTradeLiveAssistantActions"><button type="button" className="masterTradeLivePrimary" onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{!status?.live_auto_trade && !autoReady ? <LockKeyhole aria-hidden="true"/> : <Power aria-hidden="true"/>}{status?.live_auto_trade ? ' STOP AUTO TRADE' : ' START LIVE AUTO TRADE'}</button><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW REQUIREMENTS</button><button type="button" className="liveEmergencyButton" onClick={emergencyStop} disabled={Boolean(busy)} title="Bot pozisyonlarını kapatır; yalnız giriş durdurma değildir."><ShieldAlert aria-hidden="true"/> EMERGENCY STOP</button>{emergency && <button type="button" className="masterTradeLiveTextButton" onClick={clearEmergency} disabled={Boolean(busy)}>RECOVERY SONRASI TEMİZLE</button>}</div>
     </div>
 
     <div className="masterTradeLiveFlow" aria-label="LIVE Auto Trade progression"><span className={readinessReady ? 'complete' : 'current'}>1 <b>{readinessReady ? 'READY' : 'LOCKED'}</b></span><i /><span className={!liveArmed && readinessReady ? 'current' : liveArmed ? 'complete' : ''}>2 <b>ARM REQUIRED</b></span><i /><span className={liveArmed && !status?.live_auto_trade ? 'current' : status?.live_auto_trade ? 'complete' : ''}>3 <b>ARMED</b></span><i /><span className={status?.live_auto_trade ? 'current running' : ''}>4 <b>RUNNING</b></span></div>
@@ -772,7 +829,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
         <div className="masterTradeLiveCredentialLabel"><span className="masterTradeLiveKicker">CREDENTIALS</span><small>Use a key with Futures permissions only.</small></div>
         <div className="masterTradeLiveApiGrid">
           <label>API KEY<input data-private="true" type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})} placeholder="Paste API key" /></label>
-          <label>SECRET KEY<div className="masterTradeLiveSecretField"><input data-private="true" type={showSecret ? 'text' : 'password'} autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})} placeholder="Paste secret key" /><button type="button" aria-label={showSecret ? 'Hide secret key' : 'Show secret key'} onClick={() => setShowSecret(value => !value)}>{showSecret ? <EyeOff/> : <Eye/>}</button></div></label>
+          <label>SECRET KEY<div className="masterTradeLiveSecretField"><input data-private="true" type="password" autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})} placeholder="Paste secret key" /></div></label>
         </div>
         <label className="masterTradeLiveCheck"><input type="checkbox" checked={credentials.accepted} onChange={event => setCredentials({...credentials, accepted: event.target.checked})}/><span>I understand that API credentials are stored securely.</span></label>
       </div>
@@ -780,7 +837,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       <div className="masterTradeLiveConnectionActionBar">
         <div className="masterTradeLiveActionMeta"><span>ENVIRONMENT</span><b>LIVE</b><small>Binance Futures Mainnet</small></div>
         <div className="masterTradeLiveActionMeta"><span>PERMISSIONS</span><b>READ · TRADE</b><small>Withdrawals unsupported</small></div>
-        <div className="masterTradeLiveApiActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" className="masterTradeLiveSaveButton" onClick={connectAndSave} disabled={Boolean(busy)}>{busy === 'connect-save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} CONNECT ACCOUNT</button></div>
+        <div className="masterTradeLiveApiActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" className="masterTradeLiveSaveButton" onClick={connectAndSave} disabled={Boolean(busy)}>{busy === 'connect-save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} CONNECT ACCOUNT</button><button type="button" onClick={deactivateCredentials} disabled={Boolean(busy) || !liveConnection?.active}>Bağlantıyı kapat</button><button type="button" onClick={deleteCredentials} disabled={Boolean(busy) || !configured || liveConnection?.active !== false}>Anahtarı sil</button></div>
       </div>
 
       <div className="masterTradeLiveSecurityStrip" aria-label="Connection security status"><span><CheckCircle2/> Credentials encrypted</span><span><CheckCircle2/> Server-side validation</span><span><CheckCircle2/> API secret never displayed</span></div>

@@ -542,11 +542,25 @@ def _signed_query(secret_key: str, params: dict[str, Any]) -> str:
 
 
 def _safe_exchange_message(payload: Any, api_key: str) -> str:
-    if isinstance(payload, dict):
-        raw = str(payload.get("msg") or "Binance bağlantıyı reddetti.")
-    else:
-        raw = "Binance bağlantıyı reddetti."
-    return raw.replace(api_key, "[gizli]")[:240]
+    code = payload.get("code") if isinstance(payload, dict) else None
+    return exchange_rejection_message(code)
+
+
+def exchange_rejection_message(code: Any) -> str:
+    messages = {
+        -2014: "Binance API anahtarı geçersiz; API Key ve Secret Key bilgilerini kontrol edin.",
+        -2015: "Binance API anahtarı, IP izni veya Futures yetkisi doğrulanamadı. Anahtar ve izinleri kontrol edin.",
+        -1022: "Binance imza doğrulaması başarısız; API Key ve Secret Key eşleşmesini kontrol edin.",
+        -1021: "Binance saat doğrulaması başarısız; sunucu saati eşitlendikten sonra tekrar deneyin.",
+        -2019: "Binance kullanılabilir bakiyesi veya teminatı yetersiz; emir gönderilmedi.",
+        -2022: "Binance reduce-only emrini reddetti; pozisyon miktarını ve açık emirleri kontrol edin.",
+        -1111: "Binance miktar veya fiyat hassasiyetini reddetti; borsa adım kuralları kontrol edilmeli.",
+        -1013: "Binance minimum miktar, tutar veya fiyat kuralı karşılanmadı.",
+        -2011: "Binance emir kimliğini doğrulayamadı; emir ve pozisyon durumu uzlaştırılmalı.",
+        -2013: "Binance emir kaydını bulamadı; emir ve pozisyon durumu uzlaştırılmalı.",
+    }
+    return messages.get(code if isinstance(code, int) else None,
+                        "Binance isteği reddetti; bağlantı, yetki ve borsa kurallarını kontrol edin.")
 
 
 async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: str, secret_key: str, timestamp: int) -> Any:
@@ -707,6 +721,8 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
             raise VaultError("Binance para çekme izni doğrulanamadı; canlı anahtar reddedildi.")
         if restrictions["enableWithdrawals"]:
             raise VaultError("Para çekme izni açık Binance anahtarı kabul edilmez.")
+        if restrictions.get("enableFutures") is False:
+            raise VaultError("Binance Futures yetkisi kapalı; API anahtarında Futures işlem iznini açın.")
         api_permissions = {"withdrawal_check": "VERIFIED", "enableWithdrawals": False}
     else:
         # Futures Testnet has no withdrawals and does not implement the SAPI check.
@@ -717,6 +733,8 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
     logger.info("LIVE_CONNECTION_TEST ACCOUNT_VERIFY_DONE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     if not isinstance(account, dict):
         raise VaultError("Binance hesap yanıtı geçersiz.")
+    if normalized == "LIVE" and account.get("canTrade") is False:
+        raise VaultError("Binance hesap veya API anahtarı işlem yetkisine sahip değil; Futures izinlerini kontrol edin.")
     positions = account.get("positions") if isinstance(account.get("positions"), list) else []
     active_positions = sum(
         1 for row in positions
@@ -803,6 +821,9 @@ def public_status(application: Any) -> dict[str, Any]:
 
 
 def _lock_live_controller(state: dict[str, Any]) -> None:
+    from . import original_v2_live
+    if original_v2_live.running(state):
+        original_v2_live.pause(state, "LIVE API anahtarı değiştirildi veya bağlantı kapatıldı")
     state["armed_until"] = 0.0
     state["connected"] = False
     state["auto"]["enabled"] = False

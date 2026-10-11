@@ -52,19 +52,24 @@ def test_live_guard_outcome_is_identical_for_customer_and_moderator(method, paid
         request = SimpleNamespace(
             method=method, headers={"authorization": "Bearer offline-session"},
             state=SimpleNamespace(member=user, web_owner_authenticated=False),
+            url=SimpleNamespace(path="/api/v25/auto/start"),
             app=SimpleNamespace(state=SimpleNamespace(
                 v25_execution=state, v22_commercial={"state": {"subscriptions": [], "licenses": []}},
             )),
         )
         before = copy.deepcopy(state)
         with patch.object(live, "authenticated_user", return_value=user), \
-                patch.object(live, "subscription_for_user", return_value={"master_trade_access": paid}):
+                patch.object(live, "subscription_for_request", return_value={
+                    "master_trade_access": paid, "plan": "MASTER_MODE" if paid else None,
+                    "status": "ACTIVE" if paid else None,
+                }) as subscription:
             try:
                 result = live.execution_owner(request)
                 outcome = (200, result["id"])
             except HTTPException as exc:
                 outcome = (exc.status_code, exc.detail)
         assert outcome[0] == status
+        subscription.assert_called_once_with(request, user)
         if status != 200:
             assert state == before
         outcomes.append(outcome)

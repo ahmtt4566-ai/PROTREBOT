@@ -10,7 +10,7 @@ from app.moderator_access import PERMISSIONS, PermissionGrant
 
 @pytest.mark.parametrize("permission", [
     "customers.view", "subscriptions.view", "payments.view", "support.view",
-    "support.manage", "events.view", "approvals.create",
+    "support.manage", "events.view", "approvals.create", "campaigns.manage",
 ])
 def test_supported_permission(permission):
     assert PermissionGrant(permission=permission).permission == permission
@@ -32,7 +32,16 @@ def test_numbered_migration_matches_allowlist_and_preserves_existing_stores():
     sql = migration.read_text(encoding="utf-8")
     check = re.search(r"CHECK \(permission IN \((.*?)\)\)", sql, re.S)
     assert check is not None
-    assert tuple(re.findall(r"'([^']+)'", check.group(1))) == PERMISSIONS
+    initial_permissions = tuple(re.findall(r"'([^']+)'", check.group(1)))
+    extension = (migration.parent / "20261010_013_campaign_permissions_audit.sql").read_text(encoding="utf-8")
+    extended_check = re.search(r"CHECK \(permission IN \((.*?)\)\)", extension, re.S)
+    assert extended_check is not None
+    final_permissions = tuple(re.findall(r"'([^']+)'", extended_check.group(1)))
+    assert initial_permissions == tuple(permission for permission in PERMISSIONS if permission != "campaigns.manage")
+    assert final_permissions == PERMISSIONS
+    assert set(initial_permissions) < set(final_permissions)
+    assert "ALTER TABLE moderator_permissions DROP CONSTRAINT moderator_permissions_permission_check" in extension
+    assert "ALTER TABLE moderator_permissions ADD CONSTRAINT moderator_permissions_permission_check" in extension
     assert "PRIMARY KEY (user_id, permission)" in sql
     assert "REFERENCES commercial_auth_users(user_id) ON DELETE CASCADE" in sql
     assert "granted_by TEXT NOT NULL" in sql

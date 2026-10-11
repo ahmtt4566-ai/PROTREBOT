@@ -94,6 +94,12 @@ def pause(state: dict[str, Any], reason: str) -> None:
 def merge_bell(request: Request, items: list[dict[str, Any]], *, read_id: str | None = None,
                read_all: bool = False, limit: int = 100) -> list[dict[str, Any]]:
     from . import v25_execution as live
+    from .live_notifications import merge_bell as merge_live_bell
+    if read_id and read_id.startswith("live:"):
+        items = merge_live_bell(request, items, read_id=read_id, limit=limit)
+        read_id = None
+    else:
+        items = merge_live_bell(request, items, read_all=read_all, limit=limit)
     application = getattr(request, "app", None)
     state = getattr(getattr(application, "state", None), "v25_execution", {})
     config = settings(state)
@@ -270,10 +276,12 @@ async def install_targets(client: Any, state: dict[str, Any], plan: dict[str, An
     if not plan.get("original_tp_attempted"):
         plan["initial_quantity"] = live.decimal_text(quantity)
     partial = live.floor_step(Decimal(plan["initial_quantity"]) * Decimal("0.60"), Decimal(plan["step"]))
-    if partial != Decimal(plan["initial_quantity"]) * Decimal("0.60"):
+    if not plan.get("original_tp_attempted") and partial != Decimal(plan["initial_quantity"]) * Decimal("0.60"):
         pause(state, f"{plan['symbol']} doğrulanan dolum tam %60 TP1 bölünmesine uygun değil")
         raise live.LiveExchangeError("Original V2 TP1 tam %60 miktarı kurulamadı; pozisyon kapatılmadı.", http_status=423)
-    if partial < Decimal(plan["min_qty"]) or partial * Decimal(str(position["mark_price"])) < Decimal(plan["min_notional"]):
+    if not plan.get("original_tp_attempted") and (
+        partial < Decimal(plan["min_qty"]) or partial * Decimal(str(position["mark_price"])) < Decimal(plan["min_notional"])
+    ):
         pause(state, f"{plan['symbol']} TP1 %60 borsa minimumunu karşılamıyor")
         raise live.LiveExchangeError("Original V2 TP1 miktarı kurulamadı; pozisyon kapatılmadı.", http_status=423)
     common = {"algoType": "CONDITIONAL", "symbol": plan["symbol"],
@@ -324,8 +332,35 @@ async def verify_targets(client: Any, state: dict[str, Any], plan: dict[str, Any
         raise live.LiveExchangeError("Original V2 ilk stop değiştirilemez.", unknown_execution=True)
     if not plan.get("original_tp_attempted"):
         return
+    normalized = [{
+        **row,
+        "algo_id": row.get("algo_id", row.get("algoId")),
+        "client_algo_id": row.get("client_algo_id", row.get("clientAlgoId")),
+    } for row in rows]
+    for target, identity, quantity in [
+        (plan["targets"][2], plan.get("original_tp3_algo_id"), None),
+        (plan["targets"][0], plan.get("tp12_algo_id"),
+         live.decimal_text(live.floor_step(Decimal(plan["initial_quantity"]) * Decimal("0.60"), Decimal(plan["step"])))),
+    ]:
+        if not any(row.get("algo_id") == identity for row in normalized):
+            continue
+        params = {
+            "symbol": plan["symbol"], "side": "SELL" if plan["direction"] == "LONG" else "BUY",
+            "type": "TAKE_PROFIT_MARKET", "triggerPrice": target, "workingType": "MARK_PRICE",
+            "clientAlgoId": live.client_id_for("TP3" if quantity is None else "TP12", plan["intent_id"]),
+            **({"closePosition": "true"} if quantity is None else {"quantity": quantity, "reduceOnly": "true"}),
+        }
+        try:
+            match = live.existing_entry_protection_algo(params, normalized)
+            if not match or int(match["algoId"]) != identity:
+                raise live.LiveExchangeError("Original V2 TP kimliği eşleşmiyor.", unknown_execution=True)
+        except live.LiveExchangeError:
+            plan["tp_protection_state"] = "UNPROTECTED"
+            pause(state, f"{plan['symbol']} TP fiyatı, miktarı veya kimliği değişti")
+            raise
     ids = {int(row.get("algo_id", row.get("algoId", 0)) or 0) for row in rows}
     if plan.get("original_tp3_algo_id") not in ids:
+        plan["tp_protection_state"] = "UNPROTECTED"
         pause(state, f"{plan['symbol']} TP3 borsada yok")
     if plan.get("tp12_algo_id") in ids or plan.get("original_tp1_complete"):
         return
@@ -430,7 +465,9 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
             await daily_guard(client, state, await live.account_snapshot(client))
             if config.get("paused"):
                 raise HTTPException(423, "Original V2 başlatma sırasında durduruldu.")
-            await live.v25_auto_start(request, live.Confirmation(confirmation="CANLI OTOMATİK"))
+            await live._start_live_auto_session(
+                request, live.Confirmation(confirmation="CANLI OTOMATİK"), mfa_verified=True,
+            )
             config.update(enabled=True, paused=False, pause_reason=None)
             if await live.persist_state_awaited(state) not in {"INSERTED", "UPDATED"}:
                 raise HTTPException(503, "Original V2 kalıcı durum kaydı doğrulanamadı.")
