@@ -10,10 +10,21 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from . import binance_manual_payments as payments
 from .audit_log import AuditActor, write_audit
-from .v22_commercial import authenticated_user_async
+from .member_entitlements import enabled
+from .v22_commercial import authenticated_user, authenticated_user_async
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v22/admin/binance-payments", tags=["OWNER Binance payments"])
+
+
+class DisabledPayments(BaseModel):
+    enabled: Literal[False] = False
+    message: Literal["Binance ödemeleri şu an kapalı"] = "Binance ödemeleri şu an kapalı"
+
+
+def disabled_payments(request: Request) -> DisabledPayments | None:
+    authenticated_user(request, owner=True)
+    return None if enabled() else DisabledPayments()
 
 
 class ApprovePayment(BaseModel):
@@ -137,6 +148,9 @@ async def decision(conn, actor: AuditActor, request_id: str, status: Literal["ap
 async def list_payments(request: Request, status: payments.Status | None = None,
                         limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0),
                         request_id: str | None = Query(None, pattern=r"^[a-f0-9]{32}$")):
+    disabled = disabled_payments(request)
+    if disabled is not None:
+        return disabled
     async with owner_connection(request) as (conn, _):
         await payments.expire_due(conn)
         rows = await conn.fetch(
@@ -163,8 +177,11 @@ async def list_payments(request: Request, status: payments.Status | None = None,
                 "total": total, "limit": limit, "offset": offset, "summary": dict(summary)}
 
 
-@router.post("/{request_id}/approve", response_model=payments.PaymentRequest)
+@router.post("/{request_id}/approve", response_model=payments.PaymentRequest | DisabledPayments)
 async def approve(body: ApprovePayment, request: Request, request_id: str = Path(pattern=r"^[a-f0-9]{32}$")):
+    disabled = disabled_payments(request)
+    if disabled is not None:
+        return disabled
     if not body.checked_in_binance:
         raise HTTPException(422, "Binance hesabınızda ödemeyi kontrol ettiğinizi onaylayın.")
     async with owner_connection(request) as (conn, actor):
@@ -174,8 +191,11 @@ async def approve(body: ApprovePayment, request: Request, request_id: str = Path
     return result
 
 
-@router.post("/{request_id}/reject", response_model=payments.PaymentRequest)
+@router.post("/{request_id}/reject", response_model=payments.PaymentRequest | DisabledPayments)
 async def reject(body: RejectPayment, request: Request, request_id: str = Path(pattern=r"^[a-f0-9]{32}$")):
+    disabled = disabled_payments(request)
+    if disabled is not None:
+        return disabled
     async with owner_connection(request) as (conn, actor):
         result = await decision(conn, actor, request_id, "rejected", reason=body.reason)
     from .binance_notifications import wake

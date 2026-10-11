@@ -326,6 +326,53 @@ def api(setup):
     return client, conn, row
 
 
+@pytest.mark.parametrize("method,suffix,body", [
+    ("GET", "", None),
+    ("POST", "/" + "a" * 32 + "/approve", {"checked_in_binance": True}),
+    ("POST", "/" + "a" * 32 + "/reject", {"reason": "Bulunamadı"}),
+])
+@pytest.mark.parametrize("flag", [None, "false"])
+def test_disabled_owner_payment_endpoints_never_acquire_database(setup, monkeypatch, method, suffix, body, flag):
+    client, pool = setup
+    client.app.include_router(admin.router)
+    if flag is None:
+        monkeypatch.delenv("BINANCE_MANUAL_ACCESS_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("BINANCE_MANUAL_ACCESS_ENABLED", flag)
+    monkeypatch.setenv("FREE_TRIAL_ENABLED", "false")
+
+    @asynccontextmanager
+    async def forbidden_acquire():
+        raise AssertionError("Disabled payment handler must never acquire the database")
+        yield
+
+    pool.acquire = forbidden_acquire
+    response = client.request(method, "/api/v22/admin/binance-payments" + suffix,
+                              headers=headers("owner", "OWNER"), json=body)
+    assert response.status_code == 200
+    assert response.json() == {"enabled": False, "message": "Binance ödemeleri şu an kapalı"}
+    assert not any("binance_" in sql or "member_free_trials" in sql for sql in pool.queries)
+    assert pool.audits == []
+
+
+@pytest.mark.parametrize("uid,role,status", [
+    ("customer", "CUSTOMER", 403), ("moderator", "MODERATOR", 403), (None, None, 401),
+])
+@pytest.mark.parametrize("method,suffix,body", [
+    ("GET", "", None),
+    ("POST", "/" + "a" * 32 + "/approve", {"checked_in_binance": True}),
+    ("POST", "/" + "a" * 32 + "/reject", {"reason": "Bulunamadı"}),
+])
+def test_disabled_payment_endpoints_keep_owner_guard(setup, monkeypatch, uid, role, status, method, suffix, body):
+    client, pool = setup
+    client.app.include_router(admin.router)
+    monkeypatch.setenv("BINANCE_MANUAL_ACCESS_ENABLED", "false")
+    response = client.request(method, "/api/v22/admin/binance-payments" + suffix,
+                              headers=headers(uid, role) if uid else {}, json=body)
+    assert response.status_code == status
+    assert not any("binance_" in sql for sql in pool.queries)
+
+
 @pytest.mark.parametrize("method,path,body", [
     ("GET", "", None), ("POST", "/approve", {"checked_in_binance": True}), ("POST", "/reject", {"reason": "Bulunamadı"}),
 ])

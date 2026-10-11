@@ -160,6 +160,12 @@ gates or the default-off Original Demo flags.
 
 ## Manual Binance payment (backend approval; access disabled by default)
 
+With `BINANCE_MANUAL_ACCESS_ENABLED=false`, the OWNER list and approve/reject
+APIs return HTTP 200 with `{"enabled":false,"message":"Binance ödemeleri şu an kapalı"}`.
+The admin panel shows a neutral disabled card. These handlers acquire no payment
+database connection and issue no payment queries. Standard canonical authentication
+and OWNER checks remain required; their existing authentication queries are unchanged.
+
 ### Payment-free trial (prepared migration; off by default)
 
 `FREE_TRIAL_ENABLED=false` is the safe default until separately approved

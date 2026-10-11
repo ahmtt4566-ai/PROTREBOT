@@ -8,12 +8,23 @@ import './admin-binance-payments.css'
 type Status = Exclude<BinancePayment['status'], 'created'>
 type Item = BinancePayment & {user_id:string; email:string|null; display_name:string|null; created_at:string; decision_note:string|null}
 type PaymentPage = {items:Item[]; total:number; limit:number; offset:number; summary:{pending:number; approved_today:number; rejected:number}}
+type DisabledPayments = {enabled:false; message:string}
+function parseDisabled(value:unknown):DisabledPayments|null {
+  if (!isRecord(value) || value.enabled !== false) return null
+  if (typeof value.message !== 'string' || !value.message.trim()) throw new Error('Binance ödeme durumu doğrulanamadı.')
+  return {enabled:false,message:value.message}
+}
+function parseDecision(value:unknown):BinancePayment|DisabledPayments {
+  return parseDisabled(value) ?? parseBinancePayment(value)
+}
 const tabs: {status:Status; label:string}[] = [
   {status:'pending',label:'Bekleyen'}, {status:'approved',label:'Onaylanan'},
   {status:'rejected',label:'Reddedilen'}, {status:'expired',label:'Süresi dolan'},
 ]
 const count = (value:unknown):value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-function parsePage(value:unknown):PaymentPage {
+function parsePage(value:unknown):PaymentPage|DisabledPayments {
+  const disabled = parseDisabled(value)
+  if (disabled) return disabled
   if (!isRecord(value) || !Array.isArray(value.items) || !count(value.total) || !count(value.limit)
     || value.limit === 0 || !count(value.offset) || !isRecord(value.summary)
     || !count(value.summary.pending) || !count(value.summary.approved_today) || !count(value.summary.rejected)) {
@@ -55,6 +66,7 @@ export default function AdminBinancePayments() {
     return {status:'pending',offset:0,version:0,paymentId:/^[a-f0-9]{32}$/.test(id) ? id : ''}
   })
   const [page,setPage] = useState<PaymentPage|null>(null)
+  const [disabled,setDisabled] = useState<DisabledPayments|null>(null)
   const [loading,setLoading] = useState(true)
   const [busy,setBusy] = useState('')
   const [error,setError] = useState('')
@@ -77,8 +89,12 @@ export default function AdminBinancePayments() {
     else params.set('status',query.status)
     void request(`?${params}`,parsePage,controller.signal)
       .then(value => {
+        if ('enabled' in value) {
+          if (!controller.signal.aborted) {setDisabled(value);setPage(null)}
+          return
+        }
         if (value.items.some(row => query.paymentId ? row.id !== query.paymentId : row.status !== query.status)) throw new Error('Ödeme listesi durum filtresi doğrulanamadı.')
-        if (!controller.signal.aborted) setPage(value)
+        if (!controller.signal.aborted) {setDisabled(null);setPage(value)}
       })
       .catch(failure => {if (!controller.signal.aborted) {setError(message(failure));setRefreshFailed(true)}})
       .finally(() => {if (!controller.signal.aborted) setLoading(false)})
@@ -98,9 +114,13 @@ export default function AdminBinancePayments() {
     const controller = new AbortController()
     operation.current = controller;inFlight.current = true;setBusy(row.id);setError('');setRefreshFailed(false);setNotice('')
     try {
-      const result = await request(`/${row.id}/${action}`,parseBinancePayment,controller.signal,{
+      const result = await request(`/${row.id}/${action}`,parseDecision,controller.signal,{
         method:'POST',body:JSON.stringify(action === 'approve' ? {checked_in_binance:true} : {reason:reasons[row.id].trim()}),
       })
+      if ('enabled' in result) {
+        if (mounted.current) {setDisabled(result);setPage(null)}
+        return
+      }
       if (result.id !== row.id || result.status !== (action === 'approve' ? 'approved' : 'rejected')) throw new Error('Ödeme kararı doğrulanamadı. Listeyi yenileyin.')
       if (mounted.current) {
         setPage(value => value ? {...value,items:value.items.filter(item => item.id !== row.id)} : value)
@@ -115,6 +135,12 @@ export default function AdminBinancePayments() {
     try {await navigator.clipboard.writeText(text);if (mounted.current) setNotice('Kopyalandı.')}
     catch {if (mounted.current) setError('Kopyalanamadı; metni seçip elle kopyalayın.')}
   }
+  if (disabled) return <section className="adminBinance" aria-label="Binance ödemeleri">
+    <header className="adminBinanceIntro"><h2>Binance ödemeleri</h2>
+      <button type="button" onClick={refresh} disabled={loading}><RefreshCw size={16}/>Yenile</button></header>
+    <div className="adminBinanceDisabled" role="status"><h3>Kapalı</h3><p>{disabled.message}</p></div>
+    {error && <p className="adminBinanceError" role="alert">{error}</p>}
+  </section>
   return <section className="adminBinance" aria-label="Binance ödemeleri">
     <header className="adminBinanceIntro"><div><h2>Binance ödemeleri</h2><p>Ödemeyi Binance hesabınızda doğrulayın. Kararlar yalnız OWNER tarafından kaydedilir.</p></div>
       <button type="button" onClick={refresh} disabled={loading || Boolean(busy)}><RefreshCw size={16}/>Yenile</button></header>

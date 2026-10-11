@@ -12,6 +12,7 @@
 .adminBinanceTabs button { background: transparent; color: var(--admin-muted); }
 .adminBinanceTabs button[aria-selected=true] { background: #283b55; color: #c7d9ff; }
 .adminBinanceCards { display: grid; gap: 18px; }
+.adminBinanceDisabled { background: var(--admin-elevated,#13222b); border-radius: 16px; padding: clamp(18px,3vw,28px); margin-top: 24px; }
 .adminBinanceCards article { min-width: 0; background: var(--admin-elevated,#13222b); border-radius: 16px; padding: clamp(18px,3vw,28px); }
 .adminBinanceCards article:focus { outline: 2px solid #a6bfff; outline-offset: 4px; }
 .adminBinanceCards article > header > div { min-width: 0; overflow-wrap: anywhere; }

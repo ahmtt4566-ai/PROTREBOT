@@ -9,7 +9,7 @@ const pending = {
   expires_at:'2026-10-12T10:00:00Z',decision_note:null as string|null,
 }
 const cors = {'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS'}
-async function setup(page:Page,{fail=false,role='OWNER',readFail=false} = {}) {
+async function setup(page:Page,{fail=false,role='OWNER',readFail=false,disabled=false} = {}) {
   await mockAssistant(page)
   await page.addInitScript(() => {
     Object.defineProperty(navigator,'clipboard',{value:{writeText:async (text:string) => sessionStorage.setItem('copied-binance',text)}})
@@ -22,13 +22,14 @@ async function setup(page:Page,{fail=false,role='OWNER',readFail=false} = {}) {
     customers:[],audit:[],total_users:0,active_users:0,verified_users:0,admins:1,new_users:0,
     pro_users:0,free_users:0,active_subscriptions:0,expired_subscriptions:0,billing_live:false,
   }}))
-  const state = {fail,readFail,empty:false,hold:null as Promise<void>|null,rows:[{...pending}],writes:[] as {path:string;body:unknown}[]}
+  const state = {fail,readFail,disabled,empty:false,hold:null as Promise<void>|null,rows:[{...pending}],writes:[] as {path:string;body:unknown}[]}
   await page.route('**/api/v22/admin/binance-payments**',async route => {
     const req = route.request()
     if (req.method() === 'OPTIONS') {await route.fulfill({status:204,headers:cors});return}
     const path = new URL(req.url()).pathname
     if (req.method() === 'POST') {
       state.writes.push({path,body:req.postDataJSON()})
+      if (state.disabled) {await route.fulfill({headers:cors,json:{enabled:false,message:'Binance ödemeleri şu an kapalı'}});return}
       if (state.hold) await state.hold
       if (state.fail) {await route.fulfill({status:503,headers:cors,json:{detail:'Karar kaydedilemedi.'}});return}
       const row = state.rows[0]
@@ -36,6 +37,7 @@ async function setup(page:Page,{fail=false,role='OWNER',readFail=false} = {}) {
       row.decision_note = row.status === 'rejected' ? req.postDataJSON().reason : null
       await route.fulfill({headers:cors,json:row});return
     }
+    if (state.disabled) {await route.fulfill({headers:cors,json:{enabled:false,message:'Binance ödemeleri şu an kapalı'}});return}
     if (state.readFail) {await route.fulfill({status:503,headers:cors,json:{detail:'Liste okunamadı.'}});return}
     const status = new URL(req.url()).searchParams.get('status')
     const requested = new URL(req.url()).searchParams.get('request_id')
@@ -46,6 +48,37 @@ async function setup(page:Page,{fail=false,role='OWNER',readFail=false} = {}) {
   })
   await page.goto('/admin?section=binance-payments',{waitUntil:'domcontentloaded'})
   return state
+}
+
+test('Disabled Binance administration shows a neutral card without payment actions',async ({page}) => {
+  const state = await setup(page,{disabled:true})
+  const panel = page.getByRole('region',{name:'Binance ödemeleri'})
+  await expect(panel.getByRole('heading',{name:'Kapalı',exact:true})).toBeVisible()
+  await expect(panel.getByRole('status')).toContainText('Binance ödemeleri şu an kapalı')
+  await expect(panel.getByRole('tab')).toHaveCount(0)
+  await expect(panel.getByRole('article')).toHaveCount(0)
+  await expect(panel.getByRole('alert')).toHaveCount(0)
+  expect(state.writes).toEqual([])
+  state.disabled = false
+  await panel.getByRole('button',{name:'Yenile',exact:true}).click()
+  await expect(panel.getByRole('article')).toHaveCount(1)
+})
+
+for (const action of ['approve','reject'] as const) {
+  test(`Disabling payments before ${action} hides stale cards without reporting success`,async ({page}) => {
+    const state = await setup(page)
+    const panel = page.getByRole('region',{name:'Binance ödemeleri'})
+    const card = panel.getByRole('article')
+    if (action === 'approve') await card.getByLabel('Binance hesabımda kontrol ettim').check()
+    else await card.getByLabel('Red gerekçesi',{exact:true}).fill('Ödeme bulunamadı.')
+    state.disabled = true
+    await card.getByRole('button',{name:action === 'approve' ? 'Onayla' : 'Reddet',exact:true}).click()
+    await expect(panel.getByRole('heading',{name:'Kapalı',exact:true})).toBeVisible()
+    await expect(panel.getByRole('article')).toHaveCount(0)
+    await expect(panel.getByRole('alert')).toHaveCount(0)
+    expect(state.rows[0].status).toBe('pending')
+    expect(state.writes).toHaveLength(1)
+  })
 }
 
 test('OWNER card requires confirmation; copy and approval use the correct request',async ({page}) => {
