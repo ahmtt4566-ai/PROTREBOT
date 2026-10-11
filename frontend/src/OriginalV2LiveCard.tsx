@@ -26,6 +26,14 @@ const diagnosticMessages: Record<string, string> = {
   NO_REVISION_CONFLICT_OBSERVED: 'Bu kontrolde revision çakışması görülmedi.',
 }
 
+export const originalScanLabels: Record<string, string> = {
+  SCANNING: 'Tarama sürüyor',
+  SCAN_COMPLETE: 'Tarama tamamlandı',
+  WAITING_NEXT_CANDLE: 'Sonraki 15m mum bekleniyor',
+  RATE_LIMIT_WAIT: 'Borsa istek sınırı bekleniyor',
+  BLOCKED: 'Yeni girişler engellendi',
+}
+
 export type OriginalV2LiveStatus = {
   available: boolean
   enabled: boolean
@@ -35,6 +43,7 @@ export type OriginalV2LiveStatus = {
   daily_loss_percent: number
   daily?: {day: string; loss: number; limit: number; locked: boolean} | null
   symbols: string[]
+  scanner?: {stage?: string; last_cycle_at?: string; last_scan_at?: string; scanned_symbol_count?: number; candidate_count?: number} | null
   fill_lock?: {id: string; active: boolean; symbol: string; violations: string[]; evidence?: {
     stop_percent?: string; risk_usdt?: string; risk_budget_usdt?: string; margin_usdt?: string
   }} | null
@@ -137,7 +146,17 @@ export default function OriginalV2LiveCard({className, status, armed, automation
   }
   return <section className={`masterTradeLiveSection ${className ?? ''}`} aria-label="Kais Original V2 LIVE">
     <header><div><span className="masterTradeLiveKicker">OWNER · ORIGINAL V2</span><h3>Kais Original V2 LIVE</h3></div>
-      <strong>{status.enabled ? 'AÇIK' : status.paused ? 'GÜVENLİK KİLİDİ' : 'KAPALI'}</strong></header>
+      <strong>{status.enabled ? 'OTURUM AÇIK' : status.paused ? 'GÜVENLİK KİLİDİ' : 'KAPALI'}</strong></header>
+    <div className="masterTradeLiveControlMeta" data-testid="original-runtime-status">
+      <span><small>STRATEJİ</small><b>Original V2</b></span>
+      <span><small>KAPSAM</small><b>{status.symbols.length} sembol</b></span>
+      <span><small>ONAYLI RİSK</small><b>%{status.risk_percent}</b></span>
+      <span><small>TARAMA</small><b>{!status.enabled ? 'Otomasyon kapalı' : originalScanLabels[status.scanner?.stage || ''] || 'İlk tarama bekleniyor'}</b></span>
+      <span><small>SON TAMAMLANAN TARAMA</small><b>{status.scanner?.last_scan_at ? new Date(status.scanner.last_scan_at).toLocaleString('tr-TR') : 'Henüz tamamlanmadı'}</b></span>
+      <span><small>SON DÖNGÜ</small><b>{status.scanner?.last_cycle_at ? new Date(status.scanner.last_cycle_at).toLocaleString('tr-TR') : 'Henüz ölçülmedi'}</b></span>
+      <span><small>TARANAN / ADAY</small><b>{status.scanner?.scanned_symbol_count ?? 0} / {status.scanner?.candidate_count ?? 0}</b></span>
+      <span><small>YENİ GİRİŞ</small><b>{!status.enabled || blocked || !armed || fillLocked ? 'Kapalı / engelli' : 'Her emir için sunucu kontrolü'}</b></span>
+    </div>
     <p>8 sembol · 3x · en fazla %6 stop. TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
     <small>{status.symbols.map(symbol => symbol.replace('USDT', '')).join(' · ')}</small>
     {status.pause_reason && <p role="status">{status.pause_reason}</p>}

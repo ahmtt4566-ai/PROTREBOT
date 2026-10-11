@@ -84,6 +84,7 @@ def public_config(state: dict[str, Any]) -> dict[str, Any]:
             "risk_percent": config.get("risk_percent", 0.5), "daily_loss_percent": config.get("daily_loss_percent", 5),
             "daily": copy.deepcopy(config.get("daily")),
             "fill_lock": copy.deepcopy(config.get("fill_lock")),
+            "scanner": copy.deepcopy(config.get("scanner")),
             "symbols": strategy.fixed_profile()["execution_policy"]["allowed_symbols"]}
 
 
@@ -471,7 +472,10 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
     from . import v25_execution as live
     state = application.state.v25_execution
     config = settings(state)
+    scanner = config.setdefault("scanner", {})
+    scanner["last_cycle_at"] = live.now_iso()
     if live.account_rate_limit_active(state):
+        scanner.update(stage="RATE_LIMIT_WAIT")
         return
     try:
         if credentials is None:
@@ -485,10 +489,15 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
         await check_entry(application, client, state, snapshot)
         at = int(time.time()) // 900 * 900
         if config.get("last_decision_time", -1) >= at:
+            scanner.update(stage="WAITING_NEXT_CANDLE")
             return
         config["last_decision_time"] = at
         occupied = {item["symbol"] for item in snapshot["positions"] + snapshot["open_orders"]}
+        scanner.update(stage="SCANNING")
         eligible, _results = await original.candidates(client, at, occupied, require_complete=True)
+        scanner.update(stage="SCAN_COMPLETE", last_scan_at=live.now_iso(),
+                       scanned_symbol_count=len(strategy.fixed_profile()["execution_policy"]["allowed_symbols"]),
+                       candidate_count=len(eligible))
         for candidate, result in eligible[:3]:
             if not running(state):
                 break
@@ -503,10 +512,12 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
                                           strategy_result=result)
         live.persist_state(state)
     except live.LiveRateLimitError as exc:
+        scanner.update(stage="RATE_LIMIT_WAIT")
         if exc.request_method not in {None, "GET"}:
             pause(state, live.sanitized_exception_message(exc))
         raise
     except Exception as exc:
+        scanner.update(stage="BLOCKED")
         pause(state, live.sanitized_exception_message(exc))
         raise
 

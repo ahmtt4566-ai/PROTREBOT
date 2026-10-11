@@ -389,6 +389,33 @@ test('new scanner and market generations start immediately while old JSON remain
   await expect(page.locator('.refWatchlist [data-symbol="ETHUSDT"] .refMarketScore')).toContainText('88')
 })
 
+test('Original runtime shows its scan and approved percentage instead of stale legacy scanner', async ({page}) => {
+  const fixture = await setup(page)
+  fixture.liveFields = {
+    auto:{last_skip_reason:'automation_inactive'}, scanner:{last_cycle_stage:'skipped',last_skip_reason:'automation_inactive'},
+    original_v2_live:{available:true,enabled:true,paused:false,risk_percent:1,daily_loss_percent:5,
+      symbols:['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT'],
+      scanner:{stage:'WAITING_NEXT_CANDLE',last_cycle_at:'2026-10-11T21:01:00Z',last_scan_at:'2026-10-11T21:00:00Z',scanned_symbol_count:8,candidate_count:0}},
+  }
+  await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  const runtime = page.getByTestId('original-runtime-status')
+  await expect(runtime).toContainText('8 sembol')
+  await expect(runtime).toContainText('%1')
+  await expect(runtime).toContainText('Sonraki 15m mum bekleniyor')
+  await expect(runtime).not.toContainText('Henüz tamamlanmadı')
+  await expect(page.locator('.masterTradeLiveOperations')).toContainText('Original V2')
+  await expect(page.locator('.masterTradeLiveOperations')).not.toContainText('automation_inactive')
+  await expect(page.locator('.masterTradeLiveSetup')).toContainText('V25 SUPERVISED · DEVRE DIŞI')
+  await runtime.scrollIntoViewIfNeeded()
+  await page.screenshot({path:test.info().outputPath('original-runtime-desktop.png')})
+  await page.setViewportSize({width:390,height:844})
+  await runtime.scrollIntoViewIfNeeded()
+  await expect(runtime).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({path:test.info().outputPath('original-runtime-mobile.png')})
+  expect(fixture.mutations).toEqual([])
+})
+
 test('Original persistence diagnostics use one GET and preserve locked trading inputs', async ({page}) => {
   const fixture = await setup(page)
   fixture.liveFields = {original_v2_live:{available:true,enabled:false,paused:true,pause_reason:'Kalıcı kayıt doğrulanamadı.',risk_percent:0.5,daily_loss_percent:5,symbols:['BTCUSDT']}}

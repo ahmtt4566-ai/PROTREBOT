@@ -457,6 +457,36 @@ def test_original_cycle_dispatch_does_not_use_legacy_scanner(state, monkeypatch)
     cycle.assert_awaited_once_with(req.app, None)
 
 
+@pytest.mark.parametrize("scan_failure", [False, True])
+def test_original_scan_telemetry_records_only_completed_scans(state, monkeypatch, scan_failure):
+    req = request_for(state)
+    monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
+    monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=object()))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"positions": [], "open_orders": []}))
+    monkeypatch.setattr(original, "check_entry", AsyncMock())
+    scan = AsyncMock(return_value=([], {}), side_effect=RuntimeError("offline scan failed") if scan_failure else None)
+    monkeypatch.setattr(original.original, "candidates", scan)
+    orders = AsyncMock()
+    monkeypatch.setattr(live, "execute_live_order", orders)
+    if scan_failure:
+        with pytest.raises(RuntimeError):
+            run(original.cycle(req.app, ("offline-key", "offline-secret")))
+    else:
+        run(original.cycle(req.app, ("offline-key", "offline-secret")))
+    scanner = original.public_config(state)["scanner"]
+    assert scanner["last_cycle_at"]
+    assert scanner["stage"] == ("BLOCKED" if scan_failure else "SCAN_COMPLETE")
+    assert bool(scanner.get("last_scan_at")) is not scan_failure
+    assert scan.await_args.kwargs == {"require_complete": True}
+    orders.assert_not_awaited()
+    if not scan_failure:
+        assert scanner["scanned_symbol_count"] == 8
+        assert scanner["candidate_count"] == 0
+        run(original.cycle(req.app, ("offline-key", "offline-secret")))
+        assert original.public_config(state)["scanner"]["stage"] == "WAITING_NEXT_CANDLE"
+        scan.assert_awaited_once()
+
+
 def test_missing_credentials_pause_without_exchange(state, monkeypatch):
     req = request_for(state)
     monkeypatch.setattr(live, "auto_session_credentials", AsyncMock(return_value=("", "")))

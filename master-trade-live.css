@@ -86,6 +86,8 @@
 .masterTradeLiveControlMeta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 18px 0 12px; padding-top: 12px; border-top: 1px solid var(--live-line); }
 .masterTradeLiveControlMeta span { color: var(--live-muted); font-size: 8px; line-height: 1.5; }
 .masterTradeLiveControlMeta b { display: block; margin-top: 3px; color: var(--live-ink); font-size: 10px; overflow-wrap: anywhere; }
+.masterTradeLiveUx .masterTradeLiveOriginalCard [data-testid="original-runtime-status"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.masterTradeLiveUx .masterTradeLiveOriginalCard [data-testid="original-runtime-status"] b { white-space: normal !important; overflow: visible; text-overflow: clip; }
 .masterTradeLiveControl > .masterTradeLiveSecondary { padding: 0; }
 .masterTradeLiveSetupGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .masterTradeLiveSetupGrid label, .masterTradeLiveAdvanced label, .masterTradeLiveApiGrid label { display: grid; gap: 5px; color: var(--live-muted); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
