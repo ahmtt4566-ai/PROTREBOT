@@ -244,7 +244,7 @@ class ConsumeAnalysis(BaseModel):
 def member_access(request: Request) -> tuple[dict[str, Any], bool]:
     user = authenticated_user(request)
     access = access_for_request(request, user)
-    return user, bool(access.get("isPremium", access.get("canAccessMasterTrade")))
+    return user, bool(access["entitlements"].get("unlimitedAnalyst"))
 
 
 def service(request: Request) -> AnalystCredits:

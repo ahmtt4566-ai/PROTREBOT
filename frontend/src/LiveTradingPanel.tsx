@@ -9,6 +9,7 @@ import { MasterTradeLiveLayout } from '../../MasterTradeLayout'
 import {useKaisErrorReaction} from '../../useKaisPageReactions'
 import {useTradingPreferences} from '../../useTradingPreferences'
 import {preferredRiskMargin} from '../../account-risk-sizing'
+import {useMemberAccess} from '../../premium-access'
 
 type LivePolicy = Record<string, unknown>
 type LiveStatus = {
@@ -117,6 +118,7 @@ function errorMessage(payload: unknown, fallback: string): string {
 }
 
 export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedConnections, onRefreshStatus}: Props) {
+  const {freeTrial} = useMemberAccess()
   const tradingDefaults = useTradingPreferences()
   const defaultsApplied = useRef(false)
   const [sizingNotice, setSizingNotice] = useState('')
@@ -312,8 +314,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const autoTimeframeSupported = selectedAutoTimeframe === '15m' && savedAutoTimeframe === '15m'
   const autoTimeframeMessage = "LIVE Auto Trade yalnızca 15m zaman diliminde çalışır. Başlatmak için timeframe'i 15m seçip politikayı kaydedin."
   const timeframeWarning = !autoTimeframeSupported ? <div className="liveNotice error" role="alert" data-testid="live-auto-timeframe-warning"><TriangleAlert aria-hidden="true"/><span>{autoTimeframeMessage} Timeframe: {selectedAutoTimeframe !== '15m' ? selectedAutoTimeframe : savedAutoTimeframe}.</span></div> : null
-  const autoReady = Boolean(autoTimeframeSupported && status && connections && authorizationValid && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
-  const manualOrderReady = Boolean(status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
+  const autoReady = Boolean(!freeTrial && autoTimeframeSupported && status && connections && authorizationValid && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
+  const manualOrderReady = Boolean(!freeTrial && status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
   const updatePolicy = () => run('policy', async () => {
@@ -348,6 +350,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }, 'Binance Connected; hesap salt-okunur bağlandı ve gerçek emir kilidi korunuyor.')
 
   const armLive = () => {
+    if (freeTrial) {setNotice({kind:'error',text:'LIVE işlem MASTER MODE ile açılır'});return}
     if (!authorizationValid) {
       setNotice({kind: 'error', text: authorizationReasonText})
       return
@@ -392,6 +395,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }, 'LIVE hesabı uzlaştırıldı; yeni emir kilidi korunuyor ve yeniden arm edilebilir.')
   const autoToggle = () => {
     if (status?.live_auto_trade || status?.auto?.enabled) return stopAutoTrade()
+    if (freeTrial) {setNotice({kind:'error',text:'LIVE işlem MASTER MODE ile açılır'});return}
     if (!autoTimeframeSupported) {
       setNotice({kind: 'error', text: autoTimeframeMessage})
       return
@@ -468,6 +472,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setNotice({kind: 'ok', text: 'Seçili analiz yönü ve seviyeleri forma dolduruldu.'})
   }
   const reviewOrder = (nextOrder = order) => {
+    if (freeTrial) {setNotice({kind:'error',text:'LIVE işlem MASTER MODE ile açılır'});return}
     const values = [nextOrder.margin_usdt, nextOrder.leverage, nextOrder.stop_loss, nextOrder.tp1, nextOrder.tp2, nextOrder.tp3]
     if (!nextOrder.symbol.endsWith('USDT') || values.some(value => !Number.isFinite(Number(value)) || Number(value) <= 0)) {
       setNotice({kind: 'error', text: 'Sembol, miktar, kaldıraç, Stop Loss ve tüm TP seviyeleri pozitif olmalıdır.'}); return
@@ -541,7 +546,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     : positions.length === 0
       ? protectionState
       : positionProtectionStates.reduce((worst, current) => protectionPriority.indexOf(current) < protectionPriority.indexOf(worst) ? current : worst, 'PROTECTED')
-  const blocker = liveBlockerMessage(status, liveArmed)
+  const blocker = freeTrial ? 'LIVE işlem MASTER MODE ile açılır' : liveBlockerMessage(status, liveArmed)
   const autoStatusLabel = status === null ? 'UNKNOWN' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : 'OFF'
   const liveState = status === null ? 'UNKNOWN' : emergency || recoveryRequired ? 'BLOCKED' : status.live_auto_trade ? executionLocked ? 'SCANNING ONLY' : 'RUNNING' : liveArmed ? 'ARMED' : readinessReady ? 'READY' : 'LOCKED'
   const activeConfirm = confirm

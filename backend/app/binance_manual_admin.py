@@ -95,6 +95,14 @@ async def decision(conn, actor: AuditActor, request_id: str, status: Literal["ap
                AND plan='TRIAL' AND status='TRIALING'
                AND COALESCE(trial_end,current_period_end) > clock_timestamp()""", row["user_id"],
         )
+        from .free_trial import enabled as trial_enabled
+        if trial_enabled():
+            free_end = await conn.fetchval(
+                "SELECT ends_at FROM member_free_trials WHERE user_id=$1 AND revoked_at IS NULL AND ends_at>clock_timestamp()",
+                row["user_id"],
+            )
+            if free_end is not None:
+                trial_end = max(trial_end, free_end) if trial_end is not None else free_end
         manual_end = await conn.fetchval(
             """SELECT MAX(p.period_end) FROM binance_manual_periods p
                JOIN binance_manual_payment_requests r ON r.id=p.payment_request_id

@@ -6,13 +6,13 @@ import {emitKaisTargetReaction} from './kais-reactions'
 import {clearKaisChatHistory, resumeKaisChatHistory} from './frontend/src/kais-chat-storage'
 import './premium-access.css'
 
-type MemberAccess = {premium: boolean; ready: boolean; userId: string | null; error: string; openUpgrade: (label: string) => void}
+type MemberAccess = {premium: boolean; ready: boolean; userId: string | null; error: string; assistantAllowed:boolean; freeTrial:boolean; liveAllowed:boolean; openUpgrade: (label: string) => void}
 const missingProvider = () => { throw new Error('MemberAccessProvider is required for premium interactions.') }
-const AccessContext = createContext<MemberAccess>({premium: false, ready: false, userId: null, error: '', openUpgrade: missingProvider})
+const AccessContext = createContext<MemberAccess>({premium: false, ready: false, userId: null, error: '', assistantAllowed:false, freeTrial:false, liveAllowed:false, openUpgrade: missingProvider})
 export const useMemberAccess = () => useContext(AccessContext)
 
 export function MemberAccessProvider({children}: {children: ReactNode}) {
-  const [access, setAccess] = useState<Omit<MemberAccess, 'openUpgrade'>>({premium: false, ready: false, userId: null, error: ''})
+  const [access, setAccess] = useState<Omit<MemberAccess, 'openUpgrade'>>({premium: false, ready: false, userId: null, error: '', assistantAllowed:false,freeTrial:false,liveAllowed:false})
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [lockedLabel, setLockedLabel] = useState('')
   const [toast, setToast] = useState('')
@@ -27,22 +27,24 @@ export function MemberAccessProvider({children}: {children: ReactNode}) {
       const sessionToken = userSessionToken()
       if (!sessionToken) {
         clearKaisChatHistory()
-        setAccess({premium: false, ready: true, userId: null, error: 'Üyelik oturumu gerekli.'})
+        setAccess({premium: false, ready: true, userId: null, error: 'Üyelik oturumu gerekli.',assistantAllowed:false,freeTrial:false,liveAllowed:false})
         return
       }
       void fetch(`${API_BASE}/v22/profile`, {signal: requestController.signal})
         .then(async response => {
           if (response.status === 401 && !requestController.signal.aborted && userSessionToken() === sessionToken) clearKaisChatHistory()
-          const payload = await response.json() as {user?: {id?: string; role?: string}; access?: {isPremium?: boolean}; detail?: string}
+          const payload = await response.json() as {user?: {id?: string; role?: string}; access?: {isPremium?: boolean;assistantAllowed?:boolean;freeTrial?:boolean;canExecuteLive?:boolean}; detail?: string}
           if (!response.ok || !payload.user?.id) throw new Error(payload.detail || 'Üyelik yetkisi doğrulanamadı.')
           if (!requestController.signal.aborted) {
-            setAccess({premium: payload.access?.isPremium === true || payload.user.role === 'OWNER', ready: true, userId: payload.user.id, error: ''})
+            setAccess({premium: payload.access?.isPremium === true || payload.user.role === 'OWNER', ready: true, userId: payload.user.id, error: '',
+              assistantAllowed:payload.access?.assistantAllowed !== false,freeTrial:payload.access?.freeTrial === true,
+              liveAllowed:payload.access?.canExecuteLive === true || payload.user.role === 'OWNER'})
             if (userSessionToken() === sessionToken) resumeKaisChatHistory(payload.user.id)
           }
         })
         .catch((error: unknown) => {
           if (requestController.signal.aborted) return
-          setAccess({premium: false, ready: true, userId: null, error: error instanceof Error ? error.message : 'Üyelik yetkisi doğrulanamadı.'})
+          setAccess({premium: false, ready: true, userId: null, error: error instanceof Error ? error.message : 'Üyelik yetkisi doğrulanamadı.',assistantAllowed:false,freeTrial:false,liveAllowed:false})
         })
     }
     refreshAccess()

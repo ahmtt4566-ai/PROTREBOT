@@ -581,7 +581,7 @@ function AssistantSession({userId, pageContext, language, launcherTarget}: {user
 }
 
 export default function AssistantChat({pageContext, launcherTarget}: {pageContext: string; launcherTarget?: HTMLElement | null}) {
-  const {ready, userId} = useMemberAccess()
+  const {ready, userId, assistantAllowed} = useMemberAccess()
   const [historyEpoch, setHistoryEpoch] = useState(0)
   const [language, setLanguage] = useState<Language>(languageOfPage)
   useEffect(() => {
@@ -598,5 +598,5 @@ export default function AssistantChat({pageContext, launcherTarget}: {pageContex
     observer.observe(document.documentElement, {attributes: true, attributeFilter: ['lang']})
     return () => observer.disconnect()
   }, [])
-  return ready && userId ? <AssistantSession key={`${userId}:${historyEpoch}`} userId={userId} pageContext={pageContext} language={language} launcherTarget={launcherTarget}/> : null
+  return ready && userId && assistantAllowed ? <AssistantSession key={`${userId}:${historyEpoch}`} userId={userId} pageContext={pageContext} language={language} launcherTarget={launcherTarget}/> : null
 }

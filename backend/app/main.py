@@ -1383,9 +1383,19 @@ async def owner_preview_gate(request, call_next):
         proof = await prepare(request, request.state.member)
         access = entitlement_access(proof.subscription, request.state.member)
         request.state.premium = access["isPremium"]
-        if proof.error and requires_premium(request.url.path, request.method):
+        if proof.error and request.url.path.startswith("/api/assistant/"):
             return apply_cors_headers(request, JSONResponse({"detail": "Üyelik yetkisi doğrulanamadı."}, status_code=503))
-        if requires_premium(request.url.path, request.method) and not request.state.premium:
+        if request.url.path.startswith("/api/assistant/") and access.get("assistantAllowed") is False:
+            return apply_cors_headers(request, JSONResponse(
+                {"detail": "Kais asistanı MASTER MODE ile açılır.", "code": "ASSISTANT_MASTER_MODE_REQUIRED"}, status_code=403,
+            ))
+        trial_safety_action = proof.subscription.get("mode") == "FREE_TRIAL" and request.url.path in {
+            "/api/v25/auto/stop", "/api/v25/disarm", "/api/v25/emergency", "/api/v25/position/close",
+            "/api/v25/recovery/check", "/api/v25/consent/revoke",
+        }
+        if proof.error and requires_premium(request.url.path, request.method) and not trial_safety_action:
+            return apply_cors_headers(request, JSONResponse({"detail": "Üyelik yetkisi doğrulanamadı."}, status_code=503))
+        if requires_premium(request.url.path, request.method) and not request.state.premium and not trial_safety_action:
             logger.warning("Premium operation denied user_id=%s path=%s", request.state.member["id"], request.url.path)
             return apply_cors_headers(request, JSONResponse({"detail": "Premium üyelik gerekli.", "code": "PREMIUM_REQUIRED"}, status_code=403))
         await hydrate_authenticated_user_state(request)
@@ -1449,6 +1459,8 @@ app.include_router(moderator_approvals_router)
 app.include_router(admin_approvals_router)
 app.include_router(notification_admin_router)
 app.include_router(binance_manual_router)
+from .free_trial import router as free_trial_router
+app.include_router(free_trial_router)
 app.include_router(binance_manual_admin_router)
 app.include_router(moderator_events_router)
 app.include_router(campaign_router)

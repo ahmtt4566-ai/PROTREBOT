@@ -803,6 +803,7 @@ def round_tick(value: Decimal, tick: Decimal) -> Decimal:
 class BinanceDemoClient:
     def __init__(self, http: httpx.AsyncClient, api_key: str, secret_key: str, *, public_only: bool = False) -> None:
         self.private_authority: Callable[[], Awaitable[None]] | None = None
+        self.entry_authority: Callable[[], Awaitable[None]] | None = None
         if (not api_key or not secret_key) and not public_only:
             raise BinanceDemoError(
                 "Demo API bağlantısı aktif değil. Programdaki Borsa Bağlantıları bölümünden Testnet anahtarını kaydedip aktifleştirin.",
@@ -857,6 +858,10 @@ class BinanceDemoClient:
             await self.sync_clock(force=attempt == 1)
             if self.private_authority is not None:
                 await self.private_authority()
+            if self.entry_authority is not None and method == "POST" and path in {"/fapi/v1/order", "/fapi/v1/order/test"} \
+                    and str((params or {}).get("reduceOnly", "false")).lower() != "true" \
+                    and str((params or {}).get("closePosition", "false")).lower() != "true":
+                await self.entry_authority()
             payload = dict(params or {})
             payload["timestamp"] = int(time.time() * 1000) + self.time_offset_ms
             payload["recvWindow"] = 60000
@@ -1022,6 +1027,13 @@ def bind_demo_private_authority(
             raise BinanceDemoError("Demo session authority is no longer available.", http_status=exc.status_code) from exc
 
     client.private_authority = validate_private_authority
+    async def validate_entry_authority() -> None:
+        from .free_trial import require_background_entry
+        try:
+            await require_background_entry(application, user_id, live=False)
+        except HTTPException as exc:
+            raise BinanceDemoError(str(exc.detail), http_status=exc.status_code) from exc
+    client.entry_authority = validate_entry_authority
     return client
 
 

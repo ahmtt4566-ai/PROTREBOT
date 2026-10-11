@@ -1166,8 +1166,18 @@ def execution_owner(request: Request) -> dict[str, Any]:
     user = authenticated_user(request)
     if user.get("role") != "OWNER":
         subscription = subscription_for_request(request, user)
-        if not subscription.get("master_trade_access") and request.method != "GET":
+        safety_action = subscription.get("mode") == "FREE_TRIAL" and request.url.path in {
+            "/api/v25/auto/stop", "/api/v25/disarm", "/api/v25/emergency", "/api/v25/position/close",
+            "/api/v25/recovery/check", "/api/v25/consent/revoke",
+        }
+        if not subscription.get("master_trade_access") and request.method != "GET" and not safety_action:
             raise HTTPException(403, "Master Trade aboneliğiniz bu özelliğe erişim vermiyor")
+        if request.method != "GET" and request.url.path in {
+            "/api/v25/order", "/api/v25/order/test", "/api/v25/auto/start", "/api/v25/arm",
+        } and not (subscription.get("master_trade_access") and subscription.get("plan") == "MASTER_MODE"
+                   and subscription.get("status") in {"ACTIVE", "PAST_DUE"}):
+            from .free_trial import LIVE_MESSAGE
+            raise HTTPException(403, LIVE_MESSAGE)
     guard_execution_ownership(request, claim=request.method != "GET")
     return user
 
@@ -1246,6 +1256,15 @@ class BinanceLiveClient:
             raise LiveExchangeError("İzin verilmeyen canlı hesap API işlemi.", http_status=500)
         if self.background_session and not await background_authorization_active(self.application, self.diagnostic_state):
             raise LiveExchangeError("Canlı oturum iptal edildi veya yetki kanıtı doğrulanamadı.", http_status=423)
+        if self.application is not None and method == "POST" and path in {"/fapi/v1/order", "/fapi/v1/order/test"} \
+                and str((params or {}).get("reduceOnly", "false")).lower() != "true" \
+                and str((params or {}).get("closePosition", "false")).lower() != "true":
+            from .free_trial import require_background_entry
+            authorization = (self.diagnostic_state or {}).get("live_session_authorization") or {}
+            try:
+                await require_background_entry(self.application, str(authorization.get("user_id") or ""), live=True)
+            except HTTPException as exc:
+                raise LiveExchangeError(str(exc.detail), http_status=exc.status_code) from exc
         await self.sync_clock()
         payload = {key: value for key, value in dict(params or {}).items() if value is not None}
         payload["timestamp"] = int(time.time() * 1000) + self.time_offset_ms
@@ -3362,6 +3381,8 @@ async def auto_session_credentials(
 
 
 async def fresh_auto_submission_credentials(application: Any, state: dict[str, Any]) -> tuple[str, str]:
+    from .free_trial import require_background_entry
+    await require_background_entry(application, str((state.get("auto_authorization") or {}).get("user_id") or ""), live=True)
     credentials = await auto_session_credentials(application, state, force_refresh=True)
     if not usable_live_credentials(credentials):
         return "", ""

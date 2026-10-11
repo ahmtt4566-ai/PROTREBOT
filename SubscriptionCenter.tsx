@@ -3,6 +3,7 @@ import { Check, CreditCard, ExternalLink, Lock, Receipt, ShieldCheck, Sparkles, 
 import { API_BASE, userSessionToken } from './api'
 import { PLAN_BY_CODE, SUBSCRIPTION_PLANS, type PlanCode } from './subscription'
 import BinanceManualPayment from './BinanceManualPayment'
+import FreeTrialPricing from './FreeTrialPricing'
 
 type SubscriptionView = {
   status: string
@@ -16,7 +17,7 @@ type SubscriptionView = {
   mode?: string
 }
 type ApiError = { detail?: string }
-type PaymentMethods = { stripe_enabled: boolean; binance_enabled: boolean }
+type PaymentMethods = { stripe_enabled: boolean; binance_enabled: boolean; free_trial_enabled?: boolean }
 
 const formatDate = (value?: string | null, locale = 'en-US') => value ? new Date(value).toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Not available'
 const daysRemaining = (value?: string | null) => value ? Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / 86400000)) : 0
@@ -65,6 +66,9 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
     void request<PaymentMethods>('/subscription/config', {signal: controller.signal}).then(current => {
       if (!current || typeof current.stripe_enabled !== 'boolean' || typeof current.binance_enabled !== 'boolean') {
         throw new Error('Ödeme yöntemleri doğrulanamadı.')
+      }
+      if (current.free_trial_enabled !== undefined && typeof current.free_trial_enabled !== 'boolean') {
+        throw new Error('Deneme ayarı doğrulanamadı.')
       }
       if (!controller.signal.aborted) setPaymentMethods(current)
     }).catch(exception => {
@@ -155,13 +159,17 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
   const accessLabel = hasAccess ? 'Enabled' : subscription ? 'Closed' : 'Not available'
   const loadFeedback = loadError && <p className="subscriptionFeedback subscriptionFeedbackError" role="alert">{loadError}{' '}<button type="button" onClick={() => setLoadAttempt(attempt => attempt + 1)} disabled={subscriptionLoading}>Retry subscription</button></p>
 
-  if (mode === 'billing' && !stripeEnabled) {
+  if (mode === 'pricing' && paymentMethods?.free_trial_enabled) return <main className="subscriptionPage subscriptionPricing">
+    <FreeTrialPricing trialEnabled binanceEnabled={binanceEnabled} onBilling={() => onNavigate('billing')}/>
+  </main>
+
+  if (mode === 'billing' && (!stripeEnabled || subscription?.mode === 'FREE_TRIAL')) {
     const trStatus: Record<string, string> = {ACTIVE:'Aktif', TRIALING:'Deneme dönemi', PAST_DUE:'Ödeme gecikti', UNPAID:'Ödenmedi', CANCELLED:'İptal edildi', EXPIRED:'Süresi doldu'}
     const expiry = subscription?.current_period_end || subscription?.trial_end
     return <main className="subscriptionPage subscriptionBilling">
       <header className="subscriptionPageHeader"><div><span>ABONELİK</span><h1>Abonelik yönetimi</h1><p>MASTER MODE planınızı, erişiminizi ve ödeme seçeneklerini buradan takip edin.</p></div><button onClick={() => onNavigate('pricing')}><Sparkles/>PLANLARI GÖR</button></header>
       <section className={`subscriptionStatusCard subscriptionStatus-${status.toLowerCase()}`}>
-        <div className="subscriptionPlanHeading"><div><small>MEVCUT PLAN</small><h2>{subscription?.plan ? 'MASTER MODE' : 'Aktif plan yok'}</h2></div><span className="subscriptionStatusBadge">{subscriptionLoading ? 'Yükleniyor' : loadError ? 'Bilgi alınamadı' : trStatus[status] || '—'}</span></div>
+        <div className="subscriptionPlanHeading"><div><small>MEVCUT PLAN</small><h2>{subscription?.mode === 'FREE_TRIAL' ? '1 Hafta Ücretsiz Deneme' : subscription?.plan ? 'MASTER MODE' : 'Aktif plan yok'}</h2></div><span className="subscriptionStatusBadge">{subscriptionLoading ? 'Yükleniyor' : loadError ? 'Bilgi alınamadı' : trStatus[status] || '—'}</span></div>
         <div className="subscriptionStatusTop">
           <div><small>MASTER MODE ERİŞİMİ</small><strong>{subscription ? hasAccess ? 'Açık' : 'Kapalı' : '—'}</strong></div>
           <div><small>BİTİŞ TARİHİ</small><strong>{expiry ? formatDate(expiry, 'tr-TR') : '—'}</strong></div>
@@ -169,6 +177,7 @@ export default function SubscriptionCenter({ mode, onNavigate }: { mode: 'pricin
           <div><small>ERİŞİM DÖNEMİ</small><strong>{binancePaid ? '30 gün · elle yenileme' : '—'}</strong></div>
         </div>
         {binancePaid && <div className="subscriptionCallout"><b>Binance ile ödendi</b><span>MASTER MODE erişiminiz {formatDate(expiry,'tr-TR')} tarihinde sona erer. Otomatik yenileme veya otomatik ücretlendirme yoktur.</span></div>}
+        {subscription?.mode === 'FREE_TRIAL' && <div className="subscriptionCallout"><b>{hasAccess ? `Kalan deneme süresi: ${daysRemaining(expiry)} gün` : 'Deneme sona erdi. MASTER MODE’a geçin.'}</b><span>AI Analist mevcut kredi sınırıyla açıktır. Kais asistanı kapalıdır. LIVE işlem MASTER MODE ile açılır.</span></div>}
         {hasAccess && <button className="subscriptionSecondaryAction" onClick={() => onNavigate('master-trade')}><ShieldCheck/>MASTER TRADE’E GİT</button>}
       </section>
       <MasterPlanPreview disabledLabel={unavailableLabel}/>

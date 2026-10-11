@@ -13,11 +13,16 @@ import pytest
 from app import binance_manual_admin as admin
 from app import binance_manual_payments as payments
 from app import binance_notifications as notifications
+from app import free_trial
 from app.audit_log import AuditActor
 from app.v22_commercial import ensure_commercial_schema
 
 MIGRATIONS = Path(__file__).parents[1] / "migrations"
-FEATURE = sorted(MIGRATIONS.glob("20261011_*.sql"))
+FEATURE = [MIGRATIONS / name for name in (
+    "20261011_001_binance_manual_payments.sql",
+    "20261011_002_binance_manual_entitlements.sql",
+    "20261011_003_binance_notifications.sql",
+)]
 ROLLBACK = MIGRATIONS / "rollback" / "20261011_binance_empty.sql"
 DSN = os.getenv("BINANCE_TEST_POSTGRES_DSN")
 pytestmark = pytest.mark.skipif(not DSN, reason="Explicit isolated local PostgreSQL test DSN required")
@@ -96,6 +101,62 @@ def scenario(action):
         finally:
             await cleanup(conn, schema)
     asyncio.run(run())
+
+
+def test_real_free_trial_schema_guards_and_transaction_rollback(monkeypatch):
+    monkeypatch.setenv("FREE_TRIAL_ENABLED", "true")
+
+    async def check(conn, before):
+        await conn.execute((MIGRATIONS / "20261011_004_member_free_trials.sql").read_text(encoding="utf-8"))
+        user = {"id": "user-a", "auth_version": 1}
+        with pytest.raises(RuntimeError, match="rollback probe"):
+            async with conn.transaction():
+                await free_trial.start(conn, user)
+                raise RuntimeError("rollback probe")
+        assert await conn.fetchval("SELECT COUNT(*) FROM member_free_trials") == 0
+        first = await free_trial.start(conn, user)
+        assert first["ends_at"] - first["started_at"] == timedelta(days=7)
+        repeated = await free_trial.start(conn, user)
+        assert repeated["started_at"] == first["started_at"] and repeated["ends_at"] == first["ends_at"]
+        assert await conn.fetchval("SELECT COUNT(*) FROM subscriptions") == 0
+        assert await conn.fetchval("SELECT COUNT(*) FROM binance_manual_periods") == 0
+        with pytest.raises(asyncpg.UniqueViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "INSERT INTO member_free_trials(user_hash,user_id) VALUES ($1,'user-a')",
+                    free_trial.account_hash("user-a"),
+                )
+        for query in (
+            "UPDATE member_free_trials SET ends_at=ends_at+INTERVAL '1 day'",
+            "DELETE FROM member_free_trials",
+        ):
+            with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+                async with conn.transaction():
+                    await conn.execute(query)
+        await conn.execute(
+            "UPDATE commercial_auth_users SET security=jsonb_set(security,'{email_verified}','false') WHERE user_id='user-b'",
+        )
+        with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+            async with conn.transaction():
+                await conn.execute(
+                    "INSERT INTO member_free_trials(user_hash,user_id) VALUES ($1,'user-b')",
+                    free_trial.account_hash("user-b"),
+                )
+        await conn.execute(
+            "INSERT INTO commercial_erased_users(user_hash) VALUES ($1)", free_trial.account_hash("user-a"),
+        )
+        row = await conn.fetchrow("SELECT * FROM member_free_trials")
+        assert row["user_id"] == "ERASED" and row["revoked_at"] is not None
+        assert row["ends_at"] == first["ends_at"]
+        assert await free_trial.current(conn, "user-a") is None
+        triggers = await conn.fetch(
+            """SELECT tgenabled FROM pg_trigger
+               WHERE tgname IN ('member_free_trial_immutable','member_free_trial_tombstone')
+                 AND tgrelid IN ('member_free_trials'::regclass,'commercial_erased_users'::regclass)""",
+        )
+        assert len(triggers) == 2 and all(row["tgenabled"] == b"A" for row in triggers)
+
+    scenario(check)
 
 
 def test_real_schema_unique_transaction_fingerprint_and_amount_constraints():

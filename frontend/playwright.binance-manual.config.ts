@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export default defineConfig({
   testDir: resolve(root, 'frontend', 'tests'),
-  testMatch: ['binance-manual-payment.spec.ts', 'binance-manual-admin.spec.ts', 'notifications-panel.spec.ts'],
+  testMatch: ['binance-manual-payment.spec.ts', 'binance-manual-admin.spec.ts', 'notifications-panel.spec.ts', 'free-trial-pricing.spec.ts'],
   outputDir: process.env.BINANCE_PAYMENT_TEST_RESULTS ?? resolve(tmpdir(), `protrebot-binance-payment-${randomUUID()}`),
   workers: 1,
   retries: 0,

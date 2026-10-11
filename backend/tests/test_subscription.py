@@ -51,13 +51,14 @@ class SubscriptionCoreTests(unittest.TestCase):
                     self.assertEqual(result, {
                         "stripe_enabled": missing in (None, "BINANCE_MANUAL_PAY_ID"),
                         "binance_enabled": missing != "BINANCE_MANUAL_PAY_ID",
+                        "free_trial_enabled": False,
                     })
                     authenticate.assert_called_once_with(request)
                     self.assertEqual(result["stripe_enabled"], v22_commercial.stripe_configured())
         with patch.dict("os.environ", {}, clear=True), \
                 patch.object(v22_commercial, "authenticated_user", return_value={"id": "user-1"}):
             self.assertEqual(asyncio.run(v22_commercial.v22_subscription_config(request)),
-                             {"stripe_enabled": False, "binance_enabled": False})
+                             {"stripe_enabled": False, "binance_enabled": False, "free_trial_enabled": False})
 
     def test_exactly_two_products_and_trial_terms(self):
         self.assertEqual(set(PLAN_CATALOG), {"TRIAL", "MASTER_MODE"})

@@ -38,19 +38,39 @@ def stripe_subscription(state: dict[str, Any], user_id: str) -> dict[str, Any]:
 def access(subscription: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     owner = user.get("role") == "OWNER"
     premium = owner or bool(subscription.get("master_trade_access"))
-    return {
+    free_trial = subscription.get("mode") == "FREE_TRIAL"
+    paid = owner or bool(subscription.get("master_trade_access") and subscription.get("plan") == "MASTER_MODE"
+                         and subscription.get("status") in {"ACTIVE", "PAST_DUE"})
+    result = {
         "isAdmin": owner, "canAccessMasterTrade": True, "isPremium": premium,
         "canExecuteMasterTrade": premium,
         "entitlements": {**subscription.get("entitlements", {}), "canExecuteMasterTrade": premium,
-                         "unlimitedAnalyst": premium},
+                         "unlimitedAnalyst": premium and not free_trial},
     }
+    from .free_trial import enabled as trial_enabled
+    if free_trial or trial_enabled():
+        result.update(canExecuteLive=paid, assistantAllowed=owner or not free_trial, freeTrial=free_trial)
+        result["entitlements"]["canExecuteLive"] = paid
+    return result
 
 
 async def resolve(conn: Any, state: dict[str, Any], user_id: str) -> dict[str, Any]:
     """Valid Stripe rights never depend on availability of the Binance tables."""
     original = stripe_subscription(state, user_id)
-    if original["master_trade_access"] or not enabled():
+    if original["master_trade_access"]:
         return original
+    from .free_trial import current, enabled as trial_enabled, snapshot
+    trial = None
+    if trial_enabled():
+        if conn is None:
+            raise HTTPException(503, "Deneme kaydı doğrulanamadı.")
+        try:
+            trial = await current(conn, user_id)
+        except (PostgresError, OSError, RuntimeError) as exc:
+            logger.warning("Free trial entitlement lookup failed type=%s", type(exc).__name__)
+            raise HTTPException(503, "Deneme kaydı doğrulanamadı.") from None
+    if not enabled():
+        return snapshot(original, trial)
     if conn is None:
         raise HTTPException(503, "Binance üyelik kaydı doğrulanamadı.")
     try:
@@ -72,7 +92,7 @@ async def resolve(conn: Any, state: dict[str, Any], user_id: str) -> dict[str, A
         logger.warning("Binance entitlement lookup failed type=%s", type(exc).__name__)
         raise HTTPException(503, "Binance üyelik kaydı doğrulanamadı.") from None
     if row is None:
-        return original
+        return snapshot(original, trial)
     start, end = parse_datetime(row.get("period_start")), parse_datetime(row.get("period_end"))
     decided = parse_datetime(row.get("decided_at"))
     now = datetime.now(timezone.utc)
@@ -98,7 +118,8 @@ async def prepare(request: Request, user: dict[str, Any]) -> EntitlementProof:
     snapshot = original
     failed = False
     try:
-        if not original["master_trade_access"] and user.get("role") != "OWNER" and enabled():
+        from .free_trial import enabled as trial_enabled
+        if not original["master_trade_access"] and user.get("role") != "OWNER" and (enabled() or trial_enabled()):
             pool = getattr(request.app.state, "db_pool", None)
             if pool is None:
                 raise HTTPException(503, "Binance üyelik kaydı doğrulanamadı.")
@@ -108,7 +129,7 @@ async def prepare(request: Request, user: dict[str, Any]) -> EntitlementProof:
         logger.warning("Member entitlement unavailable type=%s; Binance access denied", type(exc).__name__)
         failed = True
     proof = EntitlementProof(user["id"], int(user.get("auth_version", 1)), snapshot,
-                             parse_datetime(snapshot.get("current_period_end")) if snapshot.get("mode") == "BINANCE_MANUAL" else None,
+                             parse_datetime(snapshot.get("current_period_end")) if snapshot.get("master_trade_access") and snapshot.get("mode") in {"BINANCE_MANUAL", "FREE_TRIAL"} else None,
                              failed)
     request.state.member_entitlement_proof = proof
     return proof
@@ -122,10 +143,13 @@ def subscription_for_request(request: Request, user: dict[str, Any]) -> dict[str
         if proof.error:
             raise HTTPException(503, "Üyelik yetkisi doğrulanamadı.")
         if proof.expires_at is not None and proof.expires_at <= datetime.now(timezone.utc):
+            if proof.subscription.get("mode") == "FREE_TRIAL":
+                return {**proof.subscription,"master_trade_access":False,"status":"EXPIRED"}
             raise HTTPException(403, "Binance üyelik süresi doldu.")
         return dict(proof.subscription)
     original = stripe_subscription(request.app.state.v22_commercial["state"], user["id"])
-    if original["master_trade_access"] or user.get("role") == "OWNER" or not enabled():
+    from .free_trial import enabled as trial_enabled
+    if original["master_trade_access"] or user.get("role") == "OWNER" or not (enabled() or trial_enabled()):
         return original
     raise HTTPException(503, "Üyelik yetkisi doğrulanamadı.")
 
@@ -135,7 +159,8 @@ def access_for_request(request: Request, user: dict[str, Any]) -> dict[str, Any]
 
 
 async def target_subscription(conn: Any, state: dict[str, Any], user_id: str) -> dict[str, Any]:
-    if not enabled():
+    from .free_trial import enabled as trial_enabled
+    if not (enabled() or trial_enabled()):
         return stripe_subscription(state, user_id)
     try:
         rows = await conn.fetch(

@@ -160,6 +160,43 @@ gates or the default-off Original Demo flags.
 
 ## Manual Binance payment (backend approval; access disabled by default)
 
+### Payment-free trial (prepared migration; off by default)
+
+`FREE_TRIAL_ENABLED=false` is the safe default until separately approved
+`backend/migrations/20261011_004_member_free_trials.sql` is applied after the
+three Binance migrations. No startup migration or local automatic migration
+is wired. With this flag enabled, pricing shows two Turkish cards and hides
+the existing Stripe cards even when Stripe is configured. Stripe Checkout,
+its seven-day subscription trial and webhook implementation remain intact.
+
+`/api/v22/free-trial/start` grants one immutable seven-day period to a canonical
+active, verified CUSTOMER. No card, Stripe customer or subscription is created.
+Repeated/concurrent starts cannot extend it; prior Stripe trial history also
+consumes eligibility. Erasure revokes the period while retaining its identity
+hash to prevent reuse for the same account. A missing/invalid schema is an
+explicit error and grants no access.
+
+Trial members have Master Trade/Demo access, including Original V2 and Demo
+Auto Trade. AI Analyst retains its existing finite credits and saved-result
+behavior; it does not become unlimited. Kais chat, assistant tools and proactive
+messages are denied server-side and the assistant UI is hidden. Trial expiry
+blocks new entries; position reads, reduce-only closes and protection continue.
+LIVE entry orders, test orders, ARM and LIVE Auto Trade require paid MASTER MODE
+and retain all existing risk/consent/2FA guards; OWNER operational authority
+is preserved. Trial users see "LIVE işlem MASTER MODE ile açılır".
+Binance approval extends from the latest of now, the trial end or existing
+manual period end, without enabling paid features before that period starts.
+
+For the isolated local sandbox, apply the fourth migration to
+`binance_manual_local_test` only, then set `FREE_TRIAL_ENABLED=true` in the
+ignored `.env.binance-local`. Keep `BINANCE_MANUAL_ACCESS_ENABLED=true`,
+`BINANCE_MANUAL_PAY_ID=LOCAL-TEST-NOT-A-REAL-PAY-ID` and
+`BINANCE_MANUAL_EMAIL_QUEUE_ONLY=true`. Restart the backend with
+`--env-file .env.binance-local`; the two cards are available at
+`http://127.0.0.1:5183/pricing`. The test Pay ID is not a payment destination.
+These local settings do not enable the production feature or apply any
+production migration.
+
 The subscription screen reads `/api/v22/subscription/config`; Stripe plan/trial
 cards and billing controls are shown only when the existing Stripe configuration
 guard passes. No Stripe checkout/webhook behavior is changed. With only Binance
