@@ -450,7 +450,19 @@ def clear_clean_reconciliation_state(state: dict[str, Any], snapshot: dict[str, 
             "Temiz Binance snapshotında pozisyon, emir veya plan karşılığı olmayan giriş niyetleri temizlendi.",
             count=len(stale_intent_ids),
         )
-    if unresolved_execution_evidence(state, clean_reconciliation_snapshot=True):
+    diagnostic = latest_reconciliation_diagnostic(state) or {}
+    clean_credential_precondition_failure = bool(
+        diagnostic.get("reconciliation_stage") == "automatic_cycle"
+        and "Canlı API bağlantısı aktif değil." in str(diagnostic.get("exception_message") or "")
+        and not snapshot["positions"]
+        and not snapshot["open_orders"]
+        and not snapshot["open_algo_orders"]
+        and not state.get("plans")
+        and not state.get("intents")
+    )
+    if unresolved_execution_evidence(
+        state, clean_reconciliation_snapshot=True,
+    ) and not clean_credential_precondition_failure:
         return False
     if stale_intent_ids:
         add_event(
@@ -4970,7 +4982,16 @@ def record_execution_loop_failure(application: Any, exc: Exception, reconciliati
     state["connected"] = False
     state["connection"].update({"last_checked": now_iso(), "last_error": safe_message})
     state["connection"]["retry_count"] = int(state["connection"].get("retry_count") or 0) + 1
-    if (isinstance(exc, LiveExchangeError) and exc.unknown_execution) or unresolved_execution_evidence(state):
+    credential_precondition_failure = bool(
+        reconciliation_stage == "automatic_cycle"
+        and isinstance(exc, LiveExchangeError)
+        and exc.http_status == 412
+        and not exc.unknown_execution
+        and "Canlı API bağlantısı aktif değil." in str(exc)
+    )
+    if credential_precondition_failure:
+        lock_live_execution(state, "LIVE_CREDENTIALS_UNAVAILABLE", unknown=False)
+    elif (isinstance(exc, LiveExchangeError) and exc.unknown_execution) or unresolved_execution_evidence(state):
         lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
     else:
         lock_reconciliation_failure(state)

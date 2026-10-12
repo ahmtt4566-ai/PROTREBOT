@@ -1690,6 +1690,49 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertFalse(state["emergency"]["active"])
         self.assertTrue(any(event["kind"] == "RECONCILIATION_CLEAN" for event in state["events"]))
 
+    def test_clean_reconciliation_clears_stale_credential_precondition_unknown_on_empty_account(self):
+        state = initial_state()
+        state.update({"execution_state": "UNKNOWN", "reconciliation_required": True})
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        v25_execution.add_event(state, "LIVE_EXCEPTION_UNKNOWN", "Historical unknown execution evidence.")
+        v25_execution.add_event(
+            state,
+            "RECONCILIATION_FAILURE_DIAGNOSTIC",
+            "Reconciliation failure diagnostic metadata recorded.",
+            exception_type="LiveExchangeError",
+            exception_message="412: Canlı API bağlantısı aktif değil. Borsa Bağlantıları bölümünden gerçek hesap anahtarını kaydedip salt-okunur bağlantıyı aktifleştirin.",
+            reconciliation_stage="automatic_cycle",
+        )
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot())), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("KEY_PLACEHOLDER", "SECRET_PLACEHOLDER")))
+
+        self.assertEqual(state["execution_state"], "LOCKED")
+        self.assertFalse(state["reconciliation_required"])
+        self.assertFalse(state["emergency"]["active"])
+        self.assertTrue(any(event["kind"] == "RECONCILIATION_CLEAN" for event in state["events"]))
+
+    def test_missing_live_credentials_do_not_create_unknown_execution(self):
+        state = initial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        failure = LiveExchangeError(
+            "Canlı API bağlantısı aktif değil. Borsa Bağlantıları bölümünden gerçek hesap anahtarını kaydedip salt-okunur bağlantıyı aktifleştirin.",
+            http_status=412,
+        )
+
+        with patch.object(v25_execution, "persist_state"):
+            v25_execution.record_execution_loop_failure(application, failure, "automatic_cycle")
+
+        self.assertEqual(state["execution_state"], "LOCKED")
+        self.assertFalse(state["reconciliation_required"])
+        self.assertTrue(state["emergency"]["active"])
+        self.assertEqual(state["emergency"]["reason"], "LIVE_CREDENTIALS_UNAVAILABLE")
+
     def test_clean_reconciliation_auto_recovers_active_session_within_window(self):
         state = initial_state()
         state["auto"].update({"enabled": True, "session_until": time.time() + 300})
