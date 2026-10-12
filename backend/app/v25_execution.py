@@ -1424,8 +1424,13 @@ class BinanceLiveClient:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in {418, 429}:
-                    raise LiveRateLimitError("Binance piyasa verisi hız sınırında; yeni giriş gönderilmedi.",
-                                             retry_after=retry_after_seconds(exc.response), exchange_code=-1003) from exc
+                    error = LiveRateLimitError(
+                        "Binance piyasa verisi hız sınırında; yeni giriş gönderilmedi.",
+                        retry_after=retry_after_seconds(exc.response),
+                        exchange_code=-1003,
+                    )
+                    error.request_method, error.request_path = "GET", path
+                    raise error from exc
                 raise LiveExchangeError("Binance piyasa verisi alınamadı; yeni giriş gönderilmedi.",
                                         http_status=503, transient_read_failure=True) from exc
             except httpx.RequestError as exc:
@@ -5129,6 +5134,24 @@ async def execution_loop(application: Any) -> None:
         except LiveRateLimitError as exc:
             automation_telemetry("AUTOMATION_SKIP reason=binance_rate_limited", reason="binance_rate_limited")
             state = application.state.v25_execution
+            if (
+                reconciliation_stage == "automatic_cycle"
+                and exc.request_method == "GET"
+                and exc.request_path in PUBLIC_PATHS
+            ):
+                state["connection"].update({"last_checked": now_iso(), "last_error": None})
+                state["connection"]["retry_count"] = 0
+                add_event(
+                    state,
+                    "LIVE_MARKET_RATE_LIMIT_WAIT",
+                    "Binance piyasa verisi hız sınırında; Original V2 oturumu ve ARM korunarak bekleniyor.",
+                    endpoint=exc.request_path,
+                    retry_after_seconds=exc.retry_after,
+                )
+                persist_state(state)
+                await asyncio.sleep(rate_limit_backoff_seconds(exc, backoff))
+                backoff = min(60, backoff * 2) if exc.retry_after is None else 5
+                continue
             if account_rate_limit_active(state) and exc.request_method in {None, "GET"}:
                 persist_state(state)
                 await asyncio.sleep(min(5.0, account_rate_limit_wait_seconds(state)))

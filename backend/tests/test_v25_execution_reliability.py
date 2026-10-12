@@ -277,6 +277,115 @@ class ExecutionReliabilityTests(unittest.TestCase):
         self.assertFalse(state["live_auto_trade"])
         self.assertIsNone(state["transient_market_data"])
 
+    def test_public_market_rate_limit_preserves_original_session_and_arm(self):
+        application, state = application_for_loop()
+        session_until = execution.time.time() + 300
+        state["auto"].update({"enabled": True, "session_until": session_until})
+        state.update(live_auto_trade=True, real_trading_locked=False)
+        state["original_v2_live"] = {
+            "enabled": True,
+            "paused": False,
+            "pause_reason": None,
+            "session_expires_at_epoch": session_until,
+        }
+        failure = execution.LiveRateLimitError(
+            "Binance piyasa verisi hız sınırında; yeni giriş gönderilmedi.",
+            retry_after=7,
+            exchange_code=-1003,
+        )
+        failure.request_method = "GET"
+        failure.request_path = "/fapi/v1/klines"
+
+        async def sleep(seconds):
+            self.assertEqual(seconds, 7)
+            raise asyncio.CancelledError
+
+        with patch.multiple(
+            execution,
+            auto_session_credentials=AsyncMock(
+                return_value=("OFFLINE_KEY_PLACEHOLDER", "OFFLINE_SECRET_PLACEHOLDER"),
+            ),
+            reconcile=AsyncMock(),
+            automatic_cycle=AsyncMock(side_effect=failure),
+        ), patch.object(execution.asyncio, "sleep", side_effect=sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(execution.execution_loop(application))
+
+        self.assertTrue(state["original_v2_live"]["enabled"])
+        self.assertFalse(state["original_v2_live"]["paused"])
+        self.assertIsNone(state["original_v2_live"]["pause_reason"])
+        self.assertTrue(state["live_auto_trade"])
+        self.assertFalse(state["real_trading_locked"])
+        self.assertTrue(state["auto"]["enabled"])
+        self.assertFalse(any(event["kind"] == "ORIGINAL_LIVE_PAUSED" for event in state["events"]))
+        self.assertFalse(any(event["kind"] == "LIVE_FAIL_CLOSED" for event in state["events"]))
+        self.assertTrue(any(event["kind"] == "LIVE_MARKET_RATE_LIMIT_WAIT" for event in state["events"]))
+
+    def test_public_market_rate_limit_records_get_request_metadata(self):
+        application, state = application_for_loop()
+        response = execution.httpx.Response(
+            429,
+            headers={"Retry-After": "7"},
+            request=execution.httpx.Request("GET", "https://fapi.binance.com/fapi/v1/klines"),
+        )
+        client = execution.BinanceLiveClient(
+            http=AsyncMock(),
+            api_key="OFFLINE_KEY_PLACEHOLDER",
+            secret_key="OFFLINE_SECRET_PLACEHOLDER",
+            diagnostic_state=state,
+            application=application,
+        )
+        with patch("app.main.market_data_request", new=AsyncMock(return_value=response)):
+            with self.assertRaises(execution.LiveRateLimitError) as raised:
+                asyncio.run(client.public_get("/fapi/v1/klines", {"symbol": "BTCUSDT"}))
+
+        self.assertEqual(raised.exception.request_method, "GET")
+        self.assertEqual(raised.exception.request_path, "/fapi/v1/klines")
+        self.assertEqual(raised.exception.retry_after, 7)
+
+    def test_original_rate_limited_scan_retries_same_candle(self):
+        application, state = application_for_loop()
+        session_until = execution.time.time() + 300
+        state["auto"].update({"enabled": True, "session_until": session_until})
+        state.update(live_auto_trade=True, real_trading_locked=False)
+        state["original_v2_live"] = {
+            "enabled": True,
+            "paused": False,
+            "pause_reason": None,
+            "session_expires_at_epoch": session_until,
+            "scanner": {},
+        }
+        failure = execution.LiveRateLimitError("Mock public market rate limit", retry_after=7)
+        failure.request_method = "GET"
+        failure.request_path = "/fapi/v1/klines"
+        candidates = AsyncMock(side_effect=[failure, ([], {})])
+        snapshot = {"positions": [], "open_orders": []}
+        decision_time = int(execution.time.time()) // 900 * 900
+
+        common = (
+            patch.object(execution, "readiness_for", return_value={"ready": True}),
+            patch.object(execution, "client_for_with_credentials", return_value=SimpleNamespace()),
+            patch.object(execution, "account_snapshot", new=AsyncMock(return_value=snapshot)),
+            patch.object(original_v2_live, "check_entry", new=AsyncMock()),
+            patch.object(original_v2_live.original, "candidates", new=candidates),
+        )
+        with common[0], common[1], common[2], common[3], common[4]:
+            with self.assertRaises(execution.LiveRateLimitError):
+                asyncio.run(original_v2_live.cycle(
+                    application,
+                    ("OFFLINE_KEY_PLACEHOLDER", "OFFLINE_SECRET_PLACEHOLDER"),
+                ))
+            self.assertNotIn("last_decision_time", state["original_v2_live"])
+            asyncio.run(original_v2_live.cycle(
+                application,
+                ("OFFLINE_KEY_PLACEHOLDER", "OFFLINE_SECRET_PLACEHOLDER"),
+            ))
+
+        self.assertEqual(candidates.await_count, 2)
+        self.assertEqual(state["original_v2_live"]["last_decision_time"], decision_time)
+        self.assertEqual(state["original_v2_live"]["scanner"]["stage"], "SCAN_COMPLETE")
+        self.assertFalse(state["original_v2_live"]["paused"])
+
     def test_supervisor_restarts_even_when_failure_reporting_raises(self):
         async def exercise():
             application, _state = application_for_loop()

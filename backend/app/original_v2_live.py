@@ -528,10 +528,10 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
         if config.get("last_decision_time", -1) >= at:
             scanner.update(stage="WAITING_NEXT_CANDLE")
             return
-        config["last_decision_time"] = at
         occupied = {item["symbol"] for item in snapshot["positions"] + snapshot["open_orders"]}
         scanner.update(stage="SCANNING")
         eligible, _results = await original.candidates(client, at, occupied, require_complete=True)
+        config["last_decision_time"] = at
         scanner.update(stage="SCAN_COMPLETE", last_scan_at=live.now_iso(),
                        scanned_symbol_count=len(strategy.fixed_profile()["execution_policy"]["allowed_symbols"]),
                        candidate_count=len(eligible))
