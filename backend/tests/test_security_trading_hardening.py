@@ -81,7 +81,7 @@ def test_sensitive_reads_deny_other_session(route):
     assert error.value.status_code == 403
 
 
-def test_same_owner_session_recovery_keeps_records_and_entries_locked():
+def test_same_owner_session_recovery_accepts_rotated_key_for_same_account_and_keeps_entries_locked():
     from app import account_settings
 
     async def recover():
@@ -98,7 +98,7 @@ def test_same_owner_session_recovery_keeps_records_and_entries_locked():
         with patch.object(live, "authenticated_user", return_value=request.state.member), \
              patch.object(account_settings, "require_totp", new=AsyncMock()) as mfa, \
              patch.object(live, "session_credentials_for_request", return_value=("offline-key", "offline-secret")), \
-             patch.object(live, "credential_fingerprint", return_value="SHA256:same"), \
+             patch.object(live, "credential_fingerprint", return_value="SHA256:rotated"), \
              patch.object(live, "session_account_identity", return_value="BINANCE:LIVE:same"), \
              patch.object(live, "authenticated_live_expiry", return_value=time.time() + 3600), \
              patch.object(vault, "_verify_request_credentials", new=AsyncMock(return_value={"account_identity": "same"})), \
@@ -108,6 +108,7 @@ def test_same_owner_session_recovery_keeps_records_and_entries_locked():
             result = await live.v25_recover_session(request, SimpleNamespace(confirmation="LIVE OTURUMUNU GERİ BAĞLA", totp_code="123456"))
         assert result == {"ok": True, "entries_enabled": False, "orders_created": False}
         assert state["live_session_authorization"]["session_id"] == vault.session_id(request)
+        assert state["live_session_authorization"]["fingerprint"] == "SHA256:rotated"
         assert state["persistence_revision"] == 375
         sql, key, payload = request.app.state.db_pool.fetchrow.await_args.args
         assert "WHERE COALESCE" in sql and key == "v25_live:state"
@@ -131,7 +132,7 @@ def test_same_owner_session_recovery_keeps_records_and_entries_locked():
 
 
 @pytest.mark.parametrize("failure,status", [
-    ("other_owner", 403), ("different_key", 403), ("different_account", 403),
+    ("other_owner", 403), ("different_account", 403),
     ("active_auto", 409), ("armed", 409), ("open_plan", 409), ("unknown_execution", 409),
     ("positions", 409), ("open_orders", 409), ("open_algo_orders", 409), ("missing_algos", 409),
     ("mfa", 401), ("confirmation", 422), ("expired_auth", 401),
@@ -173,7 +174,7 @@ def test_session_recovery_failures_preserve_old_owner_and_records(failure, statu
         with patch.object(live, "authenticated_user", return_value=request.state.member), \
              patch.object(account_settings, "require_totp", new=AsyncMock(side_effect=HTTPException(401, "offline MFA") if failure == "mfa" else None)), \
              patch.object(live, "session_credentials_for_request", return_value=("offline-key", "offline-secret")), \
-             patch.object(live, "credential_fingerprint", return_value="SHA256:other" if failure == "different_key" else "SHA256:same"), \
+             patch.object(live, "credential_fingerprint", return_value="SHA256:rotated"), \
              patch.object(live, "authenticated_live_expiry", return_value=time.time() - 1 if failure == "expired_auth" else time.time() + 3600), \
              patch.object(vault, "_verify_request_credentials", new=AsyncMock(return_value={"account_identity": "other" if failure == "different_account" else "same"}, side_effect=vault.VaultError("offline timeout") if failure == "exchange_timeout" else None)), \
              patch.object(live, "client_for_with_credentials", return_value=object()), \

@@ -5403,8 +5403,8 @@ async def v25_recover_session(request: Request, body: AutoStartConfirmation) -> 
             raise HTTPException(409, "Açık veya belirsiz LIVE kayıtları varken manuel inceleme gerekli.")
         api_key, secret_key = session_credentials_for_request(request, "LIVE", active_only=False)
         fingerprint = credential_fingerprint(api_key) if api_key else None
-        if not usable_live_credentials((api_key, secret_key)) or not authorization.get("fingerprint") or normalize_consent_fingerprint(fingerprint) != normalize_consent_fingerprint(authorization["fingerprint"]):
-            raise HTTPException(403, "Aynı LIVE anahtarı yeni oturumda kayıtlı olmalı.")
+        if not usable_live_credentials((api_key, secret_key)) or not authorization.get("trading_account_id"):
+            raise HTTPException(403, "Aynı LIVE işlem hesabının anahtarı yeni oturumda kayıtlı olmalı.")
         expiry = authenticated_live_expiry(request)
         if expiry is None or expiry <= time.time():
             raise HTTPException(401, "Güncel OWNER oturumu doğrulanamadı.")
@@ -5436,7 +5436,8 @@ async def v25_recover_session(request: Request, body: AutoStartConfirmation) -> 
                          web_consent=initial_state()["web_consent"], policy_ack_digest=None,
                          connected=False, snapshot_session_id="", _app=request.app)
         candidate["live_session_authorization"] = {
-            **authorization, "session_id": session_id(request), "auth_version": user.get("auth_version"),
+            **authorization, "session_id": session_id(request), "fingerprint": fingerprint,
+            "auth_version": user.get("auth_version"),
             "auth_expires_at_epoch": expiry,
         }
         add_event(candidate, "LIVE_SESSION_RECOVERED", "Aynı OWNER ve LIVE hesap yeni oturuma geri bağlandı; yeni girişler kapalı.", actor=str(user["id"]))
