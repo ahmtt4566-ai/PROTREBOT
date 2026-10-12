@@ -174,6 +174,58 @@ class ExecutionReliabilityTests(unittest.TestCase):
         self.assertEqual(state["heartbeat"]["last_successful_cycle"], "successful-cycle")
         self.assertEqual(sleeps, [execution.RECONCILE_SECONDS, 5])
 
+    def test_original_session_recovers_transient_market_read_without_rearm(self):
+        application, state = application_for_loop()
+        session_until = execution.time.time() + 300
+        state["auto"].update({"enabled": True, "session_until": session_until})
+        state.update(live_auto_trade=True, real_trading_locked=False)
+        state["original_v2_live"] = {
+            "enabled": True,
+            "paused": False,
+            "pause_reason": None,
+            "session_expires_at_epoch": session_until,
+        }
+        failure = execution.LiveExchangeError(
+            "Canlı market-data okuması geçici olarak başarısız oldu.",
+            transient_read_failure=True,
+            request_method="GET",
+            request_path="/fapi/v3/account",
+        )
+        reconcile_calls = 0
+
+        async def reconcile(*args, **kwargs):
+            nonlocal reconcile_calls
+            reconcile_calls += 1
+            if reconcile_calls == 1:
+                raise failure
+            self.assertTrue(execution.recover_transient_market_data(state, "GET", "/fapi/v3/account"))
+
+        sleeps = []
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) == 2:
+                raise asyncio.CancelledError
+
+        with patch.multiple(
+            execution,
+            auto_session_credentials=AsyncMock(return_value=("OFFLINE_KEY_PLACEHOLDER", "OFFLINE_SECRET_PLACEHOLDER")),
+            reconcile=reconcile,
+            automatic_cycle=AsyncMock(),
+        ), patch.object(execution.asyncio, "sleep", side_effect=sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(execution.execution_loop(application))
+
+        self.assertEqual(sleeps, [1, execution.RECONCILE_SECONDS])
+        self.assertTrue(state["original_v2_live"]["enabled"])
+        self.assertFalse(state["original_v2_live"]["paused"])
+        self.assertIsNone(state["original_v2_live"]["pause_reason"])
+        self.assertTrue(state["live_auto_trade"])
+        self.assertFalse(state["real_trading_locked"])
+        self.assertTrue(state["auto"]["enabled"])
+        self.assertFalse(any(event["kind"] == "ORIGINAL_LIVE_PAUSED" for event in state["events"]))
+        self.assertTrue(any(event["kind"] == "AUTO_RECOVERED_FROM_TRANSIENT_MARKET_DATA" for event in state["events"]))
+
     def test_supervisor_restarts_even_when_failure_reporting_raises(self):
         async def exercise():
             application, _state = application_for_loop()

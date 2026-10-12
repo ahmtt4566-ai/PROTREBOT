@@ -271,9 +271,10 @@ def lock_live_execution(
     unknown: bool = False,
     symbol: str | None = None,
     client_id: str | None = None,
+    preserve_original_session: bool = False,
 ) -> None:
     from . import original_v2_live
-    if original_v2_live.running(state):
+    if original_v2_live.running(state) and not preserve_original_session:
         original_v2_live.pause(state, reason)
     record_live_lock_reason(state, reason)
     state["armed_until"] = 0.0
@@ -541,7 +542,12 @@ def mark_transient_market_data_failure(state: dict[str, Any], error: LiveExchang
         "endpoint": error.request_path,
         "error_type": type(error.__cause__).__name__ if error.__cause__ else None,
     }
-    lock_live_execution(state, "TRANSIENT_MARKET_DATA_FAILURE", unknown=False)
+    lock_live_execution(
+        state,
+        "TRANSIENT_MARKET_DATA_FAILURE",
+        unknown=False,
+        preserve_original_session=True,
+    )
     state["armed_until"] = 0.0
     state["execution_state"] = "LOCKED"
     state["reconciliation_required"] = False
@@ -5118,9 +5124,6 @@ async def execution_loop(application: Any) -> None:
             await asyncio.sleep(rate_limit_backoff_seconds(exc, backoff))
             backoff = min(60, backoff * 2) if exc.retry_after is None else 5
         except LiveExchangeError as exc:
-            from . import original_v2_live
-            if original_v2_live.running(application.state.v25_execution):
-                original_v2_live.pause(application.state.v25_execution, sanitized_exception_message(exc))
             if exc.transient_read_failure and not exc.unknown_execution:
                 state = application.state.v25_execution
                 if mark_transient_market_data_failure(state, exc):
@@ -5129,6 +5132,9 @@ async def execution_loop(application: Any) -> None:
                     persist_state(state)
                     await asyncio.sleep(1)
                     continue
+            from . import original_v2_live
+            if original_v2_live.running(application.state.v25_execution):
+                original_v2_live.pause(application.state.v25_execution, sanitized_exception_message(exc))
             record_execution_loop_failure(application, exc, reconciliation_stage)
             await asyncio.sleep(backoff)
             backoff = min(60, backoff * 2)
