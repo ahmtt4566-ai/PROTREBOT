@@ -2014,6 +2014,12 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
         state["execution_state"] = "UNKNOWN"
         state["reconciliation_required"] = True
+        state["events"].insert(0, {
+            "kind": "LIVE_UNKNOWN_EXECUTION",
+            "reason": "RECONCILIATION_FAILURE",
+            "unknown_execution": True,
+            "symbol": None,
+        })
 
         self.assertTrue(v25_execution.clear_clean_reconciliation_state(state, complete_reconciliation_snapshot()))
         self.assertNotIn("stale-intent", state["intents"])
@@ -2022,6 +2028,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             event["kind"] == "STALE_PRE_SUBMISSION_INTENTS_CLEARED"
             for event in state["events"]
         ))
+        self.assertTrue(any(event["kind"] == "UNKNOWN_ORDER_RECONCILED" for event in state["events"]))
 
     def test_clean_reconciliation_preserves_intent_with_matching_position(self):
         state = initial_state()

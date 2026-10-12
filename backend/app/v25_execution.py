@@ -303,7 +303,9 @@ def lock_live_execution(
     )
 
 
-def unresolved_execution_evidence(state: dict[str, Any]) -> bool:
+def unresolved_execution_evidence(
+    state: dict[str, Any], *, clean_reconciliation_snapshot: bool = False,
+) -> bool:
     """Return whether state contains evidence of an unresolved LIVE execution."""
     events = state.get("events") if isinstance(state.get("events"), list) else []
     for event in events:
@@ -315,6 +317,12 @@ def unresolved_execution_evidence(state: dict[str, Any]) -> bool:
         if kind in {"UNKNOWN_ORDER_STATE", "LIVE_EXCEPTION_UNKNOWN"}:
             return True
         if kind == "LIVE_UNKNOWN_EXECUTION":
+            if (
+                clean_reconciliation_snapshot
+                and event.get("reason") == "RECONCILIATION_FAILURE"
+                and not event.get("symbol")
+            ):
+                continue
             if event.get("unknown_execution") is True or event.get("reason") != "RECONCILIATION_FAILURE":
                 return True
 
@@ -442,8 +450,14 @@ def clear_clean_reconciliation_state(state: dict[str, Any], snapshot: dict[str, 
             "Temiz Binance snapshotında pozisyon, emir veya plan karşılığı olmayan giriş niyetleri temizlendi.",
             count=len(stale_intent_ids),
         )
-    if unresolved_execution_evidence(state):
+    if unresolved_execution_evidence(state, clean_reconciliation_snapshot=True):
         return False
+    if stale_intent_ids:
+        add_event(
+            state,
+            "UNKNOWN_ORDER_RECONCILED",
+            "Pre-submission hata sonrası kalan belirsiz yürütme kaydı temiz Binance snapshotıyla uzlaştırıldı.",
+        )
     transient = state.get("transient_reconciliation") if isinstance(state.get("transient_reconciliation"), dict) else None
     failed_at = float(transient.get("failed_at_epoch") or 0) if transient else 0.0
     recovery_deadline = failed_at + TRANSIENT_RECONCILIATION_RECOVERY_SECONDS
