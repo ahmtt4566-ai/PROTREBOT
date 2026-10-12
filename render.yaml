@@ -20,6 +20,8 @@ services:
         value: "true"
       - key: PROTREBOT_DURABLE_AUTH_REQUIRED
         value: "true"
+      - key: FREE_TRIAL_ENABLED
+        value: "false"
       - key: PROTREBOT_WEB_ACCESS_TOKEN
         sync: false
       - key: PROTREBOT_SESSION_SECRET
