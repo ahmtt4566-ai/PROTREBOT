@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from app import v25_execution as execution  # noqa: E402
+from app import original_v2_live  # noqa: E402
 
 
 def application_for_loop():
@@ -225,6 +226,56 @@ class ExecutionReliabilityTests(unittest.TestCase):
         self.assertTrue(state["auto"]["enabled"])
         self.assertFalse(any(event["kind"] == "ORIGINAL_LIVE_PAUSED" for event in state["events"]))
         self.assertTrue(any(event["kind"] == "AUTO_RECOVERED_FROM_TRANSIENT_MARKET_DATA" for event in state["events"]))
+
+    def test_transient_recovery_survives_stale_reconciliation_unknown_event(self):
+        application, state = application_for_loop()
+        session_until = execution.time.time() + 300
+        state["auto"].update({"enabled": True, "session_until": session_until})
+        state.update(live_auto_trade=True, real_trading_locked=False)
+        state["original_v2_live"] = {
+            "enabled": True, "paused": False, "pause_reason": None,
+            "session_expires_at_epoch": session_until,
+        }
+        execution.add_event(
+            state, "LIVE_UNKNOWN_EXECUTION", "Önceki ARM iptalinden kalan kayıt.",
+            reason="RECONCILIATION_FAILURE", symbol=None, unknown_execution=True,
+        )
+        failure = execution.LiveExchangeError(
+            "Canlı market-data okuması geçici olarak başarısız oldu.",
+            transient_read_failure=True, request_method="GET", request_path="/fapi/v3/account",
+        )
+        self.assertTrue(execution.mark_transient_market_data_failure(state, failure))
+        self.assertTrue(execution.transient_market_data_recovery_active(state))
+
+        with patch.object(original_v2_live, "cycle", new=AsyncMock()) as cycle, \
+                patch.object(original_v2_live, "running", return_value=True):
+            asyncio.run(execution.automatic_cycle(application, credentials=("k", "s")))
+            cycle.assert_not_awaited()
+
+        self.assertTrue(execution.recover_transient_market_data(state, "GET", "/fapi/v3/account"))
+        self.assertTrue(state["live_auto_trade"])
+        self.assertFalse(state["real_trading_locked"])
+        self.assertTrue(state["auto"]["enabled"])
+        self.assertFalse(state["original_v2_live"]["paused"])
+        self.assertFalse(any(event["kind"] == "ORIGINAL_LIVE_PAUSED" for event in state["events"]))
+        self.assertTrue(any(event["kind"] == "AUTO_RECOVERED_FROM_TRANSIENT_MARKET_DATA" for event in state["events"]))
+
+    def test_transient_window_expiry_keeps_live_locked(self):
+        application, state = application_for_loop()
+        session_until = execution.time.time() + 300
+        state["auto"].update({"enabled": True, "session_until": session_until})
+        state.update(live_auto_trade=True, real_trading_locked=False)
+        failure = execution.LiveExchangeError(
+            "Canlı market-data okuması geçici olarak başarısız oldu.",
+            transient_read_failure=True, request_method="GET", request_path="/fapi/v3/account",
+        )
+        self.assertTrue(execution.mark_transient_market_data_failure(state, failure))
+        state["transient_market_data"]["failed_at_epoch"] -= execution.TRANSIENT_RECONCILIATION_RECOVERY_SECONDS + 5
+        self.assertFalse(execution.transient_market_data_recovery_active(state))
+        self.assertFalse(execution.recover_transient_market_data(state, "GET", "/fapi/v3/account"))
+        self.assertTrue(state["real_trading_locked"])
+        self.assertFalse(state["live_auto_trade"])
+        self.assertIsNone(state["transient_market_data"])
 
     def test_supervisor_restarts_even_when_failure_reporting_raises(self):
         async def exercise():

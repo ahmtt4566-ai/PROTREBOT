@@ -554,6 +554,19 @@ def mark_transient_market_data_failure(state: dict[str, Any], error: LiveExchang
     return True
 
 
+def transient_market_data_recovery_active(state: dict[str, Any]) -> bool:
+    if not isinstance(state, dict):
+        return False
+    transient = state.get("transient_market_data") if isinstance(state.get("transient_market_data"), dict) else None
+    if not transient:
+        return False
+    now = time.time()
+    return (
+        now <= float(transient.get("failed_at_epoch") or 0) + TRANSIENT_RECONCILIATION_RECOVERY_SECONDS
+        and float(transient.get("auto_session_until") or 0) > now
+    )
+
+
 def recover_transient_market_data(state: dict[str, Any], method: str, path: str) -> bool:
     if not isinstance(state, dict):
         return False
@@ -561,10 +574,10 @@ def recover_transient_market_data(state: dict[str, Any], method: str, path: str)
     if not transient or not is_transient_read_request(method, path):
         return False
     session_until = float(transient.get("auto_session_until") or 0)
-    if time.time() > float(transient.get("failed_at_epoch") or 0) + TRANSIENT_RECONCILIATION_RECOVERY_SECONDS or session_until <= time.time():
+    if not transient_market_data_recovery_active(state):
         state["transient_market_data"] = None
         return False
-    if unresolved_execution_evidence(state):
+    if unresolved_execution_evidence(state, clean_reconciliation_snapshot=True):
         return False
     state["execution_state"] = "LOCKED"
     state["reconciliation_required"] = False
@@ -4328,6 +4341,14 @@ async def automatic_cycle(application: Any, credentials: tuple[str, str] | None 
     if account_rate_limit_active(state):
         return
     from . import original_v2_live
+    if transient_market_data_recovery_active(state):
+        state["auto"]["last_skip_reason"] = "transient_market_data_recovery"
+        state["auto"]["last_cycle_stage"] = "skipped"
+        automation_telemetry(
+            "AUTOMATION_SKIP reason=transient_market_data_recovery",
+            reason="transient_market_data_recovery",
+        )
+        return
     if original_v2_live.running(state):
         await original_v2_live.cycle(application, credentials)
         return
