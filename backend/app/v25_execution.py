@@ -412,6 +412,36 @@ def clear_clean_reconciliation_state(state: dict[str, Any], snapshot: dict[str, 
             for key in ("clientOrderId", "client_order_id", "clientAlgoId", "client_algo_id")
         ):
             return False
+    position_symbols = {
+        normalize_symbol(str(row.get("symbol") or ""))
+        for row in snapshot["positions"]
+        if normalize_symbol(str(row.get("symbol") or ""))
+    }
+    plans = state.get("plans") if isinstance(state.get("plans"), dict) else {}
+    intents = state.get("intents") if isinstance(state.get("intents"), dict) else {}
+    stale_intent_ids = [
+        str(intent_id)
+        for intent_id, intent in intents.items()
+        if isinstance(intent, dict)
+        and normalize_symbol(str(intent.get("symbol") or ""))
+        and normalize_symbol(str(intent.get("symbol") or "")) not in position_symbols
+        and not any(
+            isinstance(plan, dict) and (
+                str(plan.get("intent_id") or "") == str(intent_id)
+                or str(plan.get("entry_client_order_id") or "") == str(intent.get("client_order_id") or "")
+            )
+            for plan in plans.values()
+        )
+    ]
+    for intent_id in stale_intent_ids:
+        intents.pop(intent_id, None)
+    if stale_intent_ids:
+        add_event(
+            state,
+            "STALE_PRE_SUBMISSION_INTENTS_CLEARED",
+            "Temiz Binance snapshotında pozisyon, emir veya plan karşılığı olmayan giriş niyetleri temizlendi.",
+            count=len(stale_intent_ids),
+        )
     if unresolved_execution_evidence(state):
         return False
     transient = state.get("transient_reconciliation") if isinstance(state.get("transient_reconciliation"), dict) else None
@@ -3955,6 +3985,7 @@ async def execute_live_order(
     if not readiness_for(application, state, request, credentials)["ready"]:
         raise HTTPException(423, "Canlı yayın kapıları tamamlanmadı; emir gönderilmedi.")
     submission_started = False
+    recorded_intent_id: str | None = None
     observation_stage = "ACCOUNT_MODE"
     async with state["lock"]:
         try:
@@ -4099,6 +4130,7 @@ async def execute_live_order(
                 "applied_leverage": leverage_audit["applied_leverage"],
                 "margin_type": leverage_audit["margin_type"],
             }
+            recorded_intent_id = intent_id
             if original_entry:
                 await original_v2_live.persist_required(state)
             else:
@@ -4187,6 +4219,15 @@ async def execute_live_order(
             outcome, message = live_plan_execution_outcome(plan)
             return {"ok": True, "order": {"order_id": result.get("orderId"), "client_order_id": client_id, "status": result.get("status", plan["status"])}, "plan": plan, "risk_guard": guard, "execution_outcome": outcome, "message": message, "profit_guaranteed": False}
         except (LiveExchangeError, BinanceDemoError) as exc:
+            if not submission_started and recorded_intent_id:
+                state["intents"].pop(recorded_intent_id, None)
+                add_event(
+                    state,
+                    "LIVE_INTENT_CANCELLED_PRE_SUBMISSION",
+                    "Binance emri gönderilmeden duran giriş niyeti temizlendi.",
+                    symbol=normalize_symbol(body.symbol),
+                    source=source,
+                )
             if isinstance(exc, LiveRateLimitError) and not submission_started and account_rate_limit_active(state):
                 persist_state(state)
                 raise
@@ -4214,6 +4255,15 @@ async def execute_live_order(
             persist_state(state)
             raise safe_exchange_error(exc) from exc
         except Exception as exc:
+            if not submission_started and recorded_intent_id:
+                state["intents"].pop(recorded_intent_id, None)
+                add_event(
+                    state,
+                    "LIVE_INTENT_CANCELLED_PRE_SUBMISSION",
+                    "Binance emri gönderilmeden duran giriş niyeti temizlendi.",
+                    symbol=normalize_symbol(body.symbol),
+                    source=source,
+                )
             observation.emit("candidate", symbol=str(body.symbol), execution_reject=observation_stage,
                              execution_unknown=submission_started)
             safe_message = sanitized_exception_message(exc)

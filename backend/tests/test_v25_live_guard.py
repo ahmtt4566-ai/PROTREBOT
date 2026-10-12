@@ -2005,6 +2005,44 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         isolated_margin.assert_awaited_once()
         self.assertEqual(state["auto"]["last_scan_stats"]["executed_symbols"], ["BTCUSDT"])
 
+    def test_clean_reconciliation_discards_stale_intent_without_exchange_evidence(self):
+        state = initial_state()
+        state["intents"]["stale-intent"] = {
+            "symbol": "BTCUSDT",
+            "client_order_id": v25_execution.client_id_for("ENTRY", "stale-intent"),
+        }
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        state["execution_state"] = "UNKNOWN"
+        state["reconciliation_required"] = True
+
+        self.assertTrue(v25_execution.clear_clean_reconciliation_state(state, complete_reconciliation_snapshot()))
+        self.assertNotIn("stale-intent", state["intents"])
+        self.assertFalse(state["reconciliation_required"])
+        self.assertTrue(any(
+            event["kind"] == "STALE_PRE_SUBMISSION_INTENTS_CLEARED"
+            for event in state["events"]
+        ))
+
+    def test_clean_reconciliation_preserves_intent_with_matching_position(self):
+        state = initial_state()
+        state["intents"]["uncertain-intent"] = {
+            "symbol": "BTCUSDT",
+            "client_order_id": v25_execution.client_id_for("ENTRY", "uncertain-intent"),
+        }
+        state["emergency"].update({"active": True, "reason": "RECONCILIATION_FAILURE"})
+        state["execution_state"] = "UNKNOWN"
+        state["reconciliation_required"] = True
+        snapshot = complete_reconciliation_snapshot(positions=[{
+            "symbol": "BTCUSDT",
+            "position_side": "BOTH",
+            "direction": "LONG",
+            "quantity": 0.001,
+        }])
+
+        self.assertFalse(v25_execution.clear_clean_reconciliation_state(state, snapshot))
+        self.assertIn("uncertain-intent", state["intents"])
+        self.assertTrue(state["reconciliation_required"])
+
     def test_auto_trade_dry_run_reaches_submit_boundary_without_exchange_mutation(self):
         class FakeTransport:
             def __init__(self):
