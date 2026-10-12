@@ -7,12 +7,16 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from asyncpg import PostgresError
+from asyncpg import PostgresError, UndefinedTableError
 from fastapi import HTTPException, Request
 
 from .subscription_core import entitlement_snapshot, parse_datetime
 
 logger = logging.getLogger(__name__)
+
+
+class MissingFreeTrialSchema(RuntimeError):
+    pass
 
 
 def enabled() -> bool:
@@ -29,6 +33,7 @@ class EntitlementProof:
     subscription: dict[str, Any]
     expires_at: datetime | None = None
     error: bool = False
+    error_code: str | None = None
 
 
 def stripe_subscription(state: dict[str, Any], user_id: str) -> dict[str, Any]:
@@ -66,6 +71,9 @@ async def resolve(conn: Any, state: dict[str, Any], user_id: str) -> dict[str, A
             raise HTTPException(503, "Deneme kaydı doğrulanamadı.")
         try:
             trial = await current(conn, user_id)
+        except UndefinedTableError:
+            logger.warning("Free trial entitlement lookup failed type=UndefinedTableError")
+            raise MissingFreeTrialSchema from None
         except (PostgresError, OSError, RuntimeError) as exc:
             logger.warning("Free trial entitlement lookup failed type=%s", type(exc).__name__)
             raise HTTPException(503, "Deneme kaydı doğrulanamadı.") from None
@@ -117,6 +125,7 @@ async def prepare(request: Request, user: dict[str, Any]) -> EntitlementProof:
     original = stripe_subscription(state, user["id"])
     snapshot = original
     failed = False
+    error_code = None
     try:
         from .free_trial import enabled as trial_enabled
         if not original["master_trade_access"] and user.get("role") != "OWNER" and (enabled() or trial_enabled()):
@@ -125,12 +134,16 @@ async def prepare(request: Request, user: dict[str, Any]) -> EntitlementProof:
                 raise HTTPException(503, "Binance üyelik kaydı doğrulanamadı.")
             async with pool.acquire() as conn:
                 snapshot = await resolve(conn, state, user["id"])
+    except MissingFreeTrialSchema:
+        logger.warning("Member entitlement unavailable type=MissingFreeTrialSchema; Binance access denied")
+        failed = True
+        error_code = "FREE_TRIAL_SCHEMA_MISSING"
     except (HTTPException, PostgresError, OSError, RuntimeError) as exc:
         logger.warning("Member entitlement unavailable type=%s; Binance access denied", type(exc).__name__)
         failed = True
     proof = EntitlementProof(user["id"], int(user.get("auth_version", 1)), snapshot,
                              parse_datetime(snapshot.get("current_period_end")) if snapshot.get("master_trade_access") and snapshot.get("mode") in {"BINANCE_MANUAL", "FREE_TRIAL"} else None,
-                             failed)
+                             failed, error_code)
     request.state.member_entitlement_proof = proof
     return proof
 
@@ -156,6 +169,29 @@ def subscription_for_request(request: Request, user: dict[str, Any]) -> dict[str
 
 def access_for_request(request: Request, user: dict[str, Any]) -> dict[str, Any]:
     return access(subscription_for_request(request, user), user)
+
+
+def public_account_entitlement(request: Request, user: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    proof = getattr(request.state, "member_entitlement_proof", None)
+    if not isinstance(proof, EntitlementProof) or not proof.error:
+        subscription = subscription_for_request(request, user)
+        return subscription, access(subscription, user), True
+    if proof.error_code != "FREE_TRIAL_SCHEMA_MISSING":
+        subscription_for_request(request, user)
+        raise HTTPException(503, "Üyelik yetkisi doğrulanamadı.")
+    if proof.user_id != user["id"] or proof.auth_version != int(user.get("auth_version", 1)):
+        raise HTTPException(503, "Üyelik sahipliği doğrulanamadı.")
+    subscription = stripe_subscription(request.app.state.v22_commercial["state"], user["id"])
+    rights = access(subscription, user)
+    rights.update(isPremium=False, canExecuteMasterTrade=False, canExecuteLive=False,
+                  assistantAllowed=False, freeTrial=False)
+    rights["entitlements"] = {
+        **rights.get("entitlements", {}),
+        "canExecuteMasterTrade": False,
+        "canExecuteLive": False,
+        "unlimitedAnalyst": False,
+    }
+    return subscription, rights, False
 
 
 async def target_subscription(conn: Any, state: dict[str, Any], user_id: str) -> dict[str, Any]:

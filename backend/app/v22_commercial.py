@@ -1765,16 +1765,18 @@ async def v22_reset_password(payload: PasswordResetConfirmRequest, request: Requ
 
 @router.get("/session")
 async def v22_session(request: Request):
-    from .member_entitlements import access_for_request
+    from .member_entitlements import public_account_entitlement
     user = authenticated_user(request)
     state = runtime(request)["state"]
     mode = get_maintenance_mode(getattr(request.app.state, "maintenance", None))
-    return {"user": public_user(user), "license": active_license(state, user["id"]), "access": access_for_request(request, user), "demo_only": True, "maintenance": {"mode": mode}}
+    _, access, entitlement_available = public_account_entitlement(request, user)
+    return {"user": public_user(user), "license": active_license(state, user["id"]), "access": access,
+            "entitlement_available": entitlement_available, "demo_only": True, "maintenance": {"mode": mode}}
 
 
 @router.get("/profile")
 async def v22_profile(request: Request):
-    from .member_entitlements import access_for_request, subscription_for_request
+    from .member_entitlements import public_account_entitlement
     user = authenticated_user(request)
     state = runtime(request)["state"]
     profile = next((item for item in state.get("profiles", []) if item.get("user_id") == user["id"]), None)
@@ -1784,7 +1786,9 @@ async def v22_profile(request: Request):
         if profile is None:
             profile = {"user_id": user["id"], "preferences": {}}
         profile.setdefault("preferences", {}).update(copy.deepcopy(account["preferences"]))
-    return {"user": public_user(user), "profile": profile, "subscription": subscription_for_request(request, user), "access": access_for_request(request, user), "demo_only": True}
+    subscription, access, entitlement_available = public_account_entitlement(request, user)
+    return {"user": public_user(user), "profile": profile, "subscription": subscription, "access": access,
+            "entitlement_available": entitlement_available, "demo_only": True}
 
 
 @router.patch("/profile")

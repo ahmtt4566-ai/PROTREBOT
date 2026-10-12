@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from asyncpg import UndefinedTableError
 from app import binance_demo, free_trial
 from app import member_entitlements as entitlements
 from app import v25_execution as live
@@ -28,6 +29,7 @@ class TrialConnection(EntitlementConnection):
         self.trials = {}
         self.canonical_users["user-a"] = {"auth_version":1,"security":{"role":"CUSTOMER","active":True,"email_verified":True}}
         self.trial_failure = False
+        self.trial_schema_missing = False
 
     @asynccontextmanager
     async def acquire(self):
@@ -45,6 +47,8 @@ class TrialConnection(EntitlementConnection):
 
     async def fetchrow(self, sql, *args):
         if "FROM member_free_trials" in sql:
+            if self.trial_schema_missing:
+                raise UndefinedTableError("member_free_trials is missing")
             if self.trial_failure:
                 raise OSError("trial storage unavailable")
             row = self.trials.get(args[0])
@@ -282,6 +286,22 @@ def test_real_authenticated_start_profile_and_canonical_verification(trial_api):
     profile = client.get("/api/v22/profile", headers=auth)
     assert profile.status_code == 200 and not profile.json()["access"]["isPremium"]
     assert profile.json()["subscription"]["status"] == "EXPIRED"
+
+
+def test_missing_trial_schema_keeps_basic_session_but_denies_all_entitlements(trial_api):
+    client, conn = trial_api
+    conn.trial_schema_missing = True
+    auth = headers("customer", "CUSTOMER")
+    for path in ("/api/v22/session", "/api/v22/profile"):
+        response = client.get(path, headers=auth)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["entitlement_available"] is False
+        assert payload["access"]["isPremium"] is False
+        assert payload["access"]["canExecuteMasterTrade"] is False
+        assert payload["access"]["canExecuteLive"] is False
+        assert payload["access"]["assistantAllowed"] is False
+        assert payload["access"]["entitlements"]["unlimitedAnalyst"] is False
 
 
 @pytest.mark.parametrize("method,path",[
