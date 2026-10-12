@@ -294,6 +294,37 @@ def test_new_user_requires_terms_then_becomes_customer_free_without_password(set
     assert len(pool.snapshot["users"]) == 1
 
 
+@pytest.mark.parametrize("failed_table,stage", [
+    ("commercial_auth_users", "auth_user_insert"),
+    ("commercial_google_identities", "google_identity_insert"),
+    ("application_state_snapshots", "commercial_snapshot_write"),
+])
+def test_new_registration_database_failure_is_safe_and_atomic(setup, caplog, failed_table, stage):
+    client, pool, app = setup
+    state = begin(client)["state"][0]
+    with patch.object(google, "exchange_identity", AsyncMock(return_value=IDENTITY)):
+        assert "google_login=consent" in callback(client, state).headers["location"]
+    original_execute = pool.execute
+
+    class DatabaseFailure(Exception):
+        sqlstate = "23505"
+
+    async def fail_write(query, *args):
+        if f"INSERT INTO {failed_table}" in query:
+            raise DatabaseFailure("private-token private-client-secret personal@example.test")
+        return await original_execute(query, *args)
+
+    with patch.object(pool, "execute", side_effect=fail_write):
+        result = client.post("/api/v22/auth/google/complete", json={"terms_accepted": True}, headers=HEADERS)
+    assert result.status_code == 503
+    assert not pool.identities and not pool.snapshot["users"]
+    assert not client.cookies.get("protrebot_session")
+    assert f"stage={stage} error=DatabaseFailure sqlstate=23505" in caplog.text
+    for private_value in ("private-token", "private-client-secret", "personal@example.test", IDENTITY["email"]):
+        assert private_value not in caplog.text
+        assert private_value not in result.text
+
+
 def test_concurrent_registration_between_consent_and_complete_does_not_merge(setup):
     client, pool, app = setup
     state = begin(client)["state"][0]

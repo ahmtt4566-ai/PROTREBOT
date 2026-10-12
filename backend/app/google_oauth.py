@@ -349,6 +349,7 @@ async def registration_guard(request: Request, email: str):
 
 
 async def resolve_identity(request: Request, identity: dict[str, str], *, create: bool) -> dict[str, Any] | None:
+    stage = "identity_lookup"
     try:
         async with identity_transaction(request) as connection:
             await connection.execute("SELECT pg_advisory_xact_lock(hashtext($1))", "google-email:" + identity["email"])
@@ -384,10 +385,12 @@ async def resolve_identity(request: Request, identity: dict[str, str], *, create
                 state["acceptances"].append({"id": uuid.uuid4().hex, "user_id": uid, "terms_accepted": True,
                                              "source": "GOOGLE_REGISTRATION", "accepted_at": created})
                 auth.add_audit(state, "USER_REGISTERED", "Google kimliğiyle CUSTOMER kaydı oluşturuldu.", actor=uid, subject=uid)
+                stage = "auth_user_insert"
                 await connection.execute(
                     """INSERT INTO commercial_auth_users (user_id, auth_version, security)
                        VALUES ($1, $2, $3::jsonb)""", uid, 1, json.dumps(auth.auth_security(user)),
                 )
+                stage = "google_identity_insert"
                 await connection.execute(
                     """INSERT INTO commercial_google_identities (issuer, subject, user_id, user_payload)
                        VALUES ($1, $2, $3, $4::jsonb)""", identity["issuer"], identity["subject"], uid,
@@ -396,12 +399,14 @@ async def resolve_identity(request: Request, identity: dict[str, str], *, create
                         for collection in ("profiles", "subscriptions", "acceptances")
                     }}),
                 )
+                stage = "commercial_snapshot_write"
                 await connection.execute(
                     """INSERT INTO application_state_snapshots (state_key, updated_at, payload)
                        VALUES ($1, NOW(), $2::jsonb) ON CONFLICT (state_key)
                        DO UPDATE SET updated_at = NOW(), payload = EXCLUDED.payload""",
                     auth.COMMERCIAL_STATE_KEY, json.dumps(state),
                 )
+        stage = "user_hydration"
         user = await hydrate_user(request, user_id=uid)
         if user is None:
             raise OAuthFailure("account_unavailable")
@@ -412,7 +417,9 @@ async def resolve_identity(request: Request, identity: dict[str, str], *, create
     except (OAuthFailure, HTTPException, asyncio.CancelledError):
         raise
     except Exception as exc:
-        logger.error("Google identity transaction failed: %s", type(exc).__name__)
+        sqlstate = getattr(exc, "sqlstate", None)
+        safe_sqlstate = sqlstate if isinstance(sqlstate, str) and re.fullmatch(r"[A-Z0-9]{5}", sqlstate) else None
+        logger.error("Google identity transaction failed: stage=%s error=%s sqlstate=%s", stage, type(exc).__name__, safe_sqlstate)
         raise HTTPException(503, "Google hesabı güvenli şekilde kaydedilemedi") from None
 
 

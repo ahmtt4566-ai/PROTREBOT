@@ -635,6 +635,19 @@
 #root .authCardLogin .authSocial > span { display: flex; align-items: center; gap: 12px; width: 100%; margin-bottom: 14px; }
 #root .authCardLogin .authSocial > span::before, #root .authCardLogin .authSocial > span::after { content: ""; flex: 1; height: 1px; background: rgba(182, 200, 191, .2); }
 #root .authPageLogin .authMobileIdentity, #root .authPageLogin .authMobileMarkets { display: none; }
+.authCardLogin .authLoginForgot { display: none; }
+.authCardLogin .authLoginOptions { min-width: 0; }
+@media (max-width: 1023px) {
+	#root .authPageLogin .authCardLogin .authLoginOptions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+	#root .authPageLogin .authCardLogin .authLoginOptions .authCheck { margin: 0; align-items: center !important; }
+	#root .authPageLogin .authCardLogin .authLoginForgot { display: block; flex-shrink: 0; border: 0; padding: 0; background: transparent; color: #a4dfc6; font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+	#root .authPageLogin .authCardLogin .authLoginForgot:focus-visible { outline: 2px solid #a4dfc6; outline-offset: 4px; }
+	#root .authPageLogin .authCardLogin .authDesktopForgot { display: none !important; }
+	#root .authPageLogin .authCardLogin .authLinks > button:last-child { grid-column: 1 / -1; }
+	#root .authPageLogin .authCardLogin .authCardHead h2 { color: #e6f8ef; letter-spacing: 0; }
+	#root .authPageLogin .authCardLogin .authSubmit { background: #9ce8c4 !important; color: #092119 !important; box-shadow: none !important; text-transform: none; letter-spacing: 0; font-size: 15px !important; }
+	#root .authPageLogin .authCardLogin .authGoogle { background: rgba(7, 18, 14, .35) !important; border-color: rgba(146, 198, 170, .22) !important; box-shadow: none; }
+}
 @keyframes authReveal { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes authFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 @keyframes authAmbient { from { opacity: .3; } to { opacity: .65; } }
@@ -746,16 +759,34 @@
 		background: radial-gradient(ellipse 110% 440px at 50% 0, rgba(52, 211, 153, .13), transparent 75%), linear-gradient(180deg, #0b1417 0, #080c10 65%, #05080b 100%) !important;
 	}
 	#root .authRoot > .authPage.authPageLogin {
-		padding: 16px 16px 12px !important;
-		gap: 12px !important;
+		padding: 18px 16px 12px !important;
+		gap: 14px !important;
 	}
-	#root .authPageLogin .authMobileIdentity img { width: 160px; }
-	#root .authPageLogin .authMobileIdentity p { margin-top: 6px; }
-	#root .authPageLogin .authCardLogin .authCardLead { margin-bottom: 12px !important; }
-	#root .authPageLogin .authCardLogin form { gap: 12px !important; }
-	#root .authPageLogin .authCardLogin .authSocial { margin-top: 10px !important; gap: 0 !important; }
-	#root .authPageLogin .authCardLogin .authSocial > span { margin-bottom: 10px; }
-	#root .authPageLogin .authCardLogin .authLinks { margin-top: 8px !important; }
+	#root .authPageLogin .authMobileIdentity img { width: 148px; }
+	#root .authPageLogin .authMobileIdentity p { margin-top: 5px; color: #8fa69b; font-size: 12px; }
+	#root .authPageLogin .authCardLogin .authCardHead { align-items: flex-start; margin-bottom: 7px; }
+	#root .authPageLogin .authCardLogin .authCardHead .authMark,
+	#root .authPageLogin .authCardLogin .authCardHead > div > span:first-child { display: none; }
+	#root .authPageLogin .authCardLogin .authCardHead h2 { margin: 0; color: #edfff6; font-size: 0 !important; font-weight: 720; letter-spacing: -.025em; }
+	#root .authPageLogin .authCardLogin .authCardHead h2::after { content: attr(data-mobile-copy); font-size: clamp(23px, 6.2vw, 27px); }
+	#root .authPageLogin .authCardLogin .authCardLead { margin: 0 0 18px !important; color: #9bb0a6; font-size: 0 !important; line-height: 1.55; }
+	#root .authPageLogin .authCardLogin .authCardLead::after { content: attr(data-mobile-copy); font-size: 13px; }
+	#root .authPageLogin .authCardLogin form { gap: 13px !important; }
+	#root .authPageLogin .authCardLogin form > label { color: #bdd0c6; font-size: 11px; font-weight: 650; letter-spacing: .035em; }
+	#root .authPageLogin .authCardLogin .authInputWithIcon input { min-height: 52px !important; border-color: rgba(134, 194, 165, .22); border-radius: 12px; background: rgba(3, 12, 9, .58); }
+	#root .authPageLogin .authCardLogin .authInputWithIcon input:focus { border-color: #8ee0b9; box-shadow: 0 0 0 3px rgba(116, 224, 174, .11); }
+	#root .authPageLogin .authCardLogin .authLoginOptions { min-height: 30px; }
+	#root .authPageLogin .authCardLogin .authLoginOptions .authCheck { min-height: 30px; color: #aebfb7; }
+	#root .authPageLogin .authCardLogin .authLoginOptions .authCheck > span { font-size: 0; }
+	#root .authPageLogin .authCardLogin .authLoginOptions .authCheck > span::after { content: attr(data-mobile-copy); font-size: 12px; }
+	#root .authPageLogin .authCardLogin .authSubmit,
+	#root .authPageLogin .authCardLogin .authGoogle { min-height: 50px !important; border-radius: 12px !important; }
+	#root .authPageLogin .authCardLogin .authSubmit { font-weight: 750; }
+	#root .authPageLogin .authCardLogin .authSocial { margin-top: 14px !important; gap: 0 !important; }
+	#root .authPageLogin .authCardLogin .authSocial > span { margin-bottom: 11px; color: #758b80; font-size: 11px; }
+	#root .authPageLogin .authCardLogin .authGoogle { color: #d9e8e0; font-weight: 620; }
+	#root .authPageLogin .authCardLogin .authLinks { margin-top: 10px !important; padding-top: 4px; }
+	#root .authPageLogin .authCardLogin .authLinks button { color: #9ce8c4 !important; font-weight: 650; }
 	#root .authRoot:has(.authPageLogin) > .authFooter {
 		padding: 10px 16px max(10px, env(safe-area-inset-bottom)) !important;
 		gap: 6px 12px;
@@ -768,15 +799,18 @@
 		animation: none !important;
 	}
 	#root .authRoot > .authPage.authPageLogin > .authCardLogin {
-		padding: 20px 20px 0 !important;
+		padding: 22px 20px 0 !important;
 		overflow: hidden;
-		border-top-color: rgba(162, 245, 209, .4) !important;
-		background: linear-gradient(155deg, rgba(30, 50, 44, .72), rgba(12, 19, 23, .85) 60%) !important;
-		box-shadow: inset 0 1px 0 rgba(206, 255, 230, .1), 0 24px 64px rgba(0, 0, 0, .3), 0 0 36px rgba(52, 211, 153, .04) !important;
+		border: 1px solid rgba(137, 224, 181, .23) !important;
+		border-top-color: rgba(178, 246, 214, .38) !important;
+		border-radius: 22px !important;
+		background: linear-gradient(155deg, rgba(23, 48, 38, .75), rgba(8, 19, 16, .9) 62%) !important;
+		backdrop-filter: blur(18px);
+		box-shadow: inset 0 1px 0 rgba(206, 255, 230, .1), 0 22px 58px rgba(0, 0, 0, .34), 0 0 32px rgba(52, 211, 153, .035) !important;
 	}
 	#root .authPageLogin .authCardLogin > .authMobileMarkets {
 		width: calc(100% + 40px);
-		margin: 12px -20px 0;
+		margin: 33px -20px 0;
 	}
 	#root .authPageLogin .authCoinScreen {
 		display: flex;
@@ -854,6 +888,7 @@
 
 @media (max-width: 1023px) and (max-height: 740px) {
 	#root .authRoot > .authPage.authPageLogin:has(.authCardLogin) { padding: 8px 16px !important; gap: 8px !important; }
+	#root .authPageLogin .authCardLogin > .authMobileMarkets { margin-top: -9px; }
 	#root .authRoot > .authPage.authPageLogin > .authMobileIdentity img { width: 128px; }
 	#root .authPageLogin .authMobileIdentity p,
 	#root .authPageLogin .authCardLogin .authCardHead span,
@@ -870,7 +905,7 @@
 	#root .authPageLogin .authCardLogin .authSocial { margin-top: 6px !important; }
 	#root .authPageLogin .authCardLogin .authSocial > span { margin-bottom: 6px; }
 	#root .authPageLogin .authCardLogin .authLinks { margin-top: 4px !important; }
-	#root .authPageLogin .authCardLogin > .authMobileMarkets { width: calc(100% + 32px); margin: 8px -16px 0; }
+	#root .authPageLogin .authCardLogin > .authMobileMarkets { width: calc(100% + 32px); margin: 26px -16px 0; }
 	#root .authPageLogin .authCoinScreen { padding-block: 2px; }
 	#root .authRoot:has(.authPageLogin) > .authFooter { padding-block: 6px max(6px, env(safe-area-inset-bottom)) !important; }
 }
