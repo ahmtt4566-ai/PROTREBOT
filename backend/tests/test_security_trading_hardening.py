@@ -643,8 +643,9 @@ def test_save_only_writes_validated_permissions(valid):
     async def check(*args, **kwargs):
         return await run()
 
+    mfa_check = AsyncMock(side_effect=AssertionError("API key save must not require 2FA"))
     with patch.object(vault, "_require_ready", new=AsyncMock(return_value=request.app.state.db_pool)), \
-         patch.object(vault, "_require_live_mfa", new=AsyncMock()), \
+         patch.object(vault, "_require_live_mfa", new=mfa_check), \
          patch.object(vault, "ensure_schema", new=AsyncMock()), \
          patch.object(vault, "test_binance_credentials", side_effect=check), \
          patch.object(vault, "encrypt_credentials", return_value=b"ciphertext"), \
@@ -658,3 +659,4 @@ def test_save_only_writes_validated_permissions(valid):
             with pytest.raises(HTTPException):
                 asyncio.run(vault.exchange_connection_save(request, body))
             request.app.state.db_pool.execute.assert_not_awaited()
+    mfa_check.assert_not_awaited()

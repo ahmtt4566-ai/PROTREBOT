@@ -162,7 +162,6 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [localConnections, setLocalConnections] = useState<ConnectionStatus | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
   const [credentials, setCredentials] = useState({apiKey: '', secretKey: '', accepted: false})
-  const [credentialTotpCode, setCredentialTotpCode] = useState('')
   const [order, setOrder] = useState<OrderDraft>(initialOrder(symbol))
   const [policyDraft, setPolicyDraft] = useState<LivePolicy | null>(null)
   const [confirm, setConfirm] = useState<{title: string;message: string;expected?: string;simple?: boolean;mfa?: boolean;action: (code?: string) => Promise<void>} | null>(null)
@@ -423,21 +422,15 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       setNotice({kind: 'error', text: 'LIVE API Key ve Secret Key birlikte girilmelidir.'})
       return
     }
-    const code = credentialTotpCode.trim()
-    if (code.length < 6) {
-      setNotice({kind: 'error', text: 'LIVE anahtarını kaydetmek ve bağlamak için güncel 2FA kodu gereklidir.'})
-      return
-    }
     void run('connect-save', async () => {
       await call(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({
         mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey,
-        confirmation: 'CANLI KASAYA KAYDET', totp_code: code,
+        confirmation: 'CANLI KASAYA KAYDET',
       })})
       setCredentials({apiKey: '', secretKey: '', accepted: false})
-      setCredentialTotpCode('')
       await refresh()
       await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({
-        mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ', totp_code: code,
+        mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ',
       })})
       await refresh()
     }, 'API anahtarı şifreli kasaya kaydedildi ve LIVE hesabı salt-okunur bağlandı. Emir kilidi kapalı kaldı.')
@@ -947,14 +940,13 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
           <label>API KEY<input data-private="true" type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})} placeholder="Paste API key" /></label>
           <label>SECRET KEY<div className="masterTradeLiveSecretField"><input data-private="true" type="password" autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})} placeholder="Paste secret key" /></div></label>
         </div>
-        <label>2FA CODE<input data-private="true" type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={32} value={credentialTotpCode} onChange={event => setCredentialTotpCode(event.target.value)} /></label>
-        <small className="masterTradeLiveApiHint">CONNECT ACCOUNT saves the key to the encrypted vault and opens a read-only connection. A current 2FA code is required; no order is sent.</small>
+        <small className="masterTradeLiveApiHint">CONNECT ACCOUNT saves the key to the encrypted vault and opens a read-only connection. It does not send orders or change LIVE trading locks.</small>
       </div>
 
       <div className="masterTradeLiveConnectionActionBar">
         <div className="masterTradeLiveActionMeta"><span>ENVIRONMENT</span><b>LIVE</b><small>Binance Futures Mainnet</small></div>
         <div className="masterTradeLiveActionMeta"><span>PERMISSIONS</span><b>READ · TRADE</b><small>Withdrawals unsupported</small></div>
-        <div className="masterTradeLiveApiActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready || globalBanActive}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" className="masterTradeLiveSaveButton" onClick={connectAndSave} disabled={Boolean(busy) || globalBanActive || credentialTotpCode.trim().length < 6}>{busy === 'connect-save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} CONNECT ACCOUNT</button><button type="button" onClick={deactivateCredentials} disabled={Boolean(busy) || !liveConnection?.active}>Bağlantıyı kapat</button><button type="button" onClick={deleteCredentials} disabled={Boolean(busy) || !configured || liveConnection?.active !== false}>Anahtarı sil</button></div>
+        <div className="masterTradeLiveApiActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready || globalBanActive}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" className="masterTradeLiveSaveButton" onClick={connectAndSave} disabled={Boolean(busy) || globalBanActive}>{busy === 'connect-save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} CONNECT ACCOUNT</button><button type="button" onClick={deactivateCredentials} disabled={Boolean(busy) || !liveConnection?.active}>Bağlantıyı kapat</button><button type="button" onClick={deleteCredentials} disabled={Boolean(busy) || !configured || liveConnection?.active !== false}>Anahtarı sil</button></div>
       </div>
 
       <div className="masterTradeLiveSecurityStrip" aria-label="Connection security status"><span><CheckCircle2/> Credentials encrypted</span><span><CheckCircle2/> Server-side validation</span><span><CheckCircle2/> API secret never displayed</span></div>

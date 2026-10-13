@@ -206,14 +206,14 @@ test('connection keys stay masked and are cleared once saved even if activation 
     calls.push(path)
     if (path.endsWith('/save')) {
       expect(route.request().postDataJSON()).toEqual({
-      mode:'LIVE',api_key:key,secret_key:secret,confirmation:'CANLI KASAYA KAYDET',totp_code:'123456',
+        mode:'LIVE',api_key:key,secret_key:secret,confirmation:'CANLI KASAYA KAYDET',
       })
       await route.fulfill({json:{ok:true}})
     } else {
-    expect(route.request().postDataJSON()).toEqual({
-      mode:'LIVE',confirmation:'CANLI SALT OKUNUR BAĞLANTIYI AÇ',totp_code:'123456',
-    })
-    await route.fulfill({status:502,json:{detail:'Binance Futures yetkisi doğrulanamadı.'}})
+      expect(route.request().postDataJSON()).toEqual({
+        mode:'LIVE',confirmation:'CANLI SALT OKUNUR BAĞLANTIYI AÇ',
+      })
+      await route.fulfill({status:502,json:{detail:'Binance Futures yetkisi doğrulanamadı.'}})
     }
   })
   await page.goto('/master-trade?tab=baglanti',{waitUntil:'domcontentloaded'})
@@ -224,10 +224,7 @@ test('connection keys stay masked and are cleared once saved even if activation 
   await expect(secretInput).toHaveAttribute('type','password')
   await apiInput.fill(key)
   await secretInput.fill(secret)
-  const totpInput = card.getByLabel('2FA CODE')
   const connectButton = card.getByRole('button',{name:'CONNECT ACCOUNT',exact:true})
-  await expect(connectButton).toBeDisabled()
-  await totpInput.fill('123456')
   await connectButton.click()
   await expect(page.locator('.liveConfirm')).toHaveCount(0)
   await expect(apiInput).toHaveValue('')
@@ -255,7 +252,6 @@ for (const activationStatus of [403,500]) test(`activation HTTP ${activationStat
   const card = page.locator('.masterTradeLiveConnectionCard')
   await card.getByPlaceholder('Paste API key').fill('offline-private-api-key')
   await card.getByPlaceholder('Paste secret key').fill('offline-private-secret')
-  await card.getByLabel('2FA CODE').fill('123456')
   await card.getByRole('button',{name:'CONNECT ACCOUNT',exact:true}).click()
   await expect.poll(() => fixture.mutations.length).toBe(2)
   const recovery = page.getByTestId('live-status-unverified').getByRole('button',{name:'LIVE oturumunu geri bağla',exact:true})
@@ -340,7 +336,6 @@ for (const failure of ['futures', 'invalid-key', 'ip', 'server', 'network', 'ref
       const card = page.locator('.masterTradeLiveConnectionCard')
       await card.getByPlaceholder('Paste API key').fill('offline-private-api-key')
       await card.getByPlaceholder('Paste secret key').fill('offline-private-secret')
-      await card.getByLabel('2FA CODE').fill('123456')
       try {
         await card.getByRole('button', {name: 'CONNECT ACCOUNT', exact: true}).click()
         const alert = card.getByRole('alert')

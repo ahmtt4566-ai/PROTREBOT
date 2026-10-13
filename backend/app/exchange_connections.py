@@ -362,9 +362,13 @@ def _vault_scope(request: Request, mode: str) -> tuple[str, str]:
     return sid, sid
 
 
-async def _require_live_mfa(request: Request, user: dict[str, Any], code: str | None) -> None:
+def _require_live_owner(user: dict[str, Any]) -> None:
     if user.get("role") != "OWNER":
         raise HTTPException(403, "LIVE bağlantısını yalnız OWNER yönetebilir.")
+
+
+async def _require_live_mfa(request: Request, user: dict[str, Any], code: str | None) -> None:
+    _require_live_owner(user)
     from . import account_settings
 
     if not await account_settings.enabled(request, user):
@@ -1158,7 +1162,7 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
     await ensure_schema(pool)
     mode = normalize_mode(body.mode)
     if mode == "LIVE":
-        await _require_live_mfa(request, user, body.totp_code)
+        _require_live_owner(user)
     if body.confirmation.strip().upper() != SAVE_CONFIRMATIONS[mode]:
         raise HTTPException(422, "Güvenli kaydetme onayı eksik.")
     api_key = body.api_key.get_secret_value().strip()
@@ -1233,7 +1237,7 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
     await ensure_session_cache(request)
     mode = normalize_mode(body.mode)
     if mode == "LIVE":
-        await _require_live_mfa(request, user, body.totp_code)
+        _require_live_owner(user)
     if body.confirmation.strip().upper() != ACTIVATE_CONFIRMATIONS[mode]:
         raise HTTPException(422, "Bağlantı aktifleştirme onayı eksik.")
     api_key, secret_key = session_credentials(request, mode, active_only=False)

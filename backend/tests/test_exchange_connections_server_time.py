@@ -384,12 +384,15 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
         account = {"tested_at": "2026-09-22T12:00:00+00:00", "wallet_balance": 100.0, "orders_created": False}
         status = {"connected": True, "real_trading_locked": True}
+        mfa_check = AsyncMock(side_effect=AssertionError("Read-only API activation must not require 2FA"))
         with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(return_value=account)), \
+               patch.object(exchange_connections, "_require_live_mfa", new=mfa_check), \
                patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock(return_value=status)) as connect_read_only:
             result = asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
         self.assertTrue(result["connected"])
         self.assertTrue(result["real_trading_locked"])
         connect_read_only.assert_awaited_once_with(request.app, request, actor="owner-server-time")
+        mfa_check.assert_not_awaited()
 
     def test_save_activate_binds_live_snapshot_to_the_same_session(self):
         request = self._request()
