@@ -48,7 +48,7 @@ type LiveStatus = {
   recovery_error?: string | null
   execution_state?: string
   reconciliation_required?: boolean
-  reconciliation_diagnostic?: {exception_type?: string; exception_message?: string; reconciliation_stage?: string; source?: string; function?: string; line?: number; timestamp?: string | null}
+  reconciliation_diagnostic?: {exception_type?: string; exception_message?: string; reconciliation_stage?: string; source?: string; function?: string; line?: number; request_method?: string | null; request_path?: string | null; timestamp?: string | null}
 }
 
 type ConnectionStatus = {
@@ -759,7 +759,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const signalStatus = status?.live_auto_trade ? autoStatusLabel : latestSignal ? text(latestSignal.kind).replaceAll('_', ' ') : 'WAITING'
   const originalActive = status?.original_v2_live?.enabled === true
   const originalScanner = status?.original_v2_live?.scanner
-  const scannerStatus = originalActive ? originalScanner?.stage || 'İlk tarama bekleniyor' : status?.scanner?.last_cycle_stage || (status?.scanner?.last_scan_at ? 'WAITING FOR NEXT SCAN' : 'WAITING')
+  const scannerStage = originalActive ? originalScanner?.stage : status?.scanner?.last_cycle_stage
+  const scannerStatus = scannerStage === 'WAITING_RISK_DATA' ? 'Günlük risk verisi bekleniyor' : scannerStage || (originalActive ? 'İlk tarama bekleniyor' : status?.scanner?.last_scan_at ? 'WAITING FOR NEXT SCAN' : 'WAITING')
   const candidateCount = originalActive ? originalScanner?.candidate_count ?? 0 : status?.scanner?.selected_symbols_count ?? status?.scanner?.candidate_count ?? 0
   const automationReason = originalActive ? status?.original_v2_live?.pause_reason || `Original V2 · ${status?.original_v2_live?.symbols.length} sembol · risk %${status?.original_v2_live?.risk_percent}` : status?.auto?.last_error || status?.auto?.last_skip_reason || status?.scanner?.last_skip_reason || status?.auto?.last_decision || blocker
   const safetyRows = [
@@ -830,7 +831,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     <div className="masterTradeLiveAssistant">
       <div className="masterTradeLiveAssistantCopy"><Power aria-hidden="true"/><div><span className="masterTradeLiveKicker">NEXT BEST ACTION</span><strong>{status?.live_auto_trade ? 'Auto Trade is actively monitoring approved markets.' : liveState === 'BLOCKED' ? 'LIVE is blocked until the backend recovery state is clear.' : !configured || !connected ? 'Connect and verify your LIVE API to continue.' : !readinessReady ? 'Complete the required safety checks before enabling Auto Trade.' : liveArmed ? 'LIVE is armed. Start supervised Auto Trade to continue.' : 'Everything is ready. Arm LIVE Auto Trade to continue.'}</strong><small>{status?.live_auto_trade ? 'STOP remains available at any time.' : blocker}</small></div></div>
       {timeframeWarning}
-      {status?.reconciliation_diagnostic && <div className="masterTradeLiveDiagnostic" role="alert"><span className="masterTradeLiveKicker">RECONCILIATION ERROR</span><small>Stage: {text(status.reconciliation_diagnostic.reconciliation_stage)}</small><small>Error: {text(status.reconciliation_diagnostic.exception_message)}</small><small>Source: {text(status.reconciliation_diagnostic.source)}:{text(status.reconciliation_diagnostic.line)}</small></div>}
+      {status?.reconciliation_diagnostic && <div className="masterTradeLiveDiagnostic" role="alert"><span className="masterTradeLiveKicker">RECONCILIATION ERROR</span><small>Stage: {text(status.reconciliation_diagnostic.reconciliation_stage)}</small>{status.reconciliation_diagnostic.request_method && status.reconciliation_diagnostic.request_path && <small>Request: {text(status.reconciliation_diagnostic.request_method)} {text(status.reconciliation_diagnostic.request_path)}</small>}<small>Error: {text(status.reconciliation_diagnostic.exception_message)}</small><small>Source: {text(status.reconciliation_diagnostic.source)}:{text(status.reconciliation_diagnostic.line)}</small></div>}
       <div className="masterTradeLiveAssistantActions"><button type="button" className="masterTradeLivePrimary" onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{!status?.live_auto_trade && !autoReady ? <LockKeyhole aria-hidden="true"/> : <Power aria-hidden="true"/>}{status?.live_auto_trade ? ' STOP AUTO TRADE' : ' START LIVE AUTO TRADE'}</button><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW REQUIREMENTS</button><button type="button" className="liveEmergencyButton" onClick={emergencyStop} disabled={Boolean(busy)} title="Bot pozisyonlarını kapatır; yalnız giriş durdurma değildir."><ShieldAlert aria-hidden="true"/> EMERGENCY STOP</button>{emergency && <button type="button" className="masterTradeLiveTextButton" onClick={clearEmergency} disabled={Boolean(busy)}>RECOVERY SONRASI TEMİZLE</button>}</div>
     </div>
 

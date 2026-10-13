@@ -511,8 +511,16 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
     config = settings(state)
     scanner = config.setdefault("scanner", {})
     scanner["last_cycle_at"] = live.now_iso()
+    check_session_time(state)
+    if not running(state):
+        scanner.update(stage="BLOCKED")
+        return
     if live.account_rate_limit_active(state):
         scanner.update(stage="RATE_LIMIT_WAIT")
+        return
+    at = int(time.time()) // 900 * 900
+    if config.get("last_decision_time", -1) >= at:
+        scanner.update(stage="WAITING_NEXT_CANDLE")
         return
     try:
         if credentials is None:
@@ -524,10 +532,6 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
         client = live.client_for_with_credentials(application, credentials)
         snapshot = await live.account_snapshot(client, cached=True, source="original_strategy")
         await check_entry(application, client, state, snapshot)
-        at = int(time.time()) // 900 * 900
-        if config.get("last_decision_time", -1) >= at:
-            scanner.update(stage="WAITING_NEXT_CANDLE")
-            return
         occupied = {item["symbol"] for item in snapshot["positions"] + snapshot["open_orders"]}
         scanner.update(stage="SCANNING")
         eligible, _results = await original.candidates(client, at, occupied, require_complete=True)
@@ -554,6 +558,11 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
             pause(state, live.sanitized_exception_message(exc))
         raise
     except Exception as exc:
+        if (isinstance(exc, live.LiveExchangeError) and exc.transient_read_failure
+                and not exc.unknown_execution and exc.request_path == "/fapi/v1/income"):
+            scanner.update(stage="WAITING_RISK_DATA")
+            live.persist_state(state)
+            raise
         scanner.update(stage="BLOCKED")
         pause(state, live.sanitized_exception_message(exc))
         raise

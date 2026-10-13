@@ -119,6 +119,7 @@ LIVE_CONSENT_GRACE_SECONDS = 15 * 60
 RECONCILE_SECONDS = 10
 STOP_INSTALL_MAX_ATTEMPTS = 3
 STOP_RETRY_BASE_SECONDS = 1
+ORDER_RECONCILIATION_DELAYS_SECONDS = (0.25, 0.75)
 MONITORING_CREDENTIALS_STALE_SECONDS = 90
 ANALYSIS_TIMEOUT_SECONDS = 15
 ADOPTION_PERSISTENCE_RETRY_BACKOFF_SECONDS = (5, 15, 60, 300, 900)
@@ -511,6 +512,7 @@ def clear_clean_reconciliation_state(state: dict[str, Any], snapshot: dict[str, 
 TRANSIENT_READ_PATHS = PUBLIC_PATHS | {
     "/fapi/v3/account",
     "/fapi/v3/positionRisk",
+    "/fapi/v1/income",
     "/fapi/v1/symbolConfig",
     "/fapi/v1/leverageBracket",
     "/fapi/v1/multiAssetsMargin",
@@ -591,7 +593,7 @@ def recover_transient_market_data(state: dict[str, Any], method: str, path: str)
     add_event(
         state,
         "AUTO_RECOVERED_FROM_TRANSIENT_MARKET_DATA",
-        "Geçici market-data GET kesintisi sonraki başarılı okuma ile düzeldi; Auto Trade devam ediyor.",
+        "Geçici salt-okunur veri kesintisi sonraki başarılı okumayla düzeldi; Auto Trade devam ediyor.",
         endpoint=transient.get("endpoint"),
         failed_at_epoch=transient.get("failed_at_epoch"),
     )
@@ -1031,6 +1033,8 @@ def latest_reconciliation_diagnostic(state: dict[str, Any]) -> dict[str, Any] | 
             "source": str(event.get("source") or "")[:160],
             "function": str(event.get("function") or "")[:160],
             "line": int(event.get("line") or 0),
+            "request_method": str(event.get("request_method") or "")[:8] or None,
+            "request_path": str(event.get("request_path") or "")[:80] or None,
             "timestamp": event.get("created_at"),
         }
     return None
@@ -1583,7 +1587,7 @@ class BinanceLiveClient:
             transient_read_failure = is_transient_read_request(method, path, exc)
             await self._record_request_error(method, path, exc, params=params, elapsed_ms=(time.perf_counter() - started) * 1000, timed_out=True, transient_read_failure=transient_read_failure)
             raise LiveExchangeError(
-                "Canlı market-data okuması geçici olarak başarısız oldu." if transient_read_failure else "Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.",
+                "Canlı salt-okunur veri geçici olarak alınamadı." if transient_read_failure else "Canlı emir sonucu belirsiz; zaman aşımı sonrası yeni emir gönderilmedi.",
                 unknown_execution=not transient_read_failure,
                 timed_out=True,
                 transient_read_failure=transient_read_failure,
@@ -1594,7 +1598,7 @@ class BinanceLiveClient:
             transient_read_failure = is_transient_read_request(method, path, exc)
             await self._record_request_error(method, path, exc, params=params, elapsed_ms=(time.perf_counter() - started) * 1000, transient_read_failure=transient_read_failure)
             raise LiveExchangeError(
-                "Canlı market-data okuması geçici olarak başarısız oldu." if transient_read_failure else "Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.",
+                "Canlı salt-okunur veri geçici olarak alınamadı." if transient_read_failure else "Canlı emir sonucu belirsiz; ağ bağlantısı kesildi ve yeni emir gönderilmedi.",
                 unknown_execution=not transient_read_failure,
                 transient_read_failure=transient_read_failure,
                 request_method=method,
@@ -2245,8 +2249,17 @@ async def submit_entry(
             raise LiveExchangeError("Canlı emir yanıtı eksik; emir sonucu belirsiz ve uzlaştırma gerekiyor.", unknown_execution=True)
     except LiveExchangeError as exc:
         if not test_only and exc.unknown_execution:
-            recovered = await find_order(client, spec["symbol"], client_id)
-            if recovered is not None:
+            for attempt, delay in enumerate((0, *ORDER_RECONCILIATION_DELAYS_SECONDS)):
+                if delay:
+                    await asyncio.sleep(delay)
+                try:
+                    recovered = await find_order(client, spec["symbol"], client_id)
+                except LiveExchangeError:
+                    raise exc
+                if recovered is None:
+                    if attempt < len(ORDER_RECONCILIATION_DELAYS_SECONDS):
+                        continue
+                    break
                 if not order_matches_spec(recovered, spec, client_id):
                     raise LiveExchangeError("Uzlaştırılan canlı emir beklenen kimlik veya parametrelerle eşleşmedi.", unknown_execution=True) from exc
                 return {**recovered, "recovered": True}
@@ -2256,6 +2269,22 @@ async def submit_entry(
     return payload
 
 
+def normalize_open_algo_rows(payload: Any) -> list[dict[str, Any]]:
+    return [{
+        "symbol": row.get("symbol"),
+        "algo_id": row.get("algoId"),
+        "client_algo_id": row.get("clientAlgoId"),
+        "side": row.get("side"),
+        "type": row.get("orderType", row.get("type")),
+        "status": row.get("algoStatus", row.get("status")),
+        "trigger_price": row.get("triggerPrice", row.get("stopPrice")),
+        "close_position": _truthy(row.get("closePosition")),
+        "working_type": str(row.get("workingType") or "").upper(),
+        "quantity": row.get("quantity"),
+        "reduce_only": _truthy(row.get("reduceOnly")),
+    } for row in response_rows(payload)]
+
+
 async def post_algo(client: BinanceLiveClient, params: dict[str, Any]) -> dict[str, Any]:
     try:
         payload = await client.signed("POST", "/fapi/v1/algoOrder", params)
@@ -2263,11 +2292,21 @@ async def post_algo(client: BinanceLiveClient, params: dict[str, Any]) -> dict[s
     except LiveExchangeError as exc:
         if not exc.unknown_execution:
             raise
-        rows = response_rows(await client.signed("GET", "/fapi/v1/openAlgoOrders", {"symbol": params["symbol"]}))
-        recovered = next((row for row in rows if row.get("clientAlgoId") == params.get("clientAlgoId")), None)
-        if recovered is None:
-            raise
-        return recovered
+        for attempt, delay in enumerate((0, *ORDER_RECONCILIATION_DELAYS_SECONDS)):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                rows = normalize_open_algo_rows(
+                    await client.signed("GET", "/fapi/v1/openAlgoOrders", {"symbol": params["symbol"]}),
+                )
+            except LiveExchangeError:
+                raise exc
+            recovered = existing_entry_protection_algo(params, rows)
+            if recovered is not None:
+                return recovered
+            if attempt == len(ORDER_RECONCILIATION_DELAYS_SECONDS):
+                break
+        raise
 
 
 async def close_tracked_symbol(client: BinanceLiveClient, symbol: str, intent: str) -> dict[str, Any] | None:
@@ -2502,17 +2541,7 @@ async def install_verified_stop(
             payload = await client.signed("GET", "/fapi/v1/openAlgoOrders", {"symbol": params["symbol"]})
             if classify_algo_snapshot_payload(payload) == "UNKNOWN":
                 raise LiveExchangeError("Stop doğrulama snapshot'ı belirsiz.", unknown_execution=True)
-            rows = [{
-                "symbol": row.get("symbol"),
-                "algo_id": row.get("algoId"),
-                "client_algo_id": row.get("clientAlgoId"),
-                "side": row.get("side"),
-                "type": row.get("orderType", row.get("type")),
-                "status": row.get("algoStatus", row.get("status")),
-                "trigger_price": row.get("triggerPrice", row.get("stopPrice")),
-                "close_position": _truthy(row.get("closePosition")),
-                "working_type": str(row.get("workingType") or "").upper(),
-            } for row in response_rows(payload) if isinstance(row, dict)]
+            rows = normalize_open_algo_rows(payload)
             verified = existing_entry_protection_algo(params, rows)
             if verified is not None:
                 try:
@@ -4330,7 +4359,13 @@ async def execute_live_order(
             if isinstance(exc, LiveRateLimitError) and not submission_started and account_rate_limit_active(state):
                 persist_state(state)
                 raise
-            if original_entry:
+            transient_pre_submit_read_failure = (
+                isinstance(exc, LiveExchangeError)
+                and exc.transient_read_failure
+                and not exc.unknown_execution
+                and not submission_started
+            )
+            if original_entry and not transient_pre_submit_read_failure:
                 original_v2_live.pause(state, sanitized_exception_message(exc))
             observation.emit("candidate", symbol=normalize_symbol(body.symbol), execution_reject=observation_stage)
             if isinstance(exc, LiveExchangeError) and exc.unknown_execution:
@@ -5083,6 +5118,10 @@ def record_execution_loop_failure(application: Any, exc: Exception, reconciliati
         source=os.path.basename(frame.filename) if frame else os.path.basename(__file__),
         function=frame.name if frame else "execution_loop", line=frame.lineno if frame else 0,
         reconciliation_stage=reconciliation_stage,
+        request_method=getattr(exc, "request_method", None),
+        request_path=getattr(exc, "request_path", None),
+        timed_out=bool(getattr(exc, "timed_out", False)),
+        transient_read_failure=bool(getattr(exc, "transient_read_failure", False)),
     )
     persist_state(state)
 
@@ -5219,6 +5258,32 @@ async def execution_loop(application: Any) -> None:
         except LiveExchangeError as exc:
             if exc.transient_read_failure and not exc.unknown_execution:
                 state = application.state.v25_execution
+                if (
+                    reconciliation_stage == "automatic_cycle"
+                    and exc.request_method == "GET"
+                    and exc.request_path == "/fapi/v1/income"
+                ):
+                    state["auto"].update({
+                        "last_skip_reason": "daily_risk_data_unavailable",
+                        "last_cycle_stage": "skipped",
+                        "last_error": "Günlük zarar verisi geçici olarak okunamadı; yeni giriş yapılmadı.",
+                    })
+                    state["connection"].update({
+                        "last_checked": now_iso(),
+                        "last_error": "Binance GET /fapi/v1/income geçici zaman aşımına uğradı.",
+                    })
+                    add_event(
+                        state,
+                        "LIVE_DAILY_RISK_DATA_RETRY",
+                        "Günlük zarar verisi okunamadı; yeni giriş yapılmadan sonraki güvenli deneme beklenecek.",
+                        method="GET",
+                        endpoint="/fapi/v1/income",
+                        error_type=type(exc.__cause__).__name__ if exc.__cause__ else None,
+                    )
+                    persist_state(state)
+                    await asyncio.sleep(backoff)
+                    backoff = min(60, backoff * 2)
+                    continue
                 if mark_transient_market_data_failure(state, exc):
                     state["connected"] = False
                     state["connection"].update({"last_checked": now_iso(), "last_error": str(exc)[:240]})

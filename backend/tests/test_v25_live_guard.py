@@ -751,12 +751,17 @@ class V25LiveGuardCoreTests(unittest.TestCase):
             patch.object(v25_execution, "readiness", return_value={"ready": False, "score": 0, "gates": [], "demo_certificate": {}}):
             diagnostic = v25_execution.public_status(application)["reconciliation_diagnostic"]
 
-        self.assertEqual(set(diagnostic), {"exception_type", "exception_message", "reconciliation_stage", "source", "function", "line", "timestamp"})
+        self.assertEqual(set(diagnostic), {
+            "exception_type", "exception_message", "reconciliation_stage", "source",
+            "function", "line", "request_method", "request_path", "timestamp",
+        })
         self.assertEqual(diagnostic["exception_type"], "LiveExchangeError")
         self.assertEqual(diagnostic["reconciliation_stage"], "account_reconciliation")
         self.assertEqual(diagnostic["source"], "v25_execution.py")
         self.assertEqual(diagnostic["function"], "_request")
         self.assertEqual(diagnostic["line"], 700)
+        self.assertIsNone(diagnostic["request_method"])
+        self.assertIsNone(diagnostic["request_path"])
         self.assertEqual(diagnostic["timestamp"], "2026-09-23T12:00:00+00:00")
         self.assertIn("[REDACTED]", diagnostic["exception_message"])
         serialized = json.dumps(diagnostic)
@@ -1321,17 +1326,18 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
                     raise self.post_result
                 return self.post_result
 
-        for failure in (
-            LiveExchangeError("timeout", unknown_execution=True),
-            LiveExchangeError("5xx", unknown_execution=True),
-            {},
-        ):
-            client = FakeClient(failure)
-            with self.assertRaises(LiveExchangeError) as raised:
-                asyncio.run(submit_entry(client, self._live_spec(), "V25_ENTRY_test-intent", test_only=False))
-            self.assertTrue(raised.exception.unknown_execution)
-            self.assertEqual(sum(1 for method, path in client.calls if method == "POST" and path == "/fapi/v1/order"), 1)
-            self.assertEqual(sum(1 for method, path in client.calls if method == "POST"), 1)
+        with patch.object(asyncio, "sleep", new_callable=AsyncMock):
+            for failure in (
+                LiveExchangeError("timeout", unknown_execution=True),
+                LiveExchangeError("5xx", unknown_execution=True),
+                {},
+            ):
+                client = FakeClient(failure)
+                with self.assertRaises(LiveExchangeError) as raised:
+                    asyncio.run(submit_entry(client, self._live_spec(), "V25_ENTRY_test-intent", test_only=False))
+                self.assertTrue(raised.exception.unknown_execution)
+                self.assertEqual(sum(1 for method, path in client.calls if method == "POST" and path == "/fapi/v1/order"), 1)
+                self.assertEqual(sum(1 for method, path in client.calls if method == "POST"), 1)
 
     def test_exact_reconciliation_recovers_without_duplicate_post(self):
         class FakeClient:
@@ -1355,6 +1361,30 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         second = asyncio.run(submit_entry(client, self._live_spec(), "V25_ENTRY_test-intent", test_only=False))
         self.assertTrue(second["recovered"])
         self.assertEqual(sum(1 for method, path in client.calls if method == "POST" and path == "/fapi/v1/order"), 1)
+
+    def test_delayed_exact_reconciliation_recovers_without_duplicate_post(self):
+        class FakeClient:
+            def __init__(self):
+                self.posts = 0
+                self.reads = 0
+
+            async def signed(self, method, path, params=None):
+                if method == "POST":
+                    self.posts += 1
+                    raise LiveExchangeError("timeout", unknown_execution=True)
+                self.reads += 1
+                if self.reads < 3:
+                    return None
+                return V25LiveGuardIntegrationContractTests()._matching_order()
+
+        client = FakeClient()
+        with patch.object(asyncio, "sleep", new_callable=AsyncMock) as sleep:
+            result = asyncio.run(submit_entry(client, self._live_spec(), "V25_ENTRY_test-intent", test_only=False))
+
+        self.assertTrue(result["recovered"])
+        self.assertEqual(client.posts, 1)
+        self.assertEqual(client.reads, 3)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [0.25])
 
     def test_ambiguous_and_foreign_reconciliation_are_not_owned(self):
         class FakeClient:
@@ -1480,6 +1510,13 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertFalse(market_data_error.exception.unknown_execution)
         self.assertTrue(market_data_error.exception.transient_read_failure)
         self.assertTrue(next(event for event in state["events"] if event["kind"] == "LIVE_REQUEST_ERROR")["transient_read_failure"])
+
+        with self.assertRaises(LiveExchangeError) as income_error:
+            asyncio.run(client._request("GET", "/fapi/v1/income", {}, signed=True))
+        self.assertFalse(income_error.exception.unknown_execution)
+        self.assertTrue(income_error.exception.transient_read_failure)
+        self.assertEqual(income_error.exception.request_method, "GET")
+        self.assertEqual(income_error.exception.request_path, "/fapi/v1/income")
 
         with self.assertRaises(LiveExchangeError) as order_read_error:
             asyncio.run(client._request("GET", "/fapi/v1/order", {}, signed=True))

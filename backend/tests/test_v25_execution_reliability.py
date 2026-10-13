@@ -227,6 +227,40 @@ class ExecutionReliabilityTests(unittest.TestCase):
         self.assertFalse(any(event["kind"] == "ORIGINAL_LIVE_PAUSED" for event in state["events"]))
         self.assertTrue(any(event["kind"] == "AUTO_RECOVERED_FROM_TRANSIENT_MARKET_DATA" for event in state["events"]))
 
+    def test_income_read_timeout_skips_entries_without_cancelling_arm(self):
+        application, state = application_for_loop()
+        session_until = execution.time.time() + 300
+        state["auto"].update({"enabled": True, "session_until": session_until})
+        state.update(live_auto_trade=True, real_trading_locked=False, armed_until=session_until)
+        failure = execution.LiveExchangeError(
+            "Günlük gelir verisi geçici olarak okunamadı.",
+            timed_out=True,
+            transient_read_failure=True,
+            request_method="GET",
+            request_path="/fapi/v1/income",
+        )
+
+        async def stop_after_retry(_seconds):
+            raise asyncio.CancelledError
+
+        with patch.multiple(
+            execution,
+            auto_session_credentials=AsyncMock(return_value=("OFFLINE_KEY_PLACEHOLDER", "OFFLINE_SECRET_PLACEHOLDER")),
+            reconcile=AsyncMock(),
+            automatic_cycle=AsyncMock(side_effect=failure),
+        ), patch.object(execution.asyncio, "sleep", side_effect=stop_after_retry):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(execution.execution_loop(application))
+
+        self.assertEqual(state["armed_until"], session_until)
+        self.assertFalse(state["real_trading_locked"])
+        self.assertTrue(state["auto"]["enabled"])
+        self.assertFalse(state["emergency"]["active"])
+        self.assertEqual(state["auto"]["last_skip_reason"], "daily_risk_data_unavailable")
+        self.assertEqual(state["auto"]["last_cycle_stage"], "skipped")
+        self.assertTrue(any(event["kind"] == "LIVE_DAILY_RISK_DATA_RETRY" for event in state["events"]))
+        self.assertFalse(any(event["kind"] == "RECONCILIATION_FAILURE_DIAGNOSTIC" for event in state["events"]))
+
     def test_transient_recovery_survives_stale_reconciliation_unknown_event(self):
         application, state = application_for_loop()
         session_until = execution.time.time() + 300
@@ -543,7 +577,31 @@ class ExecutionReliabilityTests(unittest.TestCase):
                     with self.assertRaises(execution.LiveExchangeError):
                         asyncio.run(execution.install_verified_stop(client, state, {"symbol": "BTCUSDT"}, STOP_PARAMS, None))
                 self.assertEqual(len(client.posts), 1)
-                self.assertLessEqual(client.reads, 4)
+                self.assertLessEqual(client.reads, 6)
+
+    def test_ambiguous_algo_post_recovers_delayed_exact_client_algo_id(self):
+        class DelayedAlgoClient:
+            def __init__(self):
+                self.posts = 0
+                self.reads = 0
+
+            async def signed(self, method, path, params=None):
+                if method == "POST":
+                    self.posts += 1
+                    raise execution.LiveExchangeError("Mock POST timeout", unknown_execution=True)
+                self.reads += 1
+                if self.reads == 1:
+                    return []
+                return [{**STOP_PARAMS, "algoId": 101, "algoStatus": "NEW"}]
+
+        client = DelayedAlgoClient()
+        with patch.object(execution.asyncio, "sleep", new=AsyncMock()) as sleep:
+            result = asyncio.run(execution.post_algo(client, STOP_PARAMS))
+
+        self.assertEqual(result["algoId"], 101)
+        self.assertEqual(client.posts, 1)
+        self.assertEqual(client.reads, 2)
+        sleep.assert_awaited_once_with(0.25)
 
     def test_stop_read_timeout_recovers_without_second_post(self):
         client = StopClient(first_read_error=execution.LiveExchangeError("Mock read timeout"))

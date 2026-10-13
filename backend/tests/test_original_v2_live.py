@@ -502,6 +502,8 @@ def test_original_scan_telemetry_records_only_completed_scans(state, monkeypatch
         run(original.cycle(req.app, ("offline-key", "offline-secret")))
         assert original.public_config(state)["scanner"]["stage"] == "WAITING_NEXT_CANDLE"
         scan.assert_awaited_once()
+        live.account_snapshot.assert_awaited_once()
+        original.check_entry.assert_awaited_once()
 
 
 def test_missing_credentials_pause_without_exchange(state, monkeypatch):
