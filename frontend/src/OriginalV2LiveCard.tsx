@@ -48,7 +48,8 @@ const scanRejectionLabels: Record<string, string> = {
   confidence_low: 'Güven skoru düşük',
   spread_wide: 'Spread geniş',
   stop_too_wide: 'Stop %6 sınırından geniş',
-  minimum_margin: 'Teminat / minimum emir miktarı',
+  minimum_margin: 'Teminat sınırı',
+  minimum_trade_size: 'Minimum işlem tutarı',
   position_limit: 'Pozisyon / aynı sembol sınırı',
   daily_limit: 'Günlük işlem veya kayıp sınırı',
   risk_or_account_limit: 'Diğer risk / hesap kontrolü',
@@ -82,6 +83,14 @@ type OriginalScanNearMiss = {
   market_volume_usdt?: number | null
   market_move_percent?: number | null
   stop_percent?: number | null
+  total_quantity?: string
+  total_notional_usdt?: string
+  tp1_quantity?: string
+  tp1_notional_usdt?: string
+  remaining_quantity?: string
+  remaining_notional_usdt?: string
+  min_qty?: string
+  min_notional_usdt?: string
 }
 
 export type OriginalV2LiveStatus = {
@@ -262,6 +271,12 @@ export default function OriginalV2LiveCard({className, status, armed, automation
           {item.stop_percent != null && <> · Stop %{item.stop_percent.toFixed(2)}</>}
           {item.market_volume_usdt != null && <> · 24s hacim {item.market_volume_usdt.toLocaleString('tr-TR')} USDT</>}
           {item.market_move_percent != null && <> · 24s hareket %{item.market_move_percent.toFixed(2)}</>}
+          {item.total_notional_usdt != null && <>
+            {' '}· Pozisyon {item.total_notional_usdt} USDT ({item.total_quantity})
+            {' '}· TP1 %60 {item.tp1_notional_usdt} USDT ({item.tp1_quantity})
+            {' '}· Kalan {item.remaining_notional_usdt} USDT ({item.remaining_quantity})
+            {' '}· Borsa minimumu {item.min_notional_usdt} USDT / {item.min_qty}
+          </>}
           {!!item.failed_checks?.length && <> · Geçmeyen: {item.failed_checks.map(key => qualityCheckLabels[key] ?? key).join(', ')}</>}
         </li>)}
       </ol>

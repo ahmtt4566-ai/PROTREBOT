@@ -140,10 +140,15 @@ async def build_live_spec(
     allowed_symbols: list[str],
 ) -> dict[str, Any]:
     validate_live_result(result, allowed_symbols)
-    return await _build_spec(client, result)
+    return await _build_spec(client, result, enforce_minimum=False)
 
 
-async def _build_spec(client: demo.BinanceDemoClient, result: StrategyResult) -> dict[str, Any]:
+async def _build_spec(
+    client: demo.BinanceDemoClient,
+    result: StrategyResult,
+    *,
+    enforce_minimum: bool = True,
+) -> dict[str, Any]:
     if not result.signal.strategy_eligible:
         fail("CANONICAL_ENTRY_NOT_ELIGIBLE")
     signal = result.legacy["analysis"]
@@ -165,7 +170,7 @@ async def _build_spec(client: demo.BinanceDemoClient, result: StrategyResult) ->
     except OfflineRiskError as exc:
         fail(exc.reason)
     quantity = demo.floor_step(Decimal(str(rounded_risk["notional_usdt"])) / entry, rules["step"])
-    if quantity < rules["min_qty"] or quantity * entry < rules["min_notional"]:
+    if enforce_minimum and (quantity < rules["min_qty"] or quantity * entry < rules["min_notional"]):
         fail("min_notional")
     if quantity > rules["max_qty"]:
         fail("native_spec_rejected")
@@ -187,6 +192,98 @@ async def _build_spec(client: demo.BinanceDemoClient, result: StrategyResult) ->
         "step": rules["step"], "min_qty": rules["min_qty"], "min_notional": rules["min_notional"],
         "risk_per_trade": rounded_risk["estimated_stop_loss_usdt"], "risk_adjusted": False,
     }
+
+
+def minimum_order_parts(
+    quantity: Decimal,
+    entry: Decimal,
+    step: Decimal,
+    min_qty: Decimal,
+    min_notional: Decimal,
+) -> dict[str, Any]:
+    tp1_quantity = demo.floor_step(quantity * Decimal("0.60"), step)
+    remaining_quantity = quantity - tp1_quantity
+    values = {
+        "total_quantity": quantity,
+        "total_notional_usdt": quantity * entry,
+        "tp1_quantity": tp1_quantity,
+        "tp1_notional_usdt": tp1_quantity * entry,
+        "remaining_quantity": remaining_quantity,
+        "remaining_notional_usdt": remaining_quantity * entry,
+        "min_qty": min_qty,
+        "min_notional_usdt": min_notional,
+    }
+    passes = all(
+        part_quantity >= min_qty and part_notional >= min_notional
+        for part_quantity, part_notional in (
+            (quantity, values["total_notional_usdt"]),
+            (tp1_quantity, values["tp1_notional_usdt"]),
+            (remaining_quantity, values["remaining_notional_usdt"]),
+        )
+    )
+    return {key: demo.decimal_text(value) for key, value in values.items()} | {"passes": passes}
+
+
+def live_minimum_order_assessment(
+    signal: dict[str, Any],
+    symbol_info: dict[str, Any],
+    sizing_context: dict[str, Any],
+) -> dict[str, Any]:
+    filters = {
+        item.get("filterType"): item
+        for item in symbol_info.get("filters", [])
+        if isinstance(item, dict)
+    }
+    market_lot = filters.get("MARKET_LOT_SIZE") or filters.get("LOT_SIZE")
+    lot = filters.get("LOT_SIZE") or market_lot
+    notional_filter = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL")
+    if not isinstance(lot, dict) or not isinstance(market_lot, dict) or notional_filter is None:
+        fail("INVALID_ORIGINAL_SYMBOL_RULES")
+    try:
+        entry = Decimal(str(signal["entry"]))
+        stop = Decimal(str(signal["stop_loss"]))
+        base_step = Decimal(str(lot["stepSize"]))
+        step = Decimal(str(market_lot["stepSize"]))
+        min_qty = Decimal(str(market_lot.get("minQty", lot.get("minQty", "0"))))
+        min_notional = Decimal(str(notional_filter.get("notional", "0")))
+        budget = Decimal(str(sizing_context["max_loss_per_trade"]))
+        max_margin = Decimal(str(sizing_context["max_margin_per_trade"]))
+        fee_bps = Decimal(str(sizing_context["fee_bps_per_side"]))
+        slippage_bps = Decimal(str(sizing_context["slippage_bps_per_side"]))
+        if (
+            not all(value.is_finite() for value in (
+                entry, stop, base_step, step, min_qty, min_notional,
+                budget, max_margin, fee_bps, slippage_bps,
+            ))
+            or entry <= 0 or stop <= 0 or base_step <= 0 or step <= 0
+            or min_qty < 0 or min_notional < 0 or budget <= 0 or max_margin <= 0
+            or fee_bps < 0 or slippage_bps < 0
+        ):
+            fail("INVALID_ORIGINAL_SYMBOL_RULES")
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        fail("INVALID_ORIGINAL_SYMBOL_RULES")
+
+    risk = strategy.risk_preview(float(signal["entry"]), float(signal["stop_loss"]), enabled=True)
+    from .strategies.original_gap_risk import PROFILE
+    from .strategies.original_offline_risk import OfflineRiskError
+
+    try:
+        profile_size = PROFILE.size(float(entry), float(stop), margin_limit=risk["margin_usdt"])
+    except OfflineRiskError as exc:
+        fail(exc.reason)
+    base_quantity = demo.floor_step(Decimal(str(profile_size["notional_usdt"])) / entry, base_step)
+    cost_per_unit = entry * (fee_bps + slippage_bps) * 2 / 10000
+    quantity = demo.floor_step(
+        min(base_quantity, budget / (abs(entry - stop) + cost_per_unit), max_margin * 3 / entry),
+        step * 5,
+    )
+    parts = minimum_order_parts(quantity, entry, step, min_qty, min_notional)
+    return {**parts, "reason": (
+        f"Toplam {parts['total_notional_usdt']} USDT ({parts['total_quantity']}); "
+        f"TP1 %60 {parts['tp1_notional_usdt']} USDT ({parts['tp1_quantity']}); "
+        f"kalan {parts['remaining_notional_usdt']} USDT ({parts['remaining_quantity']}); "
+        f"Binance minimumu {parts['min_notional_usdt']} USDT ve {parts['min_qty']} miktar."
+    )}
 
 
 def daily_metrics(state: dict[str, Any], demo_state: dict[str, Any]) -> dict[str, Any]:
@@ -422,6 +519,7 @@ async def live_candidates(
     *,
     require_complete: bool = False,
     diagnostics: dict[str, Any] | None = None,
+    sizing_context: dict[str, Any] | None = None,
 ) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
     if (
         not 1 <= len(allowed_symbols) <= 100
@@ -432,7 +530,7 @@ async def live_candidates(
         fail("INVALID_LIVE_SYMBOL_UNIVERSE")
     return await _candidates(
         client, at, occupied, allowed_symbols, require_complete=require_complete,
-        live_universe=True, diagnostics=diagnostics,
+        live_universe=True, diagnostics=diagnostics, sizing_context=sizing_context,
     )
 
 
@@ -445,6 +543,7 @@ async def _candidates(
     require_complete: bool = False,
     live_universe: bool = False,
     diagnostics: dict[str, Any] | None = None,
+    sizing_context: dict[str, Any] | None = None,
 ) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
     from .backtest_data import normalize_candles
     from .v25_execution import rank_market_tickers
@@ -452,7 +551,7 @@ async def _candidates(
     rejection_keys = (
         "data_missing", "invalid_market_data", "market_volume", "market_move",
         "market_filter", "market_shortlist", "signal_conditions", "confidence_low",
-        "spread_wide", "stop_too_wide", "minimum_margin", "position_limit",
+        "spread_wide", "stop_too_wide", "minimum_margin", "minimum_trade_size", "position_limit",
         "daily_limit", "risk_or_account_limit",
     )
     assessments: list[dict[str, Any]] = []
@@ -479,6 +578,7 @@ async def _candidates(
         market_volume: Any = None,
         market_move: Any = None,
         stop_percent: Any = None,
+        size_metrics: dict[str, Any] | None = None,
     ) -> None:
         if diagnostics is None:
             return
@@ -495,6 +595,7 @@ async def _candidates(
             "market_move_percent": market_move,
             "stop_percent": stop_percent,
             "progress": progress,
+            **(size_metrics or {}),
         })
 
     def fail_scan(code: str, *, symbol: str, interval: str, category: str) -> None:
@@ -510,6 +611,10 @@ async def _candidates(
         }
 
     info = await client.public_get("/fapi/v1/exchangeInfo")
+    symbol_info_by_symbol = {
+        row["symbol"]: row for row in info.get("symbols", [])
+        if isinstance(row, dict) and isinstance(row.get("symbol"), str)
+    }
     results, tickers, complete = {}, [], set()
     for symbol in symbols:
         frames, series_by_interval = {}, {}
@@ -661,6 +766,36 @@ async def _candidates(
                     "symbol": candidate["symbol"],
                 }
             raise
+        if sizing_context is not None:
+            symbol_info = symbol_info_by_symbol.get(candidate["symbol"])
+            if symbol_info is None:
+                fail("INVALID_ORIGINAL_SYMBOL_RULES")
+            assessment = live_minimum_order_assessment(signal, symbol_info, sizing_context)
+            if not assessment["passes"]:
+                reject(
+                    candidate["symbol"], "minimum_trade_size", assessment["reason"], progress=5,
+                    confidence=confidence,
+                    confidence_threshold=confidence_check.threshold if confidence_check is not None else None,
+                    market_volume=candidate.get("volume"),
+                    market_move=candidate.get("change"),
+                    stop_percent=stop_percent,
+                    size_metrics={key: assessment[key] for key in (
+                        "total_quantity", "total_notional_usdt", "tp1_quantity",
+                        "tp1_notional_usdt", "remaining_quantity", "remaining_notional_usdt",
+                        "min_qty", "min_notional_usdt",
+                    )},
+                )
+                logger.info(
+                    "ORIGINAL_DEMO_MINIMUM_TRADE_SIZE_REJECTED symbol=%s total_quantity=%s total_notional_usdt=%s "
+                    "tp1_quantity=%s tp1_notional_usdt=%s remaining_quantity=%s remaining_notional_usdt=%s "
+                    "min_qty=%s min_notional_usdt=%s",
+                    candidate["symbol"],
+                    *(assessment[key] for key in (
+                        "total_quantity", "total_notional_usdt", "tp1_quantity", "tp1_notional_usdt",
+                        "remaining_quantity", "remaining_notional_usdt", "min_qty", "min_notional_usdt",
+                    )),
+                )
+                continue
         eligible.append((candidate, result))
         if diagnostics is not None:
             assessments.append({

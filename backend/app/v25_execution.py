@@ -200,6 +200,20 @@ class LiveExchangeError(RuntimeError):
         self.check_key = check_key
 
 
+class MinimumTradeSizeError(LiveExchangeError):
+    def __init__(self, symbol: str, sizing_metrics: dict[str, str]) -> None:
+        self.symbol = symbol
+        self.sizing_metrics = dict(sizing_metrics)
+        message = (
+            f"{symbol} minimum işlem tutarı: toplam {sizing_metrics['total_notional_usdt']} USDT "
+            f"({sizing_metrics['total_quantity']}); TP1 %60 {sizing_metrics['tp1_notional_usdt']} USDT "
+            f"({sizing_metrics['tp1_quantity']}); kalan {sizing_metrics['remaining_notional_usdt']} USDT "
+            f"({sizing_metrics['remaining_quantity']}); Binance minimumu "
+            f"{sizing_metrics['min_notional_usdt']} USDT ve {sizing_metrics['min_qty']} miktar."
+        )
+        super().__init__(message, http_status=409, check_key="minimum_trade_size")
+
+
 class LiveRateLimitError(LiveExchangeError):
     def __init__(self, message: str, *, retry_after: int | None = None, exchange_code: int | None = None) -> None:
         super().__init__(message, http_status=429, exchange_code=exchange_code)
@@ -4810,6 +4824,10 @@ async def execute_live_order(
             safe_symbol_skip = (
                 isinstance(exc, LiveExchangeError)
                 and exc.check_key == "symbol_occupancy"
+                and not submission_started
+            ) or (
+                isinstance(exc, MinimumTradeSizeError)
+                and exc.symbol == normalize_symbol(body.symbol)
                 and not submission_started
             )
             if original_entry and not transient_pre_submit_read_failure and not safe_symbol_skip:

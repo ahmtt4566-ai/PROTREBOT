@@ -154,6 +154,47 @@ def test_original_protection_60_percent_rounding_and_minimum(quantity, minimum, 
     assert current["monitoring_targets"] == []
 
 
+@pytest.mark.parametrize(("quantity", "minimum_notional", "expected"), [
+    ("10", "4", True),
+    ("10", "5", False),
+    ("4", "5", False),
+])
+def test_original_entry_requires_total_tp1_and_remaining_to_meet_exchange_minimums(
+    quantity, minimum_notional, expected,
+):
+    parts = original.minimum_order_parts(
+        Decimal(quantity), Decimal("1"), Decimal("0.1"), Decimal("0.1"),
+        Decimal(minimum_notional),
+    )
+
+    assert parts["passes"] is expected
+    assert parts["total_notional_usdt"] == quantity
+    assert parts["tp1_quantity"] == ("6" if quantity == "10" else "2.4")
+    assert parts["remaining_quantity"] == ("4" if quantity == "10" else "1.6")
+    assert parts["min_notional_usdt"] == minimum_notional
+
+
+def test_live_minimum_sizing_uses_account_risk_and_market_lot_rules():
+    symbol_info = {"filters": [
+        {"filterType": "LOT_SIZE", "stepSize": "0.01", "minQty": "0.01"},
+        {"filterType": "MARKET_LOT_SIZE", "stepSize": "0.01", "minQty": "0.01"},
+        {"filterType": "MIN_NOTIONAL", "notional": "5"},
+    ]}
+    signal = {"entry": "100", "stop_loss": "99.5"}
+    context = {
+        "max_loss_per_trade": "0.01", "max_margin_per_trade": "25",
+        "fee_bps_per_side": "0", "slippage_bps_per_side": "0",
+    }
+
+    assessment = original.live_minimum_order_assessment(signal, symbol_info, context)
+
+    assert assessment["passes"] is False
+    assert assessment["total_notional_usdt"] == "0"
+    assert assessment["tp1_notional_usdt"] == "0"
+    assert assessment["remaining_notional_usdt"] == "0"
+    assert assessment["min_notional_usdt"] == "5"
+
+
 def fill_payload(current, label, quantity, *, trade_id=1, cumulative=None):
     return {
         "e": "ORDER_TRADE_UPDATE", "T": trade_id,

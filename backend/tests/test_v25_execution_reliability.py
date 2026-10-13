@@ -185,6 +185,7 @@ class ExecutionReliabilityTests(unittest.TestCase):
             "enabled": True,
             "paused": False,
             "pause_reason": None,
+            "risk_percent": 0.5,
             "session_expires_at_epoch": session_until,
         }
         failure = execution.LiveExchangeError(
@@ -415,6 +416,7 @@ class ExecutionReliabilityTests(unittest.TestCase):
             "enabled": True,
             "paused": False,
             "pause_reason": None,
+            "risk_percent": 0.5,
             "session_expires_at_epoch": session_until,
             "scanner": {},
             "symbol_count": 40,
@@ -428,7 +430,7 @@ class ExecutionReliabilityTests(unittest.TestCase):
         failure.request_method = "GET"
         failure.request_path = "/fapi/v1/klines"
         candidates = AsyncMock(side_effect=[failure, ([], {})])
-        snapshot = {"positions": [], "open_orders": []}
+        snapshot = {"wallet_balance": 1000, "positions": [], "open_orders": []}
         decision_time = int(execution.time.time()) // 900 * 900
 
         common = (

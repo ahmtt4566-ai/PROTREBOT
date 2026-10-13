@@ -291,8 +291,9 @@ def test_native_sizing_with_costs_cannot_exceed_percentage(state):
 
 def test_tiny_budget_rejected_without_order(state):
     client = EntryClient()
-    with pytest.raises(HTTPException):
+    with pytest.raises(live.MinimumTradeSizeError) as error:
         run(original.build_spec(client, result(), state, {"wallet_balance": 0.01}))
+    assert error.value.check_key == "minimum_trade_size"
     assert not any(method == "POST" for method, _, _ in client.calls)
 
 
@@ -558,7 +559,9 @@ def test_original_scan_telemetry_records_only_completed_scans(state, monkeypatch
     req = request_for(state)
     monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
     monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=object()))
-    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"positions": [], "open_orders": []}))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={
+        "wallet_balance": 1000, "positions": [], "open_orders": [],
+    }))
     monkeypatch.setattr(original, "check_entry", AsyncMock())
     symbols = [f"TOKEN{index}USDT" for index in range(12)]
     monkeypatch.setattr(original, "resolve_live_universe", AsyncMock(return_value=symbols))
@@ -595,7 +598,9 @@ def test_original_live_counts_only_successful_candidate_orders_in_last_24h(state
     req = request_for(state)
     monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
     monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=object()))
-    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"positions": [], "open_orders": []}))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={
+        "wallet_balance": 1000, "positions": [], "open_orders": [],
+    }))
     monkeypatch.setattr(original, "check_entry", AsyncMock())
     symbols = ["BTCUSDT"]
     monkeypatch.setattr(original, "resolve_live_universe", AsyncMock(return_value=symbols))
@@ -616,11 +621,61 @@ def test_original_live_counts_only_successful_candidate_orders_in_last_24h(state
     execute.assert_awaited_once()
 
 
+def test_original_minimum_trade_size_rejection_skips_symbol_and_keeps_automation_running(state, monkeypatch):
+    req = request_for(state)
+    monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
+    monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=object()))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={
+        "wallet_balance": 1000, "positions": [], "open_orders": [],
+    }))
+    monkeypatch.setattr(original, "check_entry", AsyncMock())
+    symbols = ["BTCUSDT", "ETHUSDT"]
+    monkeypatch.setattr(original, "resolve_live_universe", AsyncMock(return_value=symbols))
+    decision = result()
+    candidates = [
+        ({"symbol": symbol, "opportunity_score": 1.0}, decision)
+        for symbol in symbols
+    ]
+    monkeypatch.setattr(
+        original.original, "live_candidates",
+        AsyncMock(return_value=(candidates, {"BTCUSDT": decision, "ETHUSDT": decision})),
+    )
+    size = {
+        "total_quantity": "0.4", "total_notional_usdt": "4",
+        "tp1_quantity": "0.2", "tp1_notional_usdt": "2",
+        "remaining_quantity": "0.2", "remaining_notional_usdt": "2",
+        "min_qty": "0.001", "min_notional_usdt": "5",
+    }
+    monkeypatch.setattr(original, "build_spec", AsyncMock(side_effect=[
+        live.MinimumTradeSizeError("BTCUSDT", size),
+        {"margin_usdt": 10.0},
+    ]))
+    execute = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(live, "execute_live_order", execute)
+
+    run(original.cycle(req.app, ("offline-key", "offline-secret")))
+
+    scanner = original.public_config(state)["scanner"]
+    assert scanner["candidate_count"] == 1
+    assert scanner["rejection_counts"]["minimum_trade_size"] == 1
+    assert scanner["near_misses"][0]["symbol"] == "BTCUSDT"
+    assert scanner["near_misses"][0]["total_notional_usdt"] == "4"
+    assert scanner["near_misses"][0]["tp1_notional_usdt"] == "2"
+    assert scanner["near_misses"][0]["remaining_notional_usdt"] == "2"
+    assert scanner["last_24h"] == {"scans": 1, "candidates": 1, "trades": 1}
+    assert original.running(state)
+    assert not state["original_v2_live"]["paused"]
+    execute.assert_awaited_once()
+    assert execute.await_args.args[1].symbol == "ETHUSDT"
+
+
 def test_original_live_cooldown_is_reported_without_becoming_an_empty_scan(state, monkeypatch):
     req = request_for(state)
     monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
     monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=object()))
-    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"positions": [], "open_orders": []}))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={
+        "wallet_balance": 1000, "positions": [], "open_orders": [],
+    }))
     monkeypatch.setattr(original, "check_entry", AsyncMock())
     monkeypatch.setattr(original, "resolve_live_universe", AsyncMock(return_value=["BTCUSDT"]))
     cooldown = live.LiveRateLimitError("Binance market-data cooldown", retry_after=300, exchange_code=-1003)
@@ -756,6 +811,41 @@ def test_live_scan_diagnostics_name_incomplete_candle_symbol_and_interval():
     assert diagnostics["failure"]["symbol"] in symbols
     assert diagnostics["failure"]["interval"] in strategy.INTERVALS
     assert diagnostics["rejection_counts"]["data_missing"] == 1
+
+
+def test_live_scan_excludes_symbols_that_cannot_meet_minimum_order_parts(monkeypatch):
+    decision = result()
+    monkeypatch.setattr(
+        strategy, "evaluate_live_universe",
+        Mock(return_value=decision),
+    )
+    monkeypatch.setattr(
+        live, "rank_market_tickers",
+        Mock(return_value=[{
+            "symbol": "BTCUSDT", "opportunity_score": 1.0,
+            "volume": 1_000_000, "change": 1.0,
+        }]),
+    )
+    diagnostics = {}
+
+    eligible, results = run(demo_execution.live_candidates(
+        CandleClient(), decisions.fixtures.AT, set(), ["BTCUSDT"],
+        require_complete=True,
+        diagnostics=diagnostics,
+        sizing_context={
+            "max_loss_per_trade": "0.01", "max_margin_per_trade": "25",
+            "fee_bps_per_side": "4", "slippage_bps_per_side": "4",
+        },
+    ))
+
+    assert eligible == []
+    assert results["BTCUSDT"] is decision
+    assert diagnostics["candidate_count"] == 0
+    assert diagnostics["rejection_counts"]["minimum_trade_size"] == 1
+    near_miss = diagnostics["near_misses"][0]
+    assert near_miss["symbol"] == "BTCUSDT"
+    assert near_miss["reason_code"] == "minimum_trade_size"
+    assert Decimal(near_miss["total_notional_usdt"]) < Decimal(near_miss["min_notional_usdt"])
 
 
 @pytest.mark.parametrize("hours", [1, 4, 12, 24])
@@ -1017,6 +1107,55 @@ def test_original_order_uses_fixed_builder_and_preserves_legacy_policy(state, mo
     assert live.persist_state_awaited.await_count >= 2
 
 
+def test_original_minimum_trade_size_error_does_not_pause_executor_before_submission(state, monkeypatch):
+    req = request_for(state)
+    req.app.state.maintenance = {"mode": "NORMAL"}
+    value = result()
+    signal = value.legacy["analysis"]
+    monkeypatch.setattr(live.time, "time", lambda: value.signal.decision_time)
+    state["armed_until"] = 0
+    state["auto_authorization"] = {"user_id": "owner", "fingerprint": "fingerprint", "auth_version": 1}
+    client = EntryClient()
+    snapshot = {
+        "wallet_balance": 300, "available_balance": 300,
+        "positions": [], "open_orders": [], "open_algo_orders": [],
+        "open_algo_orders_available": True, "algo_orders_quality": "VALID_EMPTY",
+        "unrealized_pnl": 0, "hedge_mode": False, "multi_assets_mode": False,
+    }
+    monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=client))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value=snapshot))
+    monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
+    monkeypatch.setattr(live, "background_authorization_active", AsyncMock(return_value=True))
+    from app import v22_commercial
+    monkeypatch.setattr(v22_commercial, "validate_authoritative_session", AsyncMock(return_value={"role": "OWNER"}))
+    monkeypatch.setattr(original, "check_entry", AsyncMock())
+    monkeypatch.setattr(original, "daily_guard", AsyncMock())
+    monkeypatch.setattr(live, "spread_bps", AsyncMock(return_value=1))
+    monkeypatch.setattr(live, "evaluate_entry_gates", Mock(return_value={"passed": True, "reason": "pass", "gates": []}))
+    metrics = {
+        "total_quantity": "0.4", "total_notional_usdt": "4",
+        "tp1_quantity": "0.2", "tp1_notional_usdt": "2",
+        "remaining_quantity": "0.2", "remaining_notional_usdt": "2",
+        "min_qty": "0.001", "min_notional_usdt": "5",
+    }
+    monkeypatch.setattr(original, "build_spec", AsyncMock(
+        side_effect=live.MinimumTradeSizeError(value.signal.symbol, metrics),
+    ))
+    body = live.LiveOrderRequest(
+        symbol=value.signal.symbol, direction=signal["direction"], margin_usdt=5, leverage=3,
+        stop_loss=signal["stop_loss"], tp1=signal["tp1"], tp2=signal["tp2"], tp3=signal["tp3"],
+    )
+
+    with pytest.raises(HTTPException) as error:
+        run(live.execute_live_order(
+            req.app, body, source=original.SOURCE,
+            credentials=("safe-key-123456", "safe-secret-123456"), strategy_result=value,
+        ))
+
+    assert error.value.status_code == 409
+    assert original.running(state)
+    assert not state["original_v2_live"]["paused"]
+    assert state["real_trading_locked"] is False
 def test_reading_original_alert_preserves_demo_and_binance_notifications(state, monkeypatch):
     from app import binance_notifications, v21_demo
     req = request_for(state)

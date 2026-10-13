@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import asyncio
+import logging
 import math
 import os
 import time
@@ -29,6 +30,7 @@ router = APIRouter(prefix="/api/v25/original-v2", tags=["Original V2 LIVE"])
 FLAG = "PROTREBOT_LIVE_KAIS_ORIGINAL_V2_ENABLED"
 SOURCE = "ORIGINAL_V2_LIVE"
 SCANNER_HISTORY_LIMIT = 128
+logger = logging.getLogger(__name__)
 
 
 class Start(BaseModel):
@@ -433,17 +435,24 @@ async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
     cost_per_unit = entry * Decimal(str(policy["fee_bps_per_side"] + policy["slippage_bps_per_side"])) * 2 / 10000
     quantity = live.floor_step(min(Decimal(spec["quantity"]), budget / (abs(entry - stop) + cost_per_unit),
                                   Decimal(str(policy["max_margin_per_trade"])) * 3 / entry), rules["step"] * 5)
-    partial = live.floor_step(quantity * Decimal("0.60"), rules["step"])
-    if quantity < rules["min_qty"] or partial < rules["min_qty"] or partial * entry < rules["min_notional"]:
+    size_metrics = original.minimum_order_parts(
+        quantity, entry, rules["step"], rules["min_qty"], rules["min_notional"],
+    )
+    if not size_metrics["passes"]:
         live.record_live_entry_check(
             check_results, "minimum_quantity", False,
-            "Miktar veya TP1 %60 Binance minimum miktar/notional şartını karşılamıyor.",
+            "Toplam miktar, TP1 %60 veya kalan miktar Binance minimum miktar/notional şartını karşılamıyor.",
             symbol=spec["symbol"],
         )
-        raise HTTPException(423, "Original V2 TP1 %60 miktarı borsa minimumunu karşılamıyor.")
+        raise live.MinimumTradeSizeError(spec["symbol"], {
+            key: size_metrics[key] for key in (
+                "total_quantity", "total_notional_usdt", "tp1_quantity", "tp1_notional_usdt",
+                "remaining_quantity", "remaining_notional_usdt", "min_qty", "min_notional_usdt",
+            )
+        })
     live.record_live_entry_check(
         check_results, "minimum_quantity", True,
-        "Giriş ve TP1 %60 miktarı Binance minimum miktar/notional şartını karşılıyor.",
+        "Toplam miktar, TP1 %60 ve kalan miktar Binance minimum miktar/notional şartını karşılıyor.",
         symbol=spec["symbol"],
     )
     margin = float(quantity * entry / 3)
@@ -723,13 +732,16 @@ def _entry_rejection_category(error: Exception) -> str:
         return "position_limit"
     if "spread" in combined:
         return "spread_wide"
-    if any(token in combined for token in ("minimum_margin", "margin floor", "minimum_quantity", "notional")):
+    if any(token in combined for token in ("minimum_margin", "margin floor")):
         return "minimum_margin"
+    if "minimum_trade_size" in combined or "minimum_quantity" in combined or "notional" in combined:
+        return "minimum_trade_size"
     return "risk_or_account_limit"
 
 
 def _record_order_rejection(
     scanner: dict[str, Any], result: StrategyResult, category: str, reason: str,
+    size_metrics: dict[str, str] | None = None,
 ) -> None:
     counts = scanner.setdefault("rejection_counts", {})
     if not isinstance(counts, dict):
@@ -750,6 +762,7 @@ def _record_order_rejection(
         ),
         "failed_checks": [],
         "progress": 5,
+        **(size_metrics or {}),
     }
     near_misses = [item for item in near_misses if not isinstance(item, dict) or item.get("symbol") != updated["symbol"]]
     scanner["near_misses"] = [updated, *near_misses][:3]
@@ -808,8 +821,16 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
             live.persist_state(state)
             return
         scanner.update(stage="SCANNING")
+        sizing_policy = execution_policy(state, snapshot)
+        sizing_context = {
+            "max_loss_per_trade": sizing_policy["max_loss_per_trade"],
+            "max_margin_per_trade": sizing_policy["max_margin_per_trade"],
+            "fee_bps_per_side": sizing_policy["fee_bps_per_side"],
+            "slippage_bps_per_side": sizing_policy["slippage_bps_per_side"],
+        }
         eligible, _results = await original.live_candidates(
             client, at, occupied, symbols, require_complete=True, diagnostics=scan_diagnostics,
+            sizing_context=sizing_context,
         )
         config["last_decision_time"] = at
         history_item = _record_scanner_scan(scanner, time.time(), len(eligible))
@@ -840,6 +861,23 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
                     strategy_result=result,
                 )
                 history_item["trades"] += 1
+            except live.MinimumTradeSizeError as exc:
+                category = "minimum_trade_size"
+                _record_order_rejection(scanner, result, category, live.sanitized_exception_message(exc),
+                                         exc.sizing_metrics)
+                logger.warning(
+                    "ORIGINAL_LIVE_MINIMUM_TRADE_SIZE_SKIPPED symbol=%s total_quantity=%s total_notional_usdt=%s "
+                    "tp1_quantity=%s tp1_notional_usdt=%s remaining_quantity=%s remaining_notional_usdt=%s "
+                    "min_qty=%s min_notional_usdt=%s",
+                    exc.symbol,
+                    *(exc.sizing_metrics[key] for key in (
+                        "total_quantity", "total_notional_usdt", "tp1_quantity", "tp1_notional_usdt",
+                        "remaining_quantity", "remaining_notional_usdt", "min_qty", "min_notional_usdt",
+                    )),
+                )
+                scanner["candidate_count"] = max(0, int(scanner.get("candidate_count") or 0) - 1)
+                history_item["candidates"] = scanner["candidate_count"]
+                continue
             except Exception as exc:
                 category = _entry_rejection_category(exc)
                 _record_order_rejection(

@@ -24,12 +24,14 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
         rejection_counts: {
           data_missing: 1, invalid_market_data: 0, market_volume: 0, market_move: 0,
           market_filter: 0, market_shortlist: 0, signal_conditions: 20, confidence_low: 19,
-          spread_wide: 0, stop_too_wide: 0, minimum_margin: 0, position_limit: 0,
+          spread_wide: 0, stop_too_wide: 0, minimum_margin: 0, minimum_trade_size: 1, position_limit: 0,
           daily_limit: 0, risk_or_account_limit: 0,
         },
         near_misses: [
           {symbol: 'LINKUSDT', reason_code: 'confidence_low', confidence: 78, confidence_threshold: 80, failed_checks: ['confidence']},
-          {symbol: 'ARBUSDT', reason_code: 'signal_conditions', confidence: 76, failed_checks: ['mtf']},
+          {symbol: 'ARBUSDT', reason_code: 'minimum_trade_size', confidence: 76, failed_checks: [],
+            total_quantity: '0.4', total_notional_usdt: '4', tp1_quantity: '0.2', tp1_notional_usdt: '2',
+            remaining_quantity: '0.2', remaining_notional_usdt: '2', min_qty: '0.001', min_notional_usdt: '5'},
           {symbol: 'OPUSDT', reason_code: 'market_move', market_move_percent: 0.12},
         ],
         last_24h: {scans: 3, candidates: 2, trades: 1},
@@ -102,6 +104,11 @@ test('OWNER sees Original V2 rejection stages, nearest symbols and 24-hour conve
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('LINKUSDT')
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('Güven %78 / eşik %80')
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('ARBUSDT')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('Minimum işlem tutarı')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('Pozisyon 4 USDT (0.4)')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('TP1 %60 2 USDT (0.2)')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('Kalan 2 USDT (0.2)')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('Borsa minimumu 5 USDT / 0.001')
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('OPUSDT')
 })
 
