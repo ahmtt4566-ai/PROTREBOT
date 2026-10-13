@@ -583,7 +583,7 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
         assert kwargs == {"required": True}
         trace.append("2fa")
     async def start(*args, **kwargs):
-        assert kwargs == {"mfa_verified": True}
+        assert kwargs == {"mfa_verified": True, "state_lock_held": True}
         trace.append("existing-auto")
         state["auto"]["enabled"] = True
         state["auto_authorization"]["auth_expires_at_epoch"] = now + ((authority_hours or 48) if limit_source == "login" else 48) * 3600
@@ -608,6 +608,38 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
     assert state["original_v2_live"]["session_id"] != "expired-session"
     assert response["daily"]["loss"] == 12
     assert trace == ["2fa", "existing-auto"]
+    live.persist_state_awaited.assert_awaited_once_with(state)
+
+
+def test_original_start_does_not_reacquire_live_state_lock(state, monkeypatch):
+    req = request_for(state)
+    state["auto"]["enabled"] = False
+    state["original_v2_live"]["enabled"] = False
+    state["policy"]["interval"] = "15m"
+    owner = {"id": "owner", "role": "OWNER", "auth_version": 1}
+    monkeypatch.setattr(original, "authenticated_user", Mock(return_value=owner))
+    monkeypatch.setattr(live, "execution_owner", Mock(return_value=owner))
+    monkeypatch.setattr(live, "guard_execution_ownership", Mock())
+    monkeypatch.setattr(account_settings, "enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(account_settings, "require_totp", AsyncMock())
+    monkeypatch.setattr(live, "live_auto_start_gate", Mock(return_value=(True, "ready")))
+    monkeypatch.setattr(live, "live_credentials_status", Mock(return_value=("key", "secret", "fingerprint")))
+    monkeypatch.setattr(live, "client_for", Mock(return_value=object()))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"wallet_balance": 1000, "unrealized_pnl": 0}))
+    monkeypatch.setattr(original, "daily_guard", AsyncMock())
+    monkeypatch.setattr(live, "consent_status", Mock(return_value={
+        "active": True,
+        "expires_at": datetime.fromtimestamp(time.time() + 3600, timezone.utc).isoformat(),
+    }))
+
+    response = run(asyncio.wait_for(
+        original.start(req, original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456")),
+        timeout=1,
+    ))
+
+    assert response["enabled"] is True
+    assert state["auto"]["enabled"] is True
+    live.account_snapshot.assert_awaited_once()
     live.persist_state_awaited.assert_awaited_once_with(state)
 
 

@@ -658,7 +658,8 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
             if config.get("paused"):
                 raise HTTPException(423, "Original V2 başlatma sırasında durduruldu.")
             await live._start_live_auto_session(
-                request, live.Confirmation(confirmation="CANLI OTOMATİK"), mfa_verified=True,
+                request, live.Confirmation(confirmation="CANLI OTOMATİK"),
+                mfa_verified=True, state_lock_held=True,
             )
             started = time.time()
             consent = live.consent_status(state, request)

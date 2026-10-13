@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from contextlib import nullcontext
 import hashlib
 import hmac
 import inspect
@@ -6324,6 +6325,7 @@ async def v25_auto_start(request: Request, body: AutoStartConfirmation) -> dict[
 
 async def _start_live_auto_session(
     request: Request, body: Confirmation, *, mfa_verified: bool = False,
+    state_lock_held: bool = False,
 ) -> dict[str, Any]:
     user = execution_owner(request)
     from .exchange_connections import _require_live_mfa
@@ -6347,7 +6349,8 @@ async def _start_live_auto_session(
     allowed, reason = live_auto_start_gate(request.app, state, request)
     if not allowed:
         raise HTTPException(423, reason)
-    async with state["lock"]:
+    lock_context = nullcontext() if state_lock_held else state["lock"]
+    async with lock_context:
         if original_v2_live.running(state) or auto_session_is_active(state):
             raise HTTPException(409, "Canlı otomasyon zaten aktif; mevcut oturum uzatılmadı.")
         if state["policy"].get("interval") != "15m":
