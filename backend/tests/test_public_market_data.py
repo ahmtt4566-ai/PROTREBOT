@@ -35,7 +35,8 @@ def test_fifty_users_graph_analysis_and_live_share_one_candle_request():
 
 
 def test_expired_candles_are_refetched_not_used_for_trading(monkeypatch):
-    monkeypatch.setattr("app.public_market_data.time.time", lambda: 100.0)
+    unix_time = [899.0]
+    monkeypatch.setattr("app.public_market_data.time.time", lambda: unix_time[0])
 
     async def run():
         now = [100.0]
@@ -49,9 +50,69 @@ def test_expired_candles_are_refetched_not_used_for_trading(monkeypatch):
 
         params = {"symbol": "BTCUSDT", "interval": "15m", "limit": 260}
         assert (await service.get("/fapi/v1/klines", params, fetch)).status_code == 200
-        now[0] = 161
+        now[0] = 101.1
+        unix_time[0] = 900.0
         assert (await service.get("/fapi/v1/klines", params, fetch)).status_code == 503
         assert len(calls) == 2
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("interval", ["1m", "5m", "15m", "30m", "1h", "4h", "1d"])
+def test_analysis_candles_cache_through_the_current_candle_close(monkeypatch, interval):
+    unix_time = [130.0]
+    monotonic_time = [0.0]
+    monkeypatch.setattr("app.public_market_data.time.time", lambda: unix_time[0])
+    seconds = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}[interval]
+    next_close = (unix_time[0] // seconds + 1) * seconds
+
+    async def run():
+        service = PublicMarketData(lambda: monotonic_time[0])
+        calls = []
+
+        async def fetch(path, params):
+            calls.append(params.copy())
+            return httpx.Response(
+                200,
+                json=[[index] for index in range(260)],
+                request=httpx.Request("GET", "https://offline.invalid"),
+            )
+
+        params = {"symbol": "LINKUSDT", "interval": interval, "limit": 260}
+        await service.get("/fapi/v1/klines", params, fetch, source="analysis")
+        assert calls[0]["limit"] == 260
+
+        unix_time[0] = next_close - 1
+        monotonic_time[0] = next_close - 1 - 130
+        await service.get("/fapi/v1/klines", params, fetch, source="analysis")
+        assert len(calls) == 1
+
+        unix_time[0] = next_close
+        monotonic_time[0] += 1
+        await service.get("/fapi/v1/klines", params, fetch, source="analysis")
+        assert len(calls) == 2
+
+    asyncio.run(run())
+
+
+def test_260_candle_requests_share_the_same_analysis_and_original_cache():
+    async def run():
+        service = PublicMarketData(lambda: 100.0)
+        calls = []
+
+        async def fetch(path, params):
+            calls.append(params.copy())
+            return httpx.Response(
+                200,
+                json=[[index] for index in range(260)],
+                request=httpx.Request("GET", "https://offline.invalid"),
+            )
+
+        params = {"symbol": "LINKUSDT", "interval": "15m", "limit": 260}
+        analysis = await service.get("/fapi/v1/klines", params, fetch, source="analysis")
+        live = await service.get("/fapi/v1/klines", params, fetch, source="original_live")
+        assert len(calls) == 1
+        assert len(analysis.json()) == len(live.json()) == 260
 
     asyncio.run(run())
 
@@ -260,6 +321,43 @@ def test_original_requests_take_priority_over_queued_scanner_symbols():
         release.set()
         await asyncio.gather(*tasks)
         assert started == ["OTHER1USDT", "OTHER2USDT", "BTCUSDT", "OTHER3USDT"]
+
+    asyncio.run(run())
+
+
+def test_original_live_source_has_priority_for_symbols_outside_the_fixed_eight():
+    async def run():
+        service = PublicMarketData()
+        release = asyncio.Event()
+        started = []
+
+        async def fetch(path, params):
+            started.append(params["symbol"])
+            await release.wait()
+            return httpx.Response(200, json=[], request=httpx.Request("GET", "https://offline.invalid"))
+
+        async def request(symbol, source):
+            return await service.get(
+                "/fapi/v1/klines",
+                {"symbol": symbol, "interval": "15m", "limit": 260},
+                fetch,
+                source=source,
+            )
+
+        tasks = [
+            asyncio.create_task(request("OTHER1USDT", "analysis")),
+            asyncio.create_task(request("OTHER2USDT", "analysis")),
+            asyncio.create_task(request("OTHER3USDT", "analysis")),
+        ]
+        while len(started) < 2 or len(service.waiters) < 1:
+            await asyncio.sleep(0)
+        original = asyncio.create_task(request("LINKUSDT", "original_live"))
+        while len(service.waiters) < 2:
+            await asyncio.sleep(0)
+
+        release.set()
+        await asyncio.gather(*tasks, original)
+        assert started == ["OTHER1USDT", "OTHER2USDT", "LINKUSDT", "OTHER3USDT"]
 
     asyncio.run(run())
 

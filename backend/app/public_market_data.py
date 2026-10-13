@@ -148,7 +148,7 @@ class PublicMarketData:
         limit = None
         if path == "/fapi/v1/klines":
             limit = int(values.get("limit", 500))
-            cache_floor = 260 if source in {"original_live", "original_warmer"} else 500
+            cache_floor = 260 if source in {"analysis", "original_live", "original_warmer"} else 500
             values["limit"] = max(cache_floor, limit)
             values["symbol"] = str(values.get("symbol", "")).upper()
         key = (path, tuple(sorted(values.items())))
@@ -181,7 +181,8 @@ class PublicMarketData:
 
     async def _fetch(self, key, path, values, fetch, source: str) -> httpx.Response:
         try:
-            async with self.slot(values.get("symbol") in self.original_symbols):
+            priority = source in {"original_live", "original_warmer"} or values.get("symbol") in self.original_symbols
+            async with self.slot(priority):
                 blocked = self.blocked(path)
                 if blocked is not None:
                     return blocked
@@ -198,21 +199,19 @@ class PublicMarketData:
                 source_key = f"{source}:GET:{path}:{frame}"
                 self.source_counts[source_key] += 1
                 self.source_weights[source_key] += self.estimated_request_weight(path, values)
+                request_started_at = time.time()
                 response = await fetch(path, values)
                 self.observe(path, response, source=source)
                 if response.is_success:
                     ttl = 600 if path.endswith("exchangeInfo") else 60 if path.endswith("klines") else 15 if path.endswith("24hr") else 0 if path.endswith("time") else 1
                     if path.endswith("klines") and "endTime" not in values and "startTime" not in values:
-                        seconds = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}.get(values.get("interval"))
+                        seconds = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}.get(values.get("interval"))
                         if seconds:
-                            until_close = seconds - time.time() % seconds
-                            ttl = (
-                                max(1, until_close)
-                                if source in {"original_live", "original_warmer"}
-                                else max(1, min(ttl, until_close))
-                            )
-                    self.cache[key] = (self.clock() + ttl, response)
-                    self.cache.move_to_end(key)
+                            next_close = (math.floor(request_started_at / seconds) + 1) * seconds
+                            ttl = max(0.0, next_close - time.time())
+                    if ttl > 0:
+                        self.cache[key] = (self.clock() + ttl, response)
+                        self.cache.move_to_end(key)
                 elif response.status_code not in {418, 429}:
                     self.cache[key] = (self.clock() + 15, response)
                 while len(self.cache) > 2048:

@@ -134,7 +134,7 @@ ALLOWED_INTERVALS = {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}
 INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
 SCAN_CACHE: dict[tuple[int, str], tuple[float, list]] = {}
 ANALYSIS_UNIVERSE_CACHE: dict[str, tuple[float, list[dict]]] = {}
-CANDLE_CACHE: dict[tuple[str, str, int], tuple[float, list[dict]]] = {}
+CANDLE_CACHE: dict[tuple[str, str, int], tuple[int, list[dict]]] = {}
 CANDLE_INFLIGHT: dict[tuple[str, str, int], asyncio.Lock] = {}
 CONSENSUS_CACHE: dict[str, tuple[float, dict]] = {}
 GUARD_CACHE: dict[str, tuple[float, dict]] = {}
@@ -1763,19 +1763,23 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
         raise HTTPException(400, "Desteklenmeyen zaman dilimi")
     safe_symbol = "".join(char for char in symbol.upper() if char.isalnum())
     key = (safe_symbol, interval, limit)
+    interval_seconds = INTERVAL_SECONDS[interval]
+    candle_bucket = int(time.time() // interval_seconds)
     cached = CANDLE_CACHE.get(key)
-    if cached and time.monotonic() - cached[0] < 5:
+    if cached and cached[0] == candle_bucket:
         return cached[1]
     lock = CANDLE_INFLIGHT.setdefault(key, asyncio.Lock())
     async with lock:
+        candle_bucket = int(time.time() // interval_seconds)
         cached = CANDLE_CACHE.get(key)
-        if cached and time.monotonic() - cached[0] < 5:
+        if cached and cached[0] == candle_bucket:
             return cached[1]
         try:
             response = await market_data_request(
                 app,
                 "/fapi/v1/klines",
                 params={"symbol": safe_symbol, "interval": interval, "limit": limit},
+                source="analysis",
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
@@ -1793,7 +1797,8 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
             }
             for row in rows
         ]
-        CANDLE_CACHE[key] = (time.monotonic(), result)
+        if int(time.time() // interval_seconds) == candle_bucket:
+            CANDLE_CACHE[key] = (candle_bucket, result)
         return result
 
 

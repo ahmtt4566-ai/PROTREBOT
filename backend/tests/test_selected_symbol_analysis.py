@@ -25,7 +25,9 @@ def public_analysis_routes(fetch):
     namespace = {
         "asyncio": asyncio, "time": time, "httpx": httpx, "HTTPException": HTTPException,
         "Query": Query, "analyze": analyze, "app": SimpleNamespace(),
-        "ALLOWED_INTERVALS": {"1m", "5m", "15m", "1h", "4h"},
+        "ALLOWED_INTERVALS": {"1m", "5m", "15m", "30m", "1h", "4h", "1d"},
+        "INTERVAL_SECONDS": {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+                             "1h": 3600, "4h": 14400, "1d": 86400},
         "CANDLE_CACHE": {}, "CANDLE_INFLIGHT": {}, "market_data_request": fetch,
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "<public-analysis-routes>", "exec"), namespace)
@@ -51,8 +53,8 @@ def candle_rows(price, count):
 def test_each_selected_symbol_uses_its_own_candles_and_real_analysis(symbol, price):
     calls = []
 
-    async def fetch(_app, path, params):
-        calls.append((path, params.copy()))
+    async def fetch(_app, path, params, *, source):
+        calls.append((path, params.copy(), source))
         assert path == "/fapi/v1/klines"
         assert params["symbol"] == symbol
         return httpx.Response(
@@ -80,12 +82,42 @@ def test_each_selected_symbol_uses_its_own_candles_and_real_analysis(symbol, pri
 
     asyncio.run(run())
     assert len(calls) == 6
-    assert all(params["symbol"] == symbol for _, params in calls)
-    assert {params["interval"] for _, params in calls} == {"1m", "5m", "15m", "1h", "4h"}
+    assert all(params["symbol"] == symbol for _, params, _ in calls)
+    assert {params["interval"] for _, params, _ in calls} == {"1m", "5m", "15m", "1h", "4h"}
+    assert all(source == "analysis" for _, _, source in calls)
+    assert all(params["limit"] == 500 for _, params, _ in calls[1:])
+
+
+def test_candle_route_cache_refreshes_at_interval_close(monkeypatch):
+    unix_time = [130.0]
+    monkeypatch.setattr(time, "time", lambda: unix_time[0])
+    calls = []
+
+    async def fetch(_app, path, params, *, source):
+        calls.append((params.copy(), source))
+        return httpx.Response(
+            200, json=candle_rows(1, params["limit"]),
+            request=httpx.Request("GET", f"https://offline.invalid{path}"),
+        )
+
+    routes = public_analysis_routes(fetch)
+
+    async def run():
+        await routes["fetch_candles"]("LINKUSDT", "5m", 260)
+        unix_time[0] = 299.0
+        await routes["fetch_candles"]("LINKUSDT", "5m", 260)
+        assert len(calls) == 1
+
+        unix_time[0] = 300.0
+        await routes["fetch_candles"]("LINKUSDT", "5m", 260)
+        assert len(calls) == 2
+
+    asyncio.run(run())
+    assert calls[0][1] == "analysis"
 
 
 def test_new_contract_without_enough_history_remains_unavailable_not_fabricated():
-    async def fetch(_app, path, params):
+    async def fetch(_app, path, params, *, source):
         return httpx.Response(
             200, json=candle_rows(0.01, 219),
             request=httpx.Request("GET", f"https://offline.invalid{path}"),
