@@ -847,8 +847,12 @@ def test_original_order_uses_fixed_builder_and_preserves_legacy_policy(state, mo
     signal = value.legacy["analysis"]
     monkeypatch.setattr(live.time, "time", lambda: value.signal.decision_time)
     client = EntryClient()
-    snapshot = {"wallet_balance": 300, "available_balance": 300, "positions": [], "open_orders": [],
-                "unrealized_pnl": 0, "hedge_mode": False, "multi_assets_mode": False}
+    snapshot = {
+        "wallet_balance": 300, "available_balance": 300,
+        "positions": [], "open_orders": [], "open_algo_orders": [],
+        "open_algo_orders_available": True, "algo_orders_quality": "VALID_EMPTY",
+        "unrealized_pnl": 0, "hedge_mode": False, "multi_assets_mode": False,
+    }
     monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=client))
     monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value=snapshot))
     monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
@@ -860,8 +864,10 @@ def test_original_order_uses_fixed_builder_and_preserves_legacy_policy(state, mo
     monkeypatch.setattr(live, "evaluate_entry_gates", Mock(return_value={"passed": True, "reason": "pass", "gates": []}))
     legacy_builder = AsyncMock(side_effect=AssertionError("Original must not use legacy dynamic stops"))
     monkeypatch.setattr(live, "build_live_spec", legacy_builder)
-    monkeypatch.setattr(live, "set_live_isolated_margin", AsyncMock(return_value="ISOLATED"))
-    monkeypatch.setattr(live, "apply_live_verified_leverage", AsyncMock(return_value={"margin_type": "ISOLATED", "applied_leverage": 3}))
+    isolated_update = AsyncMock(return_value="ISOLATED")
+    leverage_update = AsyncMock(return_value={"margin_type": "ISOLATED", "applied_leverage": 3})
+    monkeypatch.setattr(live, "set_live_isolated_margin", isolated_update)
+    monkeypatch.setattr(live, "apply_live_verified_leverage", leverage_update)
     monkeypatch.setattr(live, "live_liquidation_risk", AsyncMock(return_value={"passed": True}))
     monkeypatch.setattr(live, "fresh_auto_submission_credentials", AsyncMock(return_value=("safe-key-123456", "safe-secret-123456")))
     monkeypatch.setattr(live, "directional_entry_gates", Mock(return_value=[]))
@@ -893,6 +899,10 @@ def test_original_order_uses_fixed_builder_and_preserves_legacy_policy(state, mo
     legacy_builder.assert_not_awaited()
     assert submit_mock.await_count == 1
     assert submit_mock.await_args.args[1]["estimated_stop_loss_usdt"] <= 300 * 0.005
+    isolated_update.assert_awaited_once_with(client, value.signal.symbol)
+    leverage_update.assert_awaited_once_with(
+        client, value.signal.symbol, 3, expected_margin_type="ISOLATED",
+    )
     assert live.persist_state_awaited.await_count >= 2
 
 

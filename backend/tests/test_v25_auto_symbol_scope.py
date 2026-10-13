@@ -48,7 +48,9 @@ def spec_for(symbol):
 
 SNAPSHOT = {
     "available_balance": 100, "wallet_balance": 100,
-    "positions": [], "open_orders": [], "hedge_mode": False,
+    "positions": [], "open_orders": [], "open_algo_orders": [],
+    "open_algo_orders_available": True, "algo_orders_quality": "VALID_EMPTY",
+    "multi_assets_mode": False, "hedge_mode": False,
     "multi_assets_mode": False,
 }
 CREDENTIALS = ("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")
@@ -76,18 +78,22 @@ class AutoSymbolScopeTests(unittest.TestCase):
         persistence.start()
         self.addCleanup(persistence.stop)
 
-    def execute(self, application, symbol, *, source="V25_AUTO", override=None, submit=None, credential_refresh=None, client_factory=None):
+    def execute(
+        self, application, symbol, *, source="V25_AUTO", override=None, submit=None,
+        credential_refresh=None, client_factory=None, snapshot=None,
+        margin_update=None, leverage_update=None,
+    ):
         submit = submit or AsyncMock(return_value={"orderId": 42, "status": "FILLED"})
         with patch.multiple(
             execution,
             readiness_for=lambda *args, **kwargs: {"ready": True},
             client_for_with_credentials=client_factory or (lambda *args, **kwargs: SimpleNamespace()),
-            account_snapshot=AsyncMock(return_value=SNAPSHOT),
+            account_snapshot=AsyncMock(return_value=SNAPSHOT if snapshot is None else snapshot),
             spread_bps=AsyncMock(return_value=1),
             evaluate_entry_gates=lambda **kwargs: {"passed": True, "gates": []},
             build_live_spec=AsyncMock(return_value=spec_for(symbol)),
-            set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
-            apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
+            set_live_isolated_margin=margin_update or AsyncMock(return_value="ISOLATED"),
+            apply_live_verified_leverage=leverage_update or AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
             live_liquidation_risk=AsyncMock(return_value={"verified": True, "model": "OFFLINE_FIXTURE"}),
             fresh_auto_submission_credentials=credential_refresh or AsyncMock(return_value=CREDENTIALS),
             submit_entry=submit,
@@ -103,6 +109,8 @@ class AutoSymbolScopeTests(unittest.TestCase):
         submit = AsyncMock(return_value={"orderId": 42, "status": "FILLED"})
         credential_refresh = AsyncMock(return_value=("", ""))
         client_factory = Mock(return_value=SimpleNamespace())
+        margin_update = AsyncMock(return_value="ISOLATED")
+        leverage_update = AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"})
 
         with self.assertRaises(execution.HTTPException) as caught:
             self.execute(
@@ -111,15 +119,70 @@ class AutoSymbolScopeTests(unittest.TestCase):
                 submit=submit,
                 credential_refresh=credential_refresh,
                 client_factory=client_factory,
+                margin_update=margin_update,
+                leverage_update=leverage_update,
             )
 
         self.assertEqual(caught.exception.status_code, 423)
-        credential_refresh.assert_awaited_once_with(application, state)
+        credential_refresh.assert_awaited_once_with(application, state, check_results=unittest.mock.ANY)
         self.assertEqual(client_factory.call_count, 1)
         submit.assert_not_awaited()
+        margin_update.assert_not_awaited()
+        leverage_update.assert_not_awaited()
         self.assertEqual(state["plans"], {})
         self.assertEqual(state["intents"], {})
-        self.assertTrue(any(event["kind"] == "LIVE_INTENT_CANCELLED_PRE_SUBMISSION" for event in state["events"]))
+        self.assertEqual(state["last_order_error"]["failed_check"], "fresh_live_credentials")
+
+    def test_existing_symbol_position_or_order_blocks_margin_and_leverage_changes(self):
+        for collection, row in (
+            ("positions", {"symbol": "BTCUSDT", "quantity": "0.01"}),
+            ("open_orders", {"symbol": "BTCUSDT", "status": "NEW"}),
+            ("open_algo_orders", {"symbol": "BTCUSDT", "status": "NEW"}),
+        ):
+            with self.subTest(collection=collection):
+                application, state = application_for(["BTCUSDT"])
+                snapshot = {**SNAPSHOT, collection: [row]}
+                margin_update = AsyncMock(return_value="ISOLATED")
+                leverage_update = AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"})
+                submit = AsyncMock()
+
+                with self.assertRaises(execution.HTTPException) as caught:
+                    self.execute(
+                        application,
+                        "BTCUSDT",
+                        snapshot=snapshot,
+                        margin_update=margin_update,
+                        leverage_update=leverage_update,
+                        submit=submit,
+                    )
+
+                self.assertEqual(caught.exception.status_code, 409)
+                self.assertEqual(getattr(caught.exception, "check_key", None), "symbol_occupancy")
+                margin_update.assert_not_awaited()
+                leverage_update.assert_not_awaited()
+                submit.assert_not_awaited()
+                self.assertEqual(state["last_order_error"]["failed_check"], "symbol_occupancy")
+                self.assertFalse(state["last_order_error"]["checks"][-1]["passed"])
+
+    def test_unverified_algo_order_snapshot_fails_closed_before_symbol_configuration(self):
+        application, state = application_for(["BTCUSDT"])
+        snapshot = {**SNAPSHOT, "open_algo_orders_available": False, "algo_orders_quality": "UNKNOWN"}
+        margin_update = AsyncMock(return_value="ISOLATED")
+        leverage_update = AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"})
+
+        with self.assertRaises(execution.HTTPException) as caught:
+            self.execute(
+                application,
+                "BTCUSDT",
+                snapshot=snapshot,
+                margin_update=margin_update,
+                leverage_update=leverage_update,
+            )
+
+        self.assertEqual(getattr(caught.exception, "check_key", None), "symbol_occupancy")
+        margin_update.assert_not_awaited()
+        leverage_update.assert_not_awaited()
+        self.assertEqual(state["last_order_error"]["failed_check"], "symbol_occupancy")
 
     def cycle(self, application, candidates, *, scan_effect=None, execution_effect=None, decision=None):
         scan = AsyncMock(side_effect=scan_effect) if scan_effect else AsyncMock(return_value=candidates)
@@ -266,7 +329,7 @@ class AutoSymbolScopeTests(unittest.TestCase):
                 application, state = application_for(["BTCUSDT"])
                 submit = AsyncMock()
 
-                async def refresh(*args):
+                async def refresh(*args, **kwargs):
                     state["policy"]["allowed_symbols"] = updated_scope
                     return CREDENTIALS
 
@@ -304,6 +367,27 @@ class AutoSymbolScopeTests(unittest.TestCase):
         result = asyncio.run(execution.submit_entry(client, spec_for("ETHUSDT"), "offline-manual", test_only=False))
         self.assertEqual(result["orderId"], 42)
         self.assertEqual([call[0] for call in client.calls], ["GET", "POST"])
+
+    def test_failed_final_gate_does_not_mark_submission_started_or_post(self):
+        _application, state = application_for(["BTCUSDT"])
+        client = ScopeChangingClient(state, ["BTCUSDT"])
+        submission_started = Mock()
+
+        def reject_before_post():
+            raise execution.LiveExchangeError("risk gate rejected", http_status=409, check_key="risk_budget")
+
+        with self.assertRaises(execution.LiveExchangeError):
+            asyncio.run(execution.submit_entry(
+                client,
+                spec_for("BTCUSDT"),
+                "offline-entry",
+                test_only=False,
+                before_submit=reject_before_post,
+                on_submission_started=submission_started,
+            ))
+
+        submission_started.assert_not_called()
+        self.assertEqual([call[0] for call in client.calls], ["GET"])
 
     def test_saved_and_restored_empty_live_policy_is_not_replaced_by_defaults(self):
         application, state = application_for(["BTCUSDT"])

@@ -348,13 +348,27 @@ def execution_policy(state: dict[str, Any], snapshot: dict[str, Any]) -> dict[st
 
 
 async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
-                     snapshot: dict[str, Any]) -> dict[str, Any]:
+                     snapshot: dict[str, Any], *,
+                     check_results: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     from . import v25_execution as live
     symbols = selected_symbols(settings(state))
-    original.validate_live_result(result, symbols)
+    try:
+        original.validate_live_result(result, symbols)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        live.record_live_entry_check(check_results, "strategy_signal", False, detail, symbol=result.signal.symbol)
+        raise live.LiveExchangeError(detail, http_status=exc.status_code, check_key="strategy_signal") from exc
     if not result.signal.strategy_eligible:
-        raise HTTPException(423, "Original V2 sinyali girişe uygun değil.")
-    spec = await original.build_live_spec(client, result, symbols)
+        detail = "Original V2 sinyali girişe uygun değil."
+        live.record_live_entry_check(check_results, "strategy_signal", False, detail, symbol=result.signal.symbol)
+        raise live.LiveExchangeError(detail, http_status=423, check_key="strategy_signal")
+    live.record_live_entry_check(check_results, "strategy_signal", True, "Original V2 sinyali güncel ve girişe uygun.", symbol=result.signal.symbol)
+    try:
+        spec = await original.build_live_spec(client, result, symbols)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        live.record_live_entry_check(check_results, "strategy_sizing", False, detail, symbol=result.signal.symbol)
+        raise live.LiveExchangeError(detail, http_status=exc.status_code, check_key="strategy_sizing") from exc
     policy = execution_policy(state, snapshot)
     entry, stop = Decimal(spec["entry_price"]), Decimal(spec["stop_loss"])
     budget = Decimal(str(policy["max_loss_per_trade"]))
@@ -365,22 +379,82 @@ async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
                                   Decimal(str(policy["max_margin_per_trade"])) * 3 / entry), rules["step"] * 5)
     partial = live.floor_step(quantity * Decimal("0.60"), rules["step"])
     if quantity < rules["min_qty"] or partial < rules["min_qty"] or partial * entry < rules["min_notional"]:
+        live.record_live_entry_check(
+            check_results, "minimum_quantity", False,
+            "Miktar veya TP1 %60 Binance minimum miktar/notional şartını karşılamıyor.",
+            symbol=spec["symbol"],
+        )
         raise HTTPException(423, "Original V2 TP1 %60 miktarı borsa minimumunu karşılamıyor.")
+    live.record_live_entry_check(
+        check_results, "minimum_quantity", True,
+        "Giriş ve TP1 %60 miktarı Binance minimum miktar/notional şartını karşılıyor.",
+        symbol=spec["symbol"],
+    )
     margin = float(quantity * entry / 3)
     if margin < 5:
+        live.record_live_entry_check(
+            check_results, "available_collateral", False,
+            "Original V2 risk bütçesi minimum 5 USDT marjini karşılamıyor.",
+            symbol=spec["symbol"],
+        )
         raise HTTPException(423, "Original V2 risk bütçesi minimum marjini karşılamıyor.")
+    live.record_live_entry_check(
+        check_results, "available_collateral", True,
+        "Hesaplanan Original V2 marjini minimum 5 USDT şartını karşılıyor.",
+        symbol=spec["symbol"],
+    )
     notional = float(quantity * entry)
     net_reward = float(quantity * abs(Decimal(spec["targets"][0]) - entry) - quantity * cost_per_unit)
-    if net_reward < policy["minimum_net_reward_usdt"] or quantity > rules["max_qty"]:
+    if net_reward < policy["minimum_net_reward_usdt"]:
+        live.record_live_entry_check(
+            check_results, "risk_reward", False,
+            "TP1, ücret ve kayma sonrası minimum net getiri eşiğini karşılamıyor.",
+            symbol=spec["symbol"],
+        )
         raise HTTPException(423, "Original V2 maliyet veya borsa miktar kapısı geçilmedi.")
+    live.record_live_entry_check(
+        check_results, "risk_reward", True,
+        "TP1 maliyetlerden sonra minimum net getiri eşiğini karşılıyor.",
+        symbol=spec["symbol"],
+    )
+    if quantity > rules["max_qty"]:
+        live.record_live_entry_check(
+            check_results, "maximum_quantity", False,
+            "Hesaplanan miktar Binance sembol üst sınırını aşıyor.",
+            symbol=spec["symbol"],
+        )
+        raise HTTPException(423, "Original V2 maliyet veya borsa miktar kapısı geçilmedi.")
+    live.record_live_entry_check(
+        check_results, "maximum_quantity", True,
+        "Hesaplanan miktar Binance sembol üst sınırını aşmıyor.",
+        symbol=spec["symbol"],
+    )
     spec.update(quantity=live.decimal_text(quantity), margin_usdt=margin, notional_usdt=float(quantity * entry),
                 step=rules["step"], min_qty=rules["min_qty"], min_notional=rules["min_notional"],
                 estimated_stop_loss_usdt=float(quantity * (abs(entry - stop) + cost_per_unit)),
                 original_risk_budget=float(budget), initial_stop_loss=spec["stop_loss"],
                 original_cost_bps=policy["fee_bps_per_side"] * 2 + policy["slippage_bps_per_side"] * 2,
                 initial_quantity=live.decimal_text(quantity))
+    loss_budget_passed = float(spec["estimated_stop_loss_usdt"]) <= float(budget) + 1e-8
+    live.record_live_entry_check(
+        check_results, "risk_budget", loss_budget_passed,
+        "Tahmini Original V2 stop kaybı işlem başı risk bütçesi içinde." if loss_budget_passed else "Tahmini Original V2 stop kaybı işlem başı risk bütçesini aşıyor.",
+        symbol=spec["symbol"],
+    )
+    if not loss_budget_passed:
+        raise live.LiveExchangeError("Original V2 stop kaybı işlem başı risk bütçesini aşıyor.", http_status=423, check_key="risk_budget")
     if notional > policy["max_margin_per_trade"] * 3 + 1e-8:
+        live.record_live_entry_check(
+            check_results, "risk_budget", False,
+            "Original V2 pozisyon büyüklüğü işlem başı marjin sınırını aşıyor.",
+            symbol=spec["symbol"],
+        )
         raise HTTPException(423, "Original V2 marjin limiti aşıldı.")
+    live.record_live_entry_check(
+        check_results, "risk_budget", True,
+        "Original V2 pozisyon büyüklüğü işlem başı marjin sınırında.",
+        symbol=spec["symbol"],
+    )
     return spec
 
 
@@ -610,7 +684,14 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
         client = live.client_for_with_credentials(application, credentials)
         snapshot = await live.account_snapshot(client, cached=True, source="original_strategy")
         await check_entry(application, client, state, snapshot)
-        occupied = {item["symbol"] for item in snapshot["positions"] + snapshot["open_orders"]}
+        occupied = {
+            item["symbol"]
+            for item in (
+                snapshot.get("positions", [])
+                + snapshot.get("open_orders", [])
+                + snapshot.get("open_algo_orders", [])
+            )
+        }
         scanner.update(stage="UNIVERSE_REFRESH")
         symbols = await resolve_live_universe(application, client, config)
         if not symbols:
@@ -637,8 +718,20 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
                 leverage=3, stop_loss=signal["stop_loss"], tp1=signal["tp1"], tp2=signal["tp2"], tp3=signal["tp3"],
                 intent_id=f"original-live-{config['owner_id']}-{at}-{candidate['symbol']}",
             )
-            await live.execute_live_order(application, body, source=SOURCE, credentials=credentials,
-                                          strategy_result=result)
+            try:
+                await live.execute_live_order(
+                    application,
+                    body,
+                    source=SOURCE,
+                    credentials=credentials,
+                    strategy_result=result,
+                )
+            except HTTPException as exc:
+                if getattr(exc, "check_key", None) != "symbol_occupancy":
+                    raise
+                config["last_skip_reason"] = "symbol_occupied"
+                scanner.update(stage="SYMBOL_OCCUPIED", last_skip_reason="symbol_occupied")
+                continue
         live.persist_state(state)
     except live.LiveRateLimitError as exc:
         scanner.update(stage="RATE_LIMIT_WAIT")

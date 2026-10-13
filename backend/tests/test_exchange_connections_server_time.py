@@ -456,14 +456,17 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
             exchange_vault={"ready": True, "pool_id": id(pool)},
             v22_commercial={"state": {"users": []}},
         ))
+        diagnostic_codes = []
         with patch.object(exchange_connections, "decrypt_credentials", return_value=(api_key, "secret-key-123456")):
             credentials = asyncio.run(exchange_connections.session_credentials_for_identity(
                 application, "expired-session", "owner-a", "LIVE", fingerprint,
                 auth_version=1,
                 auth_expires_at_epoch=time.time() + 3600,
+                diagnostic_codes=diagnostic_codes,
             ))
 
         self.assertEqual(credentials, (api_key, "secret-key-123456"))
+        self.assertEqual(diagnostic_codes, ["vault_credentials_resolved"])
 
 
 if __name__ == "__main__":

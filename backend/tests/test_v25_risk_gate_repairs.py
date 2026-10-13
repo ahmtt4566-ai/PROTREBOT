@@ -21,7 +21,9 @@ from test_v25_partial_fills import PartialFillClient, make_plan  # noqa: E402
 def snapshot(**overrides):
     return {
         "wallet_balance": 100, "available_balance": 100,
-        "positions": [], "open_orders": [], "hedge_mode": False,
+        "positions": [], "open_orders": [], "open_algo_orders": [],
+        "open_algo_orders_available": True, "algo_orders_quality": "VALID_EMPTY",
+        "hedge_mode": False,
         "multi_assets_mode": False, **overrides,
     }
 

@@ -49,6 +49,7 @@ type LiveStatus = {
   execution_state?: string
   reconciliation_required?: boolean
   reconciliation_diagnostic?: {exception_type?: string; exception_message?: string; reconciliation_stage?: string; source?: string; function?: string; line?: number; request_method?: string | null; request_path?: string | null; timestamp?: string | null}
+  last_order_error?: {message?: string; symbol?: string | null; created_at?: string; failed_check?: string | null; checks?: Array<{check?: string; passed?: boolean; detail?: string}>} | null
 }
 
 type ConnectionStatus = {
@@ -89,6 +90,32 @@ const money = (value: unknown) => {
 }
 const date = (value: unknown) => value ? new Date(String(value)).toLocaleString('tr-TR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'
 const activityTime = (value: unknown) => value ? new Date(String(value)).toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit', second: '2-digit'}) : '--:--:--'
+const entryCheckLabel = (key: string) => ({
+  owner_entry_authorization: 'OWNER canlı giriş yetkisi',
+  owner_session_authority: 'OWNER oturum yetkisi',
+  live_key_vault: 'OWNER Binance key kasası eşleşmesi',
+  api_key_validation: 'Binance API anahtarı doğrulaması',
+  signed_account_access: 'Binance hesap erişimi',
+  auto_session_authorization: 'otomasyon oturumu yetkisi',
+  auto_session_active: 'otomasyon oturumunun aktif olması',
+  live_consent: '24 saatlik LIVE risk onayı',
+  execution_lock: 'gerçek işlem/acil durdurma kilidi',
+  recovery_readiness: 'LIVE recovery hazırlığı',
+  one_way_mode: 'One-way hesap modu',
+  multi_assets_mode: 'Multi-Assets modu',
+  available_collateral: 'kullanılabilir teminat',
+  minimum_quantity: 'Binance minimum miktar/notional',
+  maximum_quantity: 'Binance maksimum miktar',
+  risk_budget: 'işlem başı risk bütçesi',
+  risk_reward: 'net getiri/risk eşiği',
+  symbol_occupancy: 'sembolde açık pozisyon ve emir kontrolü',
+  protection_readiness: 'Stop/TP koruma hazırlığı',
+  isolated_margin: 'ISOLATED marjin ayarı',
+  leverage: 'kaldıraç doğrulaması',
+  liquidation_risk: 'likidasyon riski',
+  fresh_live_credentials: 'gönderim öncesi taze LIVE yetkisi',
+  entry_submission: 'emir gönderimi',
+} as Record<string, string>)[key] || key.replaceAll('_', ' ')
 
 export function liveBlockerMessage(status: LiveStatus | null, liveArmed: boolean): string {
   if (status === null) return 'LIVE status is not available.'
@@ -845,6 +872,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       <div className="masterTradeLiveAssistantCopy"><Power aria-hidden="true"/><div><span className="masterTradeLiveKicker">NEXT BEST ACTION</span><strong>{status?.live_auto_trade ? 'Auto Trade is actively monitoring approved markets.' : liveState === 'BLOCKED' ? 'LIVE is blocked until the backend recovery state is clear.' : !configured || !connected ? 'Connect and verify your LIVE API to continue.' : !readinessReady ? 'Complete the required safety checks before enabling Auto Trade.' : liveArmed ? 'LIVE is armed. Start supervised Auto Trade to continue.' : 'Everything is ready. Arm LIVE Auto Trade to continue.'}</strong><small>{status?.live_auto_trade ? 'STOP remains available at any time.' : blocker}</small></div></div>
       {timeframeWarning}
       {status?.reconciliation_diagnostic && <div className="masterTradeLiveDiagnostic" role="alert"><span className="masterTradeLiveKicker">RECONCILIATION ERROR</span><small>Stage: {text(status.reconciliation_diagnostic.reconciliation_stage)}</small>{status.reconciliation_diagnostic.request_method && status.reconciliation_diagnostic.request_path && <small>Request: {text(status.reconciliation_diagnostic.request_method)} {text(status.reconciliation_diagnostic.request_path)}</small>}<small>Error: {text(status.reconciliation_diagnostic.exception_message)}</small><small>Source: {text(status.reconciliation_diagnostic.source)}:{text(status.reconciliation_diagnostic.line)}</small></div>}
+      {status?.last_order_error?.failed_check && <div className="masterTradeLiveDiagnostic" role="alert"><span className="masterTradeLiveKicker">LIVE GİRİŞ DURDURULDU</span><strong>{text(status.last_order_error.symbol)} için emir gönderilmedi. Şu kontrol geçmedi: {entryCheckLabel(status.last_order_error.failed_check)}.</strong><small>{text(status.last_order_error.message)}</small>{status.last_order_error.checks?.length ? <ul>{status.last_order_error.checks.map((check, index) => <li key={`${check.check}-${index}`}>{check.passed ? 'Geçti' : 'Geçmedi'} — {entryCheckLabel(String(check.check || 'live_entry'))}: {text(check.detail)}</li>)}</ul> : null}</div>}
       <div className="masterTradeLiveAssistantActions"><button type="button" className="masterTradeLivePrimary" onClick={status?.live_auto_trade ? stopAutoTrade : autoToggle} disabled={Boolean(busy) || (!status?.live_auto_trade && !autoReady)}>{!status?.live_auto_trade && !autoReady ? <LockKeyhole aria-hidden="true"/> : <Power aria-hidden="true"/>}{status?.live_auto_trade ? ' STOP AUTO TRADE' : ' START LIVE AUTO TRADE'}</button><button type="button" className="masterTradeLiveTextButton" onClick={() => setAdvancedOpen(true)}>VIEW REQUIREMENTS</button><button type="button" className="liveEmergencyButton" onClick={emergencyStop} disabled={Boolean(busy)} title="Bot pozisyonlarını kapatır; yalnız giriş durdurma değildir."><ShieldAlert aria-hidden="true"/> EMERGENCY STOP</button>{emergency && <button type="button" className="masterTradeLiveTextButton" onClick={clearEmergency} disabled={Boolean(busy)}>RECOVERY SONRASI TEMİZLE</button>}</div>
     </div>
 

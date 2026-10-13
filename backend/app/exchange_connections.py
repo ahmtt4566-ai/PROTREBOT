@@ -456,16 +456,24 @@ async def session_credentials_for_identity(
     force_refresh: bool = False,
     auth_version: int | None = None,
     auth_expires_at_epoch: float | None = None,
+    diagnostic_codes: list[str] | None = None,
 ) -> tuple[str, str]:
     """Resolve an active encrypted account-scoped LIVE vault row."""
+    def report(code: str) -> None:
+        if diagnostic_codes is not None:
+            diagnostic_codes.append(code)
+
     normalized = normalize_mode(mode)
     if not user_id or not fingerprint:
+        report("invalid_identity")
         return "", ""
     if normalized == "LIVE" and not await authoritative_live_owner_active(application, user_id):
         clear_session_vault_for_user_cache(application, user_id)
+        report("owner_inactive")
         return "", ""
     scope = f"owner:{user_id}" if normalized == "LIVE" else session_value
     if not scope:
+        report("invalid_scope")
         return "", ""
     key = (scope, normalized)
     meta = _SESSION_META.get(key, {})
@@ -477,11 +485,13 @@ async def session_credentials_for_identity(
         and normalize_fingerprint(key_fingerprint(cached[0])) == normalize_fingerprint(fingerprint)
         and cached[1]
     ):
+        report("cache_match")
         return cached
 
     pool = getattr(application.state, "db_pool", None)
     if pool is None or not await ensure_exchange_vault(application):
         logger.warning("LIVE credential resolution failed: pool_unavailable")
+        report("vault_unavailable")
         return "", ""
     await ensure_schema(pool)
     if normalized == "LIVE":
@@ -524,17 +534,22 @@ async def session_credentials_for_identity(
             fingerprint,
             str(row.get("fingerprint") or "") if row else "",
         )
+        report("vault_row_missing" if not row else "vault_fingerprint_mismatch")
         return "", ""
     if not withdrawal_permissions_safe(normalized, _row_meta(row).get("account")):
         logger.warning("LIVE credential resolution failed: withdrawal_permissions_unverified")
+        report("vault_permissions_unverified")
         return "", ""
     try:
         credentials = decrypt_credentials(bytes(row["encrypted_payload"]), mode=normalized)
     except (KeyError, TypeError, ValueError, VaultError):
         logger.warning("LIVE credential resolution failed: decrypt_failed")
+        report("vault_decrypt_failed")
         return "", ""
     if key_fingerprint(credentials[0]) != fingerprint:
+        report("decrypted_fingerprint_mismatch")
         return "", ""
+    report("vault_credentials_resolved")
     return credentials
 
 

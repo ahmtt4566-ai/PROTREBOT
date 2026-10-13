@@ -714,6 +714,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         resolver.assert_awaited_once_with(
             application, "session-1", "WEB_OWNER", "LIVE", "fingerprint", force_refresh=False,
             auth_version=1, auth_expires_at_epoch=state["live_session_authorization"]["auth_expires_at_epoch"],
+            diagnostic_codes=unittest.mock.ANY,
         )
 
     def test_background_credentials_keep_protected_position_monitoring_after_consent_expires(self):
@@ -1705,10 +1706,16 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             "entry_price": "100.00", "stop_loss": "98.00", "targets": ["102.00", "104.00", "106.00"],
             "step": Decimal("0.001"), "min_qty": Decimal("0.001"), "estimated_stop_loss_usdt": 0.1,
         }
+        async def fail_after_submit_boundary(*_args, **kwargs):
+            kwargs["on_submission_started"]()
+            raise RuntimeError("synthetic submit failure")
+
         with patch.multiple(
             v25_execution,
             client_for=lambda application, request=None: object(),
-            account_snapshot=AsyncMock(return_value={"available_balance": 100, "positions": [], "open_orders": [], "hedge_mode": False, "multi_assets_mode": False}),
+            account_snapshot=AsyncMock(return_value=complete_reconciliation_snapshot(
+                available_balance=100,
+            )),
             spread_bps=AsyncMock(return_value=1.0),
             readiness=lambda application, state, request=None: {"ready": True},
             auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
@@ -1717,7 +1724,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
             live_liquidation_risk=AsyncMock(return_value={"verified": True, "model": "OFFLINE_FIXTURE"}),
-            submit_entry=AsyncMock(side_effect=RuntimeError("synthetic submit failure")),
+            submit_entry=AsyncMock(side_effect=fail_after_submit_boundary),
             persist_state=lambda state: None,
         ):
             with self.assertRaises(v25_execution.HTTPException) as raised:
@@ -2265,7 +2272,9 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         state["_app"] = application
         state["lock"] = asyncio.Lock()
         transport = FakeTransport()
-        snapshot = {"available_balance": 1000, "positions": [], "open_orders": [], "hedge_mode": False, "unrealized_pnl": 0, "multi_assets_mode": False}
+        snapshot = complete_reconciliation_snapshot(
+            available_balance=1000, unrealized_pnl=0,
+        )
         spec = {
             "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "close_side": "SELL", "order_type": "MARKET",
             "margin_usdt": 25.0, "leverage": 2, "notional_usdt": 50.0, "quantity": "0.500",
@@ -2880,6 +2889,30 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
         with self._resolve(application, ("", "")):
             result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
         self.assertEqual(result, ("", ""))
+
+    def test_owner_vault_fingerprint_failure_is_reported_without_credentials(self):
+        application, state, _ = self._context()
+        checks = []
+
+        async def mismatch(*_args, diagnostic_codes=None, **_kwargs):
+            diagnostic_codes.append("vault_fingerprint_mismatch")
+            return "", ""
+
+        with patch.multiple(
+            v25_execution,
+            background_authorization_active=AsyncMock(return_value=True),
+            session_credentials_for_identity=AsyncMock(side_effect=mismatch),
+        ):
+            credentials = asyncio.run(v25_execution.auto_session_credentials(
+                application, state, force_refresh=True, check_results=checks,
+            ))
+
+        vault_check = next(item for item in checks if item["check"] == "live_key_vault")
+        self.assertEqual(credentials, ("", ""))
+        self.assertFalse(vault_check["passed"])
+        self.assertIn("kimliği", vault_check["detail"])
+        self.assertNotIn(self.API_KEY, str(checks))
+        self.assertNotIn(self.SECRET_KEY, str(checks))
 
     def test_b_changed_fingerprint_blocks_submission(self):
         application, state, _ = self._context()
