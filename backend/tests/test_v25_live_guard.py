@@ -765,6 +765,74 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         self.assertEqual(diagnostic["timestamp"], "2026-09-23T12:00:00+00:00")
         self.assertIn("[REDACTED]", diagnostic["exception_message"])
         serialized = json.dumps(diagnostic)
+        for secret in ("abc123", "super-secret", "******"):
+            self.assertNotIn(secret, serialized)
+
+    def test_successful_reconcile_clears_old_credential_failure(self):
+        state = initial_state()
+        v25_execution.add_event(
+            state,
+            "RECONCILIATION_FAILURE_DIAGNOSTIC",
+            "Credential precondition failure.",
+            exception_type="HTTPException",
+            exception_message="412: Canlı API bağlantısı aktif değil.",
+            reconciliation_stage="automatic_cycle",
+        )
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        client = SimpleNamespace(time_offset_ms=0)
+
+        with patch.object(v25_execution, "client_for_with_credentials", return_value=client), \
+                patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=complete_reconciliation_snapshot())), \
+                patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "cleanup_orphan_protection_orders", new=AsyncMock(return_value=0)), \
+                patch.object(v25_execution, "persist_state"):
+            asyncio.run(v25_execution.reconcile(application, credentials=("offline-key", "offline-secret")))
+
+        self.assertTrue(state["connected"])
+        self.assertIsNone(v25_execution.latest_reconciliation_diagnostic(state))
+
+
+    def test_verified_account_reconciliation_clears_only_stale_credential_diagnostic(self):
+        state = initial_state()
+        v25_execution.add_event(
+            state,
+            "RECONCILIATION_FAILURE_DIAGNOSTIC",
+            "Credential precondition failure.",
+            exception_type="HTTPException",
+            exception_message="412: Canlı API bağlantısı aktif değil.",
+            reconciliation_stage="automatic_cycle",
+        )
+
+        self.assertTrue(v25_execution.clear_resolved_credential_diagnostic(state))
+        self.assertIsNone(v25_execution.latest_reconciliation_diagnostic(state))
+
+        v25_execution.add_event(
+            state,
+            "RECONCILIATION_FAILURE_DIAGNOSTIC",
+            "A new exchange failure.",
+            exception_type="LiveExchangeError",
+            exception_message="Binance timed out.",
+            reconciliation_stage="automatic_cycle",
+        )
+        self.assertEqual(
+            v25_execution.latest_reconciliation_diagnostic(state)["exception_message"],
+            "Binance timed out.",
+        )
+
+        other_state = initial_state()
+        v25_execution.add_event(
+            other_state,
+            "RECONCILIATION_FAILURE_DIAGNOSTIC",
+            "Unknown execution failure.",
+            exception_type="LiveExchangeError",
+            exception_message="api_key=abc123 Canlı API bağlantısı aktif değil.",
+            reconciliation_stage="account_reconciliation",
+        )
+        self.assertFalse(v25_execution.clear_resolved_credential_diagnostic(other_state))
+        self.assertIsNotNone(v25_execution.latest_reconciliation_diagnostic(other_state))
+        diagnostic = v25_execution.latest_reconciliation_diagnostic(other_state)
+        self.assertIn("[REDACTED]", diagnostic["exception_message"])
+        serialized = json.dumps(diagnostic)
         for secret in ("abc123", "super-secret", "Bearer should-not-appear"):
             self.assertNotIn(secret, serialized)
 

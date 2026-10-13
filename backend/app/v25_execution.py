@@ -1024,7 +1024,11 @@ def sanitized_exception_message(exc: BaseException | str) -> str:
 def latest_reconciliation_diagnostic(state: dict[str, Any]) -> dict[str, Any] | None:
     events = state.get("events") if isinstance(state.get("events"), list) else []
     for event in events:
-        if not isinstance(event, dict) or event.get("kind") not in {"RECONCILIATION_FAILURE_DIAGNOSTIC", "LIVE_ORDER_EXCEPTION_DIAGNOSTIC"}:
+        if not isinstance(event, dict):
+            continue
+        if event.get("kind") == "RECONCILIATION_DIAGNOSTIC_CLEARED":
+            return None
+        if event.get("kind") not in {"RECONCILIATION_FAILURE_DIAGNOSTIC", "LIVE_ORDER_EXCEPTION_DIAGNOSTIC"}:
             continue
         return {
             "exception_type": str(event.get("exception_type") or "")[:120],
@@ -1038,6 +1042,23 @@ def latest_reconciliation_diagnostic(state: dict[str, Any]) -> dict[str, Any] | 
             "timestamp": event.get("created_at"),
         }
     return None
+
+
+def clear_resolved_credential_diagnostic(state: dict[str, Any]) -> bool:
+    diagnostic = latest_reconciliation_diagnostic(state)
+    if not (
+        diagnostic
+        and diagnostic.get("reconciliation_stage") == "automatic_cycle"
+        and "Canlı API bağlantısı aktif değil." in diagnostic.get("exception_message", "")
+    ):
+        return False
+    add_event(
+        state,
+        "RECONCILIATION_DIAGNOSTIC_CLEARED",
+        "Başarılı Binance hesap uzlaştırması önceki bağlantı hatasını çözdü.",
+        resolved_diagnostic_timestamp=diagnostic.get("timestamp"),
+    )
+    return True
 
 
 async def _persist_state_snapshot(
@@ -5084,6 +5105,7 @@ async def reconcile(application: Any, credentials: tuple[str, str] | None = None
         elif protection_state == "MATCHED" and plan.get("status") == "DOLUM BEKLİYOR":
             plan["status"] = "KORUMA AKTİF"
     clear_clean_reconciliation_state(state, snapshot)
+    clear_resolved_credential_diagnostic(state)
     persist_state(state)
 
 

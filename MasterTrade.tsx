@@ -188,7 +188,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const [lastAccountSyncAt, setLastAccountSyncAt] = useState<string | null>(null)
   const [lastHistorySyncAt, setLastHistorySyncAt] = useState<string | null>(null)
   const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null)
-  const accountRefreshInFlight = useRef(false)
+  const accountRefreshInFlight = useRef<{forceLiveSnapshot: boolean; promise: Promise<boolean>} | null>(null)
   const activeSnapshot = snapshot?.symbol === draft.market && snapshot.timeframe === interval ? snapshot : null
   const selectedQuote = referenceEnabled ? marketFeed.rows.find(row => row.symbol === draft.market) : undefined
   const currentPrice = selectedQuote?.price ?? activeSnapshot?.currentPrice ?? null
@@ -308,102 +308,114 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     return () => { active = false; controller.abort(); window.clearInterval(timer) }
   }, [draft.market, interval, marketRefreshNonce])
 
-  const refreshAccountData = async (forceLiveSnapshot = false) => {
-    if (accountRefreshInFlight.current) return false
-    accountRefreshInFlight.current = true
-    try {
-      const response = await Promise.all([
-        forceLiveSnapshot
-          ? fetchWithTimeout(`${API_BASE}/v25/connect/read-only`, {method: 'POST'})
-          : fetchWithTimeout(`${API_BASE}/v25/status`),
-        fetchWithTimeout(`${API_BASE}/exchange-connections/status`),
-      ])
-      const [accountResponse, connectionResponse] = response
-      if (connectionResponse.ok) setLiveConnections(await connectionResponse.json() as SharedConnectionStatus)
-      else setLiveConnections(null)
+  const refreshAccountData = (forceLiveSnapshot = false): Promise<boolean> => {
+    const pending = accountRefreshInFlight.current
+    if (pending) {
+      if (pending.forceLiveSnapshot === forceLiveSnapshot) return pending.promise
+      return pending.promise.then(
+        () => refreshAccountData(forceLiveSnapshot),
+        () => refreshAccountData(forceLiveSnapshot),
+      )
+    }
+    const promise = (async () => {
+      try {
+        const response = await Promise.all([
+          forceLiveSnapshot
+            ? fetchWithTimeout(`${API_BASE}/v25/connect/read-only`, {method: 'POST'})
+            : fetchWithTimeout(`${API_BASE}/v25/status`),
+          fetchWithTimeout(`${API_BASE}/exchange-connections/status`),
+        ])
+        const [accountResponse, connectionResponse] = response
+        if (connectionResponse.ok) setLiveConnections(await connectionResponse.json() as SharedConnectionStatus)
+        else setLiveConnections(null)
 
-      if (accountResponse.status === 412) {
-        setLiveStatusVerified(false)
-        setLiveStatusError('Canlı hesap yapılandırılmamış; bağlantıyı kontrol edin.')
-        setLiveStatus(null)
-        accountRef.current = null
-        setSnapshot(current => current ? {...current, account:null} : current)
-        setAccountSyncState('DATA_UNAVAILABLE')
-        setHistorySyncState('UNAVAILABLE')
-        setSnapshot(current => current ? { ...current, accountError: 'LIVE ACCOUNT NOT CONFIGURED' } : current)
-        setLastAccountSyncAt(null)
-        setLastHistorySyncAt(null)
-        return false
-      }
+        if (accountResponse.status === 412) {
+          setLiveStatusVerified(false)
+          setLiveStatusError('Canlı hesap yapılandırılmamış; bağlantıyı kontrol edin.')
+          setLiveStatus(null)
+          accountRef.current = null
+          setSnapshot(current => current ? {...current, account:null} : current)
+          setAccountSyncState('DATA_UNAVAILABLE')
+          setHistorySyncState('UNAVAILABLE')
+          setSnapshot(current => current ? { ...current, accountError: 'LIVE ACCOUNT NOT CONFIGURED' } : current)
+          setLastAccountSyncAt(null)
+          setLastHistorySyncAt(null)
+          return false
+        }
 
-      const accountPayload = await accountResponse.json().catch(() => null) as (SharedLiveStatus & {
-        account?:AccountSnapshot; plans?:AccountPlan[]; detail?:unknown;
-        journal?:Array<Record<string,unknown>>; performance?:PerformanceSnapshot; daily_performance?:PerformanceSnapshot;
-      }) | null
-      if (!accountResponse.ok || !accountPayload) {
+        const accountPayload = await accountResponse.json().catch(() => null) as (SharedLiveStatus & {
+          account?:AccountSnapshot; plans?:AccountPlan[]; detail?:unknown;
+          journal?:Array<Record<string,unknown>>; performance?:PerformanceSnapshot; daily_performance?:PerformanceSnapshot;
+        }) | null
+        if (!accountResponse.ok || !accountPayload) {
+          setLiveStatusVerified(false)
+          if ([401, 403].includes(accountResponse.status)) setLiveStatus(null)
+          accountRef.current = null
+          setSnapshot(current => current ? {...current, account:null} : current)
+          const detail = accountPayload && typeof accountPayload.detail === 'string'
+            ? accountPayload.detail
+            : `Canlı hesap durumu alınamadı (HTTP ${accountResponse.status}).`
+          setLiveStatusError(detail)
+          setAccountSyncState('DISCONNECTED')
+          setSnapshot(current => current ? { ...current, accountError: detail } : current)
+          setHistorySyncState('UNAVAILABLE')
+          setLastAccountSyncAt(null)
+          return false
+        }
+        setLiveStatus(accountPayload as SharedLiveStatus)
+        setLiveStatusVerified(connectionResponse.ok)
+        setLiveStatusError(connectionResponse.ok ? '' : 'Canlı hesap bağlantısının güncel durumu doğrulanamadı.')
+
+        const nextPositions = Array.isArray(accountPayload.account?.positions) ? accountPayload.account.positions : []
+        const liveAccount = accountPayload.account ? { ...accountPayload.account, plans: accountPayload.plans } : null
+        accountRef.current = liveAccount
+        setAccountSyncState(nextPositions.length === 0 ? 'EMPTY' : 'READY')
+        setLastAccountSyncAt(new Date().toISOString())
+        setLastSuccessfulRefreshAt(new Date().toISOString())
+        setSnapshot(current => current ? { ...current, account: liveAccount, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
+
+        if (Array.isArray(accountPayload.journal)) {
+          const rows = accountPayload.journal.filter(item => item.verified_realized === true && typeof item.realized_pnl === 'number' && Number.isFinite(item.realized_pnl)).map((item, index) => {
+            const direction = String(item.side || item.direction || '').toUpperCase()
+            return {
+              id: String(item.id || `journal-${index}`), symbol: String(item.symbol || '--'), side: direction === 'BUY' || direction === 'LONG' ? 'LONG' : 'SHORT',
+              entryPrice: null, exitPrice: typeof item.price === 'number' ? item.price : null, quantity: typeof item.quantity === 'number' ? item.quantity : null,
+              leverage: null, margin: null, stopLoss: null, tp1: null, tp2: null, tp3: null, realizedPnl: Number(item.realized_pnl), pnlPercent: null,
+              fees: null, funding: null, openTime: String(item.created_at || ''), closeTime: String(item.created_at || ''), duration: null,
+              closeReason: typeof item.reason === 'string' ? item.reason : null, source: String(item.source || 'BINANCE LIVE'), analysisScore: null, opportunityScore: null, scanCycle: null,
+            } satisfies TradeHistoryRow
+          })
+          historyRef.current = rows
+          setHistory(rows)
+          setHistorySyncState(rows.length === 0 ? 'EMPTY' : 'READY')
+          setLastHistorySyncAt(rows.length ? new Date().toISOString() : null)
+        } else {
+          historyRef.current = []
+          setHistory([])
+          setHistorySyncState('UNAVAILABLE')
+          setLastHistorySyncAt(null)
+        }
+
+        setPerformanceSnapshot(accountPayload.performance ?? null)
+        setDailyPerformance(accountPayload.daily_performance ?? null)
+        return connectionResponse.ok
+      } catch (error) {
         setLiveStatusVerified(false)
-        if ([401, 403].includes(accountResponse.status)) setLiveStatus(null)
+        setLiveStatusError(error instanceof Error ? error.message : 'Canlı durum servisine ulaşılamadı.')
+        setLiveConnections(null)
         accountRef.current = null
-        setSnapshot(current => current ? {...current, account:null} : current)
-        const detail = accountPayload && typeof accountPayload.detail === 'string'
-          ? accountPayload.detail
-          : `Canlı hesap durumu alınamadı (HTTP ${accountResponse.status}).`
-        setLiveStatusError(detail)
         setAccountSyncState('DISCONNECTED')
-        setSnapshot(current => current ? { ...current, accountError: detail } : current)
         setHistorySyncState('UNAVAILABLE')
-        setLastAccountSyncAt(null)
-        return false
+        setSnapshot(current => current ? {...current, account:null, accountError:error instanceof Error ? error.message : 'ACCOUNT DISCONNECTED'} : current)
+        throw error
       }
-      setLiveStatus(accountPayload as SharedLiveStatus)
-      setLiveStatusVerified(connectionResponse.ok)
-      setLiveStatusError(connectionResponse.ok ? '' : 'Canlı hesap bağlantısının güncel durumu doğrulanamadı.')
-
-    const nextPositions = Array.isArray(accountPayload.account?.positions) ? accountPayload.account.positions : []
-    const liveAccount = accountPayload.account ? { ...accountPayload.account, plans: accountPayload.plans } : null
-    accountRef.current = liveAccount
-    setAccountSyncState(nextPositions.length === 0 ? 'EMPTY' : 'READY')
-    setLastAccountSyncAt(new Date().toISOString())
-    setLastSuccessfulRefreshAt(new Date().toISOString())
-    setSnapshot(current => current ? { ...current, account: liveAccount, accountUpdatedAt: new Date().toISOString(), accountError: '' } : current)
-
-    if (Array.isArray(accountPayload.journal)) {
-      const rows = accountPayload.journal.filter(item => item.verified_realized === true && typeof item.realized_pnl === 'number' && Number.isFinite(item.realized_pnl)).map((item, index) => {
-        const direction = String(item.side || item.direction || '').toUpperCase()
-        return {
-          id: String(item.id || `journal-${index}`), symbol: String(item.symbol || '--'), side: direction === 'BUY' || direction === 'LONG' ? 'LONG' : 'SHORT',
-          entryPrice: null, exitPrice: typeof item.price === 'number' ? item.price : null, quantity: typeof item.quantity === 'number' ? item.quantity : null,
-          leverage: null, margin: null, stopLoss: null, tp1: null, tp2: null, tp3: null, realizedPnl: Number(item.realized_pnl), pnlPercent: null,
-          fees: null, funding: null, openTime: String(item.created_at || ''), closeTime: String(item.created_at || ''), duration: null,
-          closeReason: typeof item.reason === 'string' ? item.reason : null, source: String(item.source || 'BINANCE LIVE'), analysisScore: null, opportunityScore: null, scanCycle: null,
-        } satisfies TradeHistoryRow
-      })
-      historyRef.current = rows
-      setHistory(rows)
-      setHistorySyncState(rows.length === 0 ? 'EMPTY' : 'READY')
-      setLastHistorySyncAt(rows.length ? new Date().toISOString() : null)
-    } else {
-      historyRef.current = []
-      setHistory([])
-      setHistorySyncState('UNAVAILABLE')
-      setLastHistorySyncAt(null)
+    })()
+    accountRefreshInFlight.current = {forceLiveSnapshot, promise}
+    const clear = () => {
+      if (accountRefreshInFlight.current?.promise === promise) accountRefreshInFlight.current = null
     }
-
-    setPerformanceSnapshot(accountPayload.performance ?? null)
-    setDailyPerformance(accountPayload.daily_performance ?? null)
-      return connectionResponse.ok
-    } catch (error) {
-      setLiveStatusVerified(false)
-      setLiveStatusError(error instanceof Error ? error.message : 'Canlı durum servisine ulaşılamadı.')
-      setLiveConnections(null)
-      accountRef.current = null
-      setAccountSyncState('DISCONNECTED')
-      setHistorySyncState('UNAVAILABLE')
-      setSnapshot(current => current ? {...current, account:null, accountError:error instanceof Error ? error.message : 'ACCOUNT DISCONNECTED'} : current)
-      throw error
-    } finally {
-      accountRefreshInFlight.current = false
-    }
+    void promise.then(clear, clear)
+    return promise
   }
 
   useEffect(() => {
