@@ -4286,7 +4286,7 @@ async def execute_live_order(
                 persist_state(state)
             if automatic_entry:
                 fresh_credentials = await fresh_auto_submission_credentials(application, state)
-                if not fresh_credentials:
+                if not usable_live_credentials(fresh_credentials):
                     raise LiveExchangeError("Canlı otomasyon yetkilendirmesi artık geçerli değil; emir gönderilmedi.", http_status=423)
                 credentials = fresh_credentials
                 client = client_for_with_credentials(application, credentials, request)
@@ -5120,16 +5120,17 @@ def record_execution_loop_failure(application: Any, exc: Exception, reconciliati
     state["connected"] = False
     state["connection"].update({"last_checked": now_iso(), "last_error": safe_message})
     state["connection"]["retry_count"] = int(state["connection"].get("retry_count") or 0) + 1
+    exchange_failure = exc if isinstance(exc, LiveExchangeError) else exc.__cause__
     credential_precondition_failure = bool(
         reconciliation_stage == "automatic_cycle"
-        and isinstance(exc, LiveExchangeError)
-        and exc.http_status == 412
-        and not exc.unknown_execution
-        and "Canlı API bağlantısı aktif değil." in str(exc)
+        and isinstance(exchange_failure, LiveExchangeError)
+        and exchange_failure.http_status == 412
+        and not exchange_failure.unknown_execution
+        and "Canlı API bağlantısı aktif değil." in str(exchange_failure)
     )
     if credential_precondition_failure:
         lock_live_execution(state, "LIVE_CREDENTIALS_UNAVAILABLE", unknown=False)
-    elif (isinstance(exc, LiveExchangeError) and exc.unknown_execution) or unresolved_execution_evidence(state):
+    elif (isinstance(exchange_failure, LiveExchangeError) and exchange_failure.unknown_execution) or unresolved_execution_evidence(state):
         lock_live_execution(state, "RECONCILIATION_FAILURE", unknown=True)
     else:
         lock_reconciliation_failure(state)

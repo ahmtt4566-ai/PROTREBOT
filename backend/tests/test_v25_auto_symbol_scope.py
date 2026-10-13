@@ -5,7 +5,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
@@ -76,12 +76,12 @@ class AutoSymbolScopeTests(unittest.TestCase):
         persistence.start()
         self.addCleanup(persistence.stop)
 
-    def execute(self, application, symbol, *, source="V25_AUTO", override=None, submit=None, credential_refresh=None):
+    def execute(self, application, symbol, *, source="V25_AUTO", override=None, submit=None, credential_refresh=None, client_factory=None):
         submit = submit or AsyncMock(return_value={"orderId": 42, "status": "FILLED"})
         with patch.multiple(
             execution,
             readiness_for=lambda *args, **kwargs: {"ready": True},
-            client_for_with_credentials=lambda *args, **kwargs: SimpleNamespace(),
+            client_for_with_credentials=client_factory or (lambda *args, **kwargs: SimpleNamespace()),
             account_snapshot=AsyncMock(return_value=SNAPSHOT),
             spread_bps=AsyncMock(return_value=1),
             evaluate_entry_gates=lambda **kwargs: {"passed": True, "gates": []},
@@ -97,6 +97,29 @@ class AutoSymbolScopeTests(unittest.TestCase):
                 application, order_for(symbol), source=source,
                 allowed_symbols=override, credentials=CREDENTIALS,
             ))
+
+    def test_empty_fresh_credential_pair_blocks_before_creating_submission_client(self):
+        application, state = application_for(["BTCUSDT"])
+        submit = AsyncMock(return_value={"orderId": 42, "status": "FILLED"})
+        credential_refresh = AsyncMock(return_value=("", ""))
+        client_factory = Mock(return_value=SimpleNamespace())
+
+        with self.assertRaises(execution.HTTPException) as caught:
+            self.execute(
+                application,
+                "BTCUSDT",
+                submit=submit,
+                credential_refresh=credential_refresh,
+                client_factory=client_factory,
+            )
+
+        self.assertEqual(caught.exception.status_code, 423)
+        credential_refresh.assert_awaited_once_with(application, state)
+        self.assertEqual(client_factory.call_count, 1)
+        submit.assert_not_awaited()
+        self.assertEqual(state["plans"], {})
+        self.assertEqual(state["intents"], {})
+        self.assertTrue(any(event["kind"] == "LIVE_INTENT_CANCELLED_PRE_SUBMISSION" for event in state["events"]))
 
     def cycle(self, application, candidates, *, scan_effect=None, execution_effect=None, decision=None):
         scan = AsyncMock(side_effect=scan_effect) if scan_effect else AsyncMock(return_value=candidates)

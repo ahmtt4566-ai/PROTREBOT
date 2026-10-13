@@ -206,7 +206,7 @@ class AssistantTools:
         return self.analysis_summary(response["result"], user_id, payload.symbol, payload.timeframe, cached=response["cached"])
 
     async def account_state(self, user_id: str) -> dict[str, Any] | None:
-        self.user(user_id)
+        member_id = str(self.user(user_id)["id"])
         state = getattr(self.request.app.state, "v25_execution", None)
         if not isinstance(state, dict) or not isinstance(state.get("lock"), asyncio.Lock):
             return None
@@ -214,7 +214,7 @@ class AssistantTools:
         await asyncio.wait_for(lock.acquire(), timeout=self.config.request_timeout_seconds)
         try:
             return v25_execution.read_owned_account_state(
-                state, user_id, v25_execution.live_owner_binding(self.request),
+                state, member_id, f"owner:{member_id}",
             )
         finally:
             lock.release()

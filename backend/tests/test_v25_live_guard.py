@@ -10,6 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from fastapi import HTTPException
 
 
 ROOT = Path(__file__).parents[2]
@@ -1711,6 +1712,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             spread_bps=AsyncMock(return_value=1.0),
             readiness=lambda application, state, request=None: {"ready": True},
             auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
+            fresh_auto_submission_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
             build_live_spec=AsyncMock(return_value=spec),
             set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 1, "margin_type": "isolated"}),
@@ -1844,6 +1846,24 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
         self.assertFalse(state["reconciliation_required"])
         self.assertTrue(state["emergency"]["active"])
         self.assertEqual(state["emergency"]["reason"], "LIVE_CREDENTIALS_UNAVAILABLE")
+
+    def test_wrapped_pre_submit_credential_failure_does_not_create_unknown_execution(self):
+        state = initial_state()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        exchange_failure = LiveExchangeError(
+            "Canlı API bağlantısı aktif değil. Borsa Bağlantıları bölümünden gerçek hesap anahtarını kaydedip salt-okunur bağlantıyı aktifleştirin.",
+            http_status=412,
+        )
+        wrapped_failure = HTTPException(status_code=412, detail=str(exchange_failure))
+        wrapped_failure.__cause__ = exchange_failure
+
+        with patch.object(v25_execution, "persist_state"):
+            v25_execution.record_execution_loop_failure(application, wrapped_failure, "automatic_cycle")
+
+        self.assertEqual(state["execution_state"], "LOCKED")
+        self.assertFalse(state["reconciliation_required"])
+        self.assertEqual(state["emergency"]["reason"], "LIVE_CREDENTIALS_UNAVAILABLE")
+        self.assertFalse(any(event["kind"] == "LIVE_UNKNOWN_EXECUTION" for event in state["events"]))
 
     def test_clean_reconciliation_auto_recovers_active_session_within_window(self):
         state = initial_state()
@@ -2145,6 +2165,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             spread_bps=AsyncMock(return_value=1.0),
             readiness_for=lambda *args, **kwargs: ready,
             auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
+            fresh_auto_submission_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
             evaluate_entry_gates=lambda **kwargs: {"passed": True, "gates": []},
             build_live_spec=AsyncMock(return_value=spec),
             set_live_isolated_margin=isolated_margin,
@@ -2264,6 +2285,7 @@ class V25LiveGuardIntegrationContractTests(unittest.TestCase):
             spread_bps=AsyncMock(return_value=1.0),
             readiness=lambda application, state, request=None: ready,
             auto_session_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
+            fresh_auto_submission_credentials=AsyncMock(return_value=("TEST_KEY_PLACEHOLDER", "TEST_SECRET_PLACEHOLDER")),
             build_live_spec=AsyncMock(return_value=spec),
             set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
             apply_live_verified_leverage=AsyncMock(return_value={"applied_leverage": 2, "margin_type": "isolated"}),
