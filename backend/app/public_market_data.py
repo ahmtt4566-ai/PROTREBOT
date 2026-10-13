@@ -17,8 +17,7 @@ from .binance_rate_limit import BINANCE_GLOBAL_BAN, retry_after_seconds
 logger = logging.getLogger(__name__)
 ORIGINAL_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT")
 ORIGINAL_INTERVALS = ("15m", "1h", "4h")
-ORIGINAL_WARM_INTERVAL_SECONDS = 60
-ORIGINAL_WARM_IDLE_SECONDS = 15
+ORIGINAL_REQUEST_INTERVAL_SECONDS = 0.52
 PUBLIC_PATHS = frozenset({
     "/fapi/v1/ping", "/fapi/v1/time", "/fapi/v1/exchangeInfo",
     "/fapi/v1/ticker/price", "/fapi/v1/ticker/bookTicker",
@@ -33,18 +32,30 @@ class PublicMarketData:
         self.cache: OrderedDict[tuple, tuple[float, httpx.Response]] = OrderedDict()
         self.inflight: dict[tuple, asyncio.Task] = {}
         self.condition = asyncio.Condition()
+        self.original_request_pacer = asyncio.Lock()
+        self.next_original_request_at = 0.0
         self.waiters: list[tuple[int, int]] = []
         self.sequence = 0
         self.active = 0
         self.retry_at = 0.0
         self.last_rejection = 429
-        self.original_until = 0.0
-        self.warmer_task: asyncio.Task | None = None
+        self.original_symbols = set(ORIGINAL_SYMBOLS)
         self.counts: Counter[str] = Counter()
         self.source_counts: Counter[str] = Counter()
         self.source_weights: Counter[str] = Counter()
         self.metrics_at = clock()
         self.used_weight_1m: int | None = None
+
+    def set_original_symbols(self, symbols: list[str]) -> None:
+        if (
+            not isinstance(symbols, list)
+            or len(symbols) > 100
+            or any(not isinstance(symbol, str) or not symbol.isascii() or not symbol.isalnum()
+                   or not symbol.isupper() or not symbol.endswith("USDT") for symbol in symbols)
+            or len(set(symbols)) != len(symbols)
+        ):
+            raise ValueError("Invalid Original V2 market symbols")
+        self.original_symbols = set(symbols)
 
     @asynccontextmanager
     async def slot(self, priority: bool):
@@ -137,11 +148,9 @@ class PublicMarketData:
         limit = None
         if path == "/fapi/v1/klines":
             limit = int(values.get("limit", 500))
-            values["limit"] = max(500, limit)
+            cache_floor = 260 if source in {"original_live", "original_warmer"} else 500
+            values["limit"] = max(cache_floor, limit)
             values["symbol"] = str(values.get("symbol", "")).upper()
-            if values["symbol"] in ORIGINAL_SYMBOLS and "endTime" not in values and "startTime" not in values \
-                    and asyncio.current_task() is not self.warmer_task:
-                self.original_until = self.clock() + 90
         key = (path, tuple(sorted(values.items())))
         cached = self.cache.get(key)
         if cached and cached[0] > self.clock():
@@ -172,10 +181,19 @@ class PublicMarketData:
 
     async def _fetch(self, key, path, values, fetch, source: str) -> httpx.Response:
         try:
-            async with self.slot(values.get("symbol") in ORIGINAL_SYMBOLS):
+            async with self.slot(values.get("symbol") in self.original_symbols):
                 blocked = self.blocked(path)
                 if blocked is not None:
                     return blocked
+                if source == "original_live":
+                    async with self.original_request_pacer:
+                        delay = self.next_original_request_at - self.clock()
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        blocked = self.blocked(path)
+                        if blocked is not None:
+                            return blocked
+                        self.next_original_request_at = self.clock() + ORIGINAL_REQUEST_INTERVAL_SECONDS
                 frame = values.get("interval", "bulk") if path.endswith("klines") else "bulk"
                 source_key = f"{source}:GET:{path}:{frame}"
                 self.source_counts[source_key] += 1
@@ -187,7 +205,12 @@ class PublicMarketData:
                     if path.endswith("klines") and "endTime" not in values and "startTime" not in values:
                         seconds = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}.get(values.get("interval"))
                         if seconds:
-                            ttl = max(1, min(ttl, seconds - time.time() % seconds))
+                            until_close = seconds - time.time() % seconds
+                            ttl = (
+                                max(1, until_close)
+                                if source in {"original_live", "original_warmer"}
+                                else max(1, min(ttl, until_close))
+                            )
                     self.cache[key] = (self.clock() + ttl, response)
                     self.cache.move_to_end(key)
                 elif response.status_code not in {418, 429}:
@@ -201,44 +224,3 @@ class PublicMarketData:
             raise
         finally:
             self.inflight.pop(key, None)
-
-
-async def original_market_warm_loop(application, request) -> None:
-    while True:
-        sleep_seconds = ORIGINAL_WARM_IDLE_SECONDS
-        service = getattr(application.state, "public_market_data", None)
-        if service is not None:
-            service.report_metrics()
-            service.warmer_task = asyncio.current_task()
-            now = service.clock()
-            cooldown_seconds = max(
-                BINANCE_GLOBAL_BAN.remaining_seconds(),
-                max(0, math.ceil(service.retry_at - now)),
-            )
-            if cooldown_seconds > 0:
-                sleep_seconds = max(ORIGINAL_WARM_IDLE_SECONDS, cooldown_seconds)
-            elif service.original_until > now:
-                for symbol in ORIGINAL_SYMBOLS:
-                    for interval in ORIGINAL_INTERVALS:
-                        try:
-                            response = await request(
-                                application,
-                                "/fapi/v1/klines",
-                                {"symbol": symbol, "interval": interval, "limit": 260},
-                                source="original_warmer",
-                            )
-                            response.raise_for_status()
-                        except httpx.HTTPError as exc:
-                            failed_response = exc.response if isinstance(exc, httpx.HTTPStatusError) else None
-                            logger.warning("ORIGINAL_MARKET_WARM unavailable symbol=%s interval=%s error=%s status=%s retry_after_seconds=%s",
-                                           symbol, interval, type(exc).__name__,
-                                           failed_response.status_code if failed_response is not None else None,
-                                           retry_after_seconds(failed_response) if failed_response is not None else None)
-                            break
-                    if service.retry_at > service.clock():
-                        break
-                sleep_seconds = max(
-                    ORIGINAL_WARM_INTERVAL_SECONDS,
-                    math.ceil(service.retry_at - service.clock()),
-                )
-        await asyncio.sleep(sleep_seconds)

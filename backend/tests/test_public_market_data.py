@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.binance_rate_limit import BINANCE_GLOBAL_BAN
-from app.public_market_data import ORIGINAL_INTERVALS, ORIGINAL_SYMBOLS, PublicMarketData, original_market_warm_loop
+from app.public_market_data import ORIGINAL_INTERVALS, ORIGINAL_REQUEST_INTERVAL_SECONDS, ORIGINAL_SYMBOLS, PublicMarketData
 
 
 def test_fifty_users_graph_analysis_and_live_share_one_candle_request():
@@ -52,6 +52,62 @@ def test_expired_candles_are_refetched_not_used_for_trading(monkeypatch):
         now[0] = 161
         assert (await service.get("/fapi/v1/klines", params, fetch)).status_code == 503
         assert len(calls) == 2
+
+    asyncio.run(run())
+
+
+def test_original_live_candles_cache_until_the_next_close_at_weight_two(monkeypatch):
+    unix_time = [100.0]
+    monotonic_time = [0.0]
+    monkeypatch.setattr("app.public_market_data.time.time", lambda: unix_time[0])
+
+    async def run():
+        service = PublicMarketData(lambda: monotonic_time[0])
+        calls = []
+
+        async def fetch(path, params):
+            calls.append(params.copy())
+            return httpx.Response(200, json=[[index] for index in range(500)],
+                                  request=httpx.Request("GET", f"https://offline.invalid{path}"))
+
+        params = {"symbol": "LINKUSDT", "interval": "15m", "limit": 260}
+        first = await service.get("/fapi/v1/klines", params, fetch, source="original_live")
+        assert len(first.json()) == 260
+        monotonic_time[0] = 60
+        unix_time[0] = 160
+        await service.get("/fapi/v1/klines", params, fetch, source="original_live")
+        assert len(calls) == 1
+        assert calls[0]["limit"] == 260
+        assert service.source_weights["original_live:GET:/fapi/v1/klines:15m"] == 2
+        monotonic_time[0] = 800
+        unix_time[0] = 900
+        await service.get("/fapi/v1/klines", params, fetch, source="original_live")
+        assert len(calls) == 2
+
+    asyncio.run(run())
+
+
+def test_original_live_requests_are_spaced_to_keep_peak_scan_weight_below_240_per_minute():
+    async def run():
+        service = PublicMarketData()
+        request_times = []
+
+        async def fetch(path, params):
+            request_times.append(asyncio.get_running_loop().time())
+            return httpx.Response(200, json=[], request=httpx.Request("GET", f"https://offline.invalid{path}"))
+
+        await service.get("/fapi/v1/klines", {"symbol": "BTCUSDT", "interval": "15m", "limit": 260},
+                          fetch, source="original_live")
+        await service.get("/fapi/v1/klines", {"symbol": "LINKUSDT", "interval": "15m", "limit": 260},
+                          fetch, source="original_live")
+        assert request_times[1] - request_times[0] >= ORIGINAL_REQUEST_INTERVAL_SECONDS - 0.01
+        for symbol_count in (40, 100):
+            request_count = symbol_count * len(ORIGINAL_INTERVALS)
+            weight = request_count * PublicMarketData.estimated_request_weight(
+                "/fapi/v1/klines", {"limit": 260},
+            )
+            elapsed = (request_count - 1) * ORIGINAL_REQUEST_INTERVAL_SECONDS
+            assert weight * 60 / elapsed < 240
 
     asyncio.run(run())
 
@@ -181,7 +237,7 @@ def test_market_metrics_attribute_original_request_count_and_weight():
         )
         metric_key = "original_live:GET:/fapi/v1/klines:15m"
         assert service.source_counts == {metric_key: 1}
-        assert service.source_weights == {metric_key: 5}
+        assert service.source_weights == {metric_key: 2}
     asyncio.run(run())
 
 
@@ -243,133 +299,6 @@ def test_signed_paths_and_params_never_enter_public_transport(path, params):
     asyncio.run(run())
 
 
-def test_original_warmer_only_reads_all_eight_symbols_and_required_frames():
-    async def run():
-        service = PublicMarketData()
-        service.original_until = service.clock() + 90
-        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
-        calls = []
-        done = asyncio.Event()
-
-        async def request(app, path, params, *, source):
-            calls.append((path, params.copy()))
-            assert source == "original_warmer"
-            if len(calls) == 24:
-                done.set()
-            return httpx.Response(200, json=[], request=httpx.Request("GET", "https://offline.invalid"))
-
-        task = asyncio.create_task(original_market_warm_loop(application, request))
-        await done.wait()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert len(calls) == 24
-        assert {p["symbol"] for _, p in calls} == set(ORIGINAL_SYMBOLS)
-        assert {p["interval"] for _, p in calls} == set(ORIGINAL_INTERVALS)
-        assert all(path == "/fapi/v1/klines" for path, _ in calls)
-    asyncio.run(run())
-
-
-@pytest.mark.parametrize("status", [418, 429, 451, 503])
-def test_original_warm_http_failure_reports_status_without_response_or_url_secrets(caplog, monkeypatch, status):
-    async def run():
-        service = PublicMarketData()
-        service.original_until = service.clock() + 90
-        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
-        calls = []
-
-        async def request(app, path, params, *, source):
-            calls.append(params.copy())
-            assert source == "original_warmer"
-            response = httpx.Response(status, headers={"Retry-After": "180"},
-                                      json={"msg": "private-upstream-body"},
-                                      request=httpx.Request("GET", "https://offline.invalid/?secret=private-query"))
-            service.observe(path, response)
-            return response
-
-        async def end_iteration(delay):
-            raise asyncio.CancelledError
-
-        monkeypatch.setattr("app.public_market_data.asyncio.sleep", end_iteration)
-        with pytest.raises(asyncio.CancelledError):
-            await original_market_warm_loop(application, request)
-        assert len(calls) == (1 if status in {418, 429} else 8)
-        assert all(item["interval"] == "15m" for item in calls)
-    asyncio.run(run())
-    assert f"status={status}" in caplog.text
-    assert "retry_after_seconds=180" in caplog.text
-    assert "private-upstream-body" not in caplog.text
-    assert "private-query" not in caplog.text
-
-
-def test_original_warmer_stays_idle_without_recent_original_demand(monkeypatch):
-    async def run():
-        service = PublicMarketData(lambda: 100.0)
-        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
-
-        async def request(*args):
-            pytest.fail("Inactive Original warmer must not call Binance")
-
-        async def end_iteration(delay):
-            assert delay == 15
-            raise asyncio.CancelledError
-
-        monkeypatch.setattr("app.public_market_data.asyncio.sleep", end_iteration)
-        with pytest.raises(asyncio.CancelledError):
-            await original_market_warm_loop(application, request)
-    asyncio.run(run())
-
-
-def test_original_warmer_sleeps_through_full_binance_cooldown(monkeypatch):
-    async def run():
-        service = PublicMarketData(lambda: 100.0)
-        service.original_until = 200.0
-        service.retry_at = 4981.0
-        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
-
-        async def request(*args):
-            pytest.fail("Original warmer must not call Binance during cooldown")
-
-        async def end_iteration(delay):
-            assert delay == 4881
-            raise asyncio.CancelledError
-
-        monkeypatch.setattr("app.public_market_data.asyncio.sleep", end_iteration)
-        with pytest.raises(asyncio.CancelledError):
-            await original_market_warm_loop(application, request)
-    asyncio.run(run())
-
-
-def test_original_warmer_sleeps_through_restored_global_ban(monkeypatch):
-    async def run():
-        service = PublicMarketData()
-        service.original_until = service.clock() + 90
-        response = httpx.Response(
-            418,
-            headers={"Retry-After": "4881"},
-            json={"code": -1003},
-            request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/klines"),
-        )
-        BINANCE_GLOBAL_BAN.record(
-            response,
-            source="original_warmer",
-            egress_route="render_direct",
-        )
-        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
-
-        async def request(*args, **kwargs):
-            pytest.fail("Restored global ban must stop Original warming")
-
-        async def end_iteration(delay):
-            assert delay >= 4880
-            raise asyncio.CancelledError
-
-        monkeypatch.setattr("app.public_market_data.asyncio.sleep", end_iteration)
-        with pytest.raises(asyncio.CancelledError):
-            await original_market_warm_loop(application, request)
-    asyncio.run(run())
-
-
 def test_priority_universe_matches_immutable_original_profile():
     from app.strategies.original_v2_demo import INTERVALS, fixed_profile
     assert set(ORIGINAL_SYMBOLS) == set(fixed_profile()["execution_policy"]["allowed_symbols"])
@@ -420,7 +349,10 @@ def test_live_public_reads_use_direct_cache_and_accounts_keep_signed_transport(m
             assert await client.public_get("/fapi/v1/klines", {"symbol": "BTCUSDT", "interval": "15m", "limit": limit}) == []
         assert await client.signed("GET", "/fapi/v3/account") == {}
     asyncio.run(run())
-    assert calls == [("direct", "/fapi/v1/klines"), ("direct", "/fapi/v1/time"), ("signed", "/fapi/v3/account")]
+    assert calls == [
+        ("direct", "/fapi/v1/klines"), ("direct", "/fapi/v1/klines"),
+        ("direct", "/fapi/v1/time"), ("signed", "/fapi/v3/account"),
+    ]
     assert application.state.http is signed_http
 
 

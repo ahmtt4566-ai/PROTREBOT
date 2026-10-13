@@ -12,19 +12,26 @@ on the supervising account.
 
 ## Signal and exits
 
-The strategy reuses the Demo Original V2 adapter and its immutable profile:
-BTC, ETH, SOL, BNB, XRP, DOGE, ADA and AVAX USDT perpetuals; 3x isolated,
-at most 6% stop distance. TP1 closes 60%; the remaining position exits at TP3
-or the initial stop. There is no TP2 order, trailing stop or break-even move.
-Quantity is rounded down to five lot steps so the initial position can split
-exactly 60/40. An incompatible partial fill pauses entries after installing
-the stop; it is not silently resized or automatically closed.
+The LIVE strategy keeps the Demo Original V2 signal, risk and exit rules, but
+uses its own daily market universe. OWNER selects N from 10–100 (default 40)
+when starting the 2FA-protected session. Once per UTC day, USDT-M perpetuals
+are ranked by 24-hour USDT quote volume; contracts younger than 30 days,
+volume below 1,000,000 USDT or spread above 8 bps are excluded. The selected
+list and daily ranking are persisted, so changing N during the day reuses the
+same daily market snapshot. Fewer than N may be selected if fewer pass filters.
+
+Orders remain 3x isolated, with at most 6% stop distance. TP1 closes 60%; the
+remaining position exits at TP3 or the initial stop. There is no TP2 order,
+trailing stop or break-even move. Quantity is rounded down to five lot steps so
+the initial position can split exactly 60/40. An incompatible partial fill
+pauses entries after installing the stop; it is not silently resized or
+automatically closed. Demo Original V2 keeps its immutable eight-symbol policy.
 
 As approved, no new 100-day trend filter is added. The historical reference's
 18-day *future-gap inventory* is not causal LIVE data and is not represented as
 a LIVE look-ahead rule. LIVE requires 259 contiguous, current closed candles in
-each of 15m, 1h and 4h for all eight symbols. Missing, duplicate, stale or invalid
-history stops new entries instead of inventing a signal.
+each of 15m, 1h and 4h for every selected symbol. Missing, duplicate, stale or
+invalid history stops new entries instead of inventing a signal.
 
 ## Enable
 
@@ -211,17 +218,25 @@ configured fixed-IP proxy; there is no signed direct fallback. Public clock
 reads are direct too. No proxy environment value is modified.
 
 A process-wide singleflight cache shares exchange metadata (10 minutes), bulk
-tickers and candles (15 seconds) across users, charts, scanners and LIVE.
-Candle requests up to 500 rows share one upstream series and receive exactly
-their requested latest row count. Candle-boundary expiry prevents reusing the
-previous bar at an Original decision boundary. Expired/failed candle reads do
-not become stale successful trading inputs.
+tickers (15 seconds) and candles across users, charts, scanners and LIVE.
+Original LIVE requests 260 rows without rounding up to 500; Binance's estimated
+weight is 2 per kline request. Its candle cache expires at the next close of
+that interval, so a 15m scan does not refetch unchanged 1h/4h candles. Failed
+or expired reads are never treated as successful trading inputs.
 
-Original's fixed eight symbols have priority over queued general scans. A
-read-only 15-second warmer runs even without users or enabled automation and
-maintains the unchanged 15m/1h/4h frames. It cannot start automation or send
-orders. Public reads are capped at two concurrent upstream calls and do not
-retry the same failed host in a loop.
+The live scan itself fetches the selected symbols' 15m/1h/4h history, spacing
+kline requests by 0.5 seconds. At N=40, the conservative upper bound is 120
+reads / 240 weight units over about one minute; at N=100 it is 300 reads / 600
+weight units over about 2.5 minutes (about 240 per minute). Hourly/4-hour cache
+hits usually reduce that load. Daily universe selection uses at most one
+exchangeInfo read, one bulk 24h ticker read (weight 40) and one bulk bookTicker
+read (weight 2), once per UTC day. These are scanner estimates, not a promise
+about total account/feed traffic or other applications on the same IP. No
+background 15-second candle warmer is started; selected Original symbols get
+priority in the shared queue. Public reads remain capped at two concurrent
+upstream calls and do not retry a failed host in a loop. Candles use REST; a
+WebSocket is not used because each scan still needs the 259-candle history and
+the paced/cache-bounded REST path stays within the selected weight target.
 
 HTTP 418/429 applies the full valid `Retry-After`, including values above
 60 seconds, across all public paths and symbols. During that interval no

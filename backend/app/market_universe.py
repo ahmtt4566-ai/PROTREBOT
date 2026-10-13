@@ -10,9 +10,108 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+ORIGINAL_DEFAULT_SYMBOL_COUNT = 40
+ORIGINAL_MIN_SYMBOL_COUNT = 10
+ORIGINAL_MAX_SYMBOL_COUNT = 100
+ORIGINAL_MIN_QUOTE_VOLUME_USDT = 1_000_000.0
+ORIGINAL_MIN_SYMBOL_AGE_DAYS = 30
+ORIGINAL_MAX_SPREAD_BPS = 8.0
+
 
 def active_usdt_perpetual(contract: dict[str, Any]) -> bool:
     return contract.get("status") == "TRADING" and contract.get("contractType") == "PERPETUAL" and contract.get("quoteAsset") == "USDT"
+
+
+def ranked_original_live_symbols(
+    exchange_info: Any,
+    tickers_24h: Any,
+    book_tickers: Any,
+    *,
+    now_ms: int,
+) -> tuple[list[str], int]:
+    if (
+        not isinstance(exchange_info, dict)
+        or not isinstance(exchange_info.get("symbols"), list)
+        or not isinstance(tickers_24h, list)
+        or not isinstance(book_tickers, list)
+        or type(now_ms) is not int
+        or now_ms <= 0
+    ):
+        raise ValueError("Invalid Binance Futures universe payload")
+
+    contracts = exchange_info["symbols"]
+    if any(not isinstance(row, dict) or not isinstance(row.get("symbol"), str) for row in contracts):
+        raise ValueError("Invalid Binance Futures contract metadata")
+    if len({row["symbol"] for row in contracts}) != len(contracts):
+        raise ValueError("Duplicate Binance Futures contract symbol")
+
+    def symbol_map(rows: list[Any], label: str) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get("symbol"), str):
+                raise ValueError(f"Invalid Binance Futures {label} row")
+            symbol = row["symbol"]
+            if symbol in result:
+                raise ValueError(f"Duplicate Binance Futures {label} symbol")
+            result[symbol] = row
+        return result
+
+    ticker_map = symbol_map(tickers_24h, "24h ticker")
+    book_map = symbol_map(book_tickers, "book ticker")
+    minimum_age_ms = ORIGINAL_MIN_SYMBOL_AGE_DAYS * 24 * 60 * 60 * 1000
+    active_contracts = [contract for contract in contracts if active_usdt_perpetual(contract)]
+    if not active_contracts:
+        raise ValueError("No active USDT perpetual contracts returned")
+    age_qualified: set[str] = set()
+    for contract in active_contracts:
+        try:
+            onboard_ms = int(contract["onboardDate"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if onboard_ms > 0 and now_ms - onboard_ms >= minimum_age_ms:
+            age_qualified.add(contract["symbol"])
+    if not age_qualified or not age_qualified.issubset(ticker_map) or not age_qualified.issubset(book_map):
+        raise ValueError("Incomplete Binance Futures daily market data")
+    eligible: list[tuple[str, float]] = []
+    for contract in contracts:
+        if not active_usdt_perpetual(contract):
+            continue
+        symbol = contract["symbol"]
+        if not symbol.isascii() or not symbol.isalnum() or not symbol.isupper() or not symbol.endswith("USDT"):
+            continue
+        try:
+            onboard_ms = int(contract["onboardDate"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if onboard_ms <= 0 or now_ms - onboard_ms < minimum_age_ms:
+            continue
+
+        ticker = ticker_map.get(symbol)
+        book = book_map.get(symbol)
+        if ticker is None or book is None:
+            continue
+        try:
+            quote_volume = float(ticker["quoteVolume"])
+            bid = float(book["bidPrice"])
+            ask = float(book["askPrice"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if (
+            not all(math.isfinite(value) for value in (quote_volume, bid, ask))
+            or quote_volume < ORIGINAL_MIN_QUOTE_VOLUME_USDT
+            or bid <= 0
+            or ask < bid
+        ):
+            continue
+        midpoint = (ask + bid) / 2
+        spread_bps = (ask - bid) / midpoint * 10_000
+        if spread_bps > ORIGINAL_MAX_SPREAD_BPS:
+            continue
+        eligible.append((symbol, quote_volume))
+
+    eligible.sort(key=lambda row: (-row[1], row[0]))
+    ranked = [symbol for symbol, _volume in eligible[:ORIGINAL_MAX_SYMBOL_COUNT]]
+    return ranked, len(eligible)
 
 
 def market_rows(info: dict[str, Any], tickers: list[dict[str, Any]]) -> list[dict[str, Any]]:

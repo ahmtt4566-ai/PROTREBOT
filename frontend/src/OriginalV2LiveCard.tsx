@@ -27,10 +27,13 @@ const diagnosticMessages: Record<string, string> = {
 }
 
 export const originalScanLabels: Record<string, string> = {
+  UNIVERSE_PENDING: 'Günlük sembol listesi bekleniyor',
+  UNIVERSE_REFRESH: 'Günlük sembol listesi yenileniyor',
   SCANNING: 'Tarama sürüyor',
   SCAN_COMPLETE: 'Tarama tamamlandı',
   WAITING_NEXT_CANDLE: 'Sonraki 15m mum bekleniyor',
   RATE_LIMIT_WAIT: 'Borsa istek sınırı bekleniyor',
+  NO_ELIGIBLE_SYMBOLS: 'Filtrelere uyan sembol yok',
   BLOCKED: 'Yeni girişler engellendi',
 }
 
@@ -44,7 +47,8 @@ export type OriginalV2LiveStatus = {
   session?: {hours: number; started_at?: string | null; expires_at?: string | null; remaining_seconds: number; authority_limited: boolean; warning_sent: boolean} | null
   daily?: {day: string; loss: number; limit: number; locked: boolean} | null
   symbols: string[]
-  scanner?: {stage?: string; last_cycle_at?: string; last_scan_at?: string; scanned_symbol_count?: number; candidate_count?: number} | null
+  universe?: {requested_count: number; selected_count: number; eligible_count: number; updated_at?: string | null} | null
+  scanner?: {stage?: string; last_cycle_at?: string; last_scan_at?: string; scanned_symbol_count?: number; scanned_symbols?: string[]; candidate_count?: number} | null
   fill_lock?: {id: string; active: boolean; symbol: string; violations: string[]; evidence?: {
     stop_percent?: string; risk_usdt?: string; risk_budget_usdt?: string; margin_usdt?: string
   }} | null
@@ -66,6 +70,7 @@ type Props = {
 export default function OriginalV2LiveCard({className, status, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice}: Props) {
   const [risk, setRisk] = useState(String(status.risk_percent))
   const [dailyLoss, setDailyLoss] = useState(String(status.daily_loss_percent))
+  const [symbolCount, setSymbolCount] = useState(String(status.universe?.requested_count ?? 40))
   const [hours, setHours] = useState('1')
   const [clock, setClock] = useState(Date.now)
   const [sessionClock, setSessionClock] = useState({received: Date.now(), remaining: status.session?.remaining_seconds ?? 0})
@@ -139,7 +144,8 @@ export default function OriginalV2LiveCard({className, status, armed, automation
     onNotice('')
     try {
       const payload = await request(stop ? '/original-v2/stop' : '/original-v2/start', stop ? undefined : {
-        confirmation, totp_code: code, risk_percent: Number(risk), daily_loss_percent: Number(dailyLoss), session_hours: Number(hours),
+        confirmation, totp_code: code, risk_percent: Number(risk), daily_loss_percent: Number(dailyLoss),
+        symbol_count: Number(symbolCount), session_hours: Number(hours),
       })
       if (!payload || typeof payload !== 'object' || !('enabled' in payload) || payload.enabled !== !stop) {
         throw new Error('Original V2 LIVE sonucu doğrulanamadı. LIVE durumunu yenileyin.')
@@ -164,7 +170,7 @@ export default function OriginalV2LiveCard({className, status, armed, automation
       <strong>{status.enabled ? 'OTURUM AÇIK' : status.paused ? 'GÜVENLİK KİLİDİ' : 'KAPALI'}</strong></header>
     <div className="masterTradeLiveControlMeta" data-testid="original-runtime-status">
       <span><small>STRATEJİ</small><b>Original V2</b></span>
-      <span><small>KAPSAM</small><b>{status.symbols.length} sembol</b></span>
+      <span><small>SEÇİLEN EVREN</small><b>{status.symbols.length} / {status.universe?.requested_count ?? 40} sembol</b></span>
       <span><small>ONAYLI RİSK</small><b>%{status.risk_percent}</b></span>
       <span><small>TARAMA</small><b>{!status.enabled ? 'Otomasyon kapalı' : originalScanLabels[status.scanner?.stage || ''] || 'İlk tarama bekleniyor'}</b></span>
       <span><small>SON TAMAMLANAN TARAMA</small><b>{status.scanner?.last_scan_at ? new Date(status.scanner.last_scan_at).toLocaleString('tr-TR') : 'Henüz tamamlanmadı'}</b></span>
@@ -175,8 +181,9 @@ export default function OriginalV2LiveCard({className, status, armed, automation
       <span><small>KALAN SÜRE</small><b data-testid="original-session-remaining">{remainingText}</b></span>
       <span><small>SEÇİLEN OTURUM</small><b>{status.session?.hours ?? 1} saat{status.session?.authority_limited ? ' · Yetki süresiyle sınırlı' : ''}</b></span>
     </div>
-    <p>8 sembol · 3x · en fazla %6 stop. TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
-    <small>{status.symbols.map(symbol => symbol.replace('USDT', '')).join(' · ')}</small>
+    <p>USDT-M Futures · 24 saatlik hacimde ilk N; hacim en az 1.000.000 USDT, liste yaşı en az 30 gün, spread en fazla 8 bps. Evren UTC gününde bir kez yenilenir. Strateji: 3x · en fazla %6 stop · TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
+    <small>Son taramadaki semboller: {(status.scanner?.scanned_symbols ?? status.symbols).map(symbol => symbol.replace('USDT', '')).join(' · ') || 'Günlük seçim bekleniyor'}</small>
+    <small>Uygun: {status.universe?.eligible_count ?? 0} · Seçilen: {status.universe?.selected_count ?? status.symbols.length} · Liste yenileme: {status.universe?.updated_at ? new Date(status.universe.updated_at).toLocaleString('tr-TR') : 'Henüz yapılmadı'}</small>
     {status.pause_reason && <p role="status">{status.pause_reason}</p>}
     {fillLocked && <div role="alert">
       <p>Dolum güvenlik kilidi · {status.fill_lock?.symbol}. Yeni LIVE girişler OWNER onayına kadar kapalıdır.</p>
@@ -191,6 +198,7 @@ export default function OriginalV2LiveCard({className, status, armed, automation
       <div className="masterTradeLiveSetupGrid">
         <label>İşlem riski (%)<input type="number" min="0.01" max="1" step="0.01" required value={risk} onChange={event => setRisk(event.target.value)} disabled={busy || status.enabled}/></label>
         <label>Günlük kayıp sınırı (%)<input type="number" min="0.01" max="5" step="0.01" required value={dailyLoss} onChange={event => setDailyLoss(event.target.value)} disabled={busy || status.enabled}/></label>
+        <label>İlk N sembolü tara<input type="number" min="10" max="100" step="1" required value={symbolCount} onChange={event => setSymbolCount(event.target.value)} disabled={busy || status.enabled}/></label>
         <label>Oturum süresi<select aria-label="Oturum süresi" value={status.enabled ? String(status.session?.hours ?? 1) : hours} onChange={event => setHours(event.target.value)} disabled={busy || status.enabled}>
           {[1, 4, 12, 24].map(value => <option key={value} value={value}>{value} saat</option>)}
         </select></label>

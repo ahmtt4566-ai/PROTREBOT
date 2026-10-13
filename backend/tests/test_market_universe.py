@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from app.market_universe import MarketUniverseCache, market_rows
+from app.market_universe import MarketUniverseCache, market_rows, ranked_original_live_symbols
 
 
 def contract(symbol, **fields):
@@ -29,6 +29,59 @@ def test_universe_has_no_500_limit_and_keeps_missing_quotes_unknown():
     assert rows[0]["price"] == 1.2
     assert next(row for row in rows if row["symbol"] == "TOKEN1USDT")["price"] is None
     assert all(row["status"] == "TRADING" and row["contractType"] == "PERPETUAL" and row["quoteAsset"] == "USDT" for row in rows)
+
+
+def test_original_live_universe_filters_age_volume_spread_and_ranks_by_quote_volume():
+    now_ms = 2_000_000_000_000
+    old = now_ms - 31 * 24 * 60 * 60 * 1000
+    recent = now_ms - 29 * 24 * 60 * 60 * 1000
+    contracts = [
+        contract("BTCUSDT", onboardDate=old),
+        contract("ETHUSDT", onboardDate=old),
+        contract("NEWUSDT", onboardDate=recent),
+        contract("LOWUSDT", onboardDate=old),
+        contract("WIDEUSDT", onboardDate=old),
+        contract("CLOSEDUSDT", onboardDate=old, status="BREAK"),
+    ]
+    tickers = [
+        {"symbol": "BTCUSDT", "quoteVolume": "1000000"},
+        {"symbol": "ETHUSDT", "quoteVolume": "3000000"},
+        {"symbol": "NEWUSDT", "quoteVolume": "9000000"},
+        {"symbol": "LOWUSDT", "quoteVolume": "999999"},
+        {"symbol": "WIDEUSDT", "quoteVolume": "8000000"},
+        {"symbol": "CLOSEDUSDT", "quoteVolume": "9000000"},
+    ]
+    books = [
+        {"symbol": "BTCUSDT", "bidPrice": "100", "askPrice": "100.04"},
+        {"symbol": "ETHUSDT", "bidPrice": "100", "askPrice": "100.04"},
+        {"symbol": "NEWUSDT", "bidPrice": "100", "askPrice": "100.04"},
+        {"symbol": "LOWUSDT", "bidPrice": "100", "askPrice": "100.04"},
+        {"symbol": "WIDEUSDT", "bidPrice": "100", "askPrice": "100.10"},
+        {"symbol": "CLOSEDUSDT", "bidPrice": "100", "askPrice": "100.04"},
+    ]
+
+    ranked, eligible_count = ranked_original_live_symbols(
+        {"symbols": contracts}, tickers, books, now_ms=now_ms,
+    )
+
+    assert ranked == ["ETHUSDT", "BTCUSDT"]
+    assert eligible_count == 2
+
+
+def test_original_live_universe_caps_cached_ranked_list_at_owner_maximum():
+    now_ms = 2_000_000_000_000
+    onboard_date = now_ms - 31 * 24 * 60 * 60 * 1000
+    contracts = [contract(f"TOKEN{index}USDT", onboardDate=onboard_date) for index in range(101)]
+    tickers = [{"symbol": row["symbol"], "quoteVolume": str(2_000_000 - index)} for index, row in enumerate(contracts)]
+    books = [{"symbol": row["symbol"], "bidPrice": "100", "askPrice": "100.04"} for row in contracts]
+
+    ranked, eligible_count = ranked_original_live_symbols(
+        {"symbols": contracts}, tickers, books, now_ms=now_ms,
+    )
+
+    assert eligible_count == 101
+    assert len(ranked) == 100
+    assert "TOKEN100USDT" not in ranked
 
 
 def test_singleflight_ticker_3_seconds_metadata_10_minutes_and_explicit_stale_backoff():

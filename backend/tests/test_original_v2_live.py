@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from app import account_settings, original_v2_live as original, v25_execution as live
 from app import original_v2_demo_execution as demo_execution
+from app.public_market_data import PublicMarketData
 import test_original_v2_demo as decisions
 from app.strategies import original_v2_demo as strategy
 from test_original_v2_demo_execution import EntryClient, result
@@ -36,6 +37,12 @@ def state(monkeypatch):
     state["original_v2_live"] = {
         "enabled": True, "owner_id": "owner", "fingerprint": "fingerprint",
         "risk_percent": 0.5, "daily_loss_percent": 5, "paused": False,
+        "symbol_count": 40,
+        "universe": {
+            "updated_day": datetime.now(timezone.utc).date().isoformat(),
+            "ranked_symbols": strategy.fixed_profile()["execution_policy"]["allowed_symbols"],
+            "eligible_count": 8,
+        },
     }
     return state
 
@@ -61,6 +68,78 @@ def test_original_session_duration_choices(hours):
     body = original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=hours)
     assert body.session_hours == hours
     assert original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456").session_hours == 1
+    assert original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456").symbol_count == 40
+
+
+@pytest.mark.parametrize("count", [10, 40, 100])
+def test_original_live_symbol_count_bounds(count):
+    body = original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", symbol_count=count)
+    assert body.symbol_count == count
+
+
+@pytest.mark.parametrize("count", [9, 101, 1.5, True, "40"])
+def test_original_live_rejects_invalid_symbol_count(count):
+    with pytest.raises(ValidationError):
+        original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", symbol_count=count)
+
+
+def test_original_live_execution_policy_changes_only_the_daily_symbol_scope(state):
+    symbols = [f"TOKEN{index}USDT" for index in range(10)]
+    state["original_v2_live"].update(
+        symbol_count=10,
+        universe={
+            "updated_day": datetime.now(timezone.utc).date().isoformat(),
+            "ranked_symbols": symbols,
+            "eligible_count": 10,
+        },
+    )
+
+    policy = original.execution_policy(state, {"wallet_balance": 1000})
+
+    assert policy["allowed_symbols"] == symbols
+    assert policy["max_leverage"] == 3
+    assert policy["max_positions"] == 5
+    assert policy["max_same_direction_positions"] == 2
+    assert policy["daily_trade_limit"] == 3
+    assert policy["max_stop_distance_pct"] == 6
+
+
+def test_original_live_universe_is_fetched_once_per_day_and_resliced_for_new_n():
+    now_ms = int(time.time() * 1000)
+    onboard_date = now_ms - 31 * 24 * 60 * 60 * 1000
+    contracts = [
+        {"symbol": f"TOKEN{index:02d}USDT", "baseAsset": f"TOKEN{index:02d}",
+         "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT",
+         "onboardDate": onboard_date}
+        for index in range(12)
+    ]
+    tickers = [{"symbol": row["symbol"], "quoteVolume": str(1_000_000 + index)}
+               for index, row in enumerate(contracts)]
+    books = [{"symbol": row["symbol"], "bidPrice": "100", "askPrice": "100.04"}
+             for row in contracts]
+    calls = []
+
+    class Client:
+        async def public_get(self, path):
+            calls.append(path)
+            return {
+                "/fapi/v1/exchangeInfo": {"symbols": contracts},
+                "/fapi/v1/ticker/24hr": tickers,
+                "/fapi/v1/ticker/bookTicker": books,
+            }[path]
+
+    service = PublicMarketData()
+    application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
+    config = {"symbol_count": 10}
+    first = run(original.resolve_live_universe(application, Client(), config))
+    config["symbol_count"] = 12
+    second = run(original.resolve_live_universe(application, Client(), config))
+
+    assert len(first) == 10
+    assert len(second) == 12
+    assert calls == ["/fapi/v1/exchangeInfo", "/fapi/v1/ticker/24hr", "/fapi/v1/ticker/bookTicker"]
+    assert service.original_symbols == set(second)
+    assert config["universe"]["eligible_count"] == 12
 
 
 @pytest.mark.parametrize("hours", [0, 2, 25, -1, 1.5, True, "4"])
@@ -481,8 +560,10 @@ def test_original_scan_telemetry_records_only_completed_scans(state, monkeypatch
     monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=object()))
     monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"positions": [], "open_orders": []}))
     monkeypatch.setattr(original, "check_entry", AsyncMock())
+    symbols = [f"TOKEN{index}USDT" for index in range(12)]
+    monkeypatch.setattr(original, "resolve_live_universe", AsyncMock(return_value=symbols))
     scan = AsyncMock(return_value=([], {}), side_effect=RuntimeError("offline scan failed") if scan_failure else None)
-    monkeypatch.setattr(original.original, "candidates", scan)
+    monkeypatch.setattr(original.original, "live_candidates", scan)
     orders = AsyncMock()
     monkeypatch.setattr(live, "execute_live_order", orders)
     if scan_failure:
@@ -494,10 +575,12 @@ def test_original_scan_telemetry_records_only_completed_scans(state, monkeypatch
     assert scanner["last_cycle_at"]
     assert scanner["stage"] == ("BLOCKED" if scan_failure else "SCAN_COMPLETE")
     assert bool(scanner.get("last_scan_at")) is not scan_failure
+    assert scan.await_args.args[3] == symbols
     assert scan.await_args.kwargs == {"require_complete": True}
     orders.assert_not_awaited()
     if not scan_failure:
-        assert scanner["scanned_symbol_count"] == 8
+        assert scanner["scanned_symbol_count"] == len(symbols)
+        assert scanner["scanned_symbols"] == symbols
         assert scanner["candidate_count"] == 0
         run(original.cycle(req.app, ("offline-key", "offline-secret")))
         assert original.public_config(state)["scanner"]["stage"] == "WAITING_NEXT_CANDLE"

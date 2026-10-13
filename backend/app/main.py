@@ -33,7 +33,7 @@ from .premium_access import public_projection, requires_premium
 from .email_service import validate_app_base_url
 from .binance_rate_limit import BINANCE_GLOBAL_BAN, BINANCE_RATE_LIMITER
 from .market_universe import MarketUniverseCache, active_usdt_perpetual
-from .public_market_data import PublicMarketData, PUBLIC_PATHS as PUBLIC_MARKET_PATHS, original_market_warm_loop
+from .public_market_data import PublicMarketData, PUBLIC_PATHS as PUBLIC_MARKET_PATHS
 from .exchange_connections import (
     clear_vault_cache,
     ensure_exchange_vault,
@@ -1194,7 +1194,6 @@ async def lifespan(app: FastAPI):
     await restore_health_snapshot(app)
     app.state.infrastructure_task = asyncio.create_task(infrastructure_loop(app))
     app.state.runtime_tasks = [app.state.infrastructure_task]
-    app.state.runtime_tasks.append(asyncio.create_task(original_market_warm_loop(app, market_data_request)))
     from .notification_worker import schedule_sweep, shutdown_notifications
     from .customer_event_writer import schedule_cleanup, shutdown_events
     schedule_cleanup(app)

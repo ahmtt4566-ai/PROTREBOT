@@ -15,6 +15,12 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import original_v2_demo_execution as original
+from .market_universe import (
+    ORIGINAL_DEFAULT_SYMBOL_COUNT,
+    ORIGINAL_MAX_SYMBOL_COUNT,
+    ORIGINAL_MIN_SYMBOL_COUNT,
+    ranked_original_live_symbols,
+)
 from .strategies import original_v2_demo as strategy
 from .strategies.contracts import StrategyResult
 from .v22_commercial import authenticated_user
@@ -30,6 +36,7 @@ class Start(BaseModel):
     totp_code: str = Field(min_length=6, max_length=32, repr=False)
     risk_percent: float = Field(default=0.5, gt=0, le=1, allow_inf_nan=False)
     daily_loss_percent: float = Field(default=5, gt=0, le=5, allow_inf_nan=False)
+    symbol_count: int = Field(default=ORIGINAL_DEFAULT_SYMBOL_COUNT, ge=ORIGINAL_MIN_SYMBOL_COUNT, le=ORIGINAL_MAX_SYMBOL_COUNT, strict=True)
     session_hours: int = Field(default=1, strict=True)
 
     @field_validator("session_hours")
@@ -70,6 +77,63 @@ def running(state: dict[str, Any]) -> bool:
     return settings(state).get("enabled") is True
 
 
+def _valid_symbol_count(config: dict[str, Any]) -> int:
+    count = config.get("symbol_count", ORIGINAL_DEFAULT_SYMBOL_COUNT)
+    if type(count) is not int or not ORIGINAL_MIN_SYMBOL_COUNT <= count <= ORIGINAL_MAX_SYMBOL_COUNT:
+        raise HTTPException(503, "Original V2 sembol sayısı geçersiz; yeni taramalar kapalı.")
+    return count
+
+
+def _today_universe(config: dict[str, Any]) -> dict[str, Any] | None:
+    universe = config.get("universe")
+    if not isinstance(universe, dict) or universe.get("updated_day") != datetime.now(timezone.utc).date().isoformat():
+        return None
+    ranked = universe.get("ranked_symbols")
+    if (
+        not isinstance(ranked, list)
+        or len(ranked) > ORIGINAL_MAX_SYMBOL_COUNT
+        or any(not isinstance(symbol, str) or not symbol.isascii() or not symbol.isalnum() or not symbol.isupper() or not symbol.endswith("USDT") for symbol in ranked)
+        or len(set(ranked)) != len(ranked)
+    ):
+        return None
+    eligible_count = universe.get("eligible_count")
+    if type(eligible_count) is not int or eligible_count < len(ranked):
+        return None
+    return universe
+
+
+def selected_symbols(config: dict[str, Any]) -> list[str]:
+    universe = _today_universe(config)
+    if universe is None:
+        return []
+    return universe["ranked_symbols"][:_valid_symbol_count(config)]
+
+
+async def resolve_live_universe(application: Any, client: Any, config: dict[str, Any]) -> list[str]:
+    from . import v25_execution as live
+    universe = _today_universe(config)
+    if universe is None:
+        info = await client.public_get("/fapi/v1/exchangeInfo")
+        tickers = await client.public_get("/fapi/v1/ticker/24hr")
+        book_tickers = await client.public_get("/fapi/v1/ticker/bookTicker")
+        ranked, eligible_count = ranked_original_live_symbols(
+            info, tickers, book_tickers, now_ms=int(time.time() * 1000),
+        )
+        universe = {
+            "updated_day": datetime.now(timezone.utc).date().isoformat(),
+            "updated_at": live.now_iso(),
+            "ranked_symbols": ranked,
+            "eligible_count": eligible_count,
+        }
+        config["universe"] = universe
+    symbols = universe["ranked_symbols"][:_valid_symbol_count(config)]
+    service = getattr(application.state, "public_market_data", None)
+    if service is not None:
+        service.set_original_symbols(symbols)
+    universe["selected_symbols"] = symbols
+    return symbols
+
+
 def plan_is_original(plan: dict[str, Any]) -> bool:
     return plan.get("source") == SOURCE
 
@@ -87,6 +151,14 @@ def preserve(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 def public_config(state: dict[str, Any]) -> dict[str, Any]:
     config = settings(state)
+    symbols = selected_symbols(config)
+    cached_universe = _today_universe(config)
+    universe = {
+        "requested_count": _valid_symbol_count(config),
+        "selected_count": len(symbols),
+        "eligible_count": int(cached_universe.get("eligible_count", 0)) if cached_universe is not None else 0,
+        "updated_at": cached_universe.get("updated_at") if cached_universe is not None else None,
+    }
     expires = float(config.get("session_expires_at_epoch") or ((state.get("auto") or {}).get("session_until") if running(state) else 0) or 0)
     return {"available": available(), "enabled": running(state),
             "paused": config.get("paused", False), "pause_reason": config.get("pause_reason"),
@@ -94,13 +166,14 @@ def public_config(state: dict[str, Any]) -> dict[str, Any]:
             "daily": copy.deepcopy(config.get("daily")),
             "fill_lock": copy.deepcopy(config.get("fill_lock")),
             "scanner": copy.deepcopy(config.get("scanner")),
+            "universe": universe,
             "session": {"hours": config.get("session_hours", 1),
                         "started_at": config.get("session_started_at"),
                         "expires_at": datetime.fromtimestamp(expires, timezone.utc).isoformat() if expires else None,
                         "remaining_seconds": max(0, int(expires - time.time())) if running(state) else 0,
                         "authority_limited": config.get("session_authority_limited", False),
                         "warning_sent": bool(config.get("session_warning_sent"))},
-            "symbols": strategy.fixed_profile()["execution_policy"]["allowed_symbols"]}
+            "symbols": symbols}
 
 
 def pause(state: dict[str, Any], reason: str) -> None:
@@ -253,8 +326,12 @@ async def daily_guard(client: Any, state: dict[str, Any], snapshot: dict[str, An
 
 def execution_policy(state: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
     fixed = strategy.fixed_profile()["execution_policy"]
+    symbols = selected_symbols(settings(state))
+    if not symbols:
+        raise HTTPException(423, "Original V2 günlük sembol listesi hazır değil; yeni girişler kapalı.")
     current = state["policy"]
     result = {**current, **fixed, "max_stop_distance_pct": 6}
+    result["allowed_symbols"] = symbols
     for key in ("max_margin_per_trade", "max_positions", "max_same_direction_positions",
                 "max_total_exposure_usdt", "daily_trade_limit", "consecutive_loss_limit", "max_spread_bps"):
         result[key] = min(current[key], fixed[key])
@@ -273,10 +350,11 @@ def execution_policy(state: dict[str, Any], snapshot: dict[str, Any]) -> dict[st
 async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
                      snapshot: dict[str, Any]) -> dict[str, Any]:
     from . import v25_execution as live
-    original.validate_result(result)
+    symbols = selected_symbols(settings(state))
+    original.validate_live_result(result, symbols)
     if not result.signal.strategy_eligible:
         raise HTTPException(423, "Original V2 sinyali girişe uygun değil.")
-    spec = await original.build_spec(client, result)
+    spec = await original.build_live_spec(client, result, symbols)
     policy = execution_policy(state, snapshot)
     entry, stop = Decimal(spec["entry_price"]), Decimal(spec["stop_loss"])
     budget = Decimal(str(policy["max_loss_per_trade"]))
@@ -533,11 +611,21 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
         snapshot = await live.account_snapshot(client, cached=True, source="original_strategy")
         await check_entry(application, client, state, snapshot)
         occupied = {item["symbol"] for item in snapshot["positions"] + snapshot["open_orders"]}
+        scanner.update(stage="UNIVERSE_REFRESH")
+        symbols = await resolve_live_universe(application, client, config)
+        if not symbols:
+            config["last_decision_time"] = at
+            scanner.update(stage="NO_ELIGIBLE_SYMBOLS", scanned_symbol_count=0,
+                           scanned_symbols=[], candidate_count=0, last_scan_at=live.now_iso())
+            live.persist_state(state)
+            return
         scanner.update(stage="SCANNING")
-        eligible, _results = await original.candidates(client, at, occupied, require_complete=True)
+        eligible, _results = await original.live_candidates(
+            client, at, occupied, symbols, require_complete=True,
+        )
         config["last_decision_time"] = at
         scanner.update(stage="SCAN_COMPLETE", last_scan_at=live.now_iso(),
-                       scanned_symbol_count=len(strategy.fixed_profile()["execution_policy"]["allowed_symbols"]),
+                       scanned_symbol_count=len(symbols), scanned_symbols=symbols,
                        candidate_count=len(eligible))
         for candidate, result in eligible[:3]:
             if not running(state):
@@ -658,8 +746,11 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
         if previous and (previous.get("owner_id") != user["id"] or previous.get("fingerprint") != fingerprint):
             raise HTTPException(423, "Original V2 hesap bağlantısı değişti; günlük limit kaydı korunuyor.")
         config = {**previous, "owner_id": user["id"], "risk_percent": body.risk_percent,
-                  "fingerprint": fingerprint,
+                  "fingerprint": fingerprint, "symbol_count": body.symbol_count,
                   "daily_loss_percent": body.daily_loss_percent, "enabled": False, "paused": False}
+        scanner = config.setdefault("scanner", {})
+        scanner.update(stage="UNIVERSE_PENDING", last_scan_at=None, scanned_symbol_count=0,
+                       scanned_symbols=[], candidate_count=0)
         state["original_v2_live"] = config
         try:
             client = live.client_for(request.app, request)

@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -416,6 +417,12 @@ class ExecutionReliabilityTests(unittest.TestCase):
             "pause_reason": None,
             "session_expires_at_epoch": session_until,
             "scanner": {},
+            "symbol_count": 40,
+            "universe": {
+                "updated_day": datetime.now(timezone.utc).date().isoformat(),
+                "ranked_symbols": ["BTCUSDT"],
+                "eligible_count": 1,
+            },
         }
         failure = execution.LiveRateLimitError("Mock public market rate limit", retry_after=7)
         failure.request_method = "GET"
@@ -429,7 +436,7 @@ class ExecutionReliabilityTests(unittest.TestCase):
             patch.object(execution, "client_for_with_credentials", return_value=SimpleNamespace()),
             patch.object(execution, "account_snapshot", new=AsyncMock(return_value=snapshot)),
             patch.object(original_v2_live, "check_entry", new=AsyncMock()),
-            patch.object(original_v2_live.original, "candidates", new=candidates),
+            patch.object(original_v2_live.original, "live_candidates", new=candidates),
         )
         with common[0], common[1], common[2], common[3], common[4]:
             with self.assertRaises(execution.LiveRateLimitError):

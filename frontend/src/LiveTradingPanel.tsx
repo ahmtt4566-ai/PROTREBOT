@@ -760,7 +760,20 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const originalActive = status?.original_v2_live?.enabled === true
   const originalScanner = status?.original_v2_live?.scanner
   const scannerStage = originalActive ? originalScanner?.stage : status?.scanner?.last_cycle_stage
-  const scannerStatus = scannerStage === 'WAITING_RISK_DATA' ? 'Günlük risk verisi bekleniyor' : scannerStage || (originalActive ? 'İlk tarama bekleniyor' : status?.scanner?.last_scan_at ? 'WAITING FOR NEXT SCAN' : 'WAITING')
+  const originalScannerLabels: Record<string, string> = {
+    UNIVERSE_PENDING: 'Günlük sembol listesi bekleniyor',
+    UNIVERSE_REFRESH: 'Günlük sembol listesi yenileniyor',
+    SCANNING: 'Sembol taraması sürüyor',
+    SCAN_COMPLETE: 'Tarama tamamlandı',
+    WAITING_NEXT_CANDLE: 'Sonraki 15m mum bekleniyor',
+    WAITING_RISK_DATA: 'Günlük risk verisi bekleniyor',
+    RATE_LIMIT_WAIT: 'Binance istek sınırı bekleniyor',
+    NO_ELIGIBLE_SYMBOLS: 'Filtrelere uyan sembol yok',
+    BLOCKED: 'Yeni girişler engellendi',
+  }
+  const scannerStatus = originalActive
+    ? originalScannerLabels[scannerStage || ''] || scannerStage || 'İlk tarama bekleniyor'
+    : scannerStage || (status?.scanner?.last_scan_at ? 'WAITING FOR NEXT SCAN' : 'WAITING')
   const candidateCount = originalActive ? originalScanner?.candidate_count ?? 0 : status?.scanner?.selected_symbols_count ?? status?.scanner?.candidate_count ?? 0
   const automationReason = originalActive ? status?.original_v2_live?.pause_reason || `Original V2 · ${status?.original_v2_live?.symbols.length} sembol · risk %${status?.original_v2_live?.risk_percent}` : status?.auto?.last_error || status?.auto?.last_skip_reason || status?.scanner?.last_skip_reason || status?.auto?.last_decision || blocker
   const safetyRows = [

@@ -127,6 +127,17 @@ def test_fixed_universe_cannot_expand(symbol):
         demo.evaluate(replace(request(), symbol=symbol), enabled=True)
 
 
+def test_live_selected_universe_expands_only_the_symbol_gate():
+    selected = replace(request(), symbol="LINKUSDT")
+    result = demo.evaluate_live_universe(selected, allowed_symbols=["LINKUSDT"], enabled=True)
+    assert result.signal.symbol == "LINKUSDT"
+    assert result.signal.provenance.parameter_hash == demo.DOCUMENT_SHA256
+    with pytest.raises(demo.DemoDecisionError, match="SYMBOL_OUTSIDE_FIXED_UNIVERSE"):
+        demo.evaluate(selected, enabled=True)
+    with pytest.raises(demo.DemoDecisionError, match="SYMBOL_OUTSIDE_LIVE_UNIVERSE"):
+        demo.evaluate_live_universe(selected, allowed_symbols=["ADAUSDT"], enabled=True)
+
+
 def test_caller_cannot_override_reference_policy_or_window():
     with pytest.raises(demo.DemoDecisionError, match="CALLER_POLICY_OVERRIDE_DENIED"):
         demo.evaluate(replace(request(), historical_policy_override={"confidence_threshold": 90}), enabled=True)

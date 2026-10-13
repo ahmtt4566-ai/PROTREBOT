@@ -58,8 +58,27 @@ def validate_result(result: StrategyResult) -> None:
         fail("SYMBOL_OUTSIDE_FIXED_UNIVERSE")
 
 
+def validate_live_result(result: StrategyResult, allowed_symbols: list[str]) -> None:
+    if result.signal.provenance.strategy_id != strategy.STRATEGY_ID:
+        fail("UNKNOWN_DEMO_STRATEGY_ID")
+    strategy.decision_record(result)
+    if result.signal.exit_policy_id != EXIT_ID:
+        fail("ORIGINAL_EXIT_ID_MISMATCH")
+    if result.signal.symbol not in allowed_symbols:
+        fail("SYMBOL_OUTSIDE_LIVE_UNIVERSE")
+
+
 def identity(result: StrategyResult, plan_id: str) -> dict[str, Any]:
     validate_result(result)
+    return _identity(result, plan_id)
+
+
+def live_identity(result: StrategyResult, plan_id: str, allowed_symbols: list[str]) -> dict[str, Any]:
+    validate_live_result(result, allowed_symbols)
+    return _identity(result, plan_id)
+
+
+def _identity(result: StrategyResult, plan_id: str) -> dict[str, Any]:
     profile = strategy.fixed_profile()
     return {
         "strategy_id": strategy.STRATEGY_ID,
@@ -112,6 +131,19 @@ def tp1_quantity(plan: dict[str, Any], quantity: Decimal, mark_entry: Decimal) -
 
 async def build_spec(client: demo.BinanceDemoClient, result: StrategyResult) -> dict[str, Any]:
     validate_result(result)
+    return await _build_spec(client, result)
+
+
+async def build_live_spec(
+    client: demo.BinanceDemoClient,
+    result: StrategyResult,
+    allowed_symbols: list[str],
+) -> dict[str, Any]:
+    validate_live_result(result, allowed_symbols)
+    return await _build_spec(client, result)
+
+
+async def _build_spec(client: demo.BinanceDemoClient, result: StrategyResult) -> dict[str, Any]:
     if not result.signal.strategy_eligible:
         fail("CANONICAL_ENTRY_NOT_ELIGIBLE")
     signal = result.legacy["analysis"]
@@ -378,10 +410,43 @@ async def candidates(
     client: OriginalMarketClient, at: int, occupied: set[str],
     *, require_complete: bool = False,
 ) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
+    symbols = sorted(strategy.fixed_profile()["execution_policy"]["allowed_symbols"])
+    return await _candidates(client, at, occupied, symbols, require_complete=require_complete)
+
+
+async def live_candidates(
+    client: OriginalMarketClient,
+    at: int,
+    occupied: set[str],
+    allowed_symbols: list[str],
+    *,
+    require_complete: bool = False,
+) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
+    if (
+        not 1 <= len(allowed_symbols) <= 100
+        or any(not isinstance(symbol, str) or not symbol.isascii() or not symbol.isalnum() or not symbol.isupper() or not symbol.endswith("USDT")
+               for symbol in allowed_symbols)
+        or len(set(allowed_symbols)) != len(allowed_symbols)
+    ):
+        fail("INVALID_LIVE_SYMBOL_UNIVERSE")
+    return await _candidates(
+        client, at, occupied, allowed_symbols, require_complete=require_complete,
+        live_universe=True,
+    )
+
+
+async def _candidates(
+    client: OriginalMarketClient,
+    at: int,
+    occupied: set[str],
+    symbols: list[str],
+    *,
+    require_complete: bool = False,
+    live_universe: bool = False,
+) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
     from .backtest_data import normalize_candles
     from .v25_execution import rank_market_tickers
 
-    symbols = sorted(strategy.fixed_profile()["execution_policy"]["allowed_symbols"])
     info = await client.public_get("/fapi/v1/exchangeInfo")
     results, tickers, complete = {}, [], set()
     for symbol in symbols:
@@ -409,7 +474,11 @@ async def candidates(
                 _duplicates or len(frames[interval]) != 259 or not series.history_complete(at)
             ):
                 fail("INCOMPLETE_ORIGINAL_LIVE_HISTORY")
-        results[symbol] = strategy.evaluate(StrategyInput(symbol, at, frames), enabled=True)
+        decision = StrategyInput(symbol, at, frames)
+        results[symbol] = (
+            strategy.evaluate_live_universe(decision, allowed_symbols=symbols, enabled=True)
+            if live_universe else strategy.evaluate(decision, enabled=True)
+        )
         if all(series.history_complete(at) for series in series_by_interval.values()):
             complete.add(symbol)
         ticker = series_by_interval["15m"].ticker(at, symbol)

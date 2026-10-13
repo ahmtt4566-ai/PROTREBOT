@@ -78,6 +78,31 @@ def evaluate(request: StrategyInput, *, enabled: bool | None = None) -> Strategy
     profile = fixed_profile()
     if request.symbol not in profile["execution_policy"]["allowed_symbols"]:
         _fail("SYMBOL_OUTSIDE_FIXED_UNIVERSE")
+    return _evaluate_profiled(request, profile)
+
+
+def evaluate_live_universe(
+    request: StrategyInput,
+    *,
+    allowed_symbols: list[str],
+    enabled: bool | None = None,
+) -> StrategyResult:
+    _require_enabled(enabled)
+    profile = fixed_profile()
+    if (
+        not isinstance(allowed_symbols, list)
+        or not 1 <= len(allowed_symbols) <= 100
+        or any(not isinstance(symbol, str) for symbol in allowed_symbols)
+        or len(set(allowed_symbols)) != len(allowed_symbols)
+        or any(not symbol.isascii() or not symbol.isalnum() or not symbol.isupper() or not symbol.endswith("USDT") for symbol in allowed_symbols)
+    ):
+        _fail("INVALID_LIVE_SYMBOL_UNIVERSE")
+    if request.symbol not in allowed_symbols:
+        _fail("SYMBOL_OUTSIDE_LIVE_UNIVERSE")
+    return _evaluate_profiled(request, profile)
+
+
+def _evaluate_profiled(request: StrategyInput, profile: dict[str, Any]) -> StrategyResult:
     if request.historical_policy_override is not None:
         _fail("CALLER_POLICY_OVERRIDE_DENIED")
     for interval in INTERVALS:
