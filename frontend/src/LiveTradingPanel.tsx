@@ -364,7 +364,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     ? new Date(backendBan.blocked_until).toLocaleString('tr-TR', {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'})
     : null
   const globalBanMessage = globalBanActive
-    ? `Binance geçici olarak engelledi${banUntilText ? `, ${banUntilText} tarihine kadar bekleniyor` : ''}. Kalan süre: ${banCountdownText}.`
+    ? `Binance geçici olarak engelledi; bitiş saati: ${banUntilText ?? 'sunucudan alınamadı'}. Kalan süre: ${banCountdownText}.`
     : ''
   const configured = Boolean(liveConnection?.configured || status?.credentials?.configured)
   const connected = Boolean(status?.connected)
@@ -435,7 +435,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       && Number.isFinite(autoSessionExpiresAt)
       && autoSessionExpiresAt > Date.now()
     const accountRateLimited = status.account_rate_limit?.locked === true || status.account_rate_limit?.pending_verification === true
-    const hasGlobalBanStatus = connections?.binance_ban?.active === false
+    const hasGlobalBanStatus = backendBan?.active === false
     const originalDaily = originalRuntime.daily
     const originalDailyLossReady = originalDaily?.locked === false
       && typeof originalDaily.loss === 'number'
@@ -464,6 +464,11 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       demo_certificate: {label: 'Demo sertifikası / LIVE izni', passed: 'Gerekli Demo sertifikası veya LIVE izni mevcut.', failed: 'Gerekli Demo sertifikası / LIVE izni tamamlanmamış.'},
     }
     addCheck('live_status', 'Güncel LIVE durumu', statusVerified === true, statusVerified ? 'Sunucu durumu doğrulandı.' : 'Sunucu durumu doğrulanmadı; eski bilgiyle girişe izin verilmez.')
+    addCheck('global_binance_ban', 'Binance genel engeli', hasGlobalBanStatus, hasGlobalBanStatus
+      ? 'Aktif Binance genel engeli yok.'
+      : backendBan?.active === true
+        ? globalBanMessage || `Binance geçici engel aktif${banUntilText ? ` – bitiş saati ${banUntilText}` : '; bitiş saati sunucudan alınamadı'}.`
+        : 'Binance engel durumu doğrulanamadı; girişe izin verilmez.')
     const knownFillLock = originalRuntime.fill_lock === null || typeof originalRuntime.fill_lock?.active === 'boolean'
     const fillLockReady = knownFillLock && originalRuntime.fill_lock?.active !== true
     addCheck('fill_lock', 'Dolum güvenlik kilidi', fillLockReady, fillLockReady ? 'Dolum güvenlik kilidi aktif değil.' : originalRuntime.fill_lock?.active === true ? 'Dolum güvenlik kilidi aktif; OWNER incelemesi gerekiyor.' : 'Dolum kilidi durumu doğrulanamadı.')
@@ -471,7 +476,6 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     addCheck('auto_session', 'Canlı otomasyon oturumu', autoSessionActive, autoSessionActive ? 'Canlı otomasyon oturumu etkin.' : 'Canlı otomasyon oturumu etkin değil veya süresi dolmuş.')
     addCheck('connected', 'Binance hesap bağlantısı', status.connected === true, status.connected === true ? 'Hesap bağlantısı ve snapshot hazır.' : 'Binance hesap bağlantısı veya güncel hesap snapshot’ı hazır değil.')
     addCheck('account_rate_limit', 'Binance hesap hız sınırı', !accountRateLimited, accountRateLimited ? 'Binance hesap doğrulaması / hız sınırı beklemede.' : 'Hesap hız sınırı kilidi yok.')
-    addCheck('global_binance_ban', 'Binance genel engeli', hasGlobalBanStatus, hasGlobalBanStatus ? 'Aktif Binance genel engeli yok.' : 'Binance engel durumu alınamadı veya engel aktif.')
     addCheck('credentials', 'Kayıtlı LIVE API anahtarı', status.credentials?.configured === true, status.credentials?.configured === true ? 'Hesap kasasında kayıtlı; anahtar veya secret gösterilmez.' : 'Hesap kasasında kullanılabilir LIVE API anahtarı yok.')
     const authorizationReady = status.authorization?.valid === true && status.authorization.scope_match === true
     addCheck('authorization', 'LIVE yetkilendirmesi', authorizationReady, authorizationReady ? 'LIVE yetkisi geçerli ve hesap kapsamı eşleşiyor.' : authorizationReasonText)

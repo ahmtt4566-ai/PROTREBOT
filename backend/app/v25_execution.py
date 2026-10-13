@@ -4247,7 +4247,26 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
 
 
 async def live_candles(client: BinanceLiveClient, symbol: str, interval: str, limit: int = 260) -> tuple[list[dict[str, float]], int]:
-    rows = await client.public_get("/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": limit})
+    from .binance_kline_stream import KlineStreamUnavailable
+
+    application_state = getattr(getattr(client, "application", None), "state", None)
+    stream = getattr(application_state, "original_kline_stream", None)
+    if stream is not None and stream.is_subscribed(symbol, interval):
+        try:
+            rows = await stream.get_candles(
+                symbol,
+                interval,
+                limit,
+                lambda params: client.public_get("/fapi/v1/klines", params),
+            )
+        except KlineStreamUnavailable as exc:
+            raise LiveRateLimitError(
+                "Binance geçici engeli sürüyor; eksik mum verisi nedeniyle tarama bekletildi.",
+                retry_after=exc.retry_after,
+                exchange_code=-1003,
+            ) from exc
+    else:
+        rows = await client.public_get("/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": limit})
     candles: list[dict[str, float]] = []
     last_open_time = 0
     for row in rows if isinstance(rows, list) else []:

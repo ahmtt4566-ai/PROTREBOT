@@ -469,6 +469,15 @@ are distinguished from actual upstream HTTP responses. Trading and Master Trade
 show the real API error; dashboard reads are bounded, cancellable and never
 overlap. Invalid quotes are rejected rather than converted into invented prices.
 
+Original V2 LIVE subscribes to Binance Futures kline WebSocket updates for its
+selected symbols and the strategy's `15m`, `1h` and `4h` intervals. Scanner
+cycles use that in-memory candle cache; REST klines are fetched only to bootstrap
+missing history or repair a detected gap, through the shared public-data cache
+and global Binance ban clock. A 418/429 cooldown prevents REST backfills until
+the persisted retry deadline expires; the WebSocket feed may remain connected.
+Signed account and order requests continue to use the configured QuotaGuard
+route, and strategy, risk, order and protection rules are unchanged.
+
 Both frontend entrypoints validate Demo status, account and summary responses
 before storing them. Missing limits, HTML/proxy fallback bodies and malformed
 summaries produce a recoverable in-panel error, not a workspace crash or

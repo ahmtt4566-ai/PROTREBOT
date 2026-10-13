@@ -32,6 +32,7 @@ from .google_oauth import CALLBACK_PATH as GOOGLE_CALLBACK_PATH, callback_query 
 from .premium_access import public_projection, requires_premium
 from .email_service import validate_app_base_url
 from .binance_rate_limit import BINANCE_GLOBAL_BAN, BINANCE_RATE_LIMITER
+from .binance_kline_stream import BinanceKlineStream
 from .market_universe import MarketUniverseCache, active_usdt_perpetual
 from .public_market_data import PublicMarketData, PUBLIC_PATHS as PUBLIC_MARKET_PATHS
 from .exchange_connections import (
@@ -1113,6 +1114,7 @@ async def lifespan(app: FastAPI):
     app.state.market_http = None
     app.state.market_http_loop = None
     app.state.public_market_data = PublicMarketData()
+    app.state.original_kline_stream = BinanceKlineStream()
     app.state.db_pool = None
     app.state.redis_client = None
     app.state.paper_schema_ready = False
@@ -1230,6 +1232,7 @@ async def lifespan(app: FastAPI):
     await bounded_shutdown(shutdown_v21_demo(app))
     await bounded_shutdown(shutdown_binance_demo(app))
     await bounded_shutdown(shutdown_v25_execution(app))
+    await app.state.original_kline_stream.close()
     await bounded_shutdown(shutdown_v27_cloud(app))
     await bounded_shutdown(shutdown_v22_commercial(app))
 

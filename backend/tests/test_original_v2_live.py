@@ -750,6 +750,34 @@ class CandleClient:
                  (row["time"] + duration) * 1000 - 1, row.get("quote_volume") or 1_000_000] for row in rows]
 
 
+def test_live_scan_uses_stream_fetcher_for_every_strategy_interval():
+    client = CandleClient()
+    fetcher_client = CandleClient()
+    calls = []
+
+    async def streamed_fetch(symbol, interval, limit):
+        calls.append((symbol, interval, limit))
+        return await fetcher_client.public_get(
+            "/fapi/v1/klines",
+            {"symbol": symbol, "interval": interval, "limit": limit},
+        )
+
+    run(demo_execution.live_candidates(
+        client,
+        decisions.fixtures.AT,
+        set(),
+        list(decisions.SYMBOLS),
+        require_complete=True,
+        kline_fetch=streamed_fetch,
+    ))
+
+    assert len(calls) == len(decisions.SYMBOLS) * len(strategy.INTERVALS)
+    assert {interval for _, interval, _ in calls} == set(strategy.INTERVALS)
+    assert all(limit == 260 for _, _, limit in calls)
+    assert [path for path, _ in client.calls] == ["/fapi/v1/exchangeInfo"]
+    assert all(path == "/fapi/v1/klines" for path, _ in fetcher_client.calls)
+
+
 def test_live_scan_signal_and_ranking_exactly_equal_demo():
     demo_selected, demo_results = run(demo_execution.candidates(CandleClient(), decisions.fixtures.AT, set()))
     live_selected, live_results = run(demo_execution.candidates(

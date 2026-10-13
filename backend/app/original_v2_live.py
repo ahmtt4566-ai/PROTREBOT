@@ -180,8 +180,17 @@ async def resolve_live_universe(application: Any, client: Any, config: dict[str,
     service = getattr(application.state, "public_market_data", None)
     if service is not None:
         service.set_original_symbols(symbols)
+    await configure_original_kline_stream(application, symbols)
     universe["selected_symbols"] = symbols
     return symbols
+
+
+async def configure_original_kline_stream(application: Any, symbols: list[str]) -> None:
+    stream = getattr(application.state, "original_kline_stream", None)
+    if stream is None:
+        return
+    from .public_market_data import ORIGINAL_INTERVALS
+    await stream.configure(symbols, ORIGINAL_INTERVALS)
 
 
 def plan_is_original(plan: dict[str, Any]) -> bool:
@@ -778,10 +787,31 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
     if not running(state):
         scanner.update(stage="BLOCKED")
         return
+    stored_universe = config.get("universe")
+    ranked_symbols = stored_universe.get("ranked_symbols") if isinstance(stored_universe, dict) else None
+    if isinstance(ranked_symbols, list):
+        cached_symbols = ranked_symbols[:_valid_symbol_count(config)]
+        if cached_symbols and all(
+            isinstance(symbol, str) and symbol.isascii() and symbol.isalnum()
+            and symbol.isupper() and symbol.endswith("USDT")
+            for symbol in cached_symbols
+        ) and len(set(cached_symbols)) == len(cached_symbols):
+            service = getattr(application.state, "public_market_data", None)
+            if service is not None:
+                service.set_original_symbols(cached_symbols)
+            await configure_original_kline_stream(application, cached_symbols)
     if live.account_rate_limit_active(state):
         scanner.update(stage="RATE_LIMIT_WAIT", last_failure={
             "stage": "cooldown", "reason_code": "active_cooldown",
             "message": "Binance istek sınırı bekleniyor; bu döngüde tarama yapılmadı.",
+        })
+        scanner["last_24h"] = _scanner_history_summary(scanner, time.time())
+        return
+    global_ban_seconds = live.BINANCE_GLOBAL_BAN.remaining_seconds()
+    if global_ban_seconds > 0:
+        scanner.update(stage="RATE_LIMIT_WAIT", last_failure={
+            "stage": "cooldown", "reason_code": "binance_global_ban",
+            "message": f"Binance geçici engeli sürüyor; {global_ban_seconds} saniye bekleniyor.",
         })
         scanner["last_24h"] = _scanner_history_summary(scanner, time.time())
         return
@@ -828,9 +858,31 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
             "fee_bps_per_side": sizing_policy["fee_bps_per_side"],
             "slippage_bps_per_side": sizing_policy["slippage_bps_per_side"],
         }
+        stream = getattr(application.state, "original_kline_stream", None)
+
+        async def fetch_streamed_klines(symbol: str, interval: str, limit: int) -> Any:
+            from .binance_kline_stream import KlineStreamUnavailable
+
+            if stream is None or not stream.is_subscribed(symbol, interval):
+                raise RuntimeError("Original V2 kline stream is not configured for the active universe")
+            try:
+                return await stream.get_candles(
+                    symbol,
+                    interval,
+                    limit,
+                    lambda params: client.public_get("/fapi/v1/klines", params),
+                )
+            except KlineStreamUnavailable as exc:
+                raise live.LiveRateLimitError(
+                    "Binance geçici engeli sürüyor; eksik mum verisi nedeniyle tarama bekletildi.",
+                    retry_after=exc.retry_after,
+                    exchange_code=-1003,
+                ) from exc
+
         eligible, _results = await original.live_candidates(
             client, at, occupied, symbols, require_complete=True, diagnostics=scan_diagnostics,
             sizing_context=sizing_context,
+            kline_fetch=fetch_streamed_klines if stream is not None else None,
         )
         config["last_decision_time"] = at
         history_item = _record_scanner_scan(scanner, time.time(), len(eligible))
@@ -1109,4 +1161,5 @@ async def stop(request: Request) -> dict[str, Any]:
         pause(state, "OWNER acil durdurma")
         if await live.persist_state_awaited(state) not in {"INSERTED", "UPDATED"}:
             raise HTTPException(503, "Durdurma kalıcı kaydı doğrulanamadı; LIVE durumunu kontrol edin.")
+    await configure_original_kline_stream(request.app, [])
     return await status(request)

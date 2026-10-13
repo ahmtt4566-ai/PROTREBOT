@@ -12,7 +12,7 @@ import math
 import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, NoReturn, Protocol
+from typing import Any, Awaitable, Callable, NoReturn, Protocol
 
 from fastapi import HTTPException
 
@@ -520,6 +520,7 @@ async def live_candidates(
     require_complete: bool = False,
     diagnostics: dict[str, Any] | None = None,
     sizing_context: dict[str, Any] | None = None,
+    kline_fetch: Callable[[str, str, int], Awaitable[Any]] | None = None,
 ) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
     if (
         not 1 <= len(allowed_symbols) <= 100
@@ -531,6 +532,7 @@ async def live_candidates(
     return await _candidates(
         client, at, occupied, allowed_symbols, require_complete=require_complete,
         live_universe=True, diagnostics=diagnostics, sizing_context=sizing_context,
+        kline_fetch=kline_fetch,
     )
 
 
@@ -544,6 +546,7 @@ async def _candidates(
     live_universe: bool = False,
     diagnostics: dict[str, Any] | None = None,
     sizing_context: dict[str, Any] | None = None,
+    kline_fetch: Callable[[str, str, int], Awaitable[Any]] | None = None,
 ) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
     from .backtest_data import normalize_candles
     from .v25_execution import rank_market_tickers
@@ -620,9 +623,12 @@ async def _candidates(
         frames, series_by_interval = {}, {}
         for interval in strategy.INTERVALS:
             try:
-                raw = await client.public_get(
-                    "/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": 260},
-                )
+                if kline_fetch is None:
+                    raw = await client.public_get(
+                        "/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": 260},
+                    )
+                else:
+                    raw = await kline_fetch(symbol, interval, 260)
             except Exception:
                 if diagnostics is not None:
                     diagnostics["failure"] = {

@@ -162,6 +162,8 @@ test('global Binance ban shows countdown and disables test and connect actions',
   const warning = page.getByTestId('binance-global-ban')
   await expect(warning).toContainText('Binance geçici olarak engelledi')
   await expect(warning).toContainText('Kalan süre: 01:21:')
+  await expect(page.getByTestId('original-entry-status')).toContainText('Binance geçici olarak engelledi')
+  await expect(page.getByTestId('original-entry-checks')).toContainText('bitiş saati')
   await page.getByTitle('Connect your trading account', {exact: true}).click()
   const connection = page.locator('.masterTradeLiveConnectionCard')
   await expect(connection.getByRole('button', {name: 'TEST CONNECTION'})).toBeDisabled()
