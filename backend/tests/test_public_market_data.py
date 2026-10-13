@@ -1,9 +1,11 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
+from app.binance_rate_limit import BINANCE_GLOBAL_BAN
 from app.public_market_data import ORIGINAL_INTERVALS, ORIGINAL_SYMBOLS, PublicMarketData, original_market_warm_loop
 
 
@@ -47,7 +49,7 @@ def test_expired_candles_are_refetched_not_used_for_trading(monkeypatch):
 
         params = {"symbol": "BTCUSDT", "interval": "15m", "limit": 260}
         assert (await service.get("/fapi/v1/klines", params, fetch)).status_code == 200
-        now[0] = 116
+        now[0] = 161
         assert (await service.get("/fapi/v1/klines", params, fetch)).status_code == 503
         assert len(calls) == 2
 
@@ -77,7 +79,8 @@ def test_one_minute_original_polling_is_bounded_independent_of_user_count(monkey
             downstream += len(requests)
             await asyncio.gather(*requests)
         assert downstream == 14400
-        assert len(calls) == 96
+        assert len(calls) == 24
+        assert sum(service.source_weights.values()) == 120
         assert set(calls) == {(symbol, interval) for symbol in ORIGINAL_SYMBOLS for interval in ORIGINAL_INTERVALS}
 
     asyncio.run(run())
@@ -105,8 +108,9 @@ def test_candle_boundary_invalidates_cache_even_before_fifteen_seconds(monkeypat
 
 
 def test_429_waits_full_retry_after_across_symbols_and_paths():
+    now = [100.0]
+
     async def run():
-        now = [100.0]
         service = PublicMarketData(lambda: now[0])
         calls = []
 
@@ -127,6 +131,57 @@ def test_429_waits_full_retry_after_across_symbols_and_paths():
         await service.get("/fapi/v1/klines", {"symbol": "BTCUSDT"}, fetch)
         assert len(calls) == 2
 
+    with patch("app.binance_rate_limit.time.time", side_effect=lambda: now[0]):
+        asyncio.run(run())
+
+
+def test_global_ban_blocks_public_fetch_without_upstream_request():
+    async def run():
+        service = PublicMarketData()
+        response = httpx.Response(
+            418,
+            headers={"Retry-After": "180", "X-MBX-USED-WEIGHT-1M": "1660"},
+            json={"code": -1003},
+            request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/klines"),
+        )
+        BINANCE_GLOBAL_BAN.record(
+            response,
+            source="original_warmer",
+            egress_route="render_direct",
+        )
+        fetch = AsyncMock()
+        blocked = await service.get(
+            "/fapi/v1/klines",
+            {"symbol": "BTCUSDT", "interval": "15m", "limit": 260},
+            fetch,
+            source="original_live",
+        )
+        assert blocked.status_code == 418
+        assert int(blocked.headers["Retry-After"]) > 0
+        fetch.assert_not_awaited()
+    asyncio.run(run())
+
+
+def test_market_metrics_attribute_original_request_count_and_weight():
+    async def run():
+        service = PublicMarketData()
+
+        async def fetch(path, params):
+            return httpx.Response(
+                200,
+                json=[],
+                request=httpx.Request("GET", f"https://fapi.binance.com{path}"),
+            )
+
+        await service.get(
+            "/fapi/v1/klines",
+            {"symbol": "BTCUSDT", "interval": "15m", "limit": 260},
+            fetch,
+            source="original_live",
+        )
+        metric_key = "original_live:GET:/fapi/v1/klines:15m"
+        assert service.source_counts == {metric_key: 1}
+        assert service.source_weights == {metric_key: 5}
     asyncio.run(run())
 
 
@@ -191,12 +246,14 @@ def test_signed_paths_and_params_never_enter_public_transport(path, params):
 def test_original_warmer_only_reads_all_eight_symbols_and_required_frames():
     async def run():
         service = PublicMarketData()
+        service.original_until = service.clock() + 90
         application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
         calls = []
         done = asyncio.Event()
 
-        async def request(app, path, params):
+        async def request(app, path, params, *, source):
             calls.append((path, params.copy()))
+            assert source == "original_warmer"
             if len(calls) == 24:
                 done.set()
             return httpx.Response(200, json=[], request=httpx.Request("GET", "https://offline.invalid"))
@@ -217,11 +274,13 @@ def test_original_warmer_only_reads_all_eight_symbols_and_required_frames():
 def test_original_warm_http_failure_reports_status_without_response_or_url_secrets(caplog, monkeypatch, status):
     async def run():
         service = PublicMarketData()
+        service.original_until = service.clock() + 90
         application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
         calls = []
 
-        async def request(app, path, params):
+        async def request(app, path, params, *, source):
             calls.append(params.copy())
+            assert source == "original_warmer"
             response = httpx.Response(status, headers={"Retry-After": "180"},
                                       json={"msg": "private-upstream-body"},
                                       request=httpx.Request("GET", "https://offline.invalid/?secret=private-query"))
@@ -241,6 +300,74 @@ def test_original_warm_http_failure_reports_status_without_response_or_url_secre
     assert "retry_after_seconds=180" in caplog.text
     assert "private-upstream-body" not in caplog.text
     assert "private-query" not in caplog.text
+
+
+def test_original_warmer_stays_idle_without_recent_original_demand(monkeypatch):
+    async def run():
+        service = PublicMarketData(lambda: 100.0)
+        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
+
+        async def request(*args):
+            pytest.fail("Inactive Original warmer must not call Binance")
+
+        async def end_iteration(delay):
+            assert delay == 15
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr("app.public_market_data.asyncio.sleep", end_iteration)
+        with pytest.raises(asyncio.CancelledError):
+            await original_market_warm_loop(application, request)
+    asyncio.run(run())
+
+
+def test_original_warmer_sleeps_through_full_binance_cooldown(monkeypatch):
+    async def run():
+        service = PublicMarketData(lambda: 100.0)
+        service.original_until = 200.0
+        service.retry_at = 4981.0
+        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
+
+        async def request(*args):
+            pytest.fail("Original warmer must not call Binance during cooldown")
+
+        async def end_iteration(delay):
+            assert delay == 4881
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr("app.public_market_data.asyncio.sleep", end_iteration)
+        with pytest.raises(asyncio.CancelledError):
+            await original_market_warm_loop(application, request)
+    asyncio.run(run())
+
+
+def test_original_warmer_sleeps_through_restored_global_ban(monkeypatch):
+    async def run():
+        service = PublicMarketData()
+        service.original_until = service.clock() + 90
+        response = httpx.Response(
+            418,
+            headers={"Retry-After": "4881"},
+            json={"code": -1003},
+            request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/klines"),
+        )
+        BINANCE_GLOBAL_BAN.record(
+            response,
+            source="original_warmer",
+            egress_route="render_direct",
+        )
+        application = SimpleNamespace(state=SimpleNamespace(public_market_data=service))
+
+        async def request(*args, **kwargs):
+            pytest.fail("Restored global ban must stop Original warming")
+
+        async def end_iteration(delay):
+            assert delay >= 4880
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr("app.public_market_data.asyncio.sleep", end_iteration)
+        with pytest.raises(asyncio.CancelledError):
+            await original_market_warm_loop(application, request)
+    asyncio.run(run())
 
 
 def test_priority_universe_matches_immutable_original_profile():

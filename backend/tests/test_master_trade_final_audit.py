@@ -201,6 +201,7 @@ def vault_context(monkeypatch):
     monkeypatch.setattr(connections, "_SESSION_CACHE", {})
     monkeypatch.setattr(connections, "_SESSION_META", {})
     monkeypatch.setattr(connections, "session_id", Mock(return_value="offline-session"))
+    monkeypatch.setattr(live, "session_id", Mock(return_value="offline-session"))
     monkeypatch.setattr(connections, "_require_ready", AsyncMock(return_value=pool))
     monkeypatch.setattr(connections, "ensure_schema", AsyncMock())
     monkeypatch.setattr(connections, "ensure_session_cache", AsyncMock())

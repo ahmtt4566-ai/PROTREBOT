@@ -343,6 +343,34 @@ class ExecutionReliabilityTests(unittest.TestCase):
         self.assertEqual(raised.exception.request_path, "/fapi/v1/klines")
         self.assertEqual(raised.exception.retry_after, 7)
 
+    def test_global_ban_blocks_live_account_read_without_http(self):
+        application, state = application_for_loop()
+        response = execution.httpx.Response(
+            418,
+            headers={"Retry-After": "180", "X-MBX-USED-WEIGHT-1M": "1660"},
+            json={"code": -1003},
+            request=execution.httpx.Request("GET", "https://fapi.binance.com/fapi/v3/account"),
+        )
+        execution.BINANCE_GLOBAL_BAN.record(
+            response,
+            source="original_live",
+            egress_route="render_direct",
+        )
+        http = SimpleNamespace(request=AsyncMock())
+        client = execution.BinanceLiveClient(
+            http,
+            "OFFLINE_KEY_PLACEHOLDER",
+            "OFFLINE_SECRET_PLACEHOLDER",
+            diagnostic_state=state,
+            application=application,
+        )
+        with self.assertRaises(execution.LiveRateLimitError) as raised:
+            asyncio.run(client.signed("GET", "/fapi/v3/account"))
+        self.assertEqual(raised.exception.exchange_code, -1003)
+        self.assertEqual(raised.exception.request_method, "GET")
+        self.assertTrue(execution.account_rate_limit_active(state))
+        http.request.assert_not_awaited()
+
     def test_original_rate_limited_scan_retries_same_candle(self):
         application, state = application_for_loop()
         session_until = execution.time.time() + 300

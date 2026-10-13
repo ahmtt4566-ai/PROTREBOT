@@ -623,7 +623,7 @@ def test_save_only_writes_validated_permissions(valid):
     )
     run, _ = binance_check({"enableWithdrawals": not valid})
 
-    async def check(*args):
+    async def check(*args, **kwargs):
         return await run()
 
     with patch.object(vault, "_require_ready", new=AsyncMock(return_value=request.app.state.db_pool)), \

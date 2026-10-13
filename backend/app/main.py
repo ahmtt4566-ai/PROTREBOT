@@ -31,7 +31,7 @@ from .browser_security import (
 from .google_oauth import CALLBACK_PATH as GOOGLE_CALLBACK_PATH, callback_query as google_callback_query, router as google_oauth_router
 from .premium_access import public_projection, requires_premium
 from .email_service import validate_app_base_url
-from .binance_rate_limit import BINANCE_RATE_LIMITER
+from .binance_rate_limit import BINANCE_GLOBAL_BAN, BINANCE_RATE_LIMITER
 from .market_universe import MarketUniverseCache, active_usdt_perpetual
 from .public_market_data import PublicMarketData, PUBLIC_PATHS as PUBLIC_MARKET_PATHS, original_market_warm_loop
 from .exchange_connections import (
@@ -938,7 +938,10 @@ async def health_check_frontend(application: FastAPI) -> dict:
 async def health_check_market_data(application: FastAPI) -> dict:
     started = time.perf_counter()
     try:
-        response = await asyncio.wait_for(market_data_request(application, "/fapi/v1/ping"), timeout=10)
+        response = await asyncio.wait_for(
+            market_data_request(application, "/fapi/v1/ping", source="health"),
+            timeout=10,
+        )
         if response.status_code == 200:
             return health_item("Market data", "ACTIVE", "Read-only market data endpoint reachable.", started)
         return health_item("Market data", "ERROR", f"Market data responded with HTTP {response.status_code}.", started)
@@ -1185,6 +1188,7 @@ async def lifespan(app: FastAPI):
     init_v22_commercial(app)
     init_v25_execution(app)
     await ensure_infrastructure(app)
+    await BINANCE_GLOBAL_BAN.configure_persistence(app.state.db_pool)
     await init_exchange_connections(app)
     await init_v27_cloud(app)
     await restore_health_snapshot(app)
@@ -1249,6 +1253,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
     await shutdown_assistant(app)
+    await BINANCE_GLOBAL_BAN.flush_persistence()
     if app.state.db_pool is not None:
         await app.state.db_pool.close()
     if app.state.redis_client is not None:
@@ -1793,14 +1798,25 @@ async def fetch_candles(symbol: str, interval: str, limit: int) -> list[dict]:
         return result
 
 
-async def market_data_request(application: FastAPI, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
+async def market_data_request(
+    application: FastAPI,
+    path: str,
+    params: dict[str, Any] | None = None,
+    *,
+    source: str = "public_api",
+) -> httpx.Response:
     """Share public reads across UI, analysis and LIVE without using the signed proxy."""
     if path not in PUBLIC_MARKET_PATHS:
         raise ValueError("Market-data transport only accepts public read-only endpoints.")
     service = getattr(application.state, "public_market_data", None)
     if service is None:
         service = application.state.public_market_data = PublicMarketData()
-    return await service.get(path, params, lambda route, values: _fetch_public_market_data(application, service, route, values))
+    return await service.get(
+        path,
+        params,
+        lambda route, values: _fetch_public_market_data(application, service, route, values),
+        source=source,
+    )
 
 
 async def _fetch_public_market_data(application: FastAPI, service: PublicMarketData, path: str, params: dict[str, Any]) -> httpx.Response:
@@ -1820,7 +1836,6 @@ async def _fetch_public_market_data(application: FastAPI, service: PublicMarketD
             service.counts[f"request:GET:{path}:{frame}"] += 1
             response = await asyncio.wait_for(client.get(f"{host}{path}", params=params), timeout=remaining)
             after = int(time.time() * 1000)
-            service.observe(path, response)
             last_response = response
             if response.is_success and path == "/fapi/v1/time":
                 response.headers["X-Binance-Clock-Offset-Ms"] = str(int(response.json()["serverTime"]) - ((before + after) // 2))

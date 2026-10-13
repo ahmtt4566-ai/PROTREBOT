@@ -54,6 +54,17 @@ type LiveStatus = {
 type ConnectionStatus = {
   vault?: {ready?: boolean}
   connections?: {LIVE?: {configured?: boolean; active?: boolean; last_test_ok?: boolean; fingerprint?: string | null; last_error?: string | null; account?: {wallet_balance?: number}}}
+  binance_ban?: {
+    active?: boolean
+    blocked_until?: string | null
+    remaining_seconds?: number
+    message?: string | null
+    source?: string | null
+    egress_route?: string | null
+    status_code?: number | null
+    exchange_code?: number | null
+    used_weight_1m?: number | null
+  }
   safety?: {secrets_returned_to_browser?: boolean; connection_test_creates_orders?: boolean; live_orders_require_v25_gates?: boolean}
 }
 
@@ -178,12 +189,21 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const status = sharedStatus !== undefined ? sharedStatus : localStatus
   const statusVerified = sharedStatus !== undefined ? sharedStatusVerified : localStatusVerified
   const connections = sharedConnections !== undefined ? sharedConnections : localConnections
+  const backendBan = connections?.binance_ban
 
   useEffect(() => {
     if (rateLimitSeconds === null || rateLimitSeconds <= 0) return
     const timer = window.setInterval(() => setRateLimitSeconds(current => current === null ? null : Math.max(0, current - 1)), 1000)
     return () => window.clearInterval(timer)
   }, [rateLimitSeconds])
+
+  useEffect(() => {
+    if (backendBan?.active !== true) return
+    const seconds = Number(backendBan.remaining_seconds)
+    if (Number.isFinite(seconds) && seconds > 0) {
+      setRateLimitSeconds(Math.ceil(seconds))
+    }
+  }, [backendBan?.active, backendBan?.blocked_until, backendBan?.remaining_seconds])
 
   const isConnectionAction = (path: string) => ['/test', '/save', '/activate'].includes(path)
   const rateLimitMessage = (seconds: number | null) => seconds && seconds > 0
@@ -309,6 +329,15 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
 
   const liveConnection = connections?.connections?.LIVE
+  const globalBanActive = Boolean(backendBan?.active && (rateLimitSeconds ?? backendBan?.remaining_seconds ?? 0) > 0)
+  const banCountdown = Math.max(0, rateLimitSeconds ?? backendBan?.remaining_seconds ?? 0)
+  const banCountdownText = `${String(Math.floor(banCountdown / 3600)).padStart(2, '0')}:${String(Math.floor((banCountdown % 3600) / 60)).padStart(2, '0')}:${String(banCountdown % 60).padStart(2, '0')}`
+  const banUntilText = backendBan?.blocked_until
+    ? new Date(backendBan.blocked_until).toLocaleString('tr-TR', {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'})
+    : null
+  const globalBanMessage = globalBanActive
+    ? `Binance geçici olarak engelledi${banUntilText ? `, ${banUntilText} tarihine kadar bekleniyor` : ''}. Kalan süre: ${banCountdownText}.`
+    : ''
   const configured = Boolean(liveConnection?.configured || status?.credentials?.configured)
   const connected = Boolean(status?.connected)
   const marketDataConnected = status?.stream?.status === 'CANLI'
@@ -689,7 +718,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
         <label>{liveCopy.apiKey}<input data-private="true" type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})}/></label>
         <label>{liveCopy.secretKey}<input data-private="true" type="password" autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})}/></label>
         <label className="liveCredentialCheck"><input type="checkbox" checked={credentials.accepted} onChange={event => setCredentials({...credentials, accepted: event.target.checked})}/><span>Secret yalnızca şifreli sunucu kasasında tutulur.</span></label>
-        <div className="liveCredentialActions"><button type="button" onClick={testConnection} disabled={Boolean(busy)}>{busy === 'test' ? 'TEST EDİLİYOR...' : liveCopy.testConnection}</button><button type="button" className="primary" onClick={connectAndSave} disabled={Boolean(busy)}>{busy === 'connect-save' ? 'BAĞLANIYOR...' : liveCopy.saveAndConnect}</button></div>
+        {globalBanActive && <div className="liveNotice error" role="alert"><TriangleAlert aria-hidden="true"/><span>{globalBanMessage}</span></div>}
+        <div className="liveCredentialActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || globalBanActive}>{busy === 'test' ? 'TEST EDİLİYOR...' : liveCopy.testConnection}</button><button type="button" className="primary" onClick={connectAndSave} disabled={Boolean(busy) || globalBanActive}>{busy === 'connect-save' ? 'BAĞLANIYOR...' : liveCopy.saveAndConnect}</button></div>
         <small className="liveCredentialNote">Test ve kaydetme bağlantı doğrulaması yapar; bu işlemler emir oluşturmaz.</small>
       </section>
     </div>,
@@ -889,6 +919,9 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
         role={connectionNotice?.kind === 'info' || connectionNotice?.kind === 'ok' ? 'status' : 'alert'}>
         <TriangleAlert aria-hidden="true"/><span>{connectionNotice?.text ?? redactConnectionMessage(liveConnection.last_error, [credentials.apiKey, credentials.secretKey])}</span>
       </div>}
+      {globalBanActive && <div className="liveNotice error" role="alert" data-testid="binance-global-ban">
+        <TriangleAlert aria-hidden="true"/><span>{globalBanMessage}</span>
+      </div>}
       <div className="masterTradeLiveCredentialBlock">
         <div className="masterTradeLiveCredentialLabel"><span className="masterTradeLiveKicker">CREDENTIALS</span><small>Use a key with Futures permissions only.</small></div>
         <div className="masterTradeLiveApiGrid">
@@ -901,7 +934,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       <div className="masterTradeLiveConnectionActionBar">
         <div className="masterTradeLiveActionMeta"><span>ENVIRONMENT</span><b>LIVE</b><small>Binance Futures Mainnet</small></div>
         <div className="masterTradeLiveActionMeta"><span>PERMISSIONS</span><b>READ · TRADE</b><small>Withdrawals unsupported</small></div>
-        <div className="masterTradeLiveApiActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" className="masterTradeLiveSaveButton" onClick={connectAndSave} disabled={Boolean(busy)}>{busy === 'connect-save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} CONNECT ACCOUNT</button><button type="button" onClick={deactivateCredentials} disabled={Boolean(busy) || !liveConnection?.active}>Bağlantıyı kapat</button><button type="button" onClick={deleteCredentials} disabled={Boolean(busy) || !configured || liveConnection?.active !== false}>Anahtarı sil</button></div>
+        <div className="masterTradeLiveApiActions"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready || globalBanActive}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" className="masterTradeLiveSaveButton" onClick={connectAndSave} disabled={Boolean(busy) || globalBanActive}>{busy === 'connect-save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} CONNECT ACCOUNT</button><button type="button" onClick={deactivateCredentials} disabled={Boolean(busy) || !liveConnection?.active}>Bağlantıyı kapat</button><button type="button" onClick={deleteCredentials} disabled={Boolean(busy) || !configured || liveConnection?.active !== false}>Anahtarı sil</button></div>
       </div>
 
       <div className="masterTradeLiveSecurityStrip" aria-label="Connection security status"><span><CheckCircle2/> Credentials encrypted</span><span><CheckCircle2/> Server-side validation</span><span><CheckCircle2/> API secret never displayed</span></div>
@@ -956,7 +989,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     <div className={`liveNotice ${notice.kind}`}>{notice.kind === 'error' ? <TriangleAlert/> : notice.kind === 'ok' ? <CheckCircle2/> : <ShieldCheck/>}<span>{notice.text}</span><button type="button" onClick={() => void refresh(false)} disabled={Boolean(busy)}><RefreshCw/> REFRESH</button></div>
 
     <div className="livePanelGrid">
-      <section className="liveCard liveCredentials"><header><KeyRound/><div><small>LIVE API SETTINGS</small><h3>Binance Futures Mainnet</h3></div><b>{configured ? 'CONFIGURED' : 'MISSING'}</b></header><p>Secret yalnızca mevcut şifreli backend kasasına gönderilir; localStorage/sessionStorage, summary ve loglarda tutulmaz.</p><label>Binance API Key<input data-private="true" type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})}/></label><label>Binance API Secret<input data-private="true" type="password" autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})}/></label><label className="liveCheck"><input type="checkbox" checked={credentials.accepted} onChange={event => setCredentials({...credentials, accepted: event.target.checked})}/><span>Şifreli sunucu kasasını ve secret’ın bir daha gösterilmeyeceğini onaylıyorum.</span></label><div className="liveButtons"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" onClick={saveCredentials} disabled={Boolean(busy) || !connections?.vault?.ready}>{busy === 'save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} ENCRYPTED SAVE</button></div><div className="liveMeta"><span>Fingerprint</span><b>{text(liveConnection?.fingerprint || status?.credentials?.fingerprint)}</b><span>Permissions</span><b>Futures only · withdrawals unsupported</b></div></section>
+      <section className="liveCard liveCredentials"><header><KeyRound/><div><small>LIVE API SETTINGS</small><h3>Binance Futures Mainnet</h3></div><b>{configured ? 'CONFIGURED' : 'MISSING'}</b></header><p>Secret yalnızca mevcut şifreli backend kasasına gönderilir; localStorage/sessionStorage, summary ve loglarda tutulmaz.</p><label>Binance API Key<input data-private="true" type="password" autoComplete="new-password" value={credentials.apiKey} onChange={event => setCredentials({...credentials, apiKey: event.target.value})}/></label><label>Binance API Secret<input data-private="true" type="password" autoComplete="new-password" value={credentials.secretKey} onChange={event => setCredentials({...credentials, secretKey: event.target.value})}/></label><label className="liveCheck"><input type="checkbox" checked={credentials.accepted} onChange={event => setCredentials({...credentials, accepted: event.target.checked})}/><span>Şifreli sunucu kasasını ve secret’ın bir daha gösterilmeyeceğini onaylıyorum.</span></label><div className="liveButtons"><button type="button" onClick={testConnection} disabled={Boolean(busy) || !connections?.vault?.ready || globalBanActive}>{busy === 'test' ? <RefreshCw className="spin"/> : <ShieldCheck/>} TEST CONNECTION</button><button type="button" onClick={saveCredentials} disabled={Boolean(busy) || !connections?.vault?.ready || globalBanActive}>{busy === 'save' ? <RefreshCw className="spin"/> : <LockKeyhole/>} ENCRYPTED SAVE</button></div><div className="liveMeta"><span>Fingerprint</span><b>{text(liveConnection?.fingerprint || status?.credentials?.fingerprint)}</b><span>Permissions</span><b>Futures only · withdrawals unsupported</b></div></section>
 
       <section className="liveCard liveReadiness"><header><ShieldCheck/><div><small>LIVE SAFETY GATES</small><h3>Arm / Protection Readiness</h3></div></header><div className="liveGateList">{(status?.readiness?.gates || []).map(gate => <div key={gate.key}><i className={gate.passed ? 'passed' : ''}>{gate.passed ? '✓' : '!'}</i><span><b>{gate.label || gate.key}</b><small>{gate.detail || (gate.passed ? 'PASSED' : 'BLOCKED')}</small></span></div>)}</div><div className="liveButtons"><button type="button" className="liveArmButton" onClick={status?.armed ? () => run('disarm', () => call(V25, '/disarm', {method: 'POST'}).then(() => undefined), 'LIVE disarmed; AUTO-TRADE kapalı.') : armLive} disabled={Boolean(busy) || (!status?.armed && (!configured || !connected || emergency || recoveryRequired || !protectionReady))}>{status?.armed ? <LockKeyhole/> : <UnlockKeyhole/>}{status?.armed ? ' DISARM LIVE' : ' LIVE ARM'}</button><button type="button" className="liveEmergencyButton" onClick={emergencyStop} disabled={Boolean(busy)}><ShieldAlert/> EMERGENCY STOP</button></div><small className="liveGateNote">ARM, AUTO-TRADE’i başlatmaz. Refresh/restart sonrası backend state LOCKED/OFF olarak değerlendirilir.</small></section>
     </div>

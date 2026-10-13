@@ -37,11 +37,13 @@ from pydantic import BaseModel, Field
 from .analysis import analyze
 from .strategies.contracts import StrategyResult
 from .binance_rate_limit import (
+    BINANCE_GLOBAL_BAN,
     BINANCE_RATE_LIMITER,
     BINANCE_REQUEST_WEIGHT_LIMIT_1M,
     BINANCE_REQUEST_WEIGHT_THRESHOLD_RATIO,
     RATE_LIMIT_AWARE_BACKOFF_ENABLED,
     RATE_LIMIT_PROACTIVE_WAIT_SECONDS,
+    account_egress_route,
     retry_after_seconds,
 )
 from .binance_demo import (
@@ -1420,7 +1422,12 @@ class BinanceLiveClient:
         if self.application is not None:
             from .main import market_data_request
             try:
-                response = await market_data_request(self.application, path, params)
+                response = await market_data_request(
+                    self.application,
+                    path,
+                    params,
+                    source="original_live",
+                )
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in {418, 429}:
@@ -1471,6 +1478,17 @@ class BinanceLiveClient:
                 await require_background_entry(self.application, str(authorization.get("user_id") or ""), live=True)
             except HTTPException as exc:
                 raise LiveExchangeError(str(exc.detail), http_status=exc.status_code) from exc
+        ban_status = BINANCE_GLOBAL_BAN.public_status()
+        if ban_status["active"]:
+            error = LiveRateLimitError(
+                str(ban_status["message"]),
+                retry_after=int(ban_status["remaining_seconds"]),
+                exchange_code=-1003,
+            )
+            error.request_method, error.request_path = method, path
+            if method == "GET" and isinstance(self.diagnostic_state, dict):
+                begin_account_rate_limit_wait(self.diagnostic_state, error)
+            raise error
         await self.sync_clock()
         payload = {key: value for key, value in dict(params or {}).items() if value is not None}
         return await self._request(method, path, payload, signed=True)
@@ -1480,6 +1498,17 @@ class BinanceLiveClient:
         method = method.upper()
         if (method, path) not in API_KEY_PATHS:
             raise LiveExchangeError("İzin verilmeyen canlı kullanıcı akışı işlemi.", http_status=500)
+        ban_status = BINANCE_GLOBAL_BAN.public_status()
+        if ban_status["active"]:
+            error = LiveRateLimitError(
+                str(ban_status["message"]),
+                retry_after=int(ban_status["remaining_seconds"]),
+                exchange_code=-1003,
+            )
+            error.request_method, error.request_path = method, path
+            if method == "GET" and isinstance(self.diagnostic_state, dict):
+                begin_account_rate_limit_wait(self.diagnostic_state, error)
+            raise error
         return await self._request(method, path, {}, signed=False, api_key_header=True)
 
     async def _request(
@@ -1507,7 +1536,12 @@ class BinanceLiveClient:
         try:
             priority = self.background_session and any(live_plan_is_active(plan) for plan in (self.diagnostic_state or {}).get("plans", {}).values() if isinstance(plan, dict))
             source = "live_protection" if priority else "live_background" if self.background_session else "live_browser"
-            async with BINANCE_RATE_LIMITER.slot(LIVE_REST_BASE, priority=priority, source=source) as rate_limit:
+            async with BINANCE_RATE_LIMITER.slot(
+                LIVE_REST_BASE,
+                priority=priority,
+                source=source,
+                egress_route=account_egress_route(),
+            ) as rate_limit:
                 if method == "POST" and path in {"/fapi/v1/order", "/fapi/v1/order/test"} and not _truthy(params.get("reduceOnly")) and not _truthy(params.get("closePosition")):
                     if account_rate_limit_active(self.diagnostic_state or {}):
                         raise LiveExchangeError("Hesap yeniden doğrulanana kadar yeni LIVE giriş kapalı.", http_status=423)

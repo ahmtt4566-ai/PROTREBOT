@@ -84,7 +84,7 @@ export const assistantCopy = {
 } as const
 
 export const analystCopy = {
-  ariaLabel: 'KaiStrade Analiz ve Piyasa Zekasi',
+  ariaLabel: 'KaisTrade Analiz ve Piyasa Zekasi',
   eyebrow: 'ANALİST',
   title: 'Piyasa zekası',
   description: 'Teknik sinyalleri, piyasa yapısını ve riski tek bir görünümde inceleyin.',

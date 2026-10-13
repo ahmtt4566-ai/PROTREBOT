@@ -105,20 +105,38 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
 
     def test_http_418_fails_closed_and_does_not_check_account(self):
         http = FakeBinanceHttp(time_status=418, time_payload={"code": -1003, "msg": "rate limited"})
-        with self.assertRaisesRegex(exchange_connections.VaultError, "HTTP 418.*wait briefly"):
+        with self.assertRaisesRegex(exchange_connections.VaultError, "Binance geçici olarak engelledi"):
             asyncio.run(exchange_connections.test_binance_credentials(http, "LIVE", "api-key-safe", "secret-safe"))
         self.assertEqual(http.paths, ["/fapi/v1/time"])
 
+    def test_persisted_global_ban_blocks_server_time_without_http(self):
+        response = httpx.Response(
+            418,
+            headers={"Retry-After": "180", "X-MBX-USED-WEIGHT-1M": "1660"},
+            json={"code": -1003},
+            request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/time"),
+        )
+        exchange_connections.BINANCE_GLOBAL_BAN.record(
+            response,
+            source="connection_server_time",
+            egress_route="render_direct",
+        )
+        http = FakeBinanceHttp()
+        with self.assertRaises(exchange_connections.BinanceServerTimeRejected) as raised:
+            asyncio.run(exchange_connections._server_time_offset(http, "LIVE"))
+        self.assertGreater(raised.exception.retry_after, 0)
+        self.assertEqual(http.paths, [])
+
     def test_http_429_fails_closed_and_does_not_check_account(self):
         http = FakeBinanceHttp(time_status=429, time_payload={"code": -1003, "msg": "rate limited"})
-        with self.assertRaisesRegex(exchange_connections.VaultError, "HTTP 429"):
+        with self.assertRaisesRegex(exchange_connections.VaultError, "Binance geçici olarak engelledi"):
             asyncio.run(exchange_connections.test_binance_credentials(http, "LIVE", "api-key-safe", "secret-safe"))
         self.assertEqual(http.paths, ["/fapi/v1/time"])
 
     def test_http_418_retry_after_is_guidance_only(self):
         http = FakeBinanceHttp(time_status=418, time_headers={"Retry-After": "5"})
         with self.assertLogs(exchange_connections.logger, level="WARNING") as logs:
-            with self.assertRaisesRegex(exchange_connections.VaultError, "wait 5 seconds"):
+            with self.assertRaisesRegex(exchange_connections.VaultError, "Binance geçici olarak engelledi"):
                 asyncio.run(exchange_connections._server_time_offset(http, "LIVE"))
         self.assertEqual(http.paths, ["/fapi/v1/time"])
         self.assertIn("retry_after_seconds=5", " ".join(logs.output))
@@ -138,11 +156,12 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         errors = asyncio.run(run())
         self.assertEqual(http.paths, ["/fapi/v1/time"])
         self.assertEqual(errors[0].retry_after, 5)
-        self.assertEqual(str(errors[0]), str(errors[1]))
+        self.assertIn("Binance geçici olarak engelledi", str(errors[0]))
+        self.assertIn("Binance geçici olarak engelledi", str(errors[1]))
 
     def test_malformed_retry_after_is_safe(self):
         http = FakeBinanceHttp(time_status=418, time_headers={"Retry-After": "999999999999999999999999999"})
-        with self.assertRaisesRegex(exchange_connections.VaultError, "wait briefly"):
+        with self.assertRaisesRegex(exchange_connections.VaultError, "Binance geçici olarak engelledi"):
             asyncio.run(exchange_connections._server_time_offset(http, "LIVE"))
 
     def test_timeout_fails_closed_without_account_request(self):

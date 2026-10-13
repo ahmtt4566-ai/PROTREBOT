@@ -229,9 +229,8 @@ class V203BinanceDemoSafetyTests(unittest.TestCase):
         import ast
 
         self.assertIn("async def market_data_request", MAIN_TEXT)
-        self.assertIn("for attempt in range(3)", MAIN_TEXT)
+        self.assertIn("for host in hosts", MAIN_TEXT)
         self.assertIn("{500, 502, 503, 504}", MAIN_TEXT)
-        self.assertIn("0.5 * (2 ** attempt)", MAIN_TEXT)
         self.assertIn('response = await market_data_request(app, path)', MAIN_TEXT)
         self.assertIn('request_market_data("/fapi/v1/ticker/24hr", "ticker")', MAIN_TEXT)
         klines = [

@@ -1,7 +1,7 @@
 import {expect, test, type Page} from '@playwright/test'
 
 const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT']
-async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, locked = false, rejectApproval = false} = {}) {
+async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, locked = false, rejectApproval = false, binanceBan = false} = {}) {
   const writes: Array<{path: string; body: unknown}> = []
   await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'original-live-ui'))
   await page.route('**/api/**', async route => {
@@ -40,10 +40,24 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
         account: {wallet_balance: 1000, available_balance: 1000, positions: [], open_orders: []},
         ...(owner && available ? {original_v2_live: original} : {}),
       },
-      '/api/exchange-connections/status': {vault: {ready: true}, connections: {LIVE: {configured: true, active: true, last_test_ok: true}}},
+      '/api/exchange-connections/status': {
+        vault: {ready: true},
+        connections: {LIVE: {configured: true, active: true, last_test_ok: true}},
+        ...(binanceBan ? {binance_ban: {
+          active: true,
+          blocked_until: new Date(Date.now() + 4_881_000).toISOString(),
+          remaining_seconds: 4881,
+          source: 'original_warmer',
+          egress_route: 'render_direct',
+          status_code: 418,
+          exchange_code: -1003,
+          used_weight_1m: 1660,
+        }} : {}),
+      },
       '/api/v21/journal': {items: []},
       '/api/analysis-universe': {results: []},
     }
+
     const body = path.startsWith('/api/analysis/')
       ? {direction: 'WAIT', confidence: 80, entry: 90000, stop_loss: 88000, tp1: 92000, tp2: 94000, tp3: 96000}
       : path.startsWith('/api/klines/') ? [] : bodies[path] ?? {}
@@ -53,6 +67,17 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
   await expect(page.getByRole('heading', {name: 'LIVE AUTO TRADE', exact: true})).toBeVisible()
   return writes
 }
+
+test('global Binance ban shows countdown and disables test and connect actions', async ({page}) => {
+  await fixture(page, {binanceBan: true})
+  const warning = page.getByTestId('binance-global-ban')
+  await expect(warning).toContainText('Binance geçici olarak engelledi')
+  await expect(warning).toContainText('Kalan süre: 01:21:')
+  await page.getByTitle('Connect your trading account', {exact: true}).click()
+  const connection = page.locator('.masterTradeLiveConnectionCard')
+  await expect(connection.getByRole('button', {name: 'TEST CONNECTION'})).toBeDisabled()
+  await expect(connection.getByRole('button', {name: 'CONNECT ACCOUNT'})).toBeDisabled()
+})
 
 test('fill latch survives reload; OWNER approval only unlocks latch and never starts trading', async ({page}) => {
     const writes = await fixture(page, {locked: true})

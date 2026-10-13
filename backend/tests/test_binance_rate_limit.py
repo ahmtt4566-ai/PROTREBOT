@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[2]
 BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from app.binance_rate_limit import BINANCE_RATE_LIMITER  # noqa: E402
+from app.binance_rate_limit import BINANCE_GLOBAL_BAN, BINANCE_RATE_LIMITER, BinanceGlobalBan  # noqa: E402
 
 
 class Response:
@@ -127,6 +127,78 @@ class BinanceRateLimitTests(unittest.IsolatedAsyncioTestCase):
             BINANCE_RATE_LIMITER.reset()
             await self._request(Response(status_code=status_code))
             self.assertGreater(BINANCE_RATE_LIMITER.snapshot(self.HOST)["cooldown_until"], 0.0)
+
+    async def test_global_ban_persists_across_restart_with_safe_metadata(self):
+        path = BINANCE_GLOBAL_BAN.path
+        response = httpx.Response(
+            418,
+            headers={"Retry-After": "4881", "X-MBX-USED-WEIGHT-1M": "1660"},
+            json={"code": -1003, "msg": "IP banned"},
+            request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/klines"),
+        )
+        with patch("app.binance_rate_limit.time.time", return_value=1_000.0):
+            clock = BinanceGlobalBan(path)
+            self.assertTrue(clock.record(
+                response,
+                source="original_warmer",
+                egress_route="render_direct",
+            ))
+        with patch("app.binance_rate_limit.time.time", return_value=1_001.0):
+            restored = BinanceGlobalBan(path)
+            status = restored.public_status()
+        self.assertTrue(status["active"])
+        self.assertEqual(status["remaining_seconds"], 4880)
+        self.assertEqual(status["status_code"], 418)
+        self.assertEqual(status["exchange_code"], -1003)
+        self.assertEqual(status["used_weight_1m"], 1660)
+        self.assertEqual(status["source"], "original_warmer")
+        self.assertEqual(status["egress_route"], "render_direct")
+        self.assertNotIn("IP banned", str(status))
+
+    async def test_global_ban_restores_from_durable_database(self):
+        pool = AsyncMock()
+        pool.fetchrow.return_value = {
+            "payload": {
+                "blocked_until_epoch": 5_881.0,
+                "observed_at_epoch": 1_000.0,
+                "status_code": 418,
+                "exchange_code": -1003,
+                "used_weight_1m": 1660,
+                "source": "original_warmer",
+                "egress_route": "render_direct",
+            }
+        }
+        clock = BinanceGlobalBan(BINANCE_GLOBAL_BAN.path.with_name("database-restored.json"))
+        with patch("app.binance_rate_limit.time.time", return_value=1_001.0):
+            await clock.configure_persistence(pool)
+            status = clock.public_status()
+        self.assertTrue(status["active"])
+        self.assertEqual(status["remaining_seconds"], 4880)
+        self.assertEqual(status["source"], "original_warmer")
+        self.assertEqual(status["egress_route"], "render_direct")
+        pool.fetchrow.assert_awaited_once()
+
+    async def test_global_ban_writes_new_deadline_to_durable_database(self):
+        pool = AsyncMock()
+        pool.fetchrow.return_value = None
+        clock = BinanceGlobalBan(BINANCE_GLOBAL_BAN.path.with_name("database-written.json"))
+        await clock.configure_persistence(pool)
+        response = httpx.Response(
+            429,
+            headers={"Retry-After": "180"},
+            json={"code": -1003},
+            request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/time"),
+        )
+        self.assertTrue(clock.record(
+            response,
+            source="connection_server_time",
+            egress_route="quotaguard",
+        ))
+        await clock.flush_persistence()
+        self.assertTrue(any(
+            "INSERT INTO binance_global_ban_state" in str(call.args[0])
+            for call in pool.execute.await_args_list
+        ))
 
     async def test_binance_minus_1003_creates_cooldown(self):
         await self._request(Response(payload={"code": -1003, "msg": "Too many requests"}))

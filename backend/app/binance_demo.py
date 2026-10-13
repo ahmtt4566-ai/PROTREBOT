@@ -35,7 +35,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .local_storage import DATA_DIR, migrate_legacy_files
-from .binance_rate_limit import BINANCE_RATE_LIMITER
+from .binance_rate_limit import BINANCE_GLOBAL_BAN, BINANCE_RATE_LIMITER, account_egress_route
 from .maintenance import guard_new_entry
 from .stop_evidence import observe_position_snapshot
 from .trade_r_metrics import initial_entry_risk_usdt
@@ -898,6 +898,13 @@ class BinanceDemoClient:
         signature: str = "",
         api_key_header: bool = False,
     ) -> Any:
+        ban_status = BINANCE_GLOBAL_BAN.public_status()
+        if ban_status["active"]:
+            raise BinanceDemoError(
+                str(ban_status["message"]),
+                http_status=429,
+                exchange_code=-1003,
+            )
         url = f"{DEMO_REST_BASE}{path}"
         if not url.startswith(f"{DEMO_REST_BASE}/"):
             raise BinanceDemoError("Demo sunucu kilidi doğrulanamadı.", http_status=500)
@@ -909,7 +916,11 @@ class BinanceDemoClient:
             logger.info("[DEMO_HTTP_TRACE] request_start request_id=%s method=%s url_path=%s", trace_request_id, method, path)
         for attempt in range(attempts):
             try:
-                async with BINANCE_RATE_LIMITER.slot(DEMO_REST_BASE) as rate_limit:
+                async with BINANCE_RATE_LIMITER.slot(
+                    DEMO_REST_BASE,
+                    source="demo",
+                    egress_route=account_egress_route(),
+                ) as rate_limit:
                     response = await self.http.request(
                         method,
                         request_url,

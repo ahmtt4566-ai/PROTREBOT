@@ -40,7 +40,13 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
-from .binance_rate_limit import BINANCE_RATE_LIMITER, RATE_LIMIT_MAX_WAIT_SECONDS, retry_after_seconds
+from .binance_rate_limit import (
+    BINANCE_GLOBAL_BAN,
+    BINANCE_RATE_LIMITER,
+    RATE_LIMIT_MAX_WAIT_SECONDS,
+    account_egress_route,
+    retry_after_seconds,
+)
 
 VERSION = "28.0.0"
 Mode = Literal["TESTNET", "LIVE"]
@@ -89,6 +95,19 @@ class BinanceServerTimeRejected(VaultError):
         self.upstream_status = upstream_status
         self.exchange_code = exchange_code
         self.used_weight_1m = used_weight_1m
+
+
+def _active_global_ban_error() -> BinanceServerTimeRejected | None:
+    status = BINANCE_GLOBAL_BAN.public_status()
+    if not status["active"]:
+        return None
+    return BinanceServerTimeRejected(
+        str(status["message"]),
+        retry_after=int(status["remaining_seconds"]),
+        upstream_status=int(status["status_code"] or 429),
+        exchange_code=status["exchange_code"],
+        used_weight_1m=str(status["used_weight_1m"]) if status["used_weight_1m"] is not None else None,
+    )
 
 
 class SaveCredentialsRequest(BaseModel):
@@ -439,6 +458,7 @@ def session_public_status(application: Any, request: Request) -> dict[str, Any]:
         "version": VERSION,
         "vault": {"ready": bool(state.get("ready")), "storage": state.get("storage"), "reason": state.get("reason"), "loaded_at": state.get("loaded_at")},
         "connections": {mode: _session_connection(mode, (sid, mode)) for mode in HOSTS},
+        "binance_ban": BINANCE_GLOBAL_BAN.public_status(),
         "safety": {"https_required": True, "secrets_returned_to_browser": False, "connection_test_creates_orders": False, "activation_arms_orders": False, "live_orders_require_v25_gates": True, "withdrawals_supported": False},
     }
 
@@ -576,9 +596,16 @@ def exchange_rejection_message(code: Any) -> str:
 
 
 async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: str, secret_key: str, time_offset_ms: int) -> Any:
+    active_ban = _active_global_ban_error()
+    if active_ban is not None:
+        raise active_ban
     try:
         async def request() -> httpx.Response:
-            async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+            async with BINANCE_RATE_LIMITER.slot(
+                host,
+                source="connection_signed",
+                egress_route=account_egress_route(),
+            ) as rate_limit:
                 timestamp = int(time.time() * 1000) + time_offset_ms
                 query = _signed_query(secret_key, {"timestamp": timestamp, "recvWindow": 5000})
                 response = await http.get(f"{host}{path}?{query}", headers={"X-MBX-APIKEY": api_key})
@@ -596,6 +623,8 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
     except httpx.RequestError as exc:
         raise VaultError("Binance sunucusuna ulaşılamadı.") from exc
     if response.status_code >= 400:
+        if response.status_code in {418, 429}:
+            raise _server_time_error(response)
         try:
             payload = response.json()
         except ValueError:
@@ -616,6 +645,9 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
 
 def _server_time_error(response: httpx.Response) -> VaultError:
     if response.status_code in {418, 429}:
+        active_ban = _active_global_ban_error()
+        if active_ban is not None:
+            return active_ban
         try:
             payload = response.json()
         except (ValueError, TypeError):
@@ -635,8 +667,16 @@ def _server_time_error(response: httpx.Response) -> VaultError:
     return VaultError(f"Binance saat servisi HTTP {response.status_code} döndürdü.")
 
 
-async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
+async def _server_time_offset(
+    http: httpx.AsyncClient,
+    mode: str,
+    *,
+    egress_route: str | None = None,
+) -> int:
     normalized = normalize_mode(mode)
+    active_ban = _active_global_ban_error()
+    if active_ban is not None:
+        raise active_ban
     now = time.monotonic()
     cached = _SERVER_TIME_CACHE.get(normalized)
     if cached and cached[0] > now:
@@ -657,7 +697,11 @@ async def _server_time_offset(http: httpx.AsyncClient, mode: str) -> int:
         host = HOSTS[normalized]
         try:
             async def request() -> tuple[httpx.Response, int, int]:
-                async with BINANCE_RATE_LIMITER.slot(host) as rate_limit:
+                async with BINANCE_RATE_LIMITER.slot(
+                    host,
+                    source="connection_server_time",
+                    egress_route=egress_route or account_egress_route(),
+                ) as rate_limit:
                     before = int(time.time() * 1000)
                     response = await http.get(f"{host}/fapi/v1/time")
                     after = int(time.time() * 1000)
@@ -732,7 +776,11 @@ async def test_binance_credentials(http: httpx.AsyncClient, mode: str, api_key: 
     logger.info("LIVE_CONNECTION_TEST TEST_START mode=%s", normalized)
     logger.info("LIVE_CONNECTION_TEST CREDENTIALS_RESOLVED mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     logger.info("LIVE_CONNECTION_TEST SERVER_TIME_START mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
-    offset = await _server_time_offset(public_http if public_http is not None else http, normalized)
+    offset = await _server_time_offset(
+        public_http if public_http is not None else http,
+        normalized,
+        egress_route="render_direct" if public_http is not None else account_egress_route(),
+    )
     logger.info("LIVE_CONNECTION_TEST SERVER_TIME_DONE mode=%s elapsed_ms=%d", normalized, round((time.monotonic() - started) * 1000))
     if normalized == "LIVE":
         # API restrictions are a signed Spot SAPI endpoint, not a Futures endpoint.
@@ -838,6 +886,7 @@ def public_status(application: Any) -> dict[str, Any]:
             "loaded_at": state.get("loaded_at"),
         },
         "connections": {mode: _public_connection(mode) for mode in HOSTS},
+        "binance_ban": BINANCE_GLOBAL_BAN.public_status(),
         "safety": {
             "https_required": True,
             "secrets_returned_to_browser": False,
