@@ -484,6 +484,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
     def test_disarm_cancels_pending_owned_limit_entry(self):
         state = initial_state()
+        state["lock"] = asyncio.Lock()
         state.update({"armed_until": time.time() + 300, "real_trading_locked": False})
         state["plans"] = {
             "plan-1": {
@@ -531,6 +532,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
     def test_disarm_keeps_missing_entry_and_market_plans_safe_without_delete(self):
         state = initial_state()
+        state["lock"] = asyncio.Lock()
         state["plans"] = {
             "missing": {
                 "id": "missing", "symbol": "BTCUSDT", "direction": "LONG", "order_type": "LIMIT",
@@ -562,6 +564,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
     def test_disarm_locks_unknown_when_owned_limit_cancel_cannot_be_verified(self):
         state = initial_state()
+        state["lock"] = asyncio.Lock()
         client_id = client_id_for("ENTRY", "cancel-failure")
         state["plans"] = {
             "plan-1": {
@@ -1007,6 +1010,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
     def test_consent_does_not_implicitly_acknowledge_current_policy(self):
         state = initial_state()
+        state["lock"] = asyncio.Lock()
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state, v21_demo=None))
         request = SimpleNamespace(
             app=application, method="POST", headers={"x-protrebot-session": "owner-session"},
@@ -1014,7 +1018,8 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         )
 
         with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
-            patch.object(v25_execution, "persist_state"):
+            patch.object(v25_execution, "persist_state"), \
+            patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()):
             asyncio.run(v25_execution.v25_web_consent(
                 request,
                 v25_execution.Confirmation(confirmation="CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM"),
@@ -1025,6 +1030,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
     def test_named_consent_duration_preserves_existing_expiry_and_resets(self):
         now = 1_800_000_000
         state = initial_state()
+        state["lock"] = asyncio.Lock()
         state["armed_until"] = now + v25_execution.LIVE_ARM_SECONDS
         state["auto"].update({"enabled": True, "session_until": now + v25_execution.LIVE_AUTO_SESSION_SECONDS})
         digest = policy_digest(state["policy"])
@@ -1037,6 +1043,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         state["live_session_authorization"].update(user_id="owner", session_id=v25_execution.session_id(request))
         with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
             patch.object(v25_execution, "persist_state"), \
+            patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()), \
             patch.object(v25_execution.time, "time", return_value=now):
             asyncio.run(v25_execution.v25_web_consent(
                 request, v25_execution.Confirmation(confirmation="CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM"),
@@ -1051,6 +1058,7 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
     def test_policy_change_clears_policy_acknowledgement(self):
         state = initial_state()
+        state["lock"] = asyncio.Lock()
         state["policy_ack_digest"] = policy_digest(state["policy"])
         state["armed_until"] = time.time() + 300
         state["real_trading_locked"] = False
@@ -1062,7 +1070,8 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         state["live_session_authorization"].update(user_id="owner", session_id=v25_execution.session_id(request))
 
         with patch.object(v25_execution, "consent_status", return_value={"active": True, "fingerprint": "fingerprint"}), \
-            patch.object(v25_execution, "persist_state"):
+            patch.object(v25_execution, "persist_state"), \
+            patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()):
             asyncio.run(v25_execution.v25_policy(
                 request,
                 v25_execution.PolicyUpdate(max_loss_per_trade=4),
@@ -1121,14 +1130,14 @@ class V25LiveGuardCoreTests(unittest.TestCase):
                 self.assertEqual(result["reason"], reason)
                 self.assertFalse(result["active"])
 
-    def test_scoped_authorization_rejects_different_session(self):
+    def test_scoped_authorization_is_shared_across_same_owner_sessions(self):
         state, request = self._scoped_consent_context()
         request.headers["x-protrebot-session"] = "different-session"
         with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", credential_fingerprint("api-key-123456"))):
             result = v25_execution.consent_status(state, request)
-        self.assertFalse(result["active"])
-        self.assertFalse(result["scope_match"])
-        self.assertEqual(result["reason"], "SESSION_CHANGED")
+        self.assertTrue(result["active"])
+        self.assertTrue(result["scope_match"])
+        self.assertEqual(result["reason"], "NONE")
 
     def test_session_bound_credentials_do_not_fallback_to_another_session(self):
         pool = SimpleNamespace(
@@ -1146,11 +1155,9 @@ class V25LiveGuardCoreTests(unittest.TestCase):
                 auth_expires_at_epoch=time.time() + 3600,
             ))
         self.assertEqual(result, ("", ""))
-        pool.fetch.assert_awaited_once_with(
+        pool.fetchrow.assert_any_await(
             unittest.mock.ANY,
             "user-a",
-            "LIVE",
-            "SHA256:FINGERPRINT-A",
         )
 
     def test_hard_total_exposure_and_active_plan_gates_fail_closed(self):

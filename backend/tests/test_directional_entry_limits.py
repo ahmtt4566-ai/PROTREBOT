@@ -361,18 +361,21 @@ class DirectionalLiveIntegrationTests(unittest.TestCase):
     def test_policy_updates_preserve_owner_guard_and_explicit_null_clears_cap(self):
         application, state = application_for(["BTCUSDT"])
         request = SimpleNamespace(app=application)
-        with patch.object(execution, "execution_owner", return_value={"id": "offline-owner"}) as owner, \
+        with patch.object(execution, "execution_owner", return_value={"id": "offline-owner", "role": "OWNER"}) as owner, \
+                patch("app.exchange_connections._require_live_mfa", new=AsyncMock()), \
                 patch.object(execution, "public_status", side_effect=lambda app, req: {"policy": app.state.v25_execution["policy"]}):
             asyncio.run(execution.v25_policy(request, execution.PolicyUpdate(
-                max_same_direction_positions=1, max_direction_exposure_usdt=30,
+                max_same_direction_positions=1, max_direction_exposure_usdt=30, totp_code="123456",
             )))
             self.assertEqual(state["policy"]["max_same_direction_positions"], 1)
             self.assertEqual(state["policy"]["max_direction_exposure_usdt"], 30)
-            asyncio.run(execution.v25_policy(request, execution.PolicyUpdate(scan_seconds=60)))
+            asyncio.run(execution.v25_policy(request, execution.PolicyUpdate(scan_seconds=60, totp_code="123456")))
             self.assertEqual(state["policy"]["max_direction_exposure_usdt"], 30)
             restored = execution.sanitized_state({"policy": state["policy"]})
             self.assertEqual(restored["policy"]["max_direction_exposure_usdt"], 30)
-            asyncio.run(execution.v25_policy(request, execution.PolicyUpdate(max_direction_exposure_usdt=None)))
+            asyncio.run(execution.v25_policy(request, execution.PolicyUpdate(
+                max_direction_exposure_usdt=None, totp_code="123456",
+            )))
             self.assertIsNone(state["policy"]["max_direction_exposure_usdt"])
         self.assertEqual(owner.call_count, 3)
         self.assertFalse(state["auto"]["enabled"])
@@ -381,7 +384,9 @@ class DirectionalLiveIntegrationTests(unittest.TestCase):
         before = dict(state["policy"])
         with patch.object(execution, "execution_owner", side_effect=execution.HTTPException(403, "owner required")):
             with self.assertRaises(execution.HTTPException):
-                asyncio.run(execution.v25_policy(request, execution.PolicyUpdate(max_same_direction_positions=5)))
+                asyncio.run(execution.v25_policy(request, execution.PolicyUpdate(
+                    max_same_direction_positions=5, totp_code="123456",
+                )))
         self.assertEqual(state["policy"], before)
 
     def test_api_rejects_invalid_limits(self):

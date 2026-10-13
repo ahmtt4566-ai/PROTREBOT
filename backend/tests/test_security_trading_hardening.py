@@ -42,6 +42,10 @@ def owned_state():
     return state
 
 
+def live_vault_key(request):
+    return (f"owner:{request.state.member['id']}", "LIVE")
+
+
 MUTATIONS = [
     "v25_connect", "v25_policy", "v25_policy_ack", "v25_web_consent",
     "v25_revoke_web_consent", "v25_order_test", "v25_risk_preview",
@@ -74,8 +78,8 @@ def test_other_member_cannot_mutate_shared_controller(route, role):
 
 
 @pytest.mark.parametrize("route", ["v25_status", "v25_history", "v25_mtf_history", "v25_market_candles"])
-def test_sensitive_reads_deny_other_session(route):
-    request = request_for(owned_state(), user="alice", token="rotated-session", method="GET")
+def test_sensitive_reads_deny_other_owner(route):
+    request = request_for(owned_state(), user="bob", token="bob-session", method="GET")
     with pytest.raises(HTTPException) as error:
         asyncio.run(getattr(live, route)(request))
     assert error.value.status_code == 403
@@ -93,8 +97,11 @@ def test_same_owner_session_recovery_accepts_rotated_key_for_same_account_and_ke
         state["original_v2_live"] = {"enabled": False, "daily": {"locked": True}, "fill_lock": {"active": True}}
         state["live_session_authorization"].update(fingerprint="SHA256:same", trading_account_id="BINANCE:LIVE:same")
         request = request_for(state, token="new-session")
-        request.app.state.db_pool.fetchrow = AsyncMock(return_value={"write_status": "UPDATED"})
+        request.url.path = "/api/v25/session/recover"
         snapshot = {"positions": [], "open_orders": [], "open_algo_orders": [], "open_algo_orders_available": True}
+        async def persist_recovered(current_state):
+            current_state["persistence_revision"] += 1
+            return "UPDATED"
         with patch.object(live, "authenticated_user", return_value=request.state.member), \
              patch.object(account_settings, "require_totp", new=AsyncMock()) as mfa, \
              patch.object(live, "session_credentials_for_request", return_value=("offline-key", "offline-secret")), \
@@ -104,15 +111,17 @@ def test_same_owner_session_recovery_accepts_rotated_key_for_same_account_and_ke
              patch.object(vault, "_verify_request_credentials", new=AsyncMock(return_value={"account_identity": "same"})), \
              patch.object(live, "client_for_with_credentials", return_value=object()), \
              patch.object(live, "account_snapshot", new=AsyncMock(return_value=snapshot)) as account, \
+             patch.object(live, "persist_state_awaited", new=AsyncMock(side_effect=persist_recovered)) as persist, \
              patch.object(live, "execute_live_order", new=AsyncMock()) as orders:
             result = await live.v25_recover_session(request, SimpleNamespace(confirmation="LIVE OTURUMUNU GERİ BAĞLA", totp_code="123456"))
-        assert result == {"ok": True, "entries_enabled": False, "orders_created": False}
-        assert state["live_session_authorization"]["session_id"] == vault.session_id(request)
+        assert result["ok"] is True
+        assert result["entries_enabled"] is False
+        assert result["orders_created"] is False
+        assert state["live_session_authorization"]["session_id"] == "owner:alice"
         assert state["live_session_authorization"]["fingerprint"] == "SHA256:rotated"
         assert state["persistence_revision"] == 375
-        sql, key, payload = request.app.state.db_pool.fetchrow.await_args.args
-        assert "WHERE COALESCE" in sql and key == "v25_live:state"
-        persisted = json.loads(payload)
+        persist.assert_awaited_once_with(state)
+        persisted = live.sanitized_state(state)
         assert persisted["persistence_revision"] == 375
         assert persisted["original_v2_live"]["daily"]["locked"]
         assert persisted["original_v2_live"]["fill_lock"]["active"]
@@ -135,7 +144,7 @@ def test_same_owner_session_recovery_accepts_rotated_key_for_same_account_and_ke
     ("other_owner", 403), ("different_account", 403),
     ("active_auto", 409), ("armed", 409), ("open_plan", 409), ("unknown_execution", 409),
     ("positions", 409), ("open_orders", 409), ("open_algo_orders", 409), ("missing_algos", 409),
-    ("mfa", 401), ("confirmation", 422), ("expired_auth", 401),
+    ("mfa", 401), ("confirmation", 422),
     ("recovery_unavailable", 503), ("skipped_write", 503), ("database_error", 503),
     ("exchange_timeout", 502),
     ("concurrent_revision", 409), ("concurrent_arm", 409),
@@ -149,6 +158,7 @@ def test_session_recovery_failures_preserve_old_owner_and_records(failure, statu
         state["recovery_loaded"] = True
         state["live_session_authorization"].update(fingerprint="SHA256:same", trading_account_id="BINANCE:LIVE:same")
         request = request_for(state, token="new-session", user="bob" if failure == "other_owner" else "alice")
+        request.url.path = "/api/v25/session/recover"
         snapshot = {"positions": [], "open_orders": [], "open_algo_orders": [], "open_algo_orders_available": True}
         if failure in {"positions", "open_orders", "open_algo_orders"}:
             snapshot[failure] = [{"symbol": "BTCUSDT"}]
@@ -175,6 +185,7 @@ def test_session_recovery_failures_preserve_old_owner_and_records(failure, statu
              patch.object(account_settings, "require_totp", new=AsyncMock(side_effect=HTTPException(401, "offline MFA") if failure == "mfa" else None)), \
              patch.object(live, "session_credentials_for_request", return_value=("offline-key", "offline-secret")), \
              patch.object(live, "credential_fingerprint", return_value="SHA256:rotated"), \
+             patch.object(live, "session_account_identity", return_value="BINANCE:LIVE:same"), \
              patch.object(live, "authenticated_live_expiry", return_value=time.time() - 1 if failure == "expired_auth" else time.time() + 3600), \
              patch.object(vault, "_verify_request_credentials", new=AsyncMock(return_value={"account_identity": "other" if failure == "different_account" else "same"}, side_effect=vault.VaultError("offline timeout") if failure == "exchange_timeout" else None)), \
              patch.object(live, "client_for_with_credentials", return_value=object()), \
@@ -221,6 +232,7 @@ def test_missing_session_and_unattributed_recovery_fail_closed():
 
 def test_owner_account_proof_is_checked_and_safety_stop_needs_no_key():
     state = owned_state()
+    state["lock"] = asyncio.Lock()
     state["live_session_authorization"].update(fingerprint="SHA256:abc", trading_account_id="BINANCE:LIVE:1")
     request = request_for(state)
     with patch.object(live, "live_credentials_status", return_value=("key", "secret", "SHA256:abc")), \
@@ -236,6 +248,7 @@ def test_owner_account_proof_is_checked_and_safety_stop_needs_no_key():
 
 def test_revocation_retains_controller_ownership():
     state = owned_state()
+    state["lock"] = asyncio.Lock()
     authorization = dict(state["live_session_authorization"])
     with patch.object(live, "persist_state"), patch.object(live, "public_status", return_value={}):
         asyncio.run(live.v25_revoke_web_consent(
@@ -322,7 +335,7 @@ def test_legacy_live_credentials_need_reactivation_in_request_and_background_pat
     state = owned_state()
     request = request_for(state)
     sid = vault.session_id(request)
-    key = (sid, "LIVE")
+    key = live_vault_key(request)
     fingerprint = vault.key_fingerprint("api-key-safe")
     with patch.dict(vault._SESSION_CACHE, {key: ("api-key-safe", "secret-safe")}, clear=True), \
          patch.dict(vault._SESSION_META, {key: {"active": True, "user_id": "alice", "account": {}}}, clear=True), \
@@ -332,7 +345,7 @@ def test_legacy_live_credentials_need_reactivation_in_request_and_background_pat
             "mode": "LIVE", "active": True, "fingerprint": fingerprint, "account_summary": {},
         }
         request.app.state.db_pool.fetchrow = AsyncMock(side_effect=lambda query, *args: (
-            {"auth_version": 1, "security": {"active": True, "email_verified": True}}
+            {"auth_version": 1, "security": {"active": True, "email_verified": True, "role": "OWNER"}}
             if "commercial_auth_users" in query else row
         ))
         assert vault.session_credentials(request, "LIVE") == ("", "")
@@ -347,10 +360,11 @@ def test_activation_revalidates_saved_live_key_and_fails_closed():
     state = owned_state()
     state["auto"]["enabled"] = True
     request = request_for(state)
-    key = (vault.session_id(request), "LIVE")
+    key = live_vault_key(request)
     with patch.dict(vault._SESSION_CACHE, {key: ("api-key-safe", "secret-safe")}, clear=True), \
          patch.dict(vault._SESSION_META, {key: {"active": True}}, clear=True), \
          patch.object(vault, "_require_ready", new=AsyncMock(return_value=request.app.state.db_pool)), \
+         patch.object(vault, "_require_live_mfa", new=AsyncMock()), \
          patch.object(vault, "ensure_session_cache", new=AsyncMock()), \
          patch.object(vault, "test_binance_credentials", new=AsyncMock(side_effect=vault.VaultError("withdrawal denied"))):
         with pytest.raises(HTTPException):
@@ -375,7 +389,7 @@ def test_verified_db_credentials_remain_usable_by_background_owner():
         }),
     }
     request.app.state.db_pool.fetchrow = AsyncMock(side_effect=lambda query, *args: (
-        {"auth_version": 1, "security": {"active": True, "email_verified": True}}
+        {"auth_version": 1, "security": {"active": True, "email_verified": True, "role": "OWNER"}}
         if "commercial_auth_users" in query else row
     ))
     with patch.object(vault, "ensure_exchange_vault", new=AsyncMock(return_value=True)), \
@@ -440,12 +454,14 @@ def test_account_erasure_cache_hook_only_clears_target_user_and_locks_own_contro
     before = copy.deepcopy(state)
     credentials = {
         ("alice-live", "LIVE"): ("alice-key", "secret"),
+        ("owner:alice", "LIVE"): ("alice-owner-key", "secret"),
         ("alice-demo", "TESTNET"): ("alice-demo-key", "secret"),
         ("bob-live", "LIVE"): ("bob-key", "secret"),
         ("orphan-known-session", "LIVE"): ("orphan-key", "secret"),
     }
     metadata = {
         ("alice-live", "LIVE"): {"user_id": "alice"},
+        ("owner:alice", "LIVE"): {"user_id": "alice"},
         ("alice-demo", "TESTNET"): {"user_id": "alice"},
         ("bob-live", "LIVE"): {"user_id": "bob"},
     }
@@ -496,17 +512,15 @@ def test_other_worker_cached_live_credentials_cannot_survive_shared_revocation(r
         worker.app.state.v25_execution["auto"]["enabled"] = True
         worker.app.state.v25_execution["live_auto_trade"] = True
         worker.app.state.v25_execution["real_trading_locked"] = False
-    sid = vault.session_id(worker_b)
     fingerprint = vault.key_fingerprint("api-key-safe")
-    key = (sid, "LIVE")
+    key = live_vault_key(worker_b)
     metadata = {"user_id": "alice", "active": True, "account": {
         "api_permissions": {"withdrawal_check": "VERIFIED", "enableWithdrawals": False},
     }}
     with patch.dict(vault._SESSION_CACHE, {key: ("api-key-safe", "secret-safe")}, clear=True), \
          patch.dict(vault._SESSION_META, {key: metadata}, clear=True):
         assert asyncio.run(vault.session_credentials_for_identity(
-            worker_a.app, sid, "alice", "LIVE", fingerprint, auth_version=1,
-            auth_expires_at_epoch=time.time() + 3600,
+            worker_a.app, vault.session_id(worker_a), "alice", "LIVE", fingerprint, auth_version=1,
         )) == ("api-key-safe", "secret-safe")
         if revocation == "logout":
             database.version = 2
@@ -516,11 +530,11 @@ def test_other_worker_cached_live_credentials_cannot_survive_shared_revocation(r
             database.active = False
         elif revocation == "unavailable":
             database.unavailable = True
-        version = None if revocation == "missing_version" else 1
-        assert asyncio.run(vault.session_credentials_for_identity(
-            worker_b.app, sid, "alice", "LIVE", fingerprint, auth_version=version,
-            auth_expires_at_epoch=time.time() + 3600,
-        )) == ("", "")
+        if revocation == "missing_version":
+            worker_b.app.state.v25_execution["live_session_authorization"]["auth_version"] = None
+        assert asyncio.run(live.background_authorization_active(
+            worker_b.app, worker_b.app.state.v25_execution,
+        )) is False
         assert key not in vault._SESSION_CACHE
     assert worker_b.state.member["auth_version"] == 1
     assert worker_b.state.member["active"] is True
@@ -554,27 +568,30 @@ def test_retained_background_client_rechecks_shared_authority_before_private_use
     assert state["real_trading_locked"] is True
 
 
-def test_signed_user_expiry_caps_background_grant_without_adopting_db_version():
-    from app.commercial_core import issue_token, verify_token
+def test_live_auto_grant_is_owner_scoped_and_not_capped_by_browser_token_expiry():
+    from app.commercial_core import issue_token
 
     state = live.initial_state()
+    state["lock"] = asyncio.Lock()
     request = request_for(state)
     secret = b"offline-test-signing-key"
     token = issue_token("alice", "OWNER", secret, ttl_seconds=120, token_version=1)
-    expected_expiry = verify_token(token, secret, expected_kind="USER")["exp"]
     request.app.state.v22_commercial["secret"] = secret
     request.headers = {"x-protrebot-session": token}
     with patch.object(live, "live_auto_start_gate", return_value=(True, "")), \
          patch.object(live, "live_credentials_status", return_value=("api-key-safe", "secret-safe", "SHA256:abc")), \
          patch.object(live, "persist_state"), patch.object(live, "public_status", return_value={}), \
-         patch("app.account_settings.enabled", AsyncMock(return_value=False)):
-        asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
+         patch("app.account_settings.enabled", AsyncMock(return_value=True)), \
+         patch("app.account_settings.require_totp", new=AsyncMock()):
+        asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
+            confirmation="CANLI OTOMAT\u0130K", totp_code="123456",
+        )))
     assert state["live_session_authorization"]["auth_version"] == 1
-    assert state["live_session_authorization"]["auth_expires_at_epoch"] == expected_expiry
-    assert state["auto"]["session_until"] == expected_expiry
-    assert state["auto_authorization"]["expires_at_epoch"] == expected_expiry
-    assert state["auto_authorization"]["auth_expires_at_epoch"] == expected_expiry
-    assert live.sanitized_state(state)["live_session_authorization"]["auth_expires_at_epoch"] == expected_expiry
+    assert state["live_session_authorization"]["auth_expires_at_epoch"] is None
+    assert state["auto"]["session_until"] > time.time()
+    assert state["auto_authorization"]["expires_at_epoch"] == state["auto"]["session_until"]
+    assert state["auto_authorization"]["auth_expires_at_epoch"] is None
+    assert live.sanitized_state(state)["live_session_authorization"]["auth_expires_at_epoch"] is None
 
 
 def test_expiry_capture_prefers_original_authoritative_user_token():
@@ -591,14 +608,14 @@ def test_expiry_capture_prefers_original_authoritative_user_token():
 
 
 @pytest.mark.parametrize("expires", [None, 0, float("nan"), float("inf")])
-def test_background_user_token_expiry_missing_or_invalid_is_not_refreshed(expires):
+def test_background_owner_grant_uses_shared_auth_version_not_browser_token_expiry(expires):
     database = SharedAuthDatabase()
     state = owned_state()
     state["live_session_authorization"]["auth_expires_at_epoch"] = expires
     request = request_for(state)
     request.app.state.db_pool = database
-    assert asyncio.run(live.background_authorization_active(request.app, state)) is False
-    assert database.reads == 0
+    assert asyncio.run(live.background_authorization_active(request.app, state)) is True
+    assert database.reads == 1
     assert state["real_trading_locked"] is True
 
 
@@ -627,6 +644,7 @@ def test_save_only_writes_validated_permissions(valid):
         return await run()
 
     with patch.object(vault, "_require_ready", new=AsyncMock(return_value=request.app.state.db_pool)), \
+         patch.object(vault, "_require_live_mfa", new=AsyncMock()), \
          patch.object(vault, "ensure_schema", new=AsyncMock()), \
          patch.object(vault, "test_binance_credentials", side_effect=check), \
          patch.object(vault, "encrypt_credentials", return_value=b"ciphertext"), \

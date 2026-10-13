@@ -1,4 +1,5 @@
 import {expect, test, type Page} from '@playwright/test'
+import {execFileSync} from 'node:child_process'
 import {mockAssistant} from './helpers/assistant-api'
 
 const AUTH_URL = 'http://127.0.0.1:4175/'
@@ -11,6 +12,52 @@ async function setup(page:Page) {
   state.sessionStatus = 401; state.profileStatus = 401
   return state
 }
+
+for (const viewport of [{width:390,height:844},{width:375,height:667},{width:320,height:568},{width:1440,height:900}]) test(`login preserves ticker geometry and controls at ${viewport.width}x${viewport.height}`, async ({page}) => {
+  await setup(page)
+  await page.setViewportSize(viewport)
+  await page.goto(AUTH_URL)
+  await expect(page.locator('.authCardLogin')).toBeVisible()
+  await page.emulateMedia({reducedMotion:'reduce'})
+  const measure = () => page.locator('.authMobileMarkets').evaluate(element => {
+    const bounds = element.getBoundingClientRect()
+    const ticker = element.querySelector('.authCoinTrack')!
+    const style = getComputedStyle(ticker)
+    return {top:bounds.top,height:bounds.height,width:bounds.width,animation:style.animationDuration,direction:style.animationDirection,content:ticker.textContent}
+  })
+  const current = await measure()
+  const baselineCss = execFileSync('git',['show','HEAD:auth.css'],{encoding:'utf8',cwd:'..'})
+  await page.evaluate(css => {
+    const style = document.querySelector<HTMLStyleElement>('style[data-vite-dev-id$="/auth.css"]')!
+    style.textContent = css
+    const options = document.querySelector('.authLoginOptions')!
+    const remember = options.querySelector('label')!
+    remember.querySelector('span')!.textContent = 'Bu cihazda oturumu hatırla'
+    options.replaceWith(remember)
+    document.querySelector('.authCardLogin .authCardHead h2')!.textContent = 'Hesabınıza giriş yapın'
+    document.querySelector('.authCardLogin .authCardLead')!.textContent = 'Çalışma alanınıza güvenli şekilde erişin.'
+    document.querySelector('.authCardLogin .authSubmit')!.childNodes[0].textContent = 'GÜVENLİ GİRİŞ'
+  },baselineCss)
+  const baseline = await measure()
+  expect(current.height).toBeCloseTo(baseline.height,1)
+  expect(current.width).toBeCloseTo(baseline.width,1)
+  expect(current.top).toBeCloseTo(baseline.top,0)
+  expect(current.animation).toBe(baseline.animation)
+  expect(current.direction).toBe(baseline.direction)
+  await page.reload()
+  await expect(page.getByRole('button',{name:'Giriş yap',exact:true})).toBeEnabled()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.getByRole('button',{name:'Parolayı göster',exact:true}).click()
+  await expect(page.getByLabel('Parola',{exact:true})).toHaveAttribute('type','text')
+  await page.getByRole('button',{name:'Parolayı gizle',exact:true}).click()
+  await expect(page.getByLabel('Parola',{exact:true})).toHaveAttribute('type','password')
+  await page.screenshot({path:test.info().outputPath('login-premium.png'),fullPage:true})
+  await page.getByRole('button',{name:'Parolamı unuttum',exact:true}).filter({visible:true}).click()
+  await expect(page.getByRole('button',{name:'YENİLEME BAĞLANTISI GÖNDER',exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'Giriş ekranına dön',exact:true}).click()
+  await page.getByRole('button',{name:'Yeni hesap oluştur',exact:true}).click()
+  await expect(page.getByRole('button',{name:'HESAP OLUŞTUR',exact:true})).toBeVisible()
+})
 
 test('Google button keeps its design and starts PKCE redirect with existing browser headers', async ({page}) => {
   await setup(page)
@@ -27,7 +74,7 @@ test('Google button keeps its design and starts PKCE redirect with existing brow
   await expect(button).toBeEnabled()
   await expect(button).toHaveClass('authGoogle')
   await expect(button.locator('.authGoogleMark')).toHaveText('G')
-  await page.getByRole('checkbox',{name:'Bu cihazda oturumu hatırla'}).uncheck()
+  await page.getByRole('checkbox',{name:'Oturumu açık tut'}).uncheck()
   await button.click()
   await expect(page).toHaveURL(/https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/)
   expect(body).toEqual({remember:false})
@@ -93,7 +140,7 @@ test('Unlinked existing email callback safely keeps ordinary password login avai
   await setup(page)
   await page.goto(AUTH_URL+'?google_login=account_link_required')
   await expect(page.getByRole('alert')).toContainText('Google hesabı otomatik bağlanmaz')
-  await expect(page.getByRole('button',{name:'GÜVENLİ GİRİŞ',exact:true})).toBeEnabled()
+  await expect(page.getByRole('button',{name:'Giriş yap',exact:true})).toBeEnabled()
   await expect(page.locator('.authCard input[autocomplete="current-password"]')).toBeVisible()
   await expect(page).toHaveURL(AUTH_URL)
 })

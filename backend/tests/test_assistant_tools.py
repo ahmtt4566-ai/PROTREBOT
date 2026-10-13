@@ -18,7 +18,6 @@ from app.assistant_prompt import IDENTITY_REPLIES
 from app.assistant_storage import AssistantStorageError, AssistantStore
 from app.assistant_tools import ARGUMENT_MODELS, TOOL_DEFINITIONS, AssistantTools
 from app.commercial_core import default_commercial_state, issue_token
-from app.exchange_connections import session_id
 from app.main import owner_preview_gate
 from fastapi import FastAPI, HTTPException, Request
 
@@ -102,11 +101,11 @@ class AssistantToolsTestCase(unittest.IsolatedAsyncioTestCase):
 
     def account(self, user="a"):
         state = v25_execution.initial_state()
-        session = session_id(self.request(user))
+        owner_binding = f"owner:{user}"
         state.update({
             "lock": asyncio.Lock(), "connected": True, "recovery_ready": True,
-            "snapshot_session_id": session,
-            "live_session_authorization": {"user_id": user, "session_id": session},
+            "snapshot_session_id": owner_binding,
+            "live_session_authorization": {"user_id": user, "session_id": owner_binding},
             "connection": {"last_checked": datetime.fromtimestamp(self.now, timezone.utc).isoformat(), "last_error": None},
             "snapshot": {
                 "positions": [{"symbol": "BTCUSDT", "direction": "LONG", "quantity": 0.5, "unrealized_pnl": 12.3,
@@ -292,7 +291,7 @@ class AssistantToolsTests(AssistantToolsTestCase):
         self.assertEqual(data["resets_in_seconds"], 12 * 3600 - 17)
         self.assertEqual((await self.tool("get_my_credits", "b")).json()["data"]["remaining"], 120)
 
-    async def test_positions_are_member_and_session_scoped_without_execution_mutation(self):
+    async def test_positions_are_member_and_owner_scoped_without_execution_mutation(self):
         state = self.account("a")
         before = json.dumps({key: value for key, value in state.items() if key != "lock"}, sort_keys=True)
         own = await self.tool("get_my_positions")

@@ -16,19 +16,26 @@ from app import account_settings  # noqa: E402
 
 class LiveAutoTimeframeTests(unittest.TestCase):
     def start(self, state, *, confirmation="CANLI OTOMATİK", gate=(True, "ready")):
-        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(v25_execution=state)))
+        state.setdefault("lock", asyncio.Lock())
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(v25_execution=state)),
+            state=SimpleNamespace(member={"id": "offline-owner", "role": "OWNER"}),
+            headers={"x-protrebot-session": "offline-session"},
+        )
         with patch.multiple(
             execution,
-            execution_owner=lambda request: {"id": "offline-owner"},
+            execution_owner=lambda request: {"id": "offline-owner", "role": "OWNER"},
+            live_owner_binding=lambda request: "owner:offline-owner",
             live_auto_start_gate=lambda *args: gate,
             live_credentials_status=lambda request: ("offline-key", "offline-secret", "offline-fingerprint"),
             session_id=lambda request: "offline-session",
             authenticated_live_expiry=lambda request: time.time() + 600,
             public_status=lambda *args: {},
             persist_state=lambda state: None,
-        ), patch.object(account_settings, "enabled", AsyncMock(return_value=False)):
+        ), patch.object(account_settings, "enabled", AsyncMock(return_value=True)), \
+                patch.object(account_settings, "require_totp", new=AsyncMock()):
             return asyncio.run(execution.v25_auto_start(
-                request, execution.AutoStartConfirmation(confirmation=confirmation),
+                request, execution.AutoStartConfirmation(confirmation=confirmation, totp_code="123456"),
             ))
 
     def test_non_15m_returns_explicit_error_without_starting_or_mutating_state(self):
@@ -42,6 +49,7 @@ class LiveAutoTimeframeTests(unittest.TestCase):
                 self.assertEqual(caught.exception.status_code, 422)
                 self.assertEqual(caught.exception.detail["code"], "LIVE_AUTO_TIMEFRAME_UNSUPPORTED")
                 self.assertIn("15m", caught.exception.detail["message"])
+                state.pop("lock", None)
                 self.assertEqual(state, before)
 
     def test_15m_keeps_existing_start_flow(self):
@@ -90,15 +98,21 @@ class LiveAutoTimeframeTests(unittest.TestCase):
         application = FastAPI()
         application.include_router(execution.router)
         state = execution.initial_state()
+        state["lock"] = asyncio.Lock()
         state["policy"]["interval"] = "1h"
         application.state.v25_execution = state
-        with patch.object(execution, "execution_owner", return_value={"id": "offline-owner"}), \
+        with patch.object(execution, "execution_owner", return_value={"id": "offline-owner", "role": "OWNER"}), \
+                patch.object(execution, "live_owner_binding", return_value="owner:offline-owner"), \
+                patch.object(account_settings, "enabled", new=AsyncMock(return_value=True)), \
+                patch.object(account_settings, "require_totp", new=AsyncMock()), \
                 patch.object(execution, "live_auto_start_gate") as gate, \
                 patch.object(execution, "live_credentials_status") as credentials, \
                 patch.object(execution, "persist_state") as persist, \
                 self.assertLogs("app.v25_execution", level="WARNING") as logs, \
                 TestClient(application) as client:
-            response = client.post("/api/v25/auto/start", json={"confirmation": "CANLI OTOMATİK"})
+            response = client.post("/api/v25/auto/start", json={
+                "confirmation": "CANLI OTOMATİK", "totp_code": "123456",
+            })
         self.assertEqual(response.status_code, 422)
         detail = response.json()["detail"]
         self.assertEqual(detail["code"], "LIVE_AUTO_TIMEFRAME_UNSUPPORTED")

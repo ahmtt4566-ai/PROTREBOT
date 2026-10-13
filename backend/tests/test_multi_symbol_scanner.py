@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import time
 import io
@@ -208,13 +209,18 @@ class MultiSymbolScannerTests(unittest.TestCase):
         self.assertEqual(stream.getvalue().count("AUTOMATION_LOOP running"), 1)
 
     def test_start_endpoint_activates_reset_state_with_future_session(self):
-        import asyncio
-
         state = initial_state()
+        state["lock"] = asyncio.Lock()
         state["auto"].update({"enabled": False, "session_until": 0.0})
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
-        request = SimpleNamespace(app=application)
-        with patch("app.v25_execution.execution_owner", return_value={"id": "TEST"}), \
+        request = SimpleNamespace(
+            app=application,
+            state=SimpleNamespace(member={"id": "TEST", "role": "OWNER"}),
+            headers={"x-protrebot-session": "offline-session"},
+        )
+        with patch("app.v25_execution.execution_owner", return_value={"id": "TEST", "role": "OWNER"}), \
+                patch("app.v25_execution.live_owner_binding", return_value="owner:TEST"), \
+                patch("app.exchange_connections._require_live_mfa", new=AsyncMock()), \
                 patch("app.v25_execution.live_auto_start_gate", return_value=(True, "ready")), \
                 patch("app.v25_execution.live_credentials_status", return_value=("offline-key", "offline-secret", "offline-fingerprint")), \
                 patch("app.v25_execution.session_id", return_value="offline-session"), \
@@ -228,9 +234,8 @@ class MultiSymbolScannerTests(unittest.TestCase):
         self.assertGreater(state["auto"]["session_until"], time.time())
 
     def test_stop_endpoint_disables_active_session(self):
-        import asyncio
-
         state = initial_state()
+        state["lock"] = asyncio.Lock()
         state["auto"].update({"enabled": True, "session_until": time.time() + 3600})
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
         request = SimpleNamespace(app=application)

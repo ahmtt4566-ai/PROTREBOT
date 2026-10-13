@@ -426,7 +426,14 @@ async def close_blocker(request, user):
     pool = getattr(request.app.state, "db_pool", None)
     if pool is not None:
         try:
-            rows = await pool.fetch("SELECT active, account_summary FROM protrebot_exchange_session_vault WHERE user_id = $1", user["id"])
+            rows = await pool.fetch(
+                """
+                SELECT active, account_summary FROM protrebot_exchange_session_vault WHERE user_id = $1
+                UNION ALL
+                SELECT active, account_summary FROM protrebot_exchange_account_vault WHERE user_id = $1
+                """,
+                user["id"],
+            )
         except Exception:
             raise HTTPException(503, "Borsa bağlantı durumu güvenli şekilde doğrulanamadı") from None
         for row in rows:

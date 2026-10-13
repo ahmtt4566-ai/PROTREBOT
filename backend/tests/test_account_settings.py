@@ -547,7 +547,10 @@ def test_closure_checks_other_worker_exchange_context_and_fails_closed(setup):
     pool = SimpleNamespace(fetch=AsyncMock(return_value=[{"active": True, "account_summary": {}}]))
     client.app.state.db_pool = pool
     assert asyncio.run(account.close_blocker(request, setup.users[0]))
-    pool.fetch.assert_awaited_with("SELECT active, account_summary FROM protrebot_exchange_session_vault WHERE user_id = $1", "customer")
+    query = pool.fetch.await_args.args[0]
+    assert "protrebot_exchange_session_vault" in query
+    assert "protrebot_exchange_account_vault" in query
+    assert "UNION ALL" in query
     pool.fetch.return_value = [{"active": False, "account_summary": {"positions": [{"symbol": "BTCUSDT"}]}}]
     assert asyncio.run(account.close_blocker(request, setup.users[0]))
     pool.fetch.side_effect = RuntimeError("private-vault-error")

@@ -62,11 +62,11 @@ test('A hanging login releases the submit button without fabricating a session o
   await page.goto(root)
   await page.getByLabel('E-posta',{exact:true}).fill('member@example.test')
   await page.getByLabel('Parola',{exact:true}).fill('OfflineOnly!123')
-  await page.getByRole('button',{name:'GÜVENLİ GİRİŞ',exact:true}).click()
+  await page.getByRole('button',{name:'Giriş yap',exact:true}).click()
   await expect(page.locator('.authSubmit')).toBeDisabled()
   await page.clock.fastForward(15001)
   await expect(page.getByRole('alert')).toContainText('Sunucu yanıt vermedi')
-  await expect(page.getByRole('button',{name:'GÜVENLİ GİRİŞ',exact:true})).toBeEnabled()
+  await expect(page.getByRole('button',{name:'Giriş yap',exact:true})).toBeEnabled()
   expect(attempts).toBe(1)
   await expect(page.locator('.v26App')).toHaveCount(0)
 })
@@ -90,7 +90,7 @@ for (const failure of ['timeout','503','401'] as const) {
     await expect.poll(() => attempts).toBe(2)
     if (failure === 'timeout') await page.clock.fastForward(15001)
     if (failure === '401') {
-      await expect(page.getByRole('button',{name:'GÜVENLİ GİRİŞ',exact:true})).toBeVisible()
+      await expect(page.getByRole('button',{name:'Giriş yap',exact:true})).toBeVisible()
       await expect(page.locator('.v26App')).toHaveCount(0)
       expect(await page.evaluate(key => sessionStorage.getItem(key),sessionKey)).toBeNull()
     } else {
@@ -123,7 +123,7 @@ for (const role of ['CUSTOMER','OWNER'] as const) {
     await expect.poll(() => page.evaluate(key => sessionStorage.getItem(key),sessionKey)).toBeNull()
     await expect(page.locator('.v26App')).toHaveCount(0)
     if (role === 'CUSTOMER') await expect(page.locator('.authMaintenance')).toBeVisible()
-    else await expect(page.getByRole('button',{name:'GÜVENLİ GİRİŞ',exact:true})).toBeVisible()
+    else await expect(page.getByRole('button',{name:'Giriş yap',exact:true})).toBeVisible()
     expect(state.requests.filter(request => /order|auto\/start|arm/.test(request))).toEqual([])
   })
 }

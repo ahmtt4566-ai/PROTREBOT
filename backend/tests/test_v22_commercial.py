@@ -364,7 +364,7 @@ class V22CommercialTests(unittest.TestCase):
         auth_source = (ROOT / "AuthGate.tsx").read_text(encoding="utf-8")
         self.assertIn("protrebot_exchange_session_vault", exchange_source)
         self.assertIn("session_id TEXT NOT NULL", exchange_source)
-        self.assertIn('await pool.execute("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1"', exchange_source)
+        self.assertIn("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1 AND mode = 'TESTNET'", exchange_source)
         self.assertIn("await clear_session_vault_for_request(request)", V22_SOURCE)
         self.assertIn("protrebot.binance-demo.credentials.${id}", api_source)
         self.assertIn("No frontend secret persistence is used for demo credentials.", api_source)

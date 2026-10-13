@@ -19,7 +19,12 @@ from test_exchange_connections_server_time import FakeBinanceHttp
 @pytest.fixture
 def start_context(monkeypatch):
     state = live.initial_state()
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(v25_execution=state)))
+    state["lock"] = asyncio.Lock()
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(v25_execution=state)),
+        state=SimpleNamespace(member={"id": "owner", "role": "OWNER"}),
+        headers={"x-protrebot-session": "offline-session"},
+    )
     monkeypatch.setattr(live, "execution_owner", Mock(return_value={"id": "owner", "role": "OWNER"}))
     monkeypatch.setattr(live, "live_auto_start_gate", Mock(return_value=(True, "ready")))
     monkeypatch.setattr(live, "live_credentials_status", Mock(return_value=("offline-key", "offline-secret", "fingerprint")))
@@ -34,12 +39,12 @@ def start_context(monkeypatch):
 
 def test_live_auto_missing_mfa_never_changes_authority(start_context):
     request, state = start_context
-    before = copy.deepcopy(state)
+    before = copy.deepcopy({key: value for key, value in state.items() if key != "lock"})
     with pytest.raises(HTTPException) as error:
         asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
     assert error.value.status_code == 401
-    assert error.value.detail["code"] == "LIVE_AUTO_MFA_REQUIRED"
-    assert state == before
+    assert "2FA kodu" in error.value.detail
+    assert {key: value for key, value in state.items() if key != "lock"} == before
     account_settings.require_totp.assert_not_awaited()
     live.live_credentials_status.assert_not_called()
     live.persist_state.assert_not_called()
@@ -48,13 +53,13 @@ def test_live_auto_missing_mfa_never_changes_authority(start_context):
 @pytest.mark.parametrize("reason", ["Geçersiz 2FA kodu.", "Bu 2FA kodu zaten kullanıldı."])
 def test_invalid_or_replayed_mfa_never_starts(start_context, reason):
     request, state = start_context
-    before = copy.deepcopy(state)
+    before = copy.deepcopy({key: value for key, value in state.items() if key != "lock"})
     account_settings.require_totp.side_effect = HTTPException(401, reason)
     with pytest.raises(HTTPException) as error:
         asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
             confirmation="CANLI OTOMATİK", totp_code="123456")))
     assert error.value.status_code == 401
-    assert state == before
+    assert {key: value for key, value in state.items() if key != "lock"} == before
     live.live_credentials_status.assert_not_called()
     live.persist_state.assert_not_called()
 
@@ -71,21 +76,24 @@ def test_valid_mfa_rechecks_gate_before_start(start_context):
 
 def test_mfa_cannot_bypass_changed_arm_gate(start_context):
     request, state = start_context
-    before = copy.deepcopy(state)
+    before = copy.deepcopy({key: value for key, value in state.items() if key != "lock"})
     live.live_auto_start_gate.side_effect = [(True, "ready"), (False, "ARM expired")]
     with pytest.raises(HTTPException) as error:
         asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
             confirmation="CANLI OTOMATİK", totp_code="123456")))
     assert error.value.status_code == 423
-    assert state == before
+    assert {key: value for key, value in state.items() if key != "lock"} == before
     live.persist_state.assert_not_called()
 
 
 def test_mfa_disabled_account_preserves_existing_start(start_context):
     request, state = start_context
     account_settings.enabled.return_value = False
-    asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
-    assert state["auto"]["enabled"]
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
+            confirmation="CANLI OTOMATİK", totp_code="123456")))
+    assert error.value.status_code == 403
+    assert not state["auto"]["enabled"]
     account_settings.require_totp.assert_not_awaited()
 
 @pytest.mark.parametrize("change", ["other-start", "timeframe"])
@@ -96,11 +104,12 @@ def test_async_account_mfa_read_cannot_overwrite_new_start_or_policy(start_conte
             state["auto"].update(enabled=True, session_until=time.time() + 600)
         else:
             state["policy"]["interval"] = "1h"
-        return False
+        return True
     account_settings.enabled.side_effect = enabled
     with pytest.raises(HTTPException) as error:
-        asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
-    assert error.value.status_code == (409 if change == "other-start" else 423)
+        asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
+            confirmation="CANLI OTOMATİK", totp_code="123456")))
+    assert error.value.status_code == (409 if change == "other-start" else 422)
     live.live_credentials_status.assert_not_called()
     live.persist_state.assert_not_called()
 
@@ -190,6 +199,7 @@ def test_live_safety_bell_is_owner_scoped_and_read_state_survives_restart(monkey
 def vault_context(monkeypatch):
     pool = SimpleNamespace(execute=AsyncMock())
     state = live.initial_state()
+    state["lock"] = asyncio.Lock()
     state["live_session_authorization"].update(user_id="owner", session_id="offline-session")
     state["auto"].update(enabled=True, session_until=time.time() + 600)
     state["original_v2_live"] = {"enabled": True, "owner_id": "owner"}
@@ -208,6 +218,8 @@ def vault_context(monkeypatch):
     monkeypatch.setattr(connections, "encrypt_credentials", Mock(return_value=b"encrypted-payload"))
     monkeypatch.setattr(live, "persist_state", Mock())
     monkeypatch.setattr(live, "connect_read_only_for_request", AsyncMock(return_value={"connected":True}))
+    monkeypatch.setattr(account_settings, "enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(account_settings, "require_totp", AsyncMock())
     monkeypatch.setattr(connections, "test_binance_credentials", AsyncMock(return_value={
         "tested_at":"2026-10-11T00:00:00Z","active_positions":0,
         "api_permissions":{"withdrawal_check":"VERIFIED","enableWithdrawals":False},
@@ -219,24 +231,25 @@ def test_live_key_save_change_activate_deactivate_delete_stays_locked(vault_cont
     request, state, pool = vault_context
     for key in ["offline-key-first", "offline-key-second"]:
         result = asyncio.run(connections.exchange_connection_save(request, connections.SaveCredentialsRequest(
-            mode="LIVE", api_key=key, secret_key="offline-secret-safe", confirmation="CANLI KASAYA KAYDET")))
+            mode="LIVE", api_key=key, secret_key="offline-secret-safe", confirmation="CANLI KASAYA KAYDET",
+            totp_code="123456")))
         assert result["connections"]["LIVE"]["configured"]
         assert key not in json.dumps(result) and "offline-secret-safe" not in json.dumps(result)
         connections.encrypt_credentials.assert_called_with(key, "offline-secret-safe", mode="LIVE")
         assert state["real_trading_locked"] and not state["auto"]["enabled"]
         assert state["original_v2_live"]["paused"]
     result = asyncio.run(connections.exchange_connection_activate(request, connections.ConnectionActionRequest(
-        mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
+        mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ", totp_code="123456")))
     assert result["connected"]
     assert state["real_trading_locked"]
     with pytest.raises(HTTPException) as error:
         asyncio.run(connections.exchange_connection_delete(request, connections.ConnectionActionRequest(
-            mode="LIVE", confirmation="ANAHTARI KALICI SİL")))
+            mode="LIVE", confirmation="ANAHTARI KALICI SİL", totp_code="123456")))
     assert error.value.status_code == 409
     asyncio.run(connections.exchange_connection_deactivate(request, connections.ConnectionActionRequest(
-        mode="LIVE", confirmation="BAĞLANTIYI KAPAT")))
+        mode="LIVE", confirmation="BAĞLANTIYI KAPAT", totp_code="123456")))
     result = asyncio.run(connections.exchange_connection_delete(request, connections.ConnectionActionRequest(
-        mode="LIVE", confirmation="ANAHTARI KALICI SİL")))
+        mode="LIVE", confirmation="ANAHTARI KALICI SİL", totp_code="123456")))
     assert not result["connections"]["LIVE"]["configured"]
     assert not connections._SESSION_CACHE and not connections._SESSION_META
     assert state["real_trading_locked"] and not state["auto"]["enabled"]
@@ -247,12 +260,14 @@ def test_live_key_save_change_activate_deactivate_delete_stays_locked(vault_cont
 
 def test_live_key_delete_cannot_bypass_verified_open_positions(vault_context):
     request, state, pool = vault_context
-    connections._SESSION_CACHE[("offline-session","LIVE")] = ("offline-key-first","offline-secret-safe")
-    connections._SESSION_META[("offline-session","LIVE")] = {"configured":True,"active":False}
+    connections._SESSION_CACHE[("owner:owner","LIVE")] = ("offline-key-first","offline-secret-safe")
+    connections._SESSION_META[("owner:owner","LIVE")] = {
+        "configured":True, "active":False, "user_id":"owner",
+    }
     connections.test_binance_credentials.return_value = {"active_positions":1}
     with pytest.raises(HTTPException) as error:
         asyncio.run(connections.exchange_connection_delete(request, connections.ConnectionActionRequest(
-            mode="LIVE", confirmation="ANAHTARI KALICI SİL")))
+            mode="LIVE", confirmation="ANAHTARI KALICI SİL", totp_code="123456")))
     assert error.value.status_code == 409
     pool.execute.assert_not_awaited()
     assert connections._SESSION_CACHE

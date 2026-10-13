@@ -396,9 +396,19 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const manualOrderReady = Boolean(!freeTrial && statusVerified && status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
-  const updatePolicy = () => run('policy', async () => {
-    await call<LiveStatus>(V25, '/policy', {method: 'PUT', body: JSON.stringify(policy)})
-  }, 'LIVE risk ve strateji politikası kaydedildi; policy acknowledgement ayrıca gereklidir.')
+  const updatePolicy = () => {
+    setConfirm({
+      title: 'LIVE risk politikasını kaydet',
+      message: 'Politika değişikliği otomasyonu durdurur ve risk onayını geçersiz kılar. Güncel 2FA kodu gereklidir.',
+      expected: 'CANLI RİSK POLİTİKASINI KAYDET',
+      mfa: true,
+      action: async code => {
+        await call<LiveStatus>(V25, '/policy', {method: 'PUT', body: JSON.stringify({...policy, totp_code: code})})
+      },
+    })
+    setConfirmText('')
+    setConfirmCode('')
+  }
 
   const testConnection = () => run('test', async () => {
     const body = credentials.apiKey && credentials.secretKey ? {mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey} : {mode: 'LIVE'}
@@ -407,31 +417,36 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setTestResult({testedAt: result.account?.tested_at, fingerprint: result.fingerprint})
   }, 'LIVE API erişimi doğrulandı; test bağlantısı emir oluşturmadı.')
 
-  const saveCredentials = () => run('save', async () => {
-    if (!credentials.apiKey || !credentials.secretKey) throw new Error('LIVE API Key ve Secret Key birlikte girilmelidir.')
-    if (!credentials.accepted) throw new Error('Secret yalnızca şifreli sunucu kasasında tutulur onayını verin.')
-    await call(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey, confirmation: 'CANLI KASAYA KAYDET'})})
-    setCredentials({apiKey: '', secretKey: '', accepted: false})
-  }, 'LIVE credential şifreli kasaya kaydedildi; secret tarayıcıda tutulmuyor.')
-
-  const connectReadOnly = () => run('connect', async () => {
-    await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ'})})
-  }, 'LIVE hesap salt-okunur bağlandı; gerçek emir kilidi kapalı kaldı.')
-
-  const connectAndSave = () => run('connect-save', async () => {
-    if (!credentials.apiKey || !credentials.secretKey) throw new Error('LIVE API Key ve Secret Key birlikte girilmelidir.')
-    if (!credentials.accepted) throw new Error('Secret yalnızca şifreli sunucu kasasında tutulur onayını verin.')
-    await call(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey, confirmation: 'CANLI KASAYA KAYDET'})})
-    setCredentials({apiKey: '', secretKey: '', accepted: false})
-    await refresh()
-    await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ'})})
-    await refresh()
-  }, 'Binance Connected; hesap salt-okunur bağlandı ve gerçek emir kilidi korunuyor.')
+  const connectAndSave = () => {
+    if (!credentials.apiKey || !credentials.secretKey) {
+      setNotice({kind: 'error', text: 'LIVE API Key ve Secret Key birlikte girilmelidir.'})
+      return
+    }
+    if (!credentials.accepted) {
+      setNotice({kind: 'error', text: 'Secret yalnızca şifreli sunucu kasasında tutulur onayını verin.'})
+      return
+    }
+    setConfirm({
+      title: 'LIVE anahtarını OWNER hesabına kaydet',
+      message: 'Anahtar bu OWNER hesabına şifreli kaydedilir; aynı hesapla başka cihazdan tekrar girmeniz gerekmez. Kaydetme/bağlama için güncel 2FA gerekir; emir gönderilmez.',
+      expected: 'CANLI KASAYA KAYDET',
+      mfa: true,
+      action: async code => {
+        await call(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey, confirmation: 'CANLI KASAYA KAYDET', totp_code: code})})
+        setCredentials({apiKey: '', secretKey: '', accepted: false})
+        await refresh()
+        await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ', totp_code: code})})
+        await refresh()
+      },
+    })
+    setConfirmText('')
+    setConfirmCode('')
+  }
 
   const recoverSession = () => {
     setConfirm({
       title: 'LIVE oturumunu geri bağla', expected: 'LIVE OTURUMUNU GERİ BAĞLA', mfa: true,
-      message: 'Yalnız aynı OWNER ve aynı LIVE hesap için. Açık pozisyon/emir veya aktif otomasyon varsa sunucu reddeder. Günlük kayıp ve güvenlik kilitleri korunur. Bağlantı, risk izni ve ARM yeniden doğrulanır; otomasyon başlamaz.',
+      message: 'Aynı OWNER hesabının şifreli Binance anahtarıyla hesap durumu yenilenir. Anahtarı tekrar girmeniz gerekmez; açık pozisyonlar ve mevcut güvenlik kilitleri korunur. Emir gönderilmez.',
       action: async code => {
         const result = await call<{ok: boolean; entries_enabled: boolean; orders_created: boolean}>(V25, '/session/recover', {
           method: 'POST', body: JSON.stringify({confirmation: 'LIVE OTURUMUNU GERİ BAĞLA', totp_code: code}),
@@ -445,10 +460,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
   const deactivateCredentials = () => {
     setConfirm({
-      title: 'LIVE bağlantısını kapat', expected: 'BAĞLANTIYI KAPAT',
+      title: 'LIVE bağlantısını kapat', expected: 'BAĞLANTIYI KAPAT', mfa: true,
       message: 'Yeni emir yetkileri ve otomasyon sıfırlanır. Açık pozisyonlar kapatılmaz; korumaları Binance üzerinden kontrol edin.',
-      action: async () => {
-        await call(CONNECTIONS, '/deactivate', {method: 'POST', body: JSON.stringify({mode:'LIVE', confirmation:'BAĞLANTIYI KAPAT'})})
+      action: async code => {
+        await call(CONNECTIONS, '/deactivate', {method: 'POST', body: JSON.stringify({mode:'LIVE', confirmation:'BAĞLANTIYI KAPAT', totp_code: code})})
       },
     })
     setConfirmText('')
@@ -457,10 +472,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
   const deleteCredentials = () => {
     setConfirm({
-      title: 'LIVE anahtarını sil', expected: 'ANAHTARI KALICI SİL',
+      title: 'LIVE anahtarını sil', expected: 'ANAHTARI KALICI SİL', mfa: true,
       message: 'Önce bağlantı kapatılmalıdır. Doğrulanmış açık pozisyon varsa sunucu silmeyi reddeder. Şifreli anahtar bu oturumdan kalıcı silinir; gerçek emir gönderilmez.',
-      action: async () => {
-        await call(CONNECTIONS, '/credentials', {method:'DELETE', body:JSON.stringify({mode:'LIVE', confirmation:'ANAHTARI KALICI SİL'})})
+      action: async code => {
+        await call(CONNECTIONS, '/credentials', {method:'DELETE', body:JSON.stringify({mode:'LIVE', confirmation:'ANAHTARI KALICI SİL', totp_code: code})})
         setCredentials({apiKey:'', secretKey:'', accepted:false})
         setTestResult(null)
       },
@@ -479,16 +494,16 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       setNotice({kind: 'error', text: 'LIVE ARM için tüm backend readiness gate’leri PASS olmalıdır.'})
       return
     }
-    setConfirm({title: 'LIVE ARM onayı', message: 'REAL MONEY — LIVE ACCOUNT. Backend readiness gate’leri geçmeden kilit açılmaz. LIVE ARM AUTO-TRADE başlatmaz.', expected: 'ONAYLIYORUM', action: async () => {
-      await call(V25, '/arm', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI EMİR RİSKİNİ KABUL EDİYORUM'})})
+    setConfirm({title: 'LIVE ARM onayı', message: 'Gerçek hesapta yeni emir kilidi açılır. Backend güvenlik kontrolleri ve güncel 2FA zorunludur. Otomasyon başlamaz.', expected: 'ONAYLIYORUM', mfa: true, action: async code => {
+      await call(V25, '/arm', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI EMİR RİSKİNİ KABUL EDİYORUM', totp_code: code})})
       setArmPendingSync(true)
     }})
     setConfirmText('')
   }
 
   const grantConsent = () => {
-    setConfirm({title: '24 saatlik LIVE risk izni', message: 'Bu izin yalnızca mevcut LIVE hesap fingerprint’i için 24 saat geçerlidir. Backend readiness tamamlanmadan LIVE kilidi açılmaz.', expected: 'CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM', action: async () => {
-      await call(V25, '/consent', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM'})})
+    setConfirm({title: '24 saatlik LIVE risk izni', message: 'Bu izin OWNER hesabındaki LIVE anahtarı için geçerlidir. Güncel 2FA kodu gereklidir.', expected: 'CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM', mfa: true, action: async code => {
+      await call(V25, '/consent', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM', totp_code: code})})
     }})
     setConfirmText('')
   }
@@ -502,17 +517,21 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
 
   const acknowledgePolicy = () => {
-    setConfirm({title: 'LIVE risk limitleri onayı', message: 'Mevcut backend risk limitlerini ve policy digest’ini açıkça onaylayın. Limitler değişirse bu acknowledgement geçersiz olur.', expected: 'RİSK LİMİTLERİNİ ONAYLIYORUM', action: async () => {
-      await call(V25, '/policy/acknowledge', {method: 'POST', body: JSON.stringify({confirmation: 'RİSK LİMİTLERİNİ ONAYLIYORUM'})})
+    setConfirm({title: 'LIVE risk limitleri onayı', message: 'Mevcut backend risk limitlerini güncel 2FA koduyla onaylayın. Limitler değişirse bu onay geçersiz olur.', expected: 'RİSK LİMİTLERİNİ ONAYLIYORUM', mfa: true, action: async code => {
+      await call(V25, '/policy/acknowledge', {method: 'POST', body: JSON.stringify({confirmation: 'RİSK LİMİTLERİNİ ONAYLIYORUM', totp_code: code})})
     }})
     setConfirmText('')
   }
 
   const stopAutoTrade = () => run('auto-stop', () => call(V25, '/auto/stop', {method: 'POST'}).then(() => undefined), 'LIVE AUTO-TRADE kapatıldı; mevcut protection yönetimi backend’de devam eder.')
   const disarmLive = () => run('disarm', () => call(V25, '/disarm', {method: 'POST'}).then(() => { setArmPendingSync(false) }), 'LIVE disarmed; AUTO-TRADE kapalı.')
-  const checkRecovery = () => run('recovery', async () => {
-    await call(V25, '/recovery/check', {method: 'POST', body: JSON.stringify({confirmation: 'LIVE RECOVERY CHECK'})})
-  }, 'LIVE hesabı uzlaştırıldı; yeni emir kilidi korunuyor ve yeniden arm edilebilir.')
+  const checkRecovery = () => {
+    setConfirm({title: 'LIVE recovery kontrolü', message: 'Binance hesap durumu yeniden doğrulanır. Güvenlik kilitleri korunur; kilidi açmak için ayrıca ARM ve 2FA gerekir.', expected: 'LIVE RECOVERY CHECK', mfa: true, action: async code => {
+      await call(V25, '/recovery/check', {method: 'POST', body: JSON.stringify({confirmation: 'LIVE RECOVERY CHECK', totp_code: code})})
+    }})
+    setConfirmText('')
+    setConfirmCode('')
+  }
   const autoToggle = () => {
     if (status?.live_auto_trade || status?.auto?.enabled) return stopAutoTrade()
     if (freeTrial) {setNotice({kind:'error',text:'LIVE işlem MASTER MODE ile açılır'});return}
@@ -522,7 +541,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     }
     const confirmation = {
       title: 'LIVE AUTO-TRADE onayı', message: 'REAL MONEY WILL BE USED. Otomatik işlemler yalnız mevcut V25 live safety chain üzerinden ilerler.',
-      expected: 'CANLI OTOMATİK',
+      expected: 'CANLI OTOMATİK', mfa: true,
       action: async (code?: string) => {
         try {
           await call(V25, '/auto/start', {method: 'POST', body: JSON.stringify({confirmation: 'CANLI OTOMATİK', ...(code ? {totp_code: code} : {})})})
@@ -548,8 +567,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }
 
   const clearEmergency = () => {
-    setConfirm({title: 'Emergency Stop kaldırma', message: 'Bu işlem yalnızca backend recovery temizse emergency kilidini kaldırır. Gerçek emir kilidi açık kalır ve yeniden ARM gerekir.', expected: 'ACİL DURDURMAYI KALDIRIYORUM', action: async () => {
-      await call(V25, '/emergency/clear', {method: 'POST', body: JSON.stringify({confirmation: 'ACİL DURDURMAYI KALDIRIYORUM'})})
+    setConfirm({title: 'Emergency Stop kaldırma', message: 'Güncel 2FA ve temiz backend recovery gerekir. Gerçek emir kilidi kapalı kalır; yeniden ARM ayrıca gerekir.', expected: 'ACİL DURDURMAYI KALDIRIYORUM', mfa: true, action: async code => {
+      await call(V25, '/emergency/clear', {method: 'POST', body: JSON.stringify({confirmation: 'ACİL DURDURMAYI KALDIRIYORUM', totp_code: code})})
     }})
     setConfirmText('')
   }

@@ -115,6 +115,7 @@ class SaveCredentialsRequest(BaseModel):
     api_key: SecretStr
     secret_key: SecretStr
     confirmation: str = Field(min_length=1, max_length=80)
+    totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
 
 
 class TestCredentialsRequest(BaseModel):
@@ -132,6 +133,7 @@ class TestCredentialsRequest(BaseModel):
 class ConnectionActionRequest(BaseModel):
     mode: Mode
     confirmation: str = Field(min_length=1, max_length=100)
+    totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
 
 
 def now_iso() -> str:
@@ -284,6 +286,46 @@ async def ensure_schema(pool: Any) -> None:
         );
         """
     )
+    await pool.execute(
+        """
+        CREATE TABLE IF NOT EXISTS protrebot_exchange_account_vault (
+          user_id TEXT NOT NULL,
+          mode TEXT NOT NULL CHECK (mode = 'LIVE'),
+          encrypted_payload BYTEA NOT NULL,
+          fingerprint TEXT NOT NULL,
+          active BOOLEAN NOT NULL DEFAULT FALSE,
+          last_test_ok BOOLEAN NOT NULL DEFAULT FALSE,
+          last_test_at TIMESTAMPTZ,
+          last_error TEXT,
+          account_summary JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (user_id, mode)
+        )
+        """
+    )
+    await pool.execute(
+        """
+        INSERT INTO protrebot_exchange_account_vault
+          (user_id, mode, encrypted_payload, fingerprint, active, last_test_ok, last_test_at,
+           last_error, account_summary, created_at, updated_at)
+        SELECT DISTINCT ON (user_id)
+          user_id, 'LIVE', encrypted_payload, fingerprint, active, last_test_ok, last_test_at,
+          last_error, account_summary, created_at, updated_at
+        FROM protrebot_exchange_session_vault
+        WHERE mode = 'LIVE'
+        ORDER BY user_id, updated_at DESC, created_at DESC
+        ON CONFLICT (user_id, mode) DO NOTHING
+        """
+    )
+    await pool.execute(
+        """
+        DELETE FROM protrebot_exchange_session_vault
+        WHERE mode = 'LIVE' AND user_id IN (
+          SELECT user_id FROM protrebot_exchange_account_vault WHERE mode = 'LIVE'
+        )
+        """
+    )
 
 
 def session_id(request: Request) -> str:
@@ -304,7 +346,35 @@ def session_id(request: Request) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest() if identity else ""
 
 
-def _require_member(request: Request) -> dict[str, Any]:
+def _vault_scope(request: Request, mode: str) -> tuple[str, str]:
+    normalized = normalize_mode(mode)
+    if normalized == "LIVE":
+        user = getattr(request.state, "member", None)
+        user_id = str((user or {}).get("id") or "")
+        if not user_id and bool(getattr(request.state, "web_owner_authenticated", False)):
+            user_id = "WEB_OWNER"
+        if not user_id:
+            raise HTTPException(401, "Oturum gerekli")
+        return f"owner:{user_id}", user_id
+    sid = session_id(request)
+    if not sid:
+        raise HTTPException(401, "Oturum gerekli")
+    return sid, sid
+
+
+async def _require_live_mfa(request: Request, user: dict[str, Any], code: str | None) -> None:
+    if user.get("role") != "OWNER":
+        raise HTTPException(403, "LIVE bağlantısını yalnız OWNER yönetebilir.")
+    from . import account_settings
+
+    if not await account_settings.enabled(request, user):
+        raise HTTPException(403, "LIVE yönetimi için önce 2FA'yı etkinleştirin.")
+    if not code:
+        raise HTTPException(401, "LIVE yönetimi için güncel 2FA kodu gerekli.")
+    await account_settings.require_totp(request, user, code, required=True)
+
+
+def _require_member(request: Request, *, owner: bool = False) -> dict[str, Any]:
     user = getattr(request.state, "member", None)
     if not user and bool(getattr(request.state, "web_owner_authenticated", False)):
         user = {"id": "WEB_OWNER", "role": "OWNER"}
@@ -312,11 +382,16 @@ def _require_member(request: Request) -> dict[str, Any]:
         raise HTTPException(401, "Oturum gerekli")
     if not session_id(request):
         raise HTTPException(401, "Oturum gerekli")
+    if owner and user.get("role") != "OWNER":
+        raise HTTPException(403, "Yönetici yetkisi gerekli")
     return user
 
 
 def session_credentials(request: Request, mode: str, *, active_only: bool = True) -> tuple[str, str]:
-    key = (session_id(request), normalize_mode(mode))
+    if normalize_mode(mode) == "TESTNET" and not session_id(request):
+        return "", ""
+    scope, _ = _vault_scope(request, mode)
+    key = (scope, normalize_mode(mode))
     meta = _SESSION_META.get(key, {})
     if active_only and (not meta.get("active") or not withdrawal_permissions_safe(key[1], meta.get("account"))):
         return "", ""
@@ -328,7 +403,8 @@ def session_credentials_for_request(request: Request, mode: str, *, active_only:
 
 
 def session_account_identity(request: Request, mode: str, fingerprint: str = "") -> str:
-    meta = _SESSION_META.get((session_id(request), normalize_mode(mode)), {})
+    scope, _ = _vault_scope(request, mode)
+    meta = _SESSION_META.get((scope, normalize_mode(mode)), {})
     return account_identity(meta.get("account"), mode, fingerprint or str(meta.get("fingerprint") or ""))
 
 
@@ -346,6 +422,26 @@ async def authoritative_user_version_active(application: Any, user_id: str, auth
         return False
 
 
+async def authoritative_live_owner_active(application: Any, user_id: str) -> bool:
+    """Validate the account behind an already MFA-authorized server-side LIVE grant."""
+    pool = getattr(application.state, "db_pool", None)
+    if not user_id or pool is None:
+        return False
+    try:
+        row = await pool.fetchrow(
+            "SELECT security FROM commercial_auth_users WHERE user_id = $1",
+            user_id,
+        )
+        if row is None:
+            return False
+        security = row["security"]
+        security = json.loads(security) if isinstance(security, str) else security
+        return isinstance(security, dict) and security.get("active") is True and security.get("role") == "OWNER"
+    except Exception:
+        logger.warning("Background LIVE account authority unavailable")
+        return False
+
+
 async def session_credentials_for_identity(
     application: Any,
     session_value: str,
@@ -357,20 +453,17 @@ async def session_credentials_for_identity(
     auth_version: int | None = None,
     auth_expires_at_epoch: float | None = None,
 ) -> tuple[str, str]:
-    """Resolve an active encrypted session vault row without a request object."""
+    """Resolve an active encrypted account-scoped LIVE vault row."""
     normalized = normalize_mode(mode)
-    if not session_value or not user_id or not fingerprint:
+    if not user_id or not fingerprint:
         return "", ""
-    if normalized == "LIVE":
-        if (
-            not isinstance(auth_expires_at_epoch, (int, float))
-            or not math.isfinite(auth_expires_at_epoch)
-            or auth_expires_at_epoch <= time.time()
-            or not await authoritative_user_version_active(application, user_id, auth_version)
-        ):
-            clear_session_vault_for_user_cache(application, user_id)
-            return "", ""
-    key = (session_value, normalized)
+    if normalized == "LIVE" and not await authoritative_live_owner_active(application, user_id):
+        clear_session_vault_for_user_cache(application, user_id)
+        return "", ""
+    scope = f"owner:{user_id}" if normalized == "LIVE" else session_value
+    if not scope:
+        return "", ""
+    key = (scope, normalized)
     meta = _SESSION_META.get(key, {})
     cached = _SESSION_CACHE.get(key, ("", ""))
     if not force_refresh and (
@@ -387,17 +480,27 @@ async def session_credentials_for_identity(
         logger.warning("LIVE credential resolution failed: pool_unavailable")
         return "", ""
     await ensure_schema(pool)
-    row = await pool.fetchrow(
-        """
-        SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active, account_summary
-        FROM protrebot_exchange_session_vault
-        WHERE session_id = $1 AND user_id = $2 AND mode = $3 AND active = TRUE
-        """,
-        session_value, user_id, normalized,
-    )
-    if not row:
-        # A rotated browser session may outlive the session id persisted by the
-        # live monitor. Recover only one active record for the same owner and key fingerprint.
+    if normalized == "LIVE":
+        row = await pool.fetchrow(
+            """
+            SELECT 'owner:' || user_id AS session_id, user_id, mode, encrypted_payload,
+                   fingerprint, active, account_summary, last_test_ok, last_test_at,
+                   last_error, updated_at
+            FROM protrebot_exchange_account_vault
+            WHERE user_id = $1 AND mode = 'LIVE' AND active = TRUE
+            """,
+            user_id,
+        )
+    else:
+        row = await pool.fetchrow(
+            """
+            SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active, account_summary
+            FROM protrebot_exchange_session_vault
+            WHERE session_id = $1 AND user_id = $2 AND mode = $3 AND active = TRUE
+            """,
+            session_value, user_id, normalized,
+        )
+    if not row and normalized != "LIVE":
         rows = await pool.fetch(
             """
             SELECT session_id, user_id, mode, encrypted_payload, fingerprint, active, account_summary
@@ -446,18 +549,20 @@ def _session_connection(mode: str, key: tuple[str, str]) -> dict[str, Any]:
         "last_test_at": meta.get("last_test_at"),
         "last_error": meta.get("last_error"),
         "account": meta.get("account"),
-        "storage": "OTURUM_KASASI" if meta.get("configured") else "YAPILANDIRILMADI",
+        "storage": ("HESAP_KASASI" if mode == "LIVE" else "OTURUM_KASASI") if meta.get("configured") else "YAPILANDIRILMADI",
         "secrets_returned": False,
     }
 
 
 def session_public_status(application: Any, request: Request) -> dict[str, Any]:
     state = application.state.exchange_vault
-    sid = session_id(request)
     return {
         "version": VERSION,
         "vault": {"ready": bool(state.get("ready")), "storage": state.get("storage"), "reason": state.get("reason"), "loaded_at": state.get("loaded_at")},
-        "connections": {mode: _session_connection(mode, (sid, mode)) for mode in HOSTS},
+        "connections": {
+            mode: _session_connection(mode, (_vault_scope(request, mode)[0], mode))
+            for mode in HOSTS
+        },
         "binance_ban": BINANCE_GLOBAL_BAN.public_status(),
         "safety": {"https_required": True, "secrets_returned_to_browser": False, "connection_test_creates_orders": False, "activation_arms_orders": False, "live_orders_require_v25_gates": True, "withdrawals_supported": False},
     }
@@ -476,11 +581,30 @@ async def ensure_session_cache(request: Request) -> None:
     )
     for row in rows:
         mode = normalize_mode(str(row["mode"]))
+        if mode == "LIVE":
+            continue
         try:
             _SESSION_CACHE[(sid, mode)] = decrypt_credentials(bytes(row["encrypted_payload"]), mode=mode)
             _SESSION_META[(sid, mode)] = _row_meta(row)
         except VaultError as exc:
             _SESSION_META[(sid, mode)] = {**_row_meta(row), "active": False, "last_test_ok": False, "last_error": str(exc)}
+    live_row = await pool.fetchrow(
+        """
+        SELECT 'owner:' || user_id AS session_id, user_id, mode, encrypted_payload,
+               fingerprint, active, last_test_ok, last_test_at, last_error,
+               account_summary, updated_at
+        FROM protrebot_exchange_account_vault
+        WHERE user_id = $1 AND mode = 'LIVE'
+        """,
+        user["id"],
+    )
+    if live_row:
+        key = (f"owner:{user['id']}", "LIVE")
+        try:
+            _SESSION_CACHE[key] = decrypt_credentials(bytes(live_row["encrypted_payload"]), mode="LIVE")
+            _SESSION_META[key] = _row_meta(live_row)
+        except VaultError as exc:
+            _SESSION_META[key] = {**_row_meta(live_row), "active": False, "last_test_ok": False, "last_error": str(exc)}
 
 
 def _row_meta(row: Any) -> dict[str, Any]:
@@ -949,10 +1073,7 @@ def _lock_runtime(application: Any, mode: str, request: Request) -> None:
         from .v25_execution import current_user_id
 
         authorization = state.get("live_session_authorization") or {}
-        if (
-            authorization.get("session_id") != session_id(request)
-            or authorization.get("user_id") != current_user_id(request)
-        ):
+        if authorization.get("user_id") != current_user_id(request):
             return
         _lock_live_controller(state)
 
@@ -1036,6 +1157,8 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
     pool = await _require_ready(request.app)
     await ensure_schema(pool)
     mode = normalize_mode(body.mode)
+    if mode == "LIVE":
+        await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != SAVE_CONFIRMATIONS[mode]:
         raise HTTPException(422, "Güvenli kaydetme onayı eksik.")
     api_key = body.api_key.get_secret_value().strip()
@@ -1049,26 +1172,46 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
             raise _exchange_test_http_exception(exc) from exc
         raise HTTPException(422 if "kısa" in str(exc) or "boşluk" in str(exc) else 502, str(exc)) from exc
     fingerprint = key_fingerprint(api_key)
-    sid = session_id(request)
-    await pool.execute(
-        """
-        INSERT INTO protrebot_exchange_session_vault
-          (session_id, user_id, mode, encrypted_payload, fingerprint, active, last_test_ok, last_test_at, last_error, account_summary, updated_at)
-        VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, NOW(), NULL, $6::jsonb, NOW())
-        ON CONFLICT (session_id, mode) DO UPDATE SET
-          encrypted_payload = EXCLUDED.encrypted_payload,
-          fingerprint = EXCLUDED.fingerprint,
-          active = TRUE,
-          last_test_ok = TRUE,
-          last_test_at = NOW(),
-          last_error = NULL,
-          account_summary = EXCLUDED.account_summary,
-          updated_at = NOW()
-        """,
-        sid, user["id"], mode, encrypted, fingerprint, json.dumps(account, ensure_ascii=False),
-    )
-    _SESSION_CACHE[(sid, mode)] = (api_key, secret_key)
-    _SESSION_META[(sid, mode)] = {
+    scope, owner_id = _vault_scope(request, mode)
+    if mode == "LIVE":
+        await pool.execute(
+            """
+            INSERT INTO protrebot_exchange_account_vault
+              (user_id, mode, encrypted_payload, fingerprint, active, last_test_ok,
+               last_test_at, last_error, account_summary, updated_at)
+            VALUES ($1, 'LIVE', $2, $3, TRUE, TRUE, NOW(), NULL, $4::jsonb, NOW())
+            ON CONFLICT (user_id, mode) DO UPDATE SET
+              encrypted_payload = EXCLUDED.encrypted_payload,
+              fingerprint = EXCLUDED.fingerprint,
+              active = TRUE,
+              last_test_ok = TRUE,
+              last_test_at = NOW(),
+              last_error = NULL,
+              account_summary = EXCLUDED.account_summary,
+              updated_at = NOW()
+            """,
+            owner_id, encrypted, fingerprint, json.dumps(account, ensure_ascii=False),
+        )
+    else:
+        await pool.execute(
+            """
+            INSERT INTO protrebot_exchange_session_vault
+              (session_id, user_id, mode, encrypted_payload, fingerprint, active, last_test_ok, last_test_at, last_error, account_summary, updated_at)
+            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, NOW(), NULL, $6::jsonb, NOW())
+            ON CONFLICT (session_id, mode) DO UPDATE SET
+              encrypted_payload = EXCLUDED.encrypted_payload,
+              fingerprint = EXCLUDED.fingerprint,
+              active = TRUE,
+              last_test_ok = TRUE,
+              last_test_at = NOW(),
+              last_error = NULL,
+              account_summary = EXCLUDED.account_summary,
+              updated_at = NOW()
+            """,
+            scope, user["id"], mode, encrypted, fingerprint, json.dumps(account, ensure_ascii=False),
+        )
+    _SESSION_CACHE[(scope, mode)] = (api_key, secret_key)
+    _SESSION_META[(scope, mode)] = {
         "user_id": str(user["id"]),
         "configured": True,
         "active": True,
@@ -1080,7 +1223,7 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
         "updated_at": now_iso(),
     }
     _lock_runtime(request.app, mode, request)
-    return {**session_public_status(request.app, request), "message": "Anahtarlar bu oturum için güvenli kasaya kaydedildi ve otomasyon için hazır."}
+    return {**session_public_status(request.app, request), "message": "Canlı anahtar OWNER hesabının şifreli kasasına kaydedildi." if mode == "LIVE" else "Anahtarlar bu oturum için güvenli kasaya kaydedildi ve otomasyon için hazır."}
 
 
 @router.post("/activate")
@@ -1089,38 +1232,40 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
     pool = await _require_ready(request.app)
     await ensure_session_cache(request)
     mode = normalize_mode(body.mode)
+    if mode == "LIVE":
+        await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != ACTIVATE_CONFIRMATIONS[mode]:
         raise HTTPException(422, "Bağlantı aktifleştirme onayı eksik.")
     api_key, secret_key = session_credentials(request, mode, active_only=False)
     if not api_key or not secret_key:
         raise HTTPException(412, "Bu kanal için kasada kayıtlı anahtar yok.")
+    scope, owner_id = _vault_scope(request, mode)
     if mode == "LIVE":
         from .v25_execution import guard_execution_ownership
-
-        try:
-            guard_execution_ownership(request)
-        except HTTPException as exc:
-            if exc.status_code == 403 and exc.detail == "LIVE kontrolü başka bir kullanıcı veya oturuma ait.":
-                raise HTTPException(403, "LIVE kontrolü başka bir kullanıcı veya oturuma ait. Aynı OWNER hesabındaysanız Canlı ekranındaki 'LIVE oturumunu geri bağla' düğmesini kullanın; güncel 2FA gerekir. Bağlantı aktifleştirilmedi.") from exc
-            raise
+        guard_execution_ownership(request)
     try:
         account = await _verify_request_credentials(request, mode, api_key, secret_key)
     except VaultError as exc:
+        table = "protrebot_exchange_account_vault" if mode == "LIVE" else "protrebot_exchange_session_vault"
+        key_column = "user_id" if mode == "LIVE" else "session_id"
+        key_value = owner_id if mode == "LIVE" else scope
         await pool.execute(
-            "UPDATE protrebot_exchange_session_vault SET active = FALSE, last_test_ok = FALSE, last_test_at = NOW(), last_error = $3, updated_at = NOW() WHERE session_id = $1 AND mode = $2",
-            session_id(request), mode,
+            f"UPDATE {table} SET active = FALSE, last_test_ok = FALSE, last_test_at = NOW(), last_error = $3, updated_at = NOW() WHERE {key_column} = $1 AND mode = $2",
+            key_value, mode,
             _rate_limit_public_message(exc) if isinstance(exc, BinanceServerTimeRejected) else str(exc)[:240],
         )
         public_error = _rate_limit_public_message(exc) if isinstance(exc, BinanceServerTimeRejected) else str(exc)[:240]
-        _SESSION_META[(session_id(request), mode)].update({"active": False, "last_test_ok": False, "last_test_at": now_iso(), "last_error": public_error})
+        _SESSION_META[(scope, mode)].update({"active": False, "last_test_ok": False, "last_test_at": now_iso(), "last_error": public_error})
         _lock_runtime(request.app, mode, request)
         raise _exchange_test_http_exception(exc) from exc
-    sid = session_id(request)
+    table = "protrebot_exchange_account_vault" if mode == "LIVE" else "protrebot_exchange_session_vault"
+    key_column = "user_id" if mode == "LIVE" else "session_id"
+    key_value = owner_id if mode == "LIVE" else scope
     await pool.execute(
-        "UPDATE protrebot_exchange_session_vault SET active = TRUE, last_test_ok = TRUE, last_test_at = NOW(), last_error = NULL, account_summary = $3::jsonb, updated_at = NOW() WHERE session_id = $1 AND mode = $2",
-        sid, mode, json.dumps(account, ensure_ascii=False),
+        f"UPDATE {table} SET active = TRUE, last_test_ok = TRUE, last_test_at = NOW(), last_error = NULL, account_summary = $3::jsonb, updated_at = NOW() WHERE {key_column} = $1 AND mode = $2",
+        key_value, mode, json.dumps(account, ensure_ascii=False),
     )
-    _SESSION_META[(sid, mode)].update({"active": True, "last_test_ok": True, "last_test_at": account["tested_at"], "last_error": None, "account": account, "updated_at": now_iso()})
+    _SESSION_META[(scope, mode)].update({"active": True, "last_test_ok": True, "last_test_at": account["tested_at"], "last_error": None, "account": account, "updated_at": now_iso()})
     if mode == "LIVE":
         from .v25_execution import connect_read_only_for_request
 
@@ -1133,34 +1278,41 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
 
 @router.post("/deactivate")
 async def exchange_connection_deactivate(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
-    _require_member(request)
+    user = _require_member(request)
     pool = await _require_ready(request.app)
     await ensure_session_cache(request)
     mode = normalize_mode(body.mode)
+    if mode == "LIVE":
+        await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != "BAĞLANTIYI KAPAT":
         raise HTTPException(422, "Bağlantıyı kapatma onayı eksik.")
-    sid = session_id(request)
+    scope, owner_id = _vault_scope(request, mode)
+    table = "protrebot_exchange_account_vault" if mode == "LIVE" else "protrebot_exchange_session_vault"
+    key_column = "user_id" if mode == "LIVE" else "session_id"
+    key_value = owner_id if mode == "LIVE" else scope
     await pool.execute(
-        "UPDATE protrebot_exchange_session_vault SET active = FALSE, updated_at = NOW() WHERE session_id = $1 AND mode = $2",
-        sid, mode,
+        f"UPDATE {table} SET active = FALSE, updated_at = NOW() WHERE {key_column} = $1 AND mode = $2",
+        key_value, mode,
     )
-    if (sid, mode) in _SESSION_META:
-        _SESSION_META[(sid, mode)]["active"] = False
-        _SESSION_META[(sid, mode)]["updated_at"] = now_iso()
+    if (scope, mode) in _SESSION_META:
+        _SESSION_META[(scope, mode)]["active"] = False
+        _SESSION_META[(scope, mode)]["updated_at"] = now_iso()
     _lock_runtime(request.app, mode, request)
     return {**session_public_status(request.app, request), "message": "Bağlantı kapatıldı; yeni emir yetkileri sıfırlandı."}
 
 
 @router.delete("/credentials")
 async def exchange_connection_delete(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
-    _require_member(request)
+    user = _require_member(request)
     pool = await _require_ready(request.app)
     await ensure_session_cache(request)
     mode = normalize_mode(body.mode)
+    if mode == "LIVE":
+        await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != DELETE_CONFIRMATION:
         raise HTTPException(422, f"Silmek için {DELETE_CONFIRMATION} onayı gerekir.")
-    sid = session_id(request)
-    if _SESSION_META.get((sid, mode), {}).get("active"):
+    scope, owner_id = _vault_scope(request, mode)
+    if _SESSION_META.get((scope, mode), {}).get("active"):
         raise HTTPException(409, "Önce bağlantıyı devre dışı bırakın; sonra anahtarı silebilirsiniz.")
     api_key, secret_key = session_credentials(request, mode, active_only=False)
     if api_key and secret_key:
@@ -1174,11 +1326,18 @@ async def exchange_connection_delete(request: Request, body: ConnectionActionReq
             # Invalid/expired credentials must remain removable after the
             # connection has been deactivated.
             pass
-    await pool.execute("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1 AND mode = $2", sid, mode)
-    _SESSION_CACHE.pop((sid, mode), None)
-    _SESSION_META.pop((sid, mode), None)
+    if mode == "LIVE":
+        await pool.execute(
+            "DELETE FROM protrebot_exchange_account_vault WHERE user_id = $1 AND mode = 'LIVE'",
+            owner_id,
+        )
+    else:
+        await pool.execute("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1 AND mode = $2", scope, mode)
+    _SESSION_CACHE.pop((scope, mode), None)
+    _SESSION_META.pop((scope, mode), None)
     _lock_runtime(request.app, mode, request)
-    return {**session_public_status(request.app, request), "message": "Şifreli anahtar kaydı bu oturum için silindi."}
+    message = "Şifreli LIVE anahtar OWNER hesabından silindi." if mode == "LIVE" else "Şifreli anahtar kaydı bu oturum için silindi."
+    return {**session_public_status(request.app, request), "message": message}
 
 
 @router.delete("/session")
@@ -1186,11 +1345,10 @@ async def exchange_connection_clear_session(request: Request) -> dict[str, Any]:
     _require_member(request)
     pool = await _require_ready(request.app)
     sid = session_id(request)
-    await pool.execute("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1", sid)
-    for mode in HOSTS:
-        _SESSION_CACHE.pop((sid, mode), None)
-        _SESSION_META.pop((sid, mode), None)
-        _lock_runtime(request.app, mode, request)
+    await pool.execute("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1 AND mode = 'TESTNET'", sid)
+    _SESSION_CACHE.pop((sid, "TESTNET"), None)
+    _SESSION_META.pop((sid, "TESTNET"), None)
+    _lock_runtime(request.app, "TESTNET", request)
     return {"ok": True, "message": "Oturum borsa bağlantıları temizlendi."}
 
 
@@ -1198,8 +1356,10 @@ async def clear_session_vault_for_request(request: Request) -> None:
     pool = getattr(request.app.state, "db_pool", None)
     sid = session_id(request)
     if pool is not None and sid:
-        await pool.execute("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1", sid)
-    for mode in HOSTS:
-        _SESSION_CACHE.pop((sid, mode), None)
-        _SESSION_META.pop((sid, mode), None)
-        _lock_runtime(request.app, mode, request)
+        await pool.execute(
+            "DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1 AND mode = 'TESTNET'",
+            sid,
+        )
+    _SESSION_CACHE.pop((sid, "TESTNET"), None)
+    _SESSION_META.pop((sid, "TESTNET"), None)
+    _lock_runtime(request.app, "TESTNET", request)

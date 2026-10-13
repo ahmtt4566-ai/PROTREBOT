@@ -1,3 +1,4 @@
+import asyncio
 import time
 import unittest
 from types import SimpleNamespace
@@ -53,6 +54,7 @@ class MasterTradeRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_start_does_not_extend_or_replace_active_authority(self):
         state = v25.initial_state()
+        state["lock"] = asyncio.Lock()
         deadline = time.time() + 120
         state["auto"].update(enabled=True, session_until=deadline)
         state["auto_authorization"].update(user_id="offline-owner", session_id="offline-session")
@@ -61,7 +63,8 @@ class MasterTradeRegressionTests(unittest.IsolatedAsyncioTestCase):
             app=SimpleNamespace(state=SimpleNamespace(v25_execution=state)),
             state=SimpleNamespace(member={"id": "offline-owner"}),
         )
-        with patch.object(v25, "execution_owner", return_value={"id": "offline-owner"}), \
+        with patch.object(v25, "execution_owner", return_value={"id": "offline-owner", "role": "OWNER"}), \
+                patch("app.exchange_connections._require_live_mfa", new=AsyncMock()), \
                 patch.object(v25, "live_auto_start_gate", return_value=(True, "ready")), \
                 patch.object(v25, "authenticated_live_expiry", return_value=time.time() + 900), \
                 patch.object(v25, "public_status", return_value={}), \

@@ -74,6 +74,9 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         exchange_connections._SESSION_CACHE.clear()
         exchange_connections._SESSION_META.clear()
         exchange_connections.BINANCE_RATE_LIMITER.reset()
+        self.mfa_patcher = patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock())
+        self.mfa_patcher.start()
+        self.addCleanup(self.mfa_patcher.stop)
 
     def test_server_time_200_continues_to_read_only_account_checks(self):
         http = FakeBinanceHttp()
@@ -226,6 +229,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
     def _request(self):
         pool = AsyncMock()
         pool.fetch.return_value = []
+        pool.fetchrow.return_value = None
         application = SimpleNamespace(
             state=SimpleNamespace(
                 db_pool=pool,
@@ -298,11 +302,14 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertEqual(context.exception.headers["Retry-After"], "10")
         self.assertEqual(context.exception.detail["code"], "BINANCE_RATE_LIMITED")
         self.assertNotIn("HTTP 418", context.exception.detail["detail"])
-        self.assertEqual(request.app.state.db_pool.execute.await_count, 2)
+        self.assertFalse(any(
+            "VALUES ($1, 'LIVE'" in call.args[0]
+            for call in request.app.state.db_pool.execute.await_args_list
+        ))
 
     def test_activate_endpoint_maps_server_time_418_without_storing_technical_detail(self):
         request = self._request()
-        session_key = (exchange_connections.session_id(request), "LIVE")
+        session_key = ("owner:owner-server-time", "LIVE")
         exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
         exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
         rejection = exchange_connections.BinanceServerTimeRejected("Binance server-time temporarily rejected the request (HTTP 418). Please wait 7 seconds before retrying.", retry_after=7)
@@ -315,29 +322,26 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         self.assertNotIn("HTTP 418", context.exception.detail["detail"])
         self.assertNotIn("HTTP 418", exchange_connections._SESSION_META[session_key]["last_error"])
 
-    def test_live_activate_rejects_old_session_before_exchange_or_vault_mutation(self):
+    def test_live_activate_from_another_session_of_same_owner_keeps_account_access(self):
         request = self._request()
         state = v25_execution.initial_state()
         request.app.state.v25_execution = state
         state["lock"] = asyncio.Lock()
+        fingerprint = exchange_connections.key_fingerprint("api-key-safe")
         authorization = {"user_id": "owner-server-time", "session_id": "previous-session",
-                         "fingerprint": "saved-fingerprint", "trading_account_id": "saved-account"}
+                         "fingerprint": fingerprint, "trading_account_id": ""}
         state["live_session_authorization"] = dict(authorization)
-        session_key = (exchange_connections.session_id(request), "LIVE")
+        session_key = ("owner:owner-server-time", "LIVE")
         exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
-        exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
+        exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True, "user_id": "owner-server-time", "fingerprint": fingerprint}
         account = {"tested_at": "now", "orders_created": False}
         with patch.object(exchange_connections, "_verify_request_credentials", new=AsyncMock(return_value=account)) as verify, \
              patch.object(exchange_connections, "ensure_session_cache", new=AsyncMock()), \
-             patch.object(v25_execution, "account_snapshot", new=AsyncMock()) as snapshot:
-            with self.assertRaises(exchange_connections.HTTPException) as context:
-                asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
-        self.assertEqual(context.exception.status_code, 403)
-        self.assertIn("LIVE oturumunu geri bağla", context.exception.detail)
-        self.assertIn("güncel 2FA", context.exception.detail)
-        verify.assert_not_awaited()
-        snapshot.assert_not_awaited()
-        request.app.state.db_pool.execute.assert_not_awaited()
+             patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock(return_value={"connected": True, "real_trading_locked": True})) as connect:
+            result = asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
+        self.assertEqual(result["connected"], True)
+        verify.assert_awaited_once()
+        connect.assert_awaited_once()
         self.assertEqual(state["live_session_authorization"], authorization)
         self.assertTrue(state["real_trading_locked"])
 
@@ -347,8 +351,8 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         for name, value in vars(request.app.state).items():
             setattr(application.state, name, value)
         state = application.state.v25_execution
-        state["live_session_authorization"] = {"user_id": "owner-server-time", "session_id": "previous-session"}
-        session_key = (exchange_connections.session_id(request), "LIVE")
+        state["live_session_authorization"] = {"user_id": "another-owner", "session_id": "previous-session"}
+        session_key = ("owner:owner-server-time", "LIVE")
         exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
         exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
         application.include_router(exchange_connections.router)
@@ -366,7 +370,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
             response = client.post("/api/exchange-connections/activate", headers=request.headers,
                                    json={"mode": "LIVE", "confirmation": "CANLI SALT OKUNUR BAĞLANTIYI AÇ"})
         self.assertEqual(response.status_code, 403)
-        self.assertIn("LIVE oturumunu geri bağla", response.json()["detail"])
+        self.assertIn("başka bir kullanıcıya ait", response.json()["detail"])
         verify.assert_not_awaited()
         application.state.db_pool.execute.assert_not_awaited()
         self.assertEqual(state["live_session_authorization"]["session_id"], "previous-session")
@@ -375,7 +379,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         request = self._request()
         request.app.state.v25_execution = v25_execution.initial_state()
         request.app.state.v25_execution["lock"] = asyncio.Lock()
-        session_key = (exchange_connections.session_id(request), "LIVE")
+        session_key = ("owner:owner-server-time", "LIVE")
         exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
         exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
         account = {"tested_at": "2026-09-22T12:00:00+00:00", "wallet_balance": 100.0, "orders_created": False}
@@ -402,10 +406,9 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
             asyncio.run(exchange_connection_save(request, SaveCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe", confirmation="CANLI KASAYA KAYDET")))
             result = asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
 
-        current_session = exchange_connections.session_id(request)
         self.assertTrue(result["connected"])
         self.assertTrue(request.app.state.v25_execution["connected"])
-        self.assertEqual(request.app.state.v25_execution["snapshot_session_id"], current_session)
+        self.assertEqual(request.app.state.v25_execution["snapshot_session_id"], "owner:owner-server-time")
         self.assertEqual(request.app.state.v25_execution["snapshot"], snapshot)
         self.assertTrue(v25_execution.public_status(request.app, request)["connected"])
         self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
@@ -419,7 +422,13 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         class Pool:
             async def fetchrow(self, query, *_args):
                 if "commercial_auth_users" in query:
-                    return {"auth_version": 1, "security": {"active": True, "email_verified": True}}
+                    return {"auth_version": 1, "security": {"active": True, "role": "OWNER", "email_verified": True}}
+                if "protrebot_exchange_account_vault" in query:
+                    return {
+                        "session_id": "owner:owner-a", "user_id": "owner-a", "mode": "LIVE",
+                        "encrypted_payload": b"encrypted", "fingerprint": fingerprint, "active": True,
+                        "account_summary": {"api_permissions": {"withdrawal_check": "VERIFIED", "enableWithdrawals": False}},
+                    }
                 return None
 
             async def fetch(self, *_args):

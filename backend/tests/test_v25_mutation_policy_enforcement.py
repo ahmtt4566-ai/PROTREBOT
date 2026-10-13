@@ -40,6 +40,7 @@ def emergency_request(state):
 
 def emergency_state(plan):
     state = v25_execution.initial_state()
+    state["lock"] = asyncio.Lock()
     state["plans"] = {plan["id"]: plan}
     return state
 

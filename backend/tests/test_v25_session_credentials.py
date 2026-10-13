@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -54,21 +55,107 @@ class V25SessionCredentialTests(unittest.TestCase):
             "account": {"api_permissions": {"withdrawal_check": "VERIFIED", "enableWithdrawals": False}},
         }
 
-    def test_live_credentials_use_current_session_when_global_vault_is_empty(self):
+    def test_live_credentials_are_shared_between_owner_sessions(self):
         first = self.request("session-a")
         second = self.request("session-b")
-        first_key = (exchange_connections.session_id(first), "LIVE")
-        second_key = (exchange_connections.session_id(second), "LIVE")
+        owner_key = ("owner:owner", "LIVE")
 
         with patch.dict(exchange_connections._CACHE, {}, clear=True), \
              patch.dict(exchange_connections._META, {}, clear=True), \
-             patch.dict(exchange_connections._SESSION_CACHE, {first_key: ("api-key-a", "secret-key-a")}, clear=True), \
-             patch.dict(exchange_connections._SESSION_META, {first_key: self.live_metadata()}, clear=True):
+             patch.dict(exchange_connections._SESSION_CACHE, {owner_key: ("api-key-a", "secret-key-a")}, clear=True), \
+             patch.dict(exchange_connections._SESSION_META, {owner_key: self.live_metadata()}, clear=True):
             self.assertEqual(
                 v25_execution.live_credentials_status(first),
                 ("api-key-a", "secret-key-a", v25_execution.credential_fingerprint("api-key-a")),
             )
-            self.assertEqual(v25_execution.live_credentials_status(second), ("", "", None))
+            self.assertEqual(
+                v25_execution.live_credentials_status(second),
+                ("api-key-a", "secret-key-a", v25_execution.credential_fingerprint("api-key-a")),
+            )
+
+    def test_live_owner_credentials_reload_from_account_vault_after_cache_clear(self):
+        first = self.request("session-a")
+        second = self.request("session-b", first.app)
+        first.app.state.db_pool = SimpleNamespace(
+            fetch=AsyncMock(return_value=[]),
+            fetchrow=AsyncMock(return_value={
+                "user_id": "owner", "mode": "LIVE", "encrypted_payload": b"ciphertext",
+                "fingerprint": v25_execution.credential_fingerprint("api-key-owner"),
+                "active": True, "last_test_ok": True, "last_test_at": None,
+                "last_error": None, "account_summary": self.live_metadata()["account"],
+                "updated_at": None,
+            }),
+        )
+        first.app.state.exchange_vault = {"ready": True, "pool_id": id(first.app.state.db_pool)}
+        with patch.dict(exchange_connections._SESSION_CACHE, {}, clear=True), \
+             patch.dict(exchange_connections._SESSION_META, {}, clear=True), \
+             patch.object(exchange_connections, "ensure_schema", new=AsyncMock()), \
+             patch.object(exchange_connections, "decrypt_credentials", return_value=("api-key-owner", "secret-key-owner")):
+            asyncio.run(exchange_connections.ensure_session_cache(first))
+            self.assertEqual(
+                exchange_connections.session_credentials_for_request(second, "LIVE", active_only=False),
+                ("api-key-owner", "secret-key-owner"),
+            )
+        first.app.state.db_pool.fetchrow.assert_awaited_once()
+
+    def test_live_connection_scope_requires_owner_two_factor(self):
+        from app import account_settings
+
+        request = self.request("mfa-session")
+        user = request.state.member
+        with patch.object(account_settings, "enabled", new=AsyncMock(return_value=False)):
+            with self.assertRaises(exchange_connections.HTTPException) as disabled:
+                asyncio.run(exchange_connections._require_live_mfa(request, user, None))
+        self.assertEqual(disabled.exception.status_code, 403)
+
+        with patch.object(account_settings, "enabled", new=AsyncMock(return_value=True)), \
+             patch.object(account_settings, "require_totp", new=AsyncMock()) as verify:
+            asyncio.run(exchange_connections._require_live_mfa(request, user, "123456"))
+        verify.assert_awaited_once_with(request, user, "123456", required=True)
+
+        with self.assertRaises(exchange_connections.HTTPException) as non_owner:
+            asyncio.run(exchange_connections._require_live_mfa(
+                request, {"id": "member", "role": "CUSTOMER"}, "123456",
+            ))
+        self.assertEqual(non_owner.exception.status_code, 403)
+
+    def test_logout_removes_only_browser_scoped_testnet_credentials(self):
+        request = self.request("logout-session")
+        request.app.state.db_pool.execute = AsyncMock()
+        owner_key = ("owner:owner", "LIVE")
+        live_state = request.app.state.v25_execution
+        live_state["auto"]["enabled"] = True
+        live_state["live_auto_trade"] = True
+        with patch.dict(exchange_connections._SESSION_CACHE, {owner_key: ("api-key-a", "secret-key-a")}, clear=True), \
+             patch.dict(exchange_connections._SESSION_META, {owner_key: self.live_metadata()}, clear=True):
+            asyncio.run(exchange_connections.clear_session_vault_for_request(request))
+            self.assertEqual(
+                exchange_connections.session_credentials_for_request(request, "LIVE", active_only=False),
+                ("api-key-a", "secret-key-a"),
+            )
+        delete_query = request.app.state.db_pool.execute.await_args.args[0]
+        self.assertIn("protrebot_exchange_session_vault", delete_query)
+        self.assertIn("mode = 'TESTNET'", delete_query)
+        self.assertTrue(live_state["auto"]["enabled"])
+        self.assertTrue(live_state["live_auto_trade"])
+
+    def test_background_grant_outlives_browser_token_but_not_auth_version(self):
+        state = v25_execution.initial_state()
+        state["auto_authorization"] = {
+            "user_id": "owner", "session_id": "owner:owner", "fingerprint": "fingerprint",
+            "auth_version": 1, "expires_at_epoch": time.time() + 3600,
+            "auth_expires_at_epoch": time.time() - 3600,
+        }
+        application = SimpleNamespace(state=SimpleNamespace(
+            v25_execution=state, db_pool=object(),
+        ))
+        with patch.object(exchange_connections, "authoritative_user_version_active", new=AsyncMock(return_value=True)) as validate:
+            self.assertTrue(asyncio.run(v25_execution.background_authorization_active(application, state)))
+        validate.assert_awaited_once_with(application, "owner", 1)
+
+        with patch.object(exchange_connections, "authoritative_user_version_active", new=AsyncMock(return_value=False)):
+            self.assertFalse(asyncio.run(v25_execution.background_authorization_active(application, state)))
+        self.assertTrue(state["real_trading_locked"])
 
     def test_missing_session_credential_is_unconfigured(self):
         request = self.request("session-missing")
@@ -95,10 +182,11 @@ class V25SessionCredentialTests(unittest.TestCase):
             "positions": [{"symbol": "BTCUSDT", "quantity": 0.01, "mark_price": 50000}],
             "open_orders": [{"symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "price": 49000, "quantity": 0.01, "status": "NEW"}],
         }
-        session_key = (exchange_connections.session_id(request), "LIVE")
-        with patch.dict(exchange_connections._SESSION_CACHE, {session_key: ("api-key-a", "secret-key-a")}, clear=True), \
-             patch.dict(exchange_connections._SESSION_META, {session_key: self.live_metadata()}, clear=True):
-            application.state.v25_execution["snapshot_session_id"] = exchange_connections.session_id(request)
+        owner_key = ("owner:owner", "LIVE")
+        with patch.dict(exchange_connections._SESSION_CACHE, {owner_key: ("api-key-a", "secret-key-a")}, clear=True), \
+             patch.dict(exchange_connections._SESSION_META, {owner_key: self.live_metadata()}, clear=True):
+            application.state.v25_execution["snapshot_session_id"] = "owner:owner"
+            application.state.v25_execution["live_session_authorization"].update(user_id="owner", session_id="owner:owner")
             application.state.v25_execution["connected"] = True
             status = v25_execution.public_status(application, request)
         self.assertTrue(status["connected"])
@@ -111,7 +199,7 @@ class V25SessionCredentialTests(unittest.TestCase):
         self.assertNotIn("api_key", status)
         self.assertNotIn("secret_key", status)
 
-    def test_status_disconnects_when_snapshot_belongs_to_another_session(self):
+    def test_status_shares_snapshot_with_same_owner_across_sessions(self):
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=v25_execution.initial_state()))
         request = self.request("session-b", application, bind=True)
         application.state.v25_execution["connected"] = True
@@ -121,10 +209,11 @@ class V25SessionCredentialTests(unittest.TestCase):
             "positions": [],
             "open_orders": [],
         }
-        application.state.v25_execution["snapshot_session_id"] = exchange_connections.session_id(self.request("session-a"))
+        application.state.v25_execution["snapshot_session_id"] = "owner:owner"
+        application.state.v25_execution["live_session_authorization"].update(user_id="owner", session_id="owner:owner")
         status = v25_execution.public_status(application, request)
-        self.assertFalse(status["connected"])
-        self.assertIsNone(status["account"]["wallet_balance"])
+        self.assertTrue(status["connected"])
+        self.assertEqual(status["account"]["wallet_balance"], 1000.0)
 
     def test_read_only_connect_uses_current_session_credentials_and_publishes_snapshot(self):
         state = v25_execution.initial_state()
@@ -138,12 +227,15 @@ class V25SessionCredentialTests(unittest.TestCase):
             "open_orders": [],
         }
         client = SimpleNamespace(time_offset_ms=0)
-        with patch.dict(exchange_connections._SESSION_CACHE, {(exchange_connections.session_id(request), "LIVE"): ("api-key-session-a", "secret-key-session-a")}, clear=True), \
-             patch.dict(exchange_connections._SESSION_META, {(exchange_connections.session_id(request), "LIVE"): self.live_metadata()}, clear=True), \
+        with patch.dict(exchange_connections._SESSION_CACHE, {("owner:owner", "LIVE"): ("api-key-session-a", "secret-key-session-a")}, clear=True), \
+             patch.dict(exchange_connections._SESSION_META, {("owner:owner", "LIVE"): self.live_metadata()}, clear=True), \
              patch.object(v25_execution, "client_for", return_value=client) as client_for, \
              patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=snapshot)), \
-             patch.object(v25_execution, "persist_state"):
-            status = asyncio.run(v25_execution.v25_connect(request))
+             patch.object(v25_execution, "persist_state"), \
+             patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()):
+            status = asyncio.run(v25_execution.v25_connect(
+                request, v25_execution.Confirmation(confirmation="LIVE HESABINI DOĞRULA", totp_code="123456"),
+            ))
         client_for.assert_called_once_with(application, request)
         self.assertTrue(status["connected"])
         self.assertEqual(status["account"]["wallet_balance"], 1000.0)
@@ -161,7 +253,8 @@ class V25SessionCredentialTests(unittest.TestCase):
             "open_orders": [],
         }
         state["snapshot"] = snapshot
-        state["snapshot_session_id"] = exchange_connections.session_id(request)
+        state["snapshot_session_id"] = "owner:owner"
+        state["live_session_authorization"].update(user_id="owner", session_id="owner:owner")
         state["connected"] = True
         client = SimpleNamespace(time_offset_ms=0)
         with patch.object(v25_execution, "client_for", return_value=client), \
@@ -169,11 +262,11 @@ class V25SessionCredentialTests(unittest.TestCase):
              patch.object(v25_execution, "recover_orphan_plans", new=AsyncMock(return_value=0)), \
              patch.object(v25_execution, "persist_state"):
             asyncio.run(v25_execution.reconcile(application))
-        self.assertEqual(state["snapshot_session_id"], exchange_connections.session_id(request))
+        self.assertEqual(state["snapshot_session_id"], "owner:owner")
         status = v25_execution.public_status(application, request)
         self.assertTrue(status["connected"])
 
-    def test_read_only_connect_rejects_other_session_snapshot(self):
+    def test_snapshot_binding_must_match_its_account_authorization(self):
         application = SimpleNamespace(state=SimpleNamespace(v25_execution=v25_execution.initial_state()))
         state = application.state.v25_execution
         request = self.request("session-b", application, bind=True)
@@ -184,10 +277,13 @@ class V25SessionCredentialTests(unittest.TestCase):
             "positions": [],
             "open_orders": [],
         }
+        state["live_session_authorization"].update(user_id="owner", session_id="owner:owner")
         state["snapshot_session_id"] = exchange_connections.session_id(self.request("session-a"))
         self.assertFalse(v25_execution.public_status(application, request)["connected"])
+        foreign = self.request("foreign-session", application)
+        foreign.state.member = {"id": "another-owner", "role": "OWNER", "auth_version": 1}
         with self.assertRaises(v25_execution.HTTPException) as denied:
-            v25_execution.public_status(application, self.request("session-a", application))
+            v25_execution.public_status(application, foreign)
         self.assertEqual(denied.exception.status_code, 403)
 
 

@@ -42,7 +42,11 @@ def state(monkeypatch):
 
 def request_for(state):
     app = SimpleNamespace(state=SimpleNamespace(v25_execution=state, db_pool=object()))
-    return SimpleNamespace(app=app, state=SimpleNamespace(member={"id": "owner", "role": "OWNER"}))
+    return SimpleNamespace(
+        app=app,
+        headers={"x-protrebot-session": "owner-session"},
+        state=SimpleNamespace(member={"id": "owner", "role": "OWNER", "auth_version": 1}),
+    )
 
 
 def native_plan(**changes):
@@ -594,7 +598,7 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
     monkeypatch.setattr(live, "consent_status", Mock(return_value={"active": True, "expires_at": datetime.fromtimestamp(now + consent_hours * 3600, timezone.utc).isoformat()}))
     response = run(original.start(req, original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=hours)))
     assert response["enabled"]
-    expected_expiry = now + min(hours, authority_hours or 48) * 3600
+    expected_expiry = now + min(hours, consent_hours) * 3600
     assert state["auto"]["session_until"] == expected_expiry
     assert state["auto_authorization"]["expires_at_epoch"] == expected_expiry
     assert response["session"]["hours"] == hours
@@ -669,7 +673,7 @@ def test_original_session_clock_does_not_change_legacy_v25(state):
     assert original.public_config(state)["session"]["expires_at"] is None
 
 
-@pytest.mark.parametrize("invalid_authority", ["missing-login", "expired-login", "missing-consent", "expired-consent"])
+@pytest.mark.parametrize("invalid_authority", ["missing-consent", "expired-consent"])
 def test_original_start_fails_closed_without_duration_authority(state, monkeypatch, invalid_authority):
     state["auto"]["enabled"] = False
     state["original_v2_live"].update(enabled=False, daily={"locked": True, "loss": 12})
@@ -683,7 +687,7 @@ def test_original_start_fails_closed_without_duration_authority(state, monkeypat
     monkeypatch.setattr(original, "daily_guard", AsyncMock())
     async def start(*args, **kwargs):
         state["auto"]["enabled"] = True
-        state["auto_authorization"]["auth_expires_at_epoch"] = None if invalid_authority == "missing-login" else time.time() + (-1 if invalid_authority == "expired-login" else 86400)
+        state["auto_authorization"]["auth_expires_at_epoch"] = time.time() - 1
     monkeypatch.setattr(live, "_start_live_auto_session", start)
     consent = {"active": True, "expires_at": datetime.fromtimestamp(time.time() + 86400, timezone.utc).isoformat()}
     if invalid_authority == "missing-consent":

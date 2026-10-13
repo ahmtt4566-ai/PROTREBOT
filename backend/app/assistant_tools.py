@@ -20,7 +20,6 @@ from . import assistant_help, subscription_core, v25_execution
 from .analyst_credits import AnalystCredits, ConsumeAnalysis, CreditTransaction
 from .analyst_credits import service as credit_service
 from .assistant_config import AssistantConfig, load_assistant_config
-from .exchange_connections import session_id
 from .member_entitlements import access_for_request, subscription_for_request
 from .premium_access import public_projection
 from .subscription_core import parse_datetime
@@ -214,7 +213,9 @@ class AssistantTools:
         lock = state["lock"]
         await asyncio.wait_for(lock.acquire(), timeout=self.config.request_timeout_seconds)
         try:
-            return v25_execution.read_owned_account_state(state, user_id, session_id(self.request))
+            return v25_execution.read_owned_account_state(
+                state, user_id, v25_execution.live_owner_binding(self.request),
+            )
         finally:
             lock.release()
 

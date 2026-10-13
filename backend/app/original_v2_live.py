@@ -661,16 +661,15 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
                 request, live.Confirmation(confirmation="CANLI OTOMATİK"), mfa_verified=True,
             )
             started = time.time()
-            auth_expiry = (state.get("auto_authorization") or {}).get("auth_expires_at_epoch")
             consent = live.consent_status(state, request)
-            if not isinstance(auth_expiry, (int, float)) or not math.isfinite(auth_expiry) or auth_expiry <= started or not consent.get("active") or not consent.get("expires_at"):
-                raise HTTPException(423, "Original V2 oturum yetki süresi doğrulanamadı.")
+            if not consent.get("active") or not consent.get("expires_at"):
+                raise HTTPException(423, "Original V2 canlı risk izni doğrulanamadı.")
             consent_expiry = datetime.fromisoformat(consent["expires_at"]).timestamp()
             requested_expiry = started + body.session_hours * 3600
-            expires = min(requested_expiry, auth_expiry, consent_expiry)
+            expires = min(requested_expiry, consent_expiry)
             if expires <= started:
-                raise HTTPException(423, "Original V2 oturum yetki süresi doldu.")
-            state["auto"].update(session_until=expires, last_decision=f"Original V2 {body.session_hours} saatlik gözetimli oturumu açıldı; gerçek bitiş yetki süresiyle sınırlıdır.")
+                raise HTTPException(423, "Original V2 canlı risk izni süresi doldu.")
+            state["auto"].update(session_until=expires, last_decision=f"Original V2 {body.session_hours} saatlik sunucu gözetimli oturumu açıldı; bitiş canlı risk izniyle sınırlıdır.")
             state["auto_authorization"]["expires_at_epoch"] = expires
             config.update(session_hours=body.session_hours, session_id=uuid.uuid4().hex,
                           session_started_at=live.now_iso(), session_expires_at_epoch=expires,
@@ -727,9 +726,11 @@ async def stop(request: Request) -> dict[str, Any]:
     from . import v25_execution as live
     user = authenticated_user(request, owner=True)
     live.execution_owner(request)
-    if settings(request.app.state.v25_execution).get("owner_id") != user["id"]:
-        raise HTTPException(409, "Bu hesap için Original V2 LIVE oturumu yok.")
-    pause(request.app.state.v25_execution, "OWNER acil durdurma")
-    if await live.persist_state_awaited(request.app.state.v25_execution) not in {"INSERTED", "UPDATED"}:
-        raise HTTPException(503, "Durdurma kalıcı kaydı doğrulanamadı; LIVE durumunu kontrol edin.")
+    state = request.app.state.v25_execution
+    async with state["lock"]:
+        if settings(state).get("owner_id") != user["id"]:
+            raise HTTPException(409, "Bu hesap için Original V2 LIVE oturumu yok.")
+        pause(state, "OWNER acil durdurma")
+        if await live.persist_state_awaited(state) not in {"INSERTED", "UPDATED"}:
+            raise HTTPException(503, "Durdurma kalıcı kaydı doğrulanamadı; LIVE durumunu kontrol edin.")
     return await status(request)

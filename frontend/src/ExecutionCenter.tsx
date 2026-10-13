@@ -164,26 +164,43 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
     finally {setBusy('')}
   }
 
-  const connect = () => run('connect','/connect/read-only',undefined,'Canlı hesap salt-okunur bağlandı; emir gönderilmedi.')
+  const requestMfaCode = () => {
+    const code = window.prompt('OWNER hesabının güncel 2FA kodunu girin:')
+    return code?.trim() || null
+  }
+
+  const connect = () => {
+    const totpCode = requestMfaCode()
+    if (!totpCode) return
+    return run('connect','/connect/read-only',{confirmation:'LIVE HESABINI DOĞRULA',totp_code:totpCode},'Canlı hesap salt-okunur bağlandı; emir gönderilmedi.')
+  }
   const grantConsent = () => {
     const phrase = window.prompt('24 saatlik canlı risk izni için aynen yazın: CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM')
     if (!phrase) return
-    void run('consent','/consent',{confirmation:phrase},'24 saatlik canlı izin verildi. Sunucu yeniden başlarsa otomatik iptal olur.')
+    const totpCode = requestMfaCode()
+    if (!totpCode) return
+    void run('consent','/consent',{confirmation:phrase,totp_code:totpCode},'24 saatlik canlı izin verildi.')
   }
   const acknowledge = () => {
     const phrase = window.prompt('Mevcut limitleri onaylamak için aynen yazın: RİSK LİMİTLERİNİ ONAYLIYORUM')
     if (!phrase) return
-    void run('ack','/policy/acknowledge',{confirmation:phrase},'Risk limitleri onaylandı. Limit değişirse onay sıfırlanır.')
+    const totpCode = requestMfaCode()
+    if (!totpCode) return
+    void run('ack','/policy/acknowledge',{confirmation:phrase,totp_code:totpCode},'Risk limitleri onaylandı. Limit değişirse onay sıfırlanır.')
   }
   const arm = () => {
     const phrase = window.prompt('24 saatlik canlı emir kilidini açmak için aynen yazın: CANLI EMİR RİSKİNİ KABUL EDİYORUM')
     if (!phrase) return
-    void run('arm','/arm',{confirmation:phrase},'Canlı yeni giriş kilidi 24 saat için açıldı.')
+    const totpCode = requestMfaCode()
+    if (!totpCode) return
+    void run('arm','/arm',{confirmation:phrase,totp_code:totpCode},'Canlı yeni giriş kilidi güvenlik kontrollerinden sonra açıldı.')
   }
   const startAuto = () => {
     const phrase = window.prompt('Bir saatlik canlı otomasyonu başlatmak için aynen yazın: CANLI OTOMATİK')
     if (!phrase) return
-    void run('auto','/auto/start',{confirmation:phrase},'Bir saatlik kontrollü canlı tarama başladı; her giriş bütün risk kapılarından geçer.')
+    const totpCode = requestMfaCode()
+    if (!totpCode) return
+    void run('auto','/auto/start',{confirmation:phrase,totp_code:totpCode},'Bir saatlik sunucu kontrollü canlı tarama başladı; her giriş bütün risk kapılarından geçer.')
   }
   const emergency = () => {
     const phrase = window.prompt('Yalnızca ProTreBot emirlerini iptal edip tracked pozisyonları kapatmak için aynen yazın: CANLI ACİL DURDUR')
@@ -193,9 +210,11 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
 
   const savePolicy = async () => {
     if (!policy) return
+    const totpCode = requestMfaCode()
+    if (!totpCode) return
     setBusy('policy')
     try {
-      const next = await call<Status>('/policy',{method:'PUT',body:JSON.stringify(policy)})
+      const next = await call<Status>('/policy',{method:'PUT',body:JSON.stringify({...policy,totp_code:totpCode})})
       setStatus(next);setPolicy(next.policy);setNotice('Limitler kaydedildi; güvenlik gereği risk onayı ve canlı kilit sıfırlandı.');setNoticeKind('ok')
     } catch (error) {setNotice(error instanceof Error ? error.message : 'Limitler kaydedilemedi.');setNoticeKind('error')}
     finally {setBusy('')}
@@ -246,9 +265,11 @@ export default function ExecutionCenter({token=''}:{token?:string}) {
 
   const saveLiveCredentials = async () => {
     if (!liveCredentials.apiKey.trim() || !liveCredentials.secretKey.trim()) {setNotice('Live API Key ve API Secret birlikte girilmelidir.');setNoticeKind('warn');return}
+    const totpCode = requestMfaCode()
+    if (!totpCode) return
     setLiveVaultBusy('save')
     try {
-      const response = await fetch(`${API_BASE}/exchange-connections/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'LIVE',['api' + '_key']:liveCredentials.apiKey,['secret' + '_key']:liveCredentials.secretKey,confirmation:'CANLI KASAYA KAYDET'})})
+      const response = await fetch(`${API_BASE}/exchange-connections/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'LIVE',['api' + '_key']:liveCredentials.apiKey,['secret' + '_key']:liveCredentials.secretKey,confirmation:'CANLI KASAYA KAYDET',totp_code:totpCode})})
       const payload = await response.json().catch(() => null) as {detail?:unknown;message?:string}|null
       if (!response.ok) throw new Error(errorText(payload?.detail))
       setLiveCredentials({apiKey:'',secretKey:''});setNotice(payload?.message || 'Live credentials şifreli kasaya kaydedildi ve doğrulandı.');setNoticeKind('ok');await refreshLiveVault();await refresh(true)

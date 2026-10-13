@@ -90,7 +90,7 @@ test('Password reset uses the common policy and sends nothing for weak or mismat
   expect(resets).toEqual([])
   await inputs.nth(1).fill('Offline-Password1!')
   await page.getByRole('button', {name: 'PAROLAYI GÜNCELLE'}).click()
-  await expect(page.getByRole('button', {name: 'GÜVENLİ GİRİŞ'})).toBeVisible()
+  await expect(page.locator('.authSubmit')).toHaveText('Giriş yap')
   expect(resets).toEqual([{token: 'offline-reset-policy-proof', password: 'Offline-Password1!', confirm_password: 'Offline-Password1!'}])
 })
 

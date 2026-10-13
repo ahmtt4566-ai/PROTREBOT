@@ -1,16 +1,16 @@
 """V25 Live Guard: fail-closed Binance USD-M Futures execution plane.
 
-Live trading is compiled as a separate transport from Demo.  It starts read
-only and requires all of the following before an entry can be submitted:
-encrypted local credentials, a 24-hour key-bound local consent, a completed
-Demo evidence certificate, an acknowledged risk policy, and a five-minute
-owner arm.  Cancellation, protection repair, and tracked-position closure are
-always available because they reduce risk.
+Live trading is compiled as a separate transport from Demo. It starts read
+only and requires encrypted OWNER-account credentials, a 24-hour key-bound
+consent, completed Demo evidence, an acknowledged risk policy, and a fresh
+OWNER arm before entries. Cancellation, protection repair, and tracked-position
+closure remain available because they reduce risk.
 """
 
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import hashlib
 import hmac
 import inspect
@@ -599,6 +599,7 @@ def recover_transient_market_data(state: dict[str, Any], method: str, path: str)
 
 
 class PolicyUpdate(BaseModel):
+    totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
     allowed_symbols: list[str] | None = None
     interval: Literal["1m", "5m", "15m", "1h", "4h"] | None = None
     allow_long: bool | None = None
@@ -627,6 +628,7 @@ class PolicyUpdate(BaseModel):
 
 class Confirmation(BaseModel):
     confirmation: str = Field(min_length=1, max_length=80)
+    totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
 
 
 class AutoStartConfirmation(Confirmation):
@@ -681,6 +683,7 @@ class EmergencyRequest(BaseModel):
 
 class EmergencyClearRequest(BaseModel):
     confirmation: str = Field(min_length=1, max_length=64)
+    totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
 
 
 def now_iso() -> str:
@@ -1149,6 +1152,13 @@ def current_user_id(request: Request | None) -> str:
     return ""
 
 
+def live_owner_binding(request: Request) -> str:
+    user_id = current_user_id(request)
+    if not user_id:
+        raise HTTPException(401, "Oturum gerekli")
+    return f"owner:{user_id}"
+
+
 def current_trading_account_id(state: dict[str, Any], request: Request | None, fingerprint: str | None) -> str:
     snapshot = state.get("snapshot") if isinstance(state.get("snapshot"), dict) else {}
     account_id = str(snapshot.get("account_identity") or "").strip()
@@ -1163,13 +1173,13 @@ def current_trading_account_id(state: dict[str, Any], request: Request | None, f
 
 
 def read_owned_account_state(state: dict[str, Any], user_id: str, session_binding: str) -> dict[str, Any] | None:
-    """Read only after both authenticated member and exchange session match."""
+    """Read a shared snapshot only for its authenticated account owner."""
     authorization = state.get("live_session_authorization") or {}
     if not (
         session_binding and user_id
         and authorization.get("user_id") == user_id
-        and authorization.get("session_id") == session_binding
-        and state.get("snapshot_session_id") == session_binding
+        and session_binding == f"owner:{user_id}"
+        and state.get("snapshot_session_id") == authorization.get("session_id")
         and isinstance(state.get("snapshot"), dict)
         and isinstance(state["snapshot"].get("positions"), list)
         and all(isinstance(row, dict) for row in state["snapshot"]["positions"])
@@ -1212,8 +1222,7 @@ def consent_status(
     if not authorization.get("user_id") and isinstance(state, dict) and isinstance(state.get("web_consent"), dict):
         authorization = state["web_consent"]
     current_user = current_user_id(request) or str(authorization.get("user_id") or "")
-    authorization_session = str(authorization.get("session_id") or "")
-    current_session = session_id(request) if request is not None else authorization_session
+    current_session = live_owner_binding(request) if request is not None else f"owner:{current_user}" if current_user else ""
     current_account = str(authorization.get("trading_account_id") or "") if request is None else current_trading_account_id(state or {}, request, fingerprint)
     if not current_account:
         current_account = current_trading_account_id(state or {}, request, fingerprint)
@@ -1228,8 +1237,7 @@ def consent_status(
     scope_match = bool(
         payload
         and current_user
-        and authorization_session
-        and current_session == authorization_session
+        and current_session == f"owner:{current_user}"
         and str(payload.get("user_id") or "") == current_user
         and str(payload.get("trading_account_id") or "") == current_account
         and normalize_consent_fingerprint(payload.get("key_fingerprint")) == normalize_consent_fingerprint(fingerprint)
@@ -1239,8 +1247,8 @@ def consent_status(
         reason = "EXPIRED"
     elif str(payload.get("user_id") or "") != current_user:
         reason = "USER_CHANGED"
-    elif not authorization_session or current_session != authorization_session:
-        reason = "SESSION_CHANGED"
+    elif not current_session or current_session != f"owner:{current_user}":
+        reason = "USER_CHANGED"
     elif str(payload.get("trading_account_id") or "") != current_account:
         reason = "TRADING_ACCOUNT_CHANGED"
     elif normalize_consent_fingerprint(payload.get("key_fingerprint")) != normalize_consent_fingerprint(fingerprint):
@@ -1295,8 +1303,10 @@ def authenticated_live_expiry(request: Request) -> float | None:
         return None
 
 
-def guard_execution_ownership(request: Request, *, claim: bool = False) -> None:
-    """The shared LIVE controller has one authenticated session owner, not an admin override."""
+def guard_execution_ownership(
+    request: Request, *, claim: bool = False, allow_key_rotation: bool = False,
+) -> None:
+    """The shared LIVE controller has one authenticated account owner, not an admin override."""
     user_id = current_user_id(request)
     sid = session_id(request)
     if not user_id or not sid:
@@ -1304,13 +1314,16 @@ def guard_execution_ownership(request: Request, *, claim: bool = False) -> None:
     state = request.app.state.v25_execution
     authorization = state.get("live_session_authorization") or {}
     owner_id = str(authorization.get("user_id") or "")
-    owner_session = str(authorization.get("session_id") or "")
-    if owner_id or owner_session or authorization.get("fingerprint") or authorization.get("trading_account_id"):
-        if owner_id != user_id or owner_session != sid:
-            raise HTTPException(403, "LIVE kontrolü başka bir kullanıcı veya oturuma ait.")
+    if owner_id or authorization.get("fingerprint") or authorization.get("trading_account_id"):
+        if owner_id != user_id:
+            raise HTTPException(403, "LIVE kontrolü başka bir kullanıcıya ait.")
         api_key, _, fingerprint = live_credentials_status(request)
         if api_key and authorization.get("fingerprint"):
-            if normalize_consent_fingerprint(fingerprint) != normalize_consent_fingerprint(authorization["fingerprint"]):
+            fingerprint_matches = (
+                normalize_consent_fingerprint(fingerprint)
+                == normalize_consent_fingerprint(authorization["fingerprint"])
+            )
+            if not fingerprint_matches and not allow_key_rotation:
                 raise HTTPException(403, "LIVE kontrolü farklı bir API anahtarına ait.")
             account = session_account_identity(request, "LIVE", fingerprint or "")
             if authorization.get("trading_account_id") and account != authorization["trading_account_id"]:
@@ -1328,21 +1341,22 @@ def guard_execution_ownership(request: Request, *, claim: bool = False) -> None:
     if claim:
         # Reserve before any await so concurrent starts cannot replace the owner.
         state["live_session_authorization"] = {
-            "user_id": user_id, "session_id": sid, "fingerprint": "",
+            "user_id": user_id, "session_id": f"owner:{user_id}", "fingerprint": "",
             "trading_account_id": "", "policy_digest": policy_digest(state["policy"]),
             "auth_version": getattr(request.state, "member", {}).get("auth_version"),
-            "auth_expires_at_epoch": authenticated_live_expiry(request),
+            "auth_expires_at_epoch": None,
         }
 
 
 def execution_owner(request: Request) -> dict[str, Any]:
     """Use the same owner identity as the exchange session vault."""
+    allow_key_rotation = getattr(getattr(request, "url", None), "path", "") == "/api/v25/session/recover"
     member = getattr(request.state, "member", None)
     if member and bool(getattr(request.state, "web_owner_authenticated", False)):
-        guard_execution_ownership(request, claim=request.method != "GET")
+        guard_execution_ownership(request, claim=request.method != "GET", allow_key_rotation=allow_key_rotation)
         return {"id": str(member.get("id") or ""), "role": "OWNER", "auth_version": member.get("auth_version")}
     if member and member.get("role") == "OWNER":
-        guard_execution_ownership(request, claim=request.method != "GET")
+        guard_execution_ownership(request, claim=request.method != "GET", allow_key_rotation=allow_key_rotation)
         return member
     user = authenticated_user(request)
     if user.get("role") != "OWNER":
@@ -1359,7 +1373,7 @@ def execution_owner(request: Request) -> dict[str, Any]:
                    and subscription.get("status") in {"ACTIVE", "PAST_DUE"}):
             from .free_trial import LIVE_MESSAGE
             raise HTTPException(403, LIVE_MESSAGE)
-    guard_execution_ownership(request, claim=request.method != "GET")
+    guard_execution_ownership(request, claim=request.method != "GET", allow_key_rotation=allow_key_rotation)
     return user
 
 
@@ -3696,11 +3710,6 @@ async def background_authorization_active(application: Any, state: dict[str, Any
     authorization = state.get("auto_authorization") or {}
     if not authorization.get("user_id") or float(authorization.get("expires_at_epoch") or 0) <= time.time():
         authorization = state.get("live_session_authorization") or {}
-    expires = authorization.get("auth_expires_at_epoch")
-    if not isinstance(expires, (int, float)) or not math.isfinite(expires) or expires <= time.time():
-        clear_session_vault_for_user_cache(application, str(authorization.get("user_id") or ""))
-        lock_live_execution(state, "USER_SESSION_EXPIRED_OR_UNPROVEN")
-        return False
     valid = await authoritative_user_version_active(
         application, str(authorization.get("user_id") or ""), authorization.get("auth_version"),
     )
@@ -3880,8 +3889,13 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
     release = readiness(application, state, request)
     raw_snapshot = state.get("snapshot") or {}
     snapshot_session_id = str(state.get("snapshot_session_id") or "")
-    current_session_id = session_id(request) if request is not None else ""
-    snapshot = raw_snapshot if current_session_id and current_session_id == snapshot_session_id else {}
+    authorization = state.get("live_session_authorization") or {}
+    owner_can_read = bool(
+        request is not None
+        and current_user_id(request)
+        and str(authorization.get("user_id") or "") == current_user_id(request)
+    )
+    snapshot = raw_snapshot if owner_can_read and snapshot_session_id == authorization.get("session_id") else {}
     account_snapshot_ready = isinstance(snapshot, dict) and all(
         key in snapshot for key in ("wallet_balance", "available_balance", "positions", "open_orders")
     )
@@ -3900,7 +3914,7 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "mode": "LIVE_GUARD",
         "host": LIVE_REST_BASE,
         "websocket_host": LIVE_WS_BASE,
-        "credentials": {"configured": bool(consent.get("fingerprint")), "fingerprint": consent.get("fingerprint"), "storage": "OTURUM_KASASI" if consent.get("fingerprint") else "YOK"},
+        "credentials": {"configured": bool(consent.get("fingerprint")), "fingerprint": consent.get("fingerprint"), "storage": "HESAP_KASASI" if consent.get("fingerprint") else "YOK"},
         "consent": consent,
         "authorization": {
             "valid": bool(consent.get("active")),
@@ -5513,16 +5527,17 @@ async def connect_read_only_for_request(application: Any, request: Request, *, a
             client = client_for(application, request)
             snapshot = await account_snapshot(client, cached=True, source="browser_connect")
             _, _, fingerprint = live_credentials_status(request)
-            update_account_snapshot(state, snapshot, session_binding=session_id(request))
+            binding = live_owner_binding(request)
+            update_account_snapshot(state, snapshot, session_binding=binding)
             trading_account_id = current_trading_account_id(state, request, fingerprint)
             state["live_session_authorization"] = {
-                "session_id": session_id(request),
+                "session_id": binding,
                 "user_id": str(actor or ""),
                 "fingerprint": fingerprint or "",
                 "trading_account_id": trading_account_id,
                 "policy_digest": policy_digest(state["policy"]),
                 "auth_version": user.get("auth_version"),
-                "auth_expires_at_epoch": authenticated_live_expiry(request),
+                "auth_expires_at_epoch": None,
             }
             if not state.get("reconciliation_required") and not unresolved_execution_evidence(state):
                 state["recovery_ready"] = True
@@ -5545,113 +5560,154 @@ async def connect_read_only_for_request(application: Any, request: Request, *, a
 
 @router.post("/session/recover")
 async def v25_recover_session(request: Request, body: AutoStartConfirmation) -> dict[str, Any]:
-    from . import account_settings, exchange_connections, original_v2_live
+    from . import exchange_connections
+    from . import account_settings
 
-    user = authenticated_user(request, owner=True)
+    user = execution_owner(request)
     state = request.app.state.v25_execution
-    if user.get("role") != "OWNER" or (state.get("live_session_authorization") or {}).get("user_id") != str(user["id"]):
-        raise HTTPException(403, "Yalnız aynı OWNER kendi LIVE oturumunu geri bağlayabilir.")
+    if body.confirmation != "LIVE OTURUMUNU GERİ BAĞLA":
+        raise HTTPException(422, "LIVE oturumu geri bağlama onayı gerekli.")
+    await account_settings.require_totp(request, user, body.totp_code or "", required=True)
+    if not state.get("recovery_loaded") or getattr(request.app.state, "db_pool", None) is None:
+        raise HTTPException(503, "Kalıcı LIVE durumu yüklenmeden hesap bağlanamaz.")
     async with state["lock"]:
-        authorization = dict(state.get("live_session_authorization") or {})
-        starting_revision = state.get("persistence_revision", 0)
-        if authorization.get("user_id") != str(user["id"]):
-            raise HTTPException(403, "Yalnız aynı OWNER kendi LIVE oturumunu geri bağlayabilir.")
-        if not authorization.get("session_id") or not session_id(request):
-            raise HTTPException(403, "LIVE oturum sahiplik kanıtı eksik.")
-        if body.confirmation != "LIVE OTURUMUNU GERİ BAĞLA":
-            raise HTTPException(422, "LIVE oturumu geri bağlama onayı gerekli.")
-        await account_settings.require_totp(request, user, body.totp_code or "", required=True)
-        if not state.get("recovery_loaded") or getattr(request.app.state, "db_pool", None) is None:
-            raise HTTPException(503, "Kalıcı LIVE durumu yüklenmeden oturum geri bağlanamaz.")
-        if auto_session_is_active(state) or state.get("live_auto_trade") or original_v2_live.running(state) or float(state.get("armed_until") or 0) > time.time():
-            raise HTTPException(409, "Aktif LIVE giriş yetkisi varken oturum geri bağlanamaz.")
-        if state.get("reconciliation_required") or unresolved_execution_evidence(state) or any(
-            not isinstance(plan, dict) or str(plan.get("status") or "").upper() not in {"KAPANDI", "İPTAL", "CLOSED", "CANCELLED", "CLOSED_CONFIRMED"}
-            for plan in state.get("plans", {}).values()
-        ):
-            raise HTTPException(409, "Açık veya belirsiz LIVE kayıtları varken manuel inceleme gerekli.")
-        api_key, secret_key = session_credentials_for_request(request, "LIVE", active_only=False)
-        fingerprint = credential_fingerprint(api_key) if api_key else None
-        if not usable_live_credentials((api_key, secret_key)) or not authorization.get("trading_account_id"):
-            raise HTTPException(403, "Aynı LIVE işlem hesabının anahtarı yeni oturumda kayıtlı olmalı.")
-        expiry = authenticated_live_expiry(request)
-        if expiry is None or expiry <= time.time():
-            raise HTTPException(401, "Güncel OWNER oturumu doğrulanamadı.")
+        authorization = state.get("live_session_authorization") or {}
+        if auto_session_is_active(state) or float(state.get("armed_until") or 0) > time.time():
+            raise HTTPException(409, "LIVE otomasyonu veya ARM etkin; oturum şu anda geri bağlanamaz.")
+        if state.get("reconciliation_required") or state.get("execution_state") == "UNKNOWN" or unresolved_execution_evidence(state):
+            raise HTTPException(409, "LIVE yürütme durumu belirsiz; önce kurtarma kontrolü yapılmalıdır.")
+
+        api_key, secret_key = session_credentials_for_request(request, "LIVE", active_only=True)
+        if not api_key or not secret_key:
+            raise HTTPException(412, "OWNER hesabına kayıtlı etkin LIVE Binance anahtarı bulunamadı.")
         try:
-            verified = await exchange_connections._verify_request_credentials(request, "LIVE", api_key, secret_key)
+            verified_account = await exchange_connections._verify_request_credentials(
+                request, "LIVE", api_key, secret_key,
+            )
         except exchange_connections.VaultError as exc:
             raise exchange_connections._exchange_test_http_exception(exc) from exc
-        account_identity = str(verified.get("account_identity") or "")
-        trading_account_id = f"BINANCE:LIVE:{account_identity[:160]}" if account_identity else session_account_identity(request, "LIVE", fingerprint or "")
-        if not trading_account_id or trading_account_id != authorization.get("trading_account_id"):
-            raise HTTPException(403, "Aynı LIVE işlem hesabı doğrulanamadı.")
-        client = client_for_with_credentials(request.app, (api_key, secret_key), request=request)
+
+        verified_identity = exchange_connections.account_identity(
+            {"uid": verified_account.get("account_identity")},
+            "LIVE",
+            credential_fingerprint(api_key),
+        )
+        previous_identity = str(authorization.get("trading_account_id") or "")
+        if not previous_identity or verified_identity != previous_identity:
+            raise HTTPException(403, "LIVE oturumu yalnız aynı Binance hesabına geri bağlanabilir.")
+
+        revision = state.get("persistence_revision", 0)
+        armed_until = state.get("armed_until", 0)
+        changed_fields = (
+            "snapshot", "snapshot_session_id", "live_session_authorization",
+            "web_consent", "policy_ack_digest", "armed_until", "auto",
+            "auto_authorization", "live_auto_trade", "real_trading_locked",
+            "connected", "recovery_ready", "recovery_error", "connection",
+            "events", "persistence_revision",
+        )
+        before = {key: deepcopy(state[key]) for key in changed_fields}
+        client = client_for_with_credentials(request.app, (api_key, secret_key))
         try:
-            snapshot = await account_snapshot(client, cached=False, source="session_recovery")
+            snapshot = await account_snapshot(client, cached=False, source="owner_session_recovery")
         except (LiveExchangeError, BinanceDemoError) as exc:
             raise safe_exchange_error(exc) from exc
-        if snapshot.get("open_algo_orders_available") is not True or any(
-            not isinstance(snapshot.get(key), list) or snapshot[key]
-            for key in ("positions", "open_orders", "open_algo_orders")
+        if state.get("persistence_revision", 0) != revision or state.get("armed_until", 0) != armed_until:
+            raise HTTPException(409, "LIVE durumu kontrol sırasında değişti; lütfen tekrar deneyin.")
+        collections = ("positions", "open_orders", "open_algo_orders")
+        if (
+            snapshot.get("open_algo_orders_available") is not True
+            or any(not isinstance(snapshot.get(key), list) for key in collections)
+            or any(snapshot[key] for key in collections)
         ):
-            raise HTTPException(409, "Açık pozisyon/emir var veya tam hesap durumu doğrulanamadı; oturum devredilmedi.")
-        if state.get("persistence_revision", 0) != starting_revision or state.get("live_session_authorization") != authorization or state.get("live_auto_trade") or auto_session_is_active(state) or float(state.get("armed_until") or 0) > time.time():
-            raise HTTPException(409, "Doğrulama sırasında LIVE durumu değişti; oturum devredilmedi.")
-        candidate = dict(state)
-        candidate["events"] = list(state.get("events", []))
-        candidate["auto"] = {**state["auto"], "enabled": False, "session_until": 0.0, "busy": False}
-        candidate.update(real_trading_locked=True, live_auto_trade=False, armed_until=0.0,
-                         auto_authorization=initial_state()["auto_authorization"],
-                         web_consent=initial_state()["web_consent"], policy_ack_digest=None,
-                         connected=False, snapshot_session_id="", _app=request.app)
-        candidate["live_session_authorization"] = {
-            **authorization, "session_id": session_id(request), "fingerprint": fingerprint,
+            raise HTTPException(409, "Binance hesabında açık pozisyon veya emir var; LIVE bağlantısı geri yüklenemez.")
+        snapshot_identity = str(snapshot.get("account_identity") or "").strip()
+        if snapshot_identity and f"BINANCE:LIVE:{snapshot_identity}" != previous_identity:
+            raise HTTPException(403, "LIVE oturumu yalnızca aynı Binance hesabına yeniden bağlanabilir.")
+
+        fingerprint = credential_fingerprint(api_key)
+        binding = live_owner_binding(request)
+        update_account_snapshot(state, snapshot, session_binding=binding)
+        state["live_session_authorization"] = {
+            **authorization,
+            "session_id": binding,
+            "user_id": str(user["id"]),
+            "fingerprint": fingerprint,
+            "trading_account_id": verified_identity,
+            "policy_digest": policy_digest(state["policy"]),
             "auth_version": user.get("auth_version"),
-            "auth_expires_at_epoch": expiry,
+            "auth_expires_at_epoch": None,
         }
-        add_event(candidate, "LIVE_SESSION_RECOVERED", "Aynı OWNER ve LIVE hesap yeni oturuma geri bağlandı; yeni girişler kapalı.", actor=str(user["id"]))
+        state["web_consent"] = initial_state()["web_consent"]
+        state["policy_ack_digest"] = None
+        state["armed_until"] = 0.0
+        state["auto"].update({"enabled": False, "session_until": 0.0})
+        state["auto_authorization"] = initial_state()["auto_authorization"]
+        state["live_auto_trade"] = False
+        state["real_trading_locked"] = True
+        state["connected"] = True
+        state["recovery_ready"] = True
+        state["recovery_error"] = None
+        state["connection"].update({
+            "last_checked": now_iso(),
+            "last_error": None,
+            "clock_offset_ms": getattr(client, "time_offset_ms", 0),
+        })
+        add_event(state, "READ_ONLY_CONNECTED", "Canlı hesap salt-okunur bağlantısı OWNER hesabına yeniden bağlandı; emir gönderilmedi.", actor=str(user["id"]))
         try:
-            result = await persist_state_awaited(candidate)
+            write_status = await persist_state_awaited(state)
         except Exception as exc:
-            raise HTTPException(503, "LIVE oturum kaydı doğrulanamadı; eski sahiplik korundu.") from exc
-        if result not in {"INSERTED", "UPDATED"}:
-            raise HTTPException(503, "LIVE oturum kaydı doğrulanamadı; eski sahiplik korundu.")
-        state.update(candidate)
-    return {"ok": True, "entries_enabled": False, "orders_created": False}
+            state.update(before)
+            state.update(before)
+            raise HTTPException(503, "LIVE durumu kalıcı olarak kaydedilemedi; bağlantı geri alındı.") from exc
+        if write_status not in {"INSERTED", "UPDATED"}:
+            state.update(before)
+            raise HTTPException(503, "LIVE durumu kalıcı olarak kaydedilemedi; bağlantı geri alındı.")
+    result = public_status(request.app, request)
+    return {"ok": True, **result, "entries_enabled": False, "orders_created": False}
 
 
 @router.post("/connect/read-only")
-async def v25_connect(request: Request) -> dict[str, Any]:
+async def v25_connect(request: Request, body: Confirmation) -> dict[str, Any]:
     user = execution_owner(request)
+    from .exchange_connections import _require_live_mfa
+    await _require_live_mfa(request, user, body.totp_code)
+    if body.confirmation.strip().upper() != "LIVE HESABINI DOĞRULA":
+        raise HTTPException(422, "Salt-okunur LIVE bağlantısı için LIVE HESABINI DOĞRULA yazın.")
     return await connect_read_only_for_request(request.app, request, actor=str(user["id"]))
 
 
 @router.put("/policy")
 async def v25_policy(request: Request, body: PolicyUpdate) -> dict[str, Any]:
     user = execution_owner(request)
+    from .exchange_connections import _require_live_mfa
+    await _require_live_mfa(request, user, body.totp_code)
     state = request.app.state.v25_execution
-    updates = body.model_dump(exclude_none=True)
-    if "max_direction_exposure_usdt" in body.model_fields_set:
-        updates["max_direction_exposure_usdt"] = body.max_direction_exposure_usdt
-    state["policy"] = sanitize_execution_policy({**state["policy"], **updates}, preserve_empty_allowed_symbols=True)
-    state["policy_ack_digest"] = None
-    state["auto"]["enabled"] = False
-    state["auto"]["session_until"] = 0.0
-    state["live_auto_trade"] = False
-    add_event(state, "POLICY_CHANGED", "Canlı risk limitleri değişti; aktif 24 saatlik izin korunurken otomasyon durduruldu.", actor=user["id"])
-    persist_state(state)
+    async with state["lock"]:
+        updates = body.model_dump(exclude_none=True, exclude={"totp_code"})
+        if "max_direction_exposure_usdt" in body.model_fields_set:
+            updates["max_direction_exposure_usdt"] = body.max_direction_exposure_usdt
+        state["policy"] = sanitize_execution_policy({**state["policy"], **updates}, preserve_empty_allowed_symbols=True)
+        state["policy_ack_digest"] = None
+        state["auto"]["enabled"] = False
+        state["auto"]["session_until"] = 0.0
+        state["live_auto_trade"] = False
+        add_event(state, "POLICY_CHANGED", "Canlı risk limitleri değişti; aktif 24 saatlik izin korunurken otomasyon durduruldu.", actor=user["id"])
+        persist_state(state)
     return public_status(request.app, request)
 
 
 @router.post("/policy/acknowledge")
 async def v25_policy_ack(request: Request, body: Confirmation) -> dict[str, Any]:
     user = execution_owner(request)
+    from .exchange_connections import _require_live_mfa
+    await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != "RİSK LİMİTLERİNİ ONAYLIYORUM":
         raise HTTPException(422, "Onay için RİSK LİMİTLERİNİ ONAYLIYORUM yazın.")
     state = request.app.state.v25_execution
-    state["policy_ack_digest"] = policy_digest(state["policy"])
-    add_event(state, "POLICY_ACK", "Mevcut canlı risk politikası sahibi tarafından onaylandı.", actor=user["id"])
-    persist_state(state)
+    async with state["lock"]:
+        state["policy_ack_digest"] = policy_digest(state["policy"])
+        add_event(state, "POLICY_ACK", "Mevcut canlı risk politikası sahibi tarafından onaylandı.", actor=user["id"])
+        persist_state(state)
     return public_status(request.app, request)
 
 
@@ -5659,37 +5715,40 @@ async def v25_policy_ack(request: Request, body: Confirmation) -> dict[str, Any]
 async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any]:
     """Create a fingerprint-bound, expiring 24-hour live consent."""
     user = execution_owner(request)
+    from .exchange_connections import _require_live_mfa
+    await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != "CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM":
         raise HTTPException(422, "Onay için CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM yazın.")
     state = request.app.state.v25_execution
-    api_key, secret_key, fingerprint = live_credentials_status(request)
-    if not api_key or len(secret_key) < 10 or not fingerprint:
-        raise HTTPException(412, "Önce programdaki Borsa Bağlantıları bölümünden canlı Binance API anahtarını kaydedip aktifleştirin.")
-    trading_account_id = current_trading_account_id(state, request, fingerprint)
-    current_policy_digest = policy_digest(state["policy"])
-    state["live_session_authorization"] = {
-        "session_id": session_id(request),
-        "user_id": str(user["id"]),
-        "fingerprint": fingerprint,
-        "trading_account_id": trading_account_id,
-        "policy_digest": current_policy_digest,
-        "auth_version": user.get("auth_version"),
-        "auth_expires_at_epoch": authenticated_live_expiry(request),
-    }
-    state["web_consent"] = {
-        "accepted_at": now_iso(),
-        "expires_at_epoch": time.time() + LIVE_CONSENT_SECONDS,
-        "key_fingerprint": fingerprint,
-        "user_id": str(user["id"]),
-        "trading_account_id": trading_account_id,
-        "policy_digest": current_policy_digest,
-    }
-    state["armed_until"] = 0.0
-    state["auto"]["enabled"] = False
-    state["auto"]["session_until"] = 0.0
-    record_live_lock_reason(state, "CONSENT_RENEWED")
-    add_event(state, "LIVE_WEB_CONSENT", "24 saatlik canlı risk izni verildi; süre veya API key fingerprint değişene kadar korunur.", actor=user["id"])
-    persist_state(state)
+    async with state["lock"]:
+        api_key, secret_key, fingerprint = live_credentials_status(request)
+        if not api_key or len(secret_key) < 10 or not fingerprint:
+            raise HTTPException(412, "Önce programdaki Borsa Bağlantıları bölümünden canlı Binance API anahtarını kaydedip aktifleştirin.")
+        trading_account_id = current_trading_account_id(state, request, fingerprint)
+        current_policy_digest = policy_digest(state["policy"])
+        state["live_session_authorization"] = {
+            "session_id": live_owner_binding(request),
+            "user_id": str(user["id"]),
+            "fingerprint": fingerprint,
+            "trading_account_id": trading_account_id,
+            "policy_digest": current_policy_digest,
+            "auth_version": user.get("auth_version"),
+            "auth_expires_at_epoch": None,
+        }
+        state["web_consent"] = {
+            "accepted_at": now_iso(),
+            "expires_at_epoch": time.time() + LIVE_CONSENT_SECONDS,
+            "key_fingerprint": fingerprint,
+            "user_id": str(user["id"]),
+            "trading_account_id": trading_account_id,
+            "policy_digest": current_policy_digest,
+        }
+        state["armed_until"] = 0.0
+        state["auto"]["enabled"] = False
+        state["auto"]["session_until"] = 0.0
+        record_live_lock_reason(state, "CONSENT_RENEWED")
+        add_event(state, "LIVE_WEB_CONSENT", "24 saatlik canlı risk izni verildi; süre veya API key fingerprint değişene kadar korunur.", actor=user["id"])
+        persist_state(state)
     return public_status(request.app, request)
 
 
@@ -5700,16 +5759,16 @@ async def v25_revoke_web_consent(request: Request, body: Confirmation) -> dict[s
         raise HTTPException(422, "Onay için 24 SAATLİK CONSENTİ KALDIR yazın.")
     state = request.app.state.v25_execution
     from . import original_v2_live
-    if original_v2_live.running(state):
-        original_v2_live.pause(state, "OWNER LIVE iznini kaldırdı")
-    state["web_consent"] = {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None, "user_id": "", "trading_account_id": "", "policy_digest": ""}
-    # Revoking trading consent does not transfer the shared controller to another session.
-    state["armed_until"] = 0.0
-    state["auto"]["enabled"] = False
-    state["auto"]["session_until"] = 0.0
-    record_live_lock_reason(state, "CONSENT_REVOKED")
-    add_event(state, "LIVE_WEB_CONSENT_REVOKED", "24 saatlik canlı risk izni kaldırıldı; LIVE kilidi kapatıldı.", actor=user["id"])
-    persist_state(state)
+    async with state["lock"]:
+        if original_v2_live.running(state):
+            original_v2_live.pause(state, "OWNER LIVE iznini kaldırdı")
+        state["web_consent"] = {"accepted_at": None, "expires_at_epoch": 0.0, "key_fingerprint": None, "user_id": "", "trading_account_id": "", "policy_digest": ""}
+        state["armed_until"] = 0.0
+        state["auto"]["enabled"] = False
+        state["auto"]["session_until"] = 0.0
+        record_live_lock_reason(state, "CONSENT_REVOKED")
+        add_event(state, "LIVE_WEB_CONSENT_REVOKED", "24 saatlik canlı risk izni kaldırıldı; LIVE kilidi kapatıldı.", actor=user["id"])
+        persist_state(state)
     return public_status(request.app, request)
 
 
@@ -6167,20 +6226,23 @@ async def v25_adopt_external_position(
 @router.post("/arm")
 async def v25_arm(request: Request, body: Confirmation) -> dict[str, Any]:
     user = execution_owner(request)
+    from .exchange_connections import _require_live_mfa
+    await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != "CANLI EMİR RİSKİNİ KABUL EDİYORUM":
         raise HTTPException(422, "Kilidi açmak için CANLI EMİR RİSKİNİ KABUL EDİYORUM yazın.")
     state = request.app.state.v25_execution
-    if live_execution_blocked(state):
-        raise HTTPException(423, "Canlı acil durdurma veya belirsiz uzlaştırma aktif; önce recovery tamamlanmalı.")
-    release = readiness(request.app, state, request)
-    if not release["ready"]:
-        pending = next((item["label"] for item in release["gates"] if not item["passed"]), "hazırlık kapısı")
-        raise HTTPException(423, f"Canlı kilit açılamadı: {pending} bekleniyor.")
-    expiry = authenticated_live_expiry(request)
-    state["armed_until"] = min(time.time() + LIVE_ARM_SECONDS, expiry) if expiry is not None else time.time() + LIVE_ARM_SECONDS
-    state["live_lock_reason"] = None
-    state["real_trading_locked"] = False
-    add_event(state, "LIVE_ARM", "Canlı yeni giriş izni 24 saat için açıldı.", actor=user["id"])
+    async with state["lock"]:
+        if live_execution_blocked(state):
+            raise HTTPException(423, "Canlı acil durdurma veya belirsiz uzlaştırma aktif; önce recovery tamamlanmalı.")
+        release = readiness(request.app, state, request)
+        if not release["ready"]:
+            pending = next((item["label"] for item in release["gates"] if not item["passed"]), "hazırlık kapısı")
+            raise HTTPException(423, f"Canlı kilit açılamadı: {pending} bekleniyor.")
+        state["armed_until"] = time.time() + LIVE_ARM_SECONDS
+        state["live_lock_reason"] = None
+        state["real_trading_locked"] = False
+        add_event(state, "LIVE_ARM", "Canlı yeni giriş izni 24 saat için açıldı.", actor=user["id"])
+        persist_state(state)
     return public_status(request.app, request)
 
 
@@ -6189,49 +6251,52 @@ async def v25_disarm(request: Request) -> dict[str, Any]:
     user = execution_owner(request)
     state = request.app.state.v25_execution
     from . import original_v2_live
-    if original_v2_live.running(state):
-        original_v2_live.pause(state, "OWNER LIVE disarm")
-    record_live_lock_reason(state, "USER_DISARM")
-    state["armed_until"] = 0.0
-    state["real_trading_locked"] = True
-    state["live_auto_trade"] = False
-    state["auto_authorization"] = initial_state()["auto_authorization"]
-    state["auto"]["enabled"] = False
-    state["auto"]["session_until"] = 0.0
-    try:
-        client = client_for(request.app, request)
-        cancelled, unresolved = await cancel_pending_owned_limit_entries(client, state)
-        if unresolved:
-            lock_live_execution(state, "DISARM_ENTRY_CANCELLATION_UNCERTAIN", unknown=True)
+    async with state["lock"]:
+        if original_v2_live.running(state):
+            original_v2_live.pause(state, "OWNER LIVE disarm")
+        record_live_lock_reason(state, "USER_DISARM")
+        state["armed_until"] = 0.0
+        state["real_trading_locked"] = True
+        state["live_auto_trade"] = False
+        state["auto_authorization"] = initial_state()["auto_authorization"]
+        state["auto"]["enabled"] = False
+        state["auto"]["session_until"] = 0.0
+        try:
+            client = client_for(request.app, request)
+            cancelled, unresolved = await cancel_pending_owned_limit_entries(client, state)
+            if unresolved:
+                lock_live_execution(state, "DISARM_ENTRY_CANCELLATION_UNCERTAIN", unknown=True)
+                add_event(
+                    state,
+                    "LIVE_DISARM_CLEANUP_UNKNOWN",
+                    "Disarm sırasında V25 LIMIT giriş temizliği doğrulanamadı; canlı yürütme reconciliation için kilitlendi.",
+                    actor=user["id"],
+                    unresolved=unresolved,
+                    reconciliation_required=True,
+                )
+            else:
+                add_event(state, "LIVE_DISARM_ENTRY_CLEANUP", f"Disarm sırasında {cancelled} V25 LIMIT giriş emri temizlendi.", actor=user["id"], cancelled=cancelled)
+        except Exception as exc:
+            lock_live_execution(state, "DISARM_ENTRY_CANCELLATION_FAILED", unknown=True)
             add_event(
                 state,
                 "LIVE_DISARM_CLEANUP_UNKNOWN",
-                "Disarm sırasında V25 LIMIT giriş temizliği doğrulanamadı; canlı yürütme reconciliation için kilitlendi.",
+                "Disarm sırasında V25 LIMIT giriş temizliği başarısız oldu; canlı yürütme reconciliation için kilitlendi.",
                 actor=user["id"],
-                unresolved=unresolved,
+                exception_type=type(exc).__name__,
                 reconciliation_required=True,
             )
-        else:
-            add_event(state, "LIVE_DISARM_ENTRY_CLEANUP", f"Disarm sırasında {cancelled} V25 LIMIT giriş emri temizlendi.", actor=user["id"], cancelled=cancelled)
-    except Exception as exc:
-        lock_live_execution(state, "DISARM_ENTRY_CANCELLATION_FAILED", unknown=True)
-        add_event(
-            state,
-            "LIVE_DISARM_CLEANUP_UNKNOWN",
-            "Disarm sırasında V25 LIMIT giriş temizliği başarısız oldu; canlı yürütme reconciliation için kilitlendi.",
-            actor=user["id"],
-            exception_type=type(exc).__name__,
-            reconciliation_required=True,
-        )
-    add_event(state, "LIVE_DISARM", "Canlı yeni girişler ve otomasyon kilitlendi; korumalar çalışmaya devam eder.", actor=user["id"])
-    persist_state(state)
+        add_event(state, "LIVE_DISARM", "Canlı yeni girişler ve otomasyon kilitlendi; korumalar çalışmaya devam eder.", actor=user["id"])
+        persist_state(state)
     return public_status(request.app, request)
 
 
 @router.post("/recovery/check")
 async def v25_recovery_check(request: Request, body: Confirmation) -> dict[str, Any]:
     """Reconcile a fail-closed state before allowing the owner to re-arm."""
-    execution_owner(request)
+    user = execution_owner(request)
+    from .exchange_connections import _require_live_mfa
+    await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != "LIVE RECOVERY CHECK":
         raise HTTPException(422, "Recovery kontrolü için LIVE RECOVERY CHECK yazın.")
     state = request.app.state.v25_execution
@@ -6261,6 +6326,9 @@ async def _start_live_auto_session(
     request: Request, body: Confirmation, *, mfa_verified: bool = False,
 ) -> dict[str, Any]:
     user = execution_owner(request)
+    from .exchange_connections import _require_live_mfa
+    if not mfa_verified:
+        await _require_live_mfa(request, user, getattr(body, "totp_code", None))
     if body.confirmation.strip().upper() != "CANLI OTOMATİK":
         raise HTTPException(422, "Otomasyonu açmak için CANLI OTOMATİK yazın.")
     state = request.app.state.v25_execution
@@ -6279,15 +6347,7 @@ async def _start_live_auto_session(
     allowed, reason = live_auto_start_gate(request.app, state, request)
     if not allowed:
         raise HTTPException(423, reason)
-    if not mfa_verified:
-        from . import account_settings
-        if await account_settings.enabled(request, user):
-            code = getattr(body, "totp_code", None)
-            if not code:
-                raise HTTPException(401, detail={
-                    "code": "LIVE_AUTO_MFA_REQUIRED", "message": "LIVE Auto Trade için güncel 2FA kodunu girin.",
-                })
-            await account_settings.require_totp(request, user, code, required=True)
+    async with state["lock"]:
         if original_v2_live.running(state) or auto_session_is_active(state):
             raise HTTPException(409, "Canlı otomasyon zaten aktif; mevcut oturum uzatılmadı.")
         if state["policy"].get("interval") != "15m":
@@ -6295,33 +6355,30 @@ async def _start_live_auto_session(
         allowed, reason = live_auto_start_gate(request.app, state, request)
         if not allowed:
             raise HTTPException(423, reason)
-    state["auto"].update({"enabled": True, "session_until": time.time() + LIVE_AUTO_SESSION_SECONDS, "last_error": None, "last_decision": "Bir saatlik gözetimli canlı tarama başlatıldı."})
-    state["live_auto_trade"] = True
-    state["real_trading_locked"] = False
-    state["armed_until"] = 0.0
-    api_key, secret_key, fingerprint = live_credentials_status(request)
-    live_authorization = state.get("live_session_authorization") or {}
-    if not fingerprint and all(str(live_authorization.get(key) or "").strip() for key in ("session_id", "user_id", "fingerprint")):
-        live_authorization = dict(live_authorization)
-        fingerprint = str(live_authorization["fingerprint"])
-    else:
-        live_authorization = {
-            "session_id": session_id(request),
-            "user_id": str(user["id"]),
-            "fingerprint": fingerprint if api_key and secret_key else "",
-            "auth_version": user.get("auth_version"),
+        state["auto"].update({"enabled": True, "session_until": time.time() + LIVE_AUTO_SESSION_SECONDS, "last_error": None, "last_decision": "Bir saatlik gözetimli canlı tarama başlatıldı."})
+        state["live_auto_trade"] = True
+        state["real_trading_locked"] = False
+        state["armed_until"] = 0.0
+        api_key, secret_key, fingerprint = live_credentials_status(request)
+        live_authorization = state.get("live_session_authorization") or {}
+        if not fingerprint and all(str(live_authorization.get(key) or "").strip() for key in ("session_id", "user_id", "fingerprint")):
+            live_authorization = dict(live_authorization)
+            fingerprint = str(live_authorization["fingerprint"])
+        else:
+            live_authorization = {
+                "session_id": live_owner_binding(request),
+                "user_id": str(user["id"]),
+                "fingerprint": fingerprint if api_key and secret_key else "",
+                "auth_version": user.get("auth_version"),
+                "auth_expires_at_epoch": None,
+            }
+        state["auto_authorization"] = {
+            **live_authorization,
+            "expires_at_epoch": state["auto"]["session_until"],
+            "auth_expires_at_epoch": None,
         }
-    state["auto_authorization"] = {
-        **live_authorization,
-        "expires_at_epoch": state["auto"]["session_until"],
-        "auth_expires_at_epoch": authenticated_live_expiry(request),
-    }
-    expiry = state["auto_authorization"]["auth_expires_at_epoch"]
-    if expiry is not None:
-        state["auto"]["session_until"] = min(state["auto"]["session_until"], expiry)
-        state["auto_authorization"]["expires_at_epoch"] = state["auto"]["session_until"]
-    add_event(state, "LIVE_AUTO_START", "Canlı otomasyon 24 saatlik ARM penceresi içinden bir saatlik gözetimli oturum için açıldı.", actor=user["id"])
-    persist_state(state)
+        add_event(state, "LIVE_AUTO_START", "Canlı otomasyon 24 saatlik ARM penceresi içinden bir saatlik gözetimli oturum için açıldı.", actor=user["id"])
+        persist_state(state)
     return public_status(request.app, request)
 
 
@@ -6330,16 +6387,17 @@ async def v25_auto_stop(request: Request) -> dict[str, Any]:
     user = execution_owner(request)
     state = request.app.state.v25_execution
     from . import original_v2_live
-    if original_v2_live.running(state):
-        original_v2_live.pause(state, "OWNER LIVE otomasyonunu durdurdu")
-    state["auto"]["enabled"] = False
-    state["auto"]["session_until"] = 0.0
-    state["real_trading_locked"] = float(state.get("armed_until") or 0) <= time.time()
-    state["live_auto_trade"] = False
-    state["auto_authorization"] = initial_state()["auto_authorization"]
-    state["auto"]["last_decision"] = "Yeni otomatik canlı girişler durduruldu."
-    add_event(state, "LIVE_AUTO_STOP", "Canlı otomasyon durduruldu; mevcut Stop/TP korumaları açık.", actor=user["id"])
-    persist_state(state)
+    async with state["lock"]:
+        if original_v2_live.running(state):
+            original_v2_live.pause(state, "OWNER LIVE otomasyonunu durdurdu")
+        state["auto"]["enabled"] = False
+        state["auto"]["session_until"] = 0.0
+        state["real_trading_locked"] = float(state.get("armed_until") or 0) <= time.time()
+        state["live_auto_trade"] = False
+        state["auto_authorization"] = initial_state()["auto_authorization"]
+        state["auto"]["last_decision"] = "Yeni otomatik canlı girişler durduruldu."
+        add_event(state, "LIVE_AUTO_STOP", "Canlı otomasyon durduruldu; mevcut Stop/TP korumaları açık.", actor=user["id"])
+        persist_state(state)
     return public_status(request.app, request)
 
 
@@ -6381,6 +6439,14 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
     user = execution_owner(request)
     if body.confirmation.strip().upper() != "CANLI ACİL DURDUR":
         raise HTTPException(422, "Acil işlem için CANLI ACİL DURDUR yazın.")
+    state = request.app.state.v25_execution
+    async with state["lock"]:
+        return await _emergency_stop_locked(request, user, body)
+
+
+async def _emergency_stop_locked(
+    request: Request, user: dict[str, Any], body: EmergencyRequest,
+) -> dict[str, Any]:
     state = request.app.state.v25_execution
     lock_live_execution(state, "MANUAL_EMERGENCY_STOP")
     cancelled_orders = cancelled_algos = closed = 0
@@ -6462,9 +6528,18 @@ async def v25_emergency(request: Request, body: EmergencyRequest) -> dict[str, A
 @router.post("/emergency/clear")
 async def v25_emergency_clear(request: Request, body: EmergencyClearRequest) -> dict[str, Any]:
     user = execution_owner(request)
+    from .exchange_connections import _require_live_mfa
+    await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != "ACİL DURDURMAYI KALDIRIYORUM":
         raise HTTPException(422, "Emergency kaldırma için ACİL DURDURMAYI KALDIRIYORUM yazın.")
     state = request.app.state.v25_execution
+    async with state["lock"]:
+        return await _clear_emergency_locked(request, user, state)
+
+
+async def _clear_emergency_locked(
+    request: Request, user: dict[str, Any], state: dict[str, Any],
+) -> dict[str, Any]:
     emergency = state.get("emergency") if isinstance(state.get("emergency"), dict) else {}
     if emergency.get("active") is not True:
         raise HTTPException(409, "Aktif emergency kilidi yok.")
