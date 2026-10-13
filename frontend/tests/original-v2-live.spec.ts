@@ -1,7 +1,7 @@
 import {expect, test, type Page} from '@playwright/test'
 
 const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT']
-async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, locked = false, rejectApproval = false, binanceBan = false} = {}) {
+async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false} = {}) {
   const writes: Array<{path: string; body: unknown}> = []
   await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'original-live-ui'))
   await page.route('**/api/**', async route => {
@@ -12,6 +12,8 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
       violations: ['Stop mesafesi %6 sınırını aştı'], evidence: {stop_percent: '7.84', risk_usdt: '41.02', risk_budget_usdt: '30', margin_usdt: '170'}}
     const original = {
       available, enabled, paused: locked, risk_percent: 0.5, daily_loss_percent: 5, symbols, fill_lock: fillLock,
+      session: enabled ? {hours: 1, expires_at: new Date(Date.now() + 3600000).toISOString(), remaining_seconds: 3600, authority_limited: false, warning_sent: false} : null,
+      daily: {day: '2026-10-13', loss: dailyLossLocked ? 50 : 0, limit: 50, locked: dailyLossLocked},
       universe: {
         requested_count: 40, selected_count: 40, eligible_count: 46,
         filter_counts: {
@@ -60,16 +62,19 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
       '/api/markets': [{symbol: 'BTCUSDT', display: 'BTC/USDT', price: 90000, change: 1, volume: 1000000, status: 'TRADING', contractType: 'PERPETUAL', quoteAsset: 'USDT'}],
       '/api/v25/status': {
         connected: true, real_trading_locked: false, execution_state: 'LOCKED', armed,
-        recovery_ready: true, credentials: {configured: true}, live_auto_trade: enabled,
-        readiness: {ready: true, gates: []}, authorization: {valid: true}, consent: {active: true},
-        policy: {allowed_symbols: symbols, interval: '15m'}, auto: {enabled},
-        account: {wallet_balance: 1000, available_balance: 1000, positions: [], open_orders: []},
+        recovery_ready: true, credentials: {configured: true, fingerprint: 'fixture-fingerprint'}, live_auto_trade: liveAutoTrade,
+        auto_session_until: liveAutoTrade ? new Date(Date.now() + 3600000).toISOString() : null,
+        readiness: {ready: !readinessFailure, gates: readinessFailure ? [{key: 'policy', label: 'Risk policy', passed: false}] : []}, authorization: {valid: true, scope_match: true}, consent: {active: true},
+        policy: {allowed_symbols: symbols, interval: '15m', daily_trade_limit: 3, daily_loss_limit: 10, consecutive_loss_limit: 3},
+        daily: {entries: 0, realized_pnl: 0, consecutive_losses: 0, unverified_closures: 0},
+        emergency: {active: false}, reconciliation_required: false,
+        account: {wallet_balance: 1000, available_balance: 1000, unrealized_pnl: 0, positions: [], open_orders: []},
         ...(owner && available ? {original_v2_live: original} : {}),
       },
       '/api/exchange-connections/status': {
         vault: {ready: true},
         connections: {LIVE: {configured: true, active: true, last_test_ok: true}},
-        ...(binanceBan ? {binance_ban: {
+        binance_ban: binanceBan ? {
           active: true,
           blocked_until: new Date(Date.now() + 4_881_000).toISOString(),
           remaining_seconds: 4881,
@@ -78,7 +83,7 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
           status_code: 418,
           exchange_code: -1003,
           used_weight_1m: 1660,
-        }} : {}),
+        } : {active: false, remaining_seconds: 0},
       },
       '/api/v21/journal': {items: []},
       '/api/analysis-universe': {results: []},
@@ -110,6 +115,46 @@ test('OWNER sees Original V2 rejection stages, nearest symbols and 24-hour conve
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('Kalan 2 USDT (0.2)')
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('Borsa minimumu 5 USDT / 0.001')
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('OPUSDT')
+})
+
+test('active Original V2 reports entries open after its startup ARM is consumed', async ({page}) => {
+  await fixture(page, {armed: false, enabled: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  const checks = card.getByTestId('original-entry-checks')
+  await expect(card.getByTestId('original-entry-status')).toHaveText('Açık – sinyal bekleniyor')
+  await expect(checks).toContainText('Giriş kontrolleri')
+  await expect(checks).toContainText('GEÇTİ · Canlı otomasyon oturumu')
+  await expect(checks).toContainText('GEÇTİ · Günlük işlem adedi')
+  await expect(checks).not.toContainText('fixture-fingerprint')
+  await expect(checks).not.toContainText(/fixture-secret|fixture-token|api-key-value/i)
+})
+
+test('Original V2 entry status names missing automation as the blocker', async ({page}) => {
+  await fixture(page, {armed: true, enabled: true, liveAutoTrade: false})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await expect(card.getByTestId('original-entry-status')).toHaveText('Engelli – Canlı otomasyon oturumu etkin değil veya süresi dolmuş.')
+  await expect(card.getByTestId('original-entry-checks')).toContainText('GEÇMEDİ · Canlı otomasyon oturumu')
+})
+
+test('Original V2 entry status names the fill lock', async ({page}) => {
+  await fixture(page, {armed: false, enabled: true, locked: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await expect(card.getByTestId('original-entry-status')).toHaveText('Engelli – Dolum güvenlik kilidi aktif; OWNER incelemesi gerekiyor.')
+  await expect(card.getByTestId('original-entry-checks')).toContainText('GEÇMEDİ · Dolum güvenlik kilidi')
+})
+
+test('Original V2 entry status names the daily loss lock', async ({page}) => {
+  await fixture(page, {armed: false, enabled: true, dailyLossLocked: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await expect(card.getByTestId('original-entry-status')).toHaveText('Engelli – Original V2 günlük kayıp kilidi aktif.')
+  await expect(card.getByTestId('original-entry-checks')).toContainText('GEÇMEDİ · Original V2 günlük kayıp sınırı')
+})
+
+test('Original V2 entry status translates failed policy readiness', async ({page}) => {
+  await fixture(page, {armed: false, enabled: true, readinessFailure: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await expect(card.getByTestId('original-entry-status')).toHaveText('Engelli – Güncel risk politikası onayı yok.')
+  await expect(card.getByTestId('original-entry-checks')).toContainText('GEÇMEDİ · Risk politikası onayı')
 })
 
 test('global Binance ban shows countdown and disables test and connect actions', async ({page}) => {

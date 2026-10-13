@@ -11,7 +11,7 @@ import {useKaisErrorReaction} from '../../useKaisPageReactions'
 import {useTradingPreferences} from '../../useTradingPreferences'
 import {preferredRiskMargin} from '../../account-risk-sizing'
 import {useMemberAccess} from '../../premium-access'
-import OriginalV2LiveCard, {type OriginalV2LiveStatus, type OriginalPersistenceDiagnostics} from './OriginalV2LiveCard'
+import OriginalV2LiveCard, {type OriginalV2EntryCheck, type OriginalV2LiveStatus, type OriginalPersistenceDiagnostics} from './OriginalV2LiveCard'
 
 class LiveAutoMfaRequired extends Error {
   constructor() {
@@ -30,6 +30,7 @@ type LiveStatus = {
   armed_until?: string | null
   live_lock_reason?: {code: string; message: string; at: string} | null
   account_rate_limit?: {pending_verification?: boolean; locked?: boolean; message?: string} | null
+  auto_session_until?: string | null
   real_trading_locked?: boolean
   live_auto_trade?: boolean
   auto?: {enabled?: boolean; status?: string; last_decision?: string; last_error?: string | null; last_scan?: string | null; last_skip_reason?: string | null; last_cycle_stage?: string | null; session_until?: string | null}
@@ -40,7 +41,7 @@ type LiveStatus = {
   authorization?: {valid?: boolean; expires_at?: string | null; reason?: string; scope_match?: boolean}
   readiness?: {ready?: boolean; gates?: Array<{key?: string; label?: string; passed?: boolean; detail?: string}>}
   account?: {wallet_balance?: number | null; available_balance?: number | null; margin_balance?: number | null; unrealized_pnl?: number | null; positions?: Array<Record<string, unknown>>; open_orders?: Array<Record<string, unknown>>}
-  daily?: {realized_pnl?: number; remaining_loss_budget?: number; entries?: number}
+  daily?: {realized_pnl?: number; remaining_loss_budget?: number; entries?: number; consecutive_losses?: number; unverified_closures?: number}
   plans?: Array<Record<string, unknown> & {targets?: unknown[]; stop_loss?: unknown; protection_state?: string; protection_status?: string}>
   events?: Array<{kind?: string; message?: string; created_at?: string; symbol?: string; failures?: string[]}>
   emergency?: {active?: boolean; reason?: string | null}
@@ -420,6 +421,116 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const autoTimeframeMessage = "LIVE Auto Trade yalnızca 15m zaman diliminde çalışır. Başlatmak için timeframe'i 15m seçip politikayı kaydedin."
   const timeframeWarning = !autoTimeframeSupported ? <div className="liveNotice error" role="alert" data-testid="live-auto-timeframe-warning"><TriangleAlert aria-hidden="true"/><span>{autoTimeframeMessage} Timeframe: {selectedAutoTimeframe !== '15m' ? selectedAutoTimeframe : savedAutoTimeframe}.</span></div> : null
   const autoReady = Boolean(!freeTrial && autoTimeframeSupported && status && connections && authorizationValid && connectionReady && armState === 'READY' && !executionLocked && readinessReady && riskState === 'READY' && exposureState === 'READY' && activePlanState === 'READY' && protectionState === 'READY' && recoveryState === 'READY' && emergencyState === 'CLEAR')
+  const originalEntryChecks: OriginalV2EntryCheck[] = []
+  const originalRuntime = status?.original_v2_live
+  if (status && originalRuntime) {
+    const addCheck = (key: string, label: string, passed: boolean, reason: string) => {
+      originalEntryChecks.push({key, label, passed, reason})
+    }
+    const originalSessionActive = originalRuntime.enabled === true
+      && originalRuntime.paused !== true
+      && (originalRuntime.session?.remaining_seconds ?? 0) > 0
+    const autoSessionExpiresAt = status.auto_session_until ? Date.parse(status.auto_session_until) : Number.NaN
+    const autoSessionActive = status.live_auto_trade === true
+      && Number.isFinite(autoSessionExpiresAt)
+      && autoSessionExpiresAt > Date.now()
+    const accountRateLimited = status.account_rate_limit?.locked === true || status.account_rate_limit?.pending_verification === true
+    const hasGlobalBanStatus = connections?.binance_ban?.active === false
+    const originalDaily = originalRuntime.daily
+    const originalDailyLossReady = originalDaily?.locked === false
+      && typeof originalDaily.loss === 'number'
+      && Number.isFinite(originalDaily.loss)
+      && typeof originalDaily.limit === 'number'
+      && Number.isFinite(originalDaily.limit)
+      && originalDaily.loss < originalDaily.limit
+    const policyNumber = (key: string) => {
+      const value = status.policy?.[key]
+      return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+    }
+    const dailyTradeLimit = policyNumber('daily_trade_limit')
+    const dailyLossLimit = policyNumber('daily_loss_limit')
+    const consecutiveLossLimit = policyNumber('consecutive_loss_limit')
+    const dailyEntries = status.daily?.entries
+    const realizedPnl = status.daily?.realized_pnl
+    const consecutiveLosses = status.daily?.consecutive_losses
+    const openPnl = status.account?.unrealized_pnl
+    const unverifiedClosures = status.daily?.unverified_closures
+    const releaseGateText: Record<string, {label: string; passed: string; failed: string}> = {
+      credentials: {label: 'API anahtarının hesap kasasında olması', passed: 'LIVE anahtarı kayıtlı; değerleri gösterilmez.', failed: 'Hesap kasasında kullanılabilir LIVE API anahtarı yok.'},
+      local_consent: {label: 'LIVE izin süresi', passed: 'LIVE izin kapısı geçti.', failed: 'LIVE izni geçerli değil.'},
+      read_only: {label: 'Binance hesap snapshot’ı', passed: 'İmzalı hesap snapshot’ı hazır.', failed: 'İmzalı Binance hesap snapshot’ı hazır değil.'},
+      one_way: {label: 'One-way pozisyon modu', passed: 'Hesap One-way modunda.', failed: 'Hesap One-way modunda değil.'},
+      policy: {label: 'Risk politikası onayı', passed: 'Güncel risk politikası onaylı.', failed: 'Güncel risk politikası onayı yok.'},
+      demo_certificate: {label: 'Demo sertifikası / LIVE izni', passed: 'Gerekli Demo sertifikası veya LIVE izni mevcut.', failed: 'Gerekli Demo sertifikası / LIVE izni tamamlanmamış.'},
+    }
+    addCheck('live_status', 'Güncel LIVE durumu', statusVerified === true, statusVerified ? 'Sunucu durumu doğrulandı.' : 'Sunucu durumu doğrulanmadı; eski bilgiyle girişe izin verilmez.')
+    const knownFillLock = originalRuntime.fill_lock === null || typeof originalRuntime.fill_lock?.active === 'boolean'
+    const fillLockReady = knownFillLock && originalRuntime.fill_lock?.active !== true
+    addCheck('fill_lock', 'Dolum güvenlik kilidi', fillLockReady, fillLockReady ? 'Dolum güvenlik kilidi aktif değil.' : originalRuntime.fill_lock?.active === true ? 'Dolum güvenlik kilidi aktif; OWNER incelemesi gerekiyor.' : 'Dolum kilidi durumu doğrulanamadı.')
+    addCheck('original_session', 'Original V2 oturumu', originalSessionActive, originalSessionActive ? 'Original V2 oturumu açık ve süresi devam ediyor.' : 'Original V2 oturumu kapalı veya süresi dolmuş.')
+    addCheck('auto_session', 'Canlı otomasyon oturumu', autoSessionActive, autoSessionActive ? 'Canlı otomasyon oturumu etkin.' : 'Canlı otomasyon oturumu etkin değil veya süresi dolmuş.')
+    addCheck('connected', 'Binance hesap bağlantısı', status.connected === true, status.connected === true ? 'Hesap bağlantısı ve snapshot hazır.' : 'Binance hesap bağlantısı veya güncel hesap snapshot’ı hazır değil.')
+    addCheck('account_rate_limit', 'Binance hesap hız sınırı', !accountRateLimited, accountRateLimited ? 'Binance hesap doğrulaması / hız sınırı beklemede.' : 'Hesap hız sınırı kilidi yok.')
+    addCheck('global_binance_ban', 'Binance genel engeli', hasGlobalBanStatus, hasGlobalBanStatus ? 'Aktif Binance genel engeli yok.' : 'Binance engel durumu alınamadı veya engel aktif.')
+    addCheck('credentials', 'Kayıtlı LIVE API anahtarı', status.credentials?.configured === true, status.credentials?.configured === true ? 'Hesap kasasında kayıtlı; anahtar veya secret gösterilmez.' : 'Hesap kasasında kullanılabilir LIVE API anahtarı yok.')
+    const authorizationReady = status.authorization?.valid === true && status.authorization.scope_match === true
+    addCheck('authorization', 'LIVE yetkilendirmesi', authorizationReady, authorizationReady ? 'LIVE yetkisi geçerli ve hesap kapsamı eşleşiyor.' : authorizationReasonText)
+    addCheck('real_trading_lock', 'Gerçek işlem kilidi', status.real_trading_locked === false, status.real_trading_locked === false ? 'Gerçek işlem kilidi kapalı.' : 'Gerçek işlem kilidi açık veya durumu doğrulanamadı.')
+    const executionKnown = typeof status.execution_state === 'string' && status.execution_state.length > 0
+    const executionBlockedNow = status.execution_state === 'UNKNOWN' || status.reconciliation_required === true || status.emergency?.active === true
+    const executionPassed = executionKnown && !executionBlockedNow
+    const executionReason = status.emergency?.active === true
+      ? 'Acil durdurma aktif.'
+      : status.reconciliation_required === true || status.execution_state === 'UNKNOWN'
+        ? 'Belirsiz emir veya uzlaştırma çözülmeden yeni giriş yapılamaz.'
+        : executionPassed
+          ? `Yürütme durumu belirsiz değil (${status.execution_state === 'LOCKED' ? 'beklemede' : status.execution_state}).`
+          : 'Yürütme durumu sunucudan alınamadı.'
+    addCheck('execution_state', 'Yürütme / uzlaştırma durumu', executionPassed, executionReason)
+    addCheck('recovery', 'LIVE recovery', status.recovery_ready === true && !status.recovery_error, status.recovery_ready === true && !status.recovery_error ? 'LIVE recovery tamamlandı.' : 'LIVE recovery tamamlanmadı veya hata bekliyor.')
+    addCheck('original_daily_loss', 'Original V2 günlük kayıp sınırı', originalDailyLossReady, originalDailyLossReady
+      ? `Günlük kayıp ${money(originalDaily?.loss)} / limit ${money(originalDaily?.limit)}; kilit yok.`
+      : originalDaily?.locked === true ? 'Original V2 günlük kayıp kilidi aktif.' : 'Original V2 günlük kayıp durumu doğrulanamadı veya limit doldu.')
+    const dailyTradesReady = typeof dailyEntries === 'number' && dailyTradeLimit !== null && dailyEntries < dailyTradeLimit
+    addCheck('daily_trades', 'Günlük işlem adedi', dailyTradesReady, dailyTradesReady
+      ? `Bugün ${dailyEntries}/${dailyTradeLimit} işlem; günlük sınır içinde.`
+      : typeof dailyEntries === 'number' && dailyTradeLimit !== null
+        ? `Günlük işlem sınırı doldu (${dailyEntries}/${dailyTradeLimit}).`
+        : 'Günlük işlem sayısı veya limit doğrulanamadı.')
+    const dailyLossReady = typeof realizedPnl === 'number' && dailyLossLimit !== null && realizedPnl > -dailyLossLimit
+    addCheck('daily_loss', 'Günlük gerçekleşen kayıp sınırı', dailyLossReady, dailyLossReady
+      ? `Günlük gerçekleşen PnL ${money(realizedPnl)}; limit içinde.`
+      : typeof realizedPnl === 'number' && dailyLossLimit !== null
+        ? `Günlük kayıp limiti doldu (${money(realizedPnl)} / -${money(dailyLossLimit)}).`
+        : 'Günlük gerçekleşen PnL veya limit doğrulanamadı.')
+    const openLossReady = typeof openPnl === 'number' && dailyLossLimit !== null && openPnl > -dailyLossLimit
+    addCheck('open_loss', 'Açık zarar sınırı', openLossReady, openLossReady
+      ? `Açık PnL ${money(openPnl)}; sınır içinde.`
+      : typeof openPnl === 'number' && dailyLossLimit !== null
+        ? `Açık zarar sınırı doldu (${money(openPnl)} / -${money(dailyLossLimit)}).`
+        : 'Açık PnL veya zarar limiti doğrulanamadı.')
+    const consecutiveLossReady = typeof consecutiveLosses === 'number' && consecutiveLossLimit !== null && consecutiveLosses < consecutiveLossLimit
+    addCheck('consecutive_losses', 'Ardışık kayıp sınırı', consecutiveLossReady, consecutiveLossReady
+      ? `Ardışık kayıp ${consecutiveLosses}/${consecutiveLossLimit}; sınır içinde.`
+      : typeof consecutiveLosses === 'number' && consecutiveLossLimit !== null
+        ? `Ardışık kayıp sınırı doldu (${consecutiveLosses}/${consecutiveLossLimit}).`
+        : 'Ardışık kayıp verisi veya limit doğrulanamadı.')
+    const verifiedPnlReady = unverifiedClosures === 0
+    addCheck('verified_closures', 'Kapanış / PnL doğrulaması', verifiedPnlReady, verifiedPnlReady ? 'Doğrulanmamış kapanış yok.' : typeof unverifiedClosures === 'number' ? `${unverifiedClosures} kapanışın PnL doğrulaması bekliyor.` : 'Kapanış doğrulama durumu alınamadı.')
+    const readinessGates = status.readiness?.gates
+    readinessGates?.forEach((gate, index) => {
+      const gateText = releaseGateText[gate.key || '']
+      const passed = gate.passed === true
+      addCheck(`readiness_${gate.key || index}`, gateText?.label || 'Ek LIVE güvenlik kapısı', passed, gateText
+        ? (passed ? gateText.passed : gateText.failed)
+        : (passed ? 'Sunucunun ek LIVE güvenlik kapısı geçti.' : 'Sunucunun ek LIVE güvenlik kapısı geçmedi.'))
+    })
+    const readinessPassed = status.readiness?.ready === true
+      && Array.isArray(readinessGates)
+      && readinessGates.every(gate => gate.passed === true)
+    addCheck('readiness', 'Genel LIVE hazırlık kapıları', readinessPassed, readinessPassed ? 'Sunucunun LIVE hazırlık kapıları tamam.' : 'Bir veya daha fazla LIVE hazırlık kapısı tamam değil.')
+    addCheck('ui_request', 'Devam eden ekran işlemi', !busy, busy ? 'Başka bir ekran işlemi sürüyor; tamamlanmasını bekleyin.' : 'Bekleyen ekran işlemi yok.')
+  }
   const manualOrderReady = Boolean(!freeTrial && statusVerified && status && connected && authorizationValid && liveArmed && readinessReady && !recoveryRequired && !emergency)
   const setPolicy = (key: string, value: unknown) => setPolicyDraft(current => ({...(current || {}), [key]: value}))
   const numericPolicy = (key: string, fallback: number) => Number(policy[key] ?? fallback)
@@ -937,7 +1048,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
     {status?.original_v2_live?.available && <OriginalV2LiveCard
       className="masterTradeLiveOriginalCard"
-      status={status.original_v2_live} armed={liveArmed} automationActive={status.live_auto_trade === true}
+      status={status.original_v2_live} entryChecks={originalEntryChecks} armed={liveArmed} automationActive={status.live_auto_trade === true}
       blocked={Boolean(busy) || !connected || executionLocked || !readinessReady}
       request={(path, body) => call<unknown>(V25, path, {method: 'POST', ...(body ? {body: JSON.stringify(body)} : {})})}
       readDiagnostics={() => call<OriginalPersistenceDiagnostics>(V25, '/original-v2/persistence-diagnostics', {method: 'GET', cache: 'no-store'})}

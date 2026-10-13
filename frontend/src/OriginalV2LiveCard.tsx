@@ -101,7 +101,7 @@ export type OriginalV2LiveStatus = {
   risk_percent: number
   daily_loss_percent: number
   session?: {hours: number; started_at?: string | null; expires_at?: string | null; remaining_seconds: number; authority_limited: boolean; warning_sent: boolean} | null
-  daily?: {day: string; loss: number; limit: number; locked: boolean} | null
+  daily?: {day: string; loss?: number; limit?: number; locked: boolean} | null
   symbols: string[]
   universe?: {requested_count: number; selected_count: number; eligible_count: number; updated_at?: string | null; filter_counts?: Record<string, number>} | null
   scanner?: {
@@ -122,9 +122,17 @@ export type OriginalV2LiveStatus = {
   }} | null
 }
 
+export type OriginalV2EntryCheck = {
+  key: string
+  label: string
+  passed: boolean
+  reason: string
+}
+
 type Props = {
   className?: string
   status: OriginalV2LiveStatus
+  entryChecks: OriginalV2EntryCheck[]
   armed: boolean
   automationActive: boolean
   blocked: boolean
@@ -135,7 +143,7 @@ type Props = {
   onNotice: (message: string) => void
 }
 
-export default function OriginalV2LiveCard({className, status, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice}: Props) {
+export default function OriginalV2LiveCard({className, status, entryChecks, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice}: Props) {
   const [risk, setRisk] = useState(String(status.risk_percent))
   const [dailyLoss, setDailyLoss] = useState(String(status.daily_loss_percent))
   const [symbolCount, setSymbolCount] = useState(String(status.universe?.requested_count ?? 40))
@@ -233,6 +241,11 @@ export default function OriginalV2LiveCard({className, status, armed, automation
     event.preventDefault()
     void act(false)
   }
+  const entryBlocker = entryChecks.find(check => !check.passed)
+  const entriesReady = status.enabled && automationActive && !blocked && !fillLocked && entryChecks.length > 0 && entryChecks.every(check => check.passed)
+  const entryStatus = entriesReady
+    ? 'Açık – sinyal bekleniyor'
+    : `Engelli – ${entryBlocker?.reason || 'Giriş kontrolleri henüz doğrulanmadı.'}`
   return <section className={`masterTradeLiveSection ${className ?? ''}`} aria-label="Kais Original V2 LIVE">
     <header><div><span className="masterTradeLiveKicker">OWNER · ORIGINAL V2</span><h3>Kais Original V2 LIVE</h3></div>
       <strong>{status.enabled ? 'OTURUM AÇIK' : status.paused ? 'GÜVENLİK KİLİDİ' : 'KAPALI'}</strong></header>
@@ -244,11 +257,21 @@ export default function OriginalV2LiveCard({className, status, armed, automation
       <span><small>SON TAMAMLANAN TARAMA</small><b>{status.scanner?.last_scan_at ? new Date(status.scanner.last_scan_at).toLocaleString('tr-TR') : 'Henüz tamamlanmadı'}</b></span>
       <span><small>SON DÖNGÜ</small><b>{status.scanner?.last_cycle_at ? new Date(status.scanner.last_cycle_at).toLocaleString('tr-TR') : 'Henüz ölçülmedi'}</b></span>
       <span><small>TARANAN / ADAY</small><b>{status.scanner?.scanned_symbol_count ?? 0} / {status.scanner?.candidate_count ?? 0}</b></span>
-      <span><small>YENİ GİRİŞ</small><b>{!status.enabled || blocked || !armed || fillLocked ? 'Kapalı / engelli' : 'Her emir için sunucu kontrolü'}</b></span>
+      <span><small>YENİ GİRİŞ</small><b data-testid="original-entry-status">{entryStatus}</b></span>
       <span><small>OTURUM BİTİŞİ</small><b>{status.session?.expires_at ? new Date(status.session.expires_at).toLocaleString('tr-TR') : 'Oturum yok'}</b></span>
       <span><small>KALAN SÜRE</small><b data-testid="original-session-remaining">{remainingText}</b></span>
       <span><small>SEÇİLEN OTURUM</small><b>{status.session?.hours ?? 1} saat{status.session?.authority_limited ? ' · Yetki süresiyle sınırlı' : ''}</b></span>
     </div>
+    <details open className="originalEntryChecks" data-testid="original-entry-checks">
+      <summary>Giriş kontrolleri · {entryChecks.filter(check => check.passed).length}/{entryChecks.length} geçti</summary>
+      <ul>
+        {entryChecks.map(check => <li key={check.key} data-result={check.passed ? 'passed' : 'failed'}>
+          <strong>{check.passed ? 'GEÇTİ' : 'GEÇMEDİ'} · {check.label}</strong>
+          <span>{check.reason}</span>
+        </li>)}
+      </ul>
+      <p>ARM başlatma aşamasında kullanılır; açık otomasyon kendi süresi ve yukarıdaki kapılarla kontrol edilir. Her adayda sembol, sinyal, risk, bakiye ve Binance emir kuralları sunucuda yeniden doğrulanır. “Açık” emir garantisi değildir.</p>
+    </details>
     <p>USDT-M Futures · 24 saatlik hacimde ilk N; hacim en az 1.000.000 USDT, liste yaşı en az 30 gün, spread en fazla 8 bps. Evren UTC gününde bir kez yenilenir. Strateji: 3x · en fazla %6 stop · TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
     <small>Son taramadaki semboller: {(status.scanner?.scanned_symbols ?? status.symbols).map(symbol => symbol.replace('USDT', '')).join(' · ') || 'Günlük seçim bekleniyor'}</small>
     <small>Uygun: {status.universe?.eligible_count ?? 0} · Seçilen: {status.universe?.selected_count ?? status.symbols.length} · Liste yenileme: {status.universe?.updated_at ? new Date(status.universe.updated_at).toLocaleString('tr-TR') : 'Henüz yapılmadı'}</small>
@@ -295,7 +318,7 @@ export default function OriginalV2LiveCard({className, status, armed, automation
       <label>DOLUM RİSKİNİ İNCELEDİM yazın<input value={approval} onChange={event => setApproval(event.target.value)} disabled={busy}/></label>
       <button type="button" onClick={() => void approve()} disabled={busy || approval !== 'DOLUM RİSKİNİ İNCELEDİM' || code.length < 6}>Dolum kilidini onayımla kaldır</button>
     </div>}
-    {status.daily && <p>Günlük kayıp: {status.daily.loss.toFixed(2)} / {status.daily.limit.toFixed(2)} USDT{status.daily.locked ? ' · Bugün yeni giriş kapalı' : ''}</p>}
+    {status.daily && <p>Günlük kayıp: {typeof status.daily.loss === 'number' ? status.daily.loss.toFixed(2) : '—'} / {typeof status.daily.limit === 'number' ? status.daily.limit.toFixed(2) : '—'} USDT{status.daily.locked ? ' · Bugün yeni giriş kapalı' : ''}</p>}
     <form onSubmit={submit}>
       <div className="masterTradeLiveSetupGrid">
         <label>İşlem riski (%)<input type="number" min="0.01" max="1" step="0.01" required value={risk} onChange={event => setRisk(event.target.value)} disabled={busy || status.enabled}/></label>
