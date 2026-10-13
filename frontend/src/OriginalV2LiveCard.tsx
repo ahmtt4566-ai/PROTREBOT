@@ -37,6 +37,53 @@ export const originalScanLabels: Record<string, string> = {
   BLOCKED: 'Yeni girişler engellendi',
 }
 
+const scanRejectionLabels: Record<string, string> = {
+  data_missing: 'Eksik mum / 24s piyasa verisi',
+  invalid_market_data: 'Bozuk veya yanlış zaman dilimli veri',
+  market_volume: '24s hacim eşiği altı',
+  market_move: '24s fiyat hareketi eşiği altı',
+  market_filter: 'Piyasa / sözleşme filtresi',
+  market_shortlist: 'Aday sıralama sınırı',
+  signal_conditions: 'Trend / sinyal koşulu yok',
+  confidence_low: 'Güven skoru düşük',
+  spread_wide: 'Spread geniş',
+  stop_too_wide: 'Stop %6 sınırından geniş',
+  minimum_margin: 'Teminat / minimum emir miktarı',
+  position_limit: 'Pozisyon / aynı sembol sınırı',
+  daily_limit: 'Günlük işlem veya kayıp sınırı',
+  risk_or_account_limit: 'Diğer risk / hesap kontrolü',
+}
+
+const universeFilterLabels: Record<string, string> = {
+  active_contracts: 'Aktif sözleşme',
+  age_under_30_days: '30 günden yeni',
+  market_data_missing: 'Eksik günlük veri',
+  invalid_market_data: 'Geçersiz günlük veri',
+  volume_below_minimum: 'Hacim eşiği altı',
+  spread_too_wide: 'Spread geniş',
+  eligible: 'Filtrelerden geçen',
+}
+
+const qualityCheckLabels: Record<string, string> = {
+  direction: 'yön',
+  confidence: 'güven',
+  trap: 'tuzak radarı',
+  breakout: 'kırılım kalitesi',
+  mtf: 'çoklu zaman dilimi',
+}
+
+type OriginalScanNearMiss = {
+  symbol: string
+  reason_code: string
+  reason?: string
+  confidence?: number | null
+  confidence_threshold?: number | null
+  failed_checks?: string[]
+  market_volume_usdt?: number | null
+  market_move_percent?: number | null
+  stop_percent?: number | null
+}
+
 export type OriginalV2LiveStatus = {
   available: boolean
   enabled: boolean
@@ -47,8 +94,20 @@ export type OriginalV2LiveStatus = {
   session?: {hours: number; started_at?: string | null; expires_at?: string | null; remaining_seconds: number; authority_limited: boolean; warning_sent: boolean} | null
   daily?: {day: string; loss: number; limit: number; locked: boolean} | null
   symbols: string[]
-  universe?: {requested_count: number; selected_count: number; eligible_count: number; updated_at?: string | null} | null
-  scanner?: {stage?: string; last_cycle_at?: string; last_scan_at?: string; scanned_symbol_count?: number; scanned_symbols?: string[]; candidate_count?: number} | null
+  universe?: {requested_count: number; selected_count: number; eligible_count: number; updated_at?: string | null; filter_counts?: Record<string, number>} | null
+  scanner?: {
+    stage?: string
+    last_cycle_at?: string
+    last_scan_at?: string
+    scanned_symbol_count?: number
+    scanned_symbols?: string[]
+    data_complete_count?: number
+    candidate_count?: number
+    rejection_counts?: Record<string, number>
+    near_misses?: OriginalScanNearMiss[]
+    last_24h?: {scans: number; candidates: number; trades: number}
+    last_failure?: {stage: string; reason_code: string; symbol?: string; interval?: string; message: string} | null
+  } | null
   fill_lock?: {id: string; active: boolean; symbol: string; violations: string[]; evidence?: {
     stop_percent?: string; risk_usdt?: string; risk_budget_usdt?: string; margin_usdt?: string
   }} | null
@@ -184,6 +243,34 @@ export default function OriginalV2LiveCard({className, status, armed, automation
     <p>USDT-M Futures · 24 saatlik hacimde ilk N; hacim en az 1.000.000 USDT, liste yaşı en az 30 gün, spread en fazla 8 bps. Evren UTC gününde bir kez yenilenir. Strateji: 3x · en fazla %6 stop · TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
     <small>Son taramadaki semboller: {(status.scanner?.scanned_symbols ?? status.symbols).map(symbol => symbol.replace('USDT', '')).join(' · ') || 'Günlük seçim bekleniyor'}</small>
     <small>Uygun: {status.universe?.eligible_count ?? 0} · Seçilen: {status.universe?.selected_count ?? status.symbols.length} · Liste yenileme: {status.universe?.updated_at ? new Date(status.universe.updated_at).toLocaleString('tr-TR') : 'Henüz yapılmadı'}</small>
+    <details open data-testid="original-scan-diagnostics">
+      <summary>Tarama teşhisi</summary>
+      <p data-testid="original-scan-24h">
+        Son 24 saat: {status.scanner?.last_24h?.scans ?? 0} tarama · {status.scanner?.last_24h?.candidates ?? 0} aday · {status.scanner?.last_24h?.trades ?? 0} işleme dönüştü
+      </p>
+      <div aria-label="Son taramadaki eleme sayıları">
+        {Object.entries(scanRejectionLabels).map(([key, label]) =>
+          <span key={key}>{label}: {status.scanner?.rejection_counts?.[key] ?? 0} · </span>)}
+      </div>
+      <p>Günlük evren filtresi: {Object.entries(universeFilterLabels).map(([key, label]) =>
+        `${label} ${status.universe?.filter_counts?.[key] ?? 0}`).join(' · ')}</p>
+      <p>Sinyale en yakın 3 sembol:</p>
+      <ol data-testid="original-scan-near-misses">
+        {(status.scanner?.near_misses ?? []).map(item => <li key={item.symbol}>
+          <b>{item.symbol}</b> — {scanRejectionLabels[item.reason_code] ?? item.reason ?? item.reason_code}
+          {item.confidence != null && <> · Güven %{item.confidence}{item.confidence_threshold != null && ` / eşik %${item.confidence_threshold}`}</>}
+          {item.stop_percent != null && <> · Stop %{item.stop_percent.toFixed(2)}</>}
+          {item.market_volume_usdt != null && <> · 24s hacim {item.market_volume_usdt.toLocaleString('tr-TR')} USDT</>}
+          {item.market_move_percent != null && <> · 24s hareket %{item.market_move_percent.toFixed(2)}</>}
+          {!!item.failed_checks?.length && <> · Geçmeyen: {item.failed_checks.map(key => qualityCheckLabels[key] ?? key).join(', ')}</>}
+        </li>)}
+      </ol>
+      {status.scanner?.last_failure && <p role="status" data-testid="original-scan-failure">
+        Tarama tamamlanmadı: {status.scanner.last_failure.message}
+        {status.scanner.last_failure.symbol && ` · ${status.scanner.last_failure.symbol}`}
+        {status.scanner.last_failure.interval && ` · ${status.scanner.last_failure.interval}`}
+      </p>}
+    </details>
     {status.pause_reason && <p role="status">{status.pause_reason}</p>}
     {fillLocked && <div role="alert">
       <p>Dolum güvenlik kilidi · {status.fill_lock?.symbol}. Yeni LIVE girişler OWNER onayına kadar kapalıdır.</p>

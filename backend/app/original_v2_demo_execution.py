@@ -421,6 +421,7 @@ async def live_candidates(
     allowed_symbols: list[str],
     *,
     require_complete: bool = False,
+    diagnostics: dict[str, Any] | None = None,
 ) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
     if (
         not 1 <= len(allowed_symbols) <= 100
@@ -431,7 +432,7 @@ async def live_candidates(
         fail("INVALID_LIVE_SYMBOL_UNIVERSE")
     return await _candidates(
         client, at, occupied, allowed_symbols, require_complete=require_complete,
-        live_universe=True,
+        live_universe=True, diagnostics=diagnostics,
     )
 
 
@@ -443,19 +444,91 @@ async def _candidates(
     *,
     require_complete: bool = False,
     live_universe: bool = False,
+    diagnostics: dict[str, Any] | None = None,
 ) -> tuple[list[tuple[dict[str, Any], StrategyResult]], dict[str, StrategyResult]]:
     from .backtest_data import normalize_candles
     from .v25_execution import rank_market_tickers
+
+    rejection_keys = (
+        "data_missing", "invalid_market_data", "market_volume", "market_move",
+        "market_filter", "market_shortlist", "signal_conditions", "confidence_low",
+        "spread_wide", "stop_too_wide", "minimum_margin", "position_limit",
+        "daily_limit", "risk_or_account_limit",
+    )
+    assessments: list[dict[str, Any]] = []
+    if diagnostics is not None:
+        diagnostics.clear()
+        diagnostics.update({
+            "scanned_symbol_count": len(symbols),
+            "data_complete_count": 0,
+            "candidate_count": 0,
+            "rejection_counts": {key: 0 for key in rejection_keys},
+            "near_misses": [],
+            "failure": None,
+        })
+
+    def reject(
+        symbol: str,
+        category: str,
+        reason: str,
+        *,
+        progress: int,
+        confidence: Any = None,
+        confidence_threshold: Any = None,
+        failed_checks: list[str] | None = None,
+        market_volume: Any = None,
+        market_move: Any = None,
+        stop_percent: Any = None,
+    ) -> None:
+        if diagnostics is None:
+            return
+        counts = diagnostics["rejection_counts"]
+        counts[category] = counts.get(category, 0) + 1
+        assessments.append({
+            "symbol": symbol,
+            "reason_code": category,
+            "reason": reason,
+            "confidence": confidence,
+            "confidence_threshold": confidence_threshold,
+            "failed_checks": failed_checks or [],
+            "market_volume_usdt": market_volume,
+            "market_move_percent": market_move,
+            "stop_percent": stop_percent,
+            "progress": progress,
+        })
+
+    def fail_scan(code: str, *, symbol: str, interval: str, category: str) -> None:
+        if diagnostics is None:
+            return
+        counts = diagnostics["rejection_counts"]
+        counts[category] = counts.get(category, 0) + 1
+        diagnostics["failure"] = {
+            "stage": "market_data",
+            "reason_code": code,
+            "symbol": symbol,
+            "interval": interval,
+        }
 
     info = await client.public_get("/fapi/v1/exchangeInfo")
     results, tickers, complete = {}, [], set()
     for symbol in symbols:
         frames, series_by_interval = {}, {}
         for interval in strategy.INTERVALS:
-            raw = await client.public_get(
-                "/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": 260},
-            )
+            try:
+                raw = await client.public_get(
+                    "/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": 260},
+                )
+            except Exception:
+                if diagnostics is not None:
+                    diagnostics["failure"] = {
+                        "stage": "market_data",
+                        "reason_code": "upstream_request_failed",
+                        "symbol": symbol,
+                        "interval": interval,
+                    }
+                raise
             if not isinstance(raw, list) or any(not isinstance(row, list) or len(row) < 8 for row in raw):
+                fail_scan("invalid_candle_payload", symbol=symbol, interval=interval, category="invalid_market_data")
                 fail("INVALID_ORIGINAL_KLINES")
             rows = [
                 {
@@ -467,44 +540,156 @@ async def _candidates(
             try:
                 series, _duplicates = normalize_candles(rows, interval)
             except (ValueError, TypeError, KeyError):
+                fail_scan("invalid_or_misaligned_candles", symbol=symbol, interval=interval, category="invalid_market_data")
                 fail("INVALID_ORIGINAL_KLINES")
             frames[interval] = series.closed(at)
             series_by_interval[interval] = series
             if require_complete and (
                 _duplicates or len(frames[interval]) != 259 or not series.history_complete(at)
             ):
+                code = "duplicate_candles" if _duplicates else (
+                    "missing_or_wrong_interval_candles"
+                    if len(frames[interval]) != 259 else "candle_gap"
+                )
+                category = "invalid_market_data" if _duplicates else "data_missing"
+                fail_scan(code, symbol=symbol, interval=interval, category=category)
                 fail("INCOMPLETE_ORIGINAL_LIVE_HISTORY")
-        decision = StrategyInput(symbol, at, frames)
-        results[symbol] = (
-            strategy.evaluate_live_universe(decision, allowed_symbols=symbols, enabled=True)
-            if live_universe else strategy.evaluate(decision, enabled=True)
-        )
+        try:
+            decision = StrategyInput(symbol, at, frames)
+            results[symbol] = (
+                strategy.evaluate_live_universe(decision, allowed_symbols=symbols, enabled=True)
+                if live_universe else strategy.evaluate(decision, enabled=True)
+            )
+        except Exception:
+            if diagnostics is not None:
+                diagnostics["failure"] = {
+                    "stage": "strategy",
+                    "reason_code": "decision_evaluation_failed",
+                    "symbol": symbol,
+                }
+            raise
         if all(series.history_complete(at) for series in series_by_interval.values()):
             complete.add(symbol)
         ticker = series_by_interval["15m"].ticker(at, symbol)
         if ticker is not None:
             tickers.append(ticker)
-    ranked = rank_market_tickers(info, tickers, excluded_symbols=occupied, allowed_symbols=set(symbols))
+    if diagnostics is not None:
+        diagnostics["data_complete_count"] = len(complete)
+    market_diagnostics: dict[str, Any] = {}
+    ranked = rank_market_tickers(
+        info, tickers, excluded_symbols=occupied, allowed_symbols=set(symbols),
+        diagnostics=market_diagnostics if diagnostics is not None else None,
+    )
+    ranked_by_symbol = {candidate["symbol"]: candidate for candidate in ranked}
+    ticker_by_symbol = {ticker["symbol"]: ticker for ticker in tickers}
+    market_rejections = market_diagnostics.get("rejection_by_symbol", {})
+    for symbol, result in results.items():
+        if symbol in ranked_by_symbol:
+            continue
+        ticker = ticker_by_symbol.get(symbol)
+        if ticker is None:
+            reject(symbol, "data_missing", "15m mumlarından 24 saatlik piyasa verisi üretilemedi.", progress=0)
+            continue
+        market_reason = market_rejections.get(symbol, "market_filter")
+        category = {
+            "market_volume": "market_volume",
+            "market_move": "market_move",
+            "market_shortlist": "market_shortlist",
+            "position_limit": "position_limit",
+            "invalid_market_data": "invalid_market_data",
+        }.get(market_reason, "market_filter")
+        reject(
+            symbol, category, market_reason, progress=1,
+            confidence=result.legacy.get("analysis", {}).get("confidence"),
+            market_volume=ticker.get("quoteVolume"),
+            market_move=ticker.get("priceChangePercent"),
+        )
     eligible = []
     for candidate in ranked:
         result = results[candidate["symbol"]]
         if candidate["symbol"] not in complete:
             logger.warning("ORIGINAL_DEMO_PREFILTER_REJECTED symbol=%s reason=data_gap_history", candidate["symbol"])
+            reject(candidate["symbol"], "data_missing", "15m/1h/4h kapalı mum geçmişi eksik.", progress=0)
             continue
         if not result.signal.strategy_eligible:
+            failed_checks = [check.key for check in result.signal.quality_checks if not check.passed]
+            confidence_check = next((check for check in result.signal.quality_checks if check.key == "confidence"), None)
+            confidence = result.legacy.get("analysis", {}).get("confidence")
+            category = (
+                "confidence_low"
+                if confidence_check is not None and not confidence_check.passed
+                else "signal_conditions"
+            )
+            reject(
+                candidate["symbol"], category, result.signal.reason or category, progress=2,
+                confidence=confidence,
+                confidence_threshold=confidence_check.threshold if confidence_check is not None else None,
+                failed_checks=failed_checks,
+                market_volume=candidate.get("volume"),
+                market_move=candidate.get("change"),
+            )
             continue
         signal = result.legacy["analysis"]
+        confidence_check = next((check for check in result.signal.quality_checks if check.key == "confidence"), None)
+        confidence = signal.get("confidence")
+        try:
+            entry = float(signal["entry"])
+            stop = float(signal["stop_loss"])
+            stop_percent = abs(entry - stop) / entry * 100 if entry else None
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            stop_percent = None
         try:
             strategy.risk_preview(signal["entry"], signal["stop_loss"], enabled=True)
         except strategy.DemoDecisionError as exc:
-            if str(exc) != "profile_cap":
-                raise
-            logger.warning("ORIGINAL_DEMO_PREFILTER_REJECTED symbol=%s reason=profile_cap", candidate["symbol"])
-            continue
+            code = str(exc)
+            if code == "profile_cap":
+                reject(
+                    candidate["symbol"], "stop_too_wide", code, progress=3,
+                    confidence=confidence,
+                    confidence_threshold=confidence_check.threshold if confidence_check is not None else None,
+                    stop_percent=stop_percent,
+                )
+                logger.warning("ORIGINAL_DEMO_PREFILTER_REJECTED symbol=%s reason=profile_cap", candidate["symbol"])
+                continue
+            if "margin" in code.lower():
+                reject(candidate["symbol"], "minimum_margin", code, progress=3,
+                       confidence=confidence, stop_percent=stop_percent)
+            if diagnostics is not None:
+                diagnostics["failure"] = {
+                    "stage": "risk_preview",
+                    "reason_code": code,
+                    "symbol": candidate["symbol"],
+                }
+            raise
         eligible.append((candidate, result))
+        if diagnostics is not None:
+            assessments.append({
+                "symbol": candidate["symbol"],
+                "reason_code": "candidate",
+                "reason": "Sinyal, piyasa ve stop ön kontrolleri geçti.",
+                "confidence": confidence,
+                "confidence_threshold": confidence_check.threshold if confidence_check is not None else None,
+                "failed_checks": [],
+                "market_volume_usdt": candidate.get("volume"),
+                "market_move_percent": candidate.get("change"),
+                "stop_percent": stop_percent,
+                "progress": 4,
+            })
     eligible.sort(key=lambda pair: (
         pair[0]["opportunity_score"], pair[1].legacy["analysis"]["confidence"],
     ), reverse=True)
+    if diagnostics is not None:
+        diagnostics["candidate_count"] = len(eligible)
+        diagnostics["near_misses"] = sorted(
+            assessments,
+            key=lambda item: (
+                item["progress"],
+                -len(item["failed_checks"]),
+                float(item["confidence"] or 0),
+                item["symbol"],
+            ),
+            reverse=True,
+        )[:3]
     return eligible, results
 
 

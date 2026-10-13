@@ -1973,7 +1973,18 @@ def rank_market_tickers(
     candidate_limit: int = DEEP_ANALYSIS_LIMIT,
     excluded_symbols: set[str] | None = None,
     allowed_symbols: set[str] | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    rejected_counts: dict[str, int] = {}
+    rejected_by_symbol: dict[str, str] = {}
+    if diagnostics is not None:
+        diagnostics.clear()
+
+    def reject(reason: str, symbol: str | None = None) -> None:
+        rejected_counts[reason] = rejected_counts.get(reason, 0) + 1
+        if symbol and symbol not in rejected_by_symbol:
+            rejected_by_symbol[symbol] = reason
+
     eligible = {
         item.get("symbol")
         for item in exchange_info.get("symbols", [])
@@ -1986,20 +1997,34 @@ def rank_market_tickers(
     liquid: list[dict[str, Any]] = []
     for ticker in tickers if isinstance(tickers, list) else []:
         if not isinstance(ticker, dict):
+            reject("invalid_market_data")
             continue
         symbol = str(ticker.get("symbol") or "")
         base = symbol[:-4] if symbol.endswith("USDT") else ""
-        if symbol not in eligible or symbol in excluded or (allowed_symbols is not None and symbol not in allowed_symbols) or base in BLOCKED_BASE_ASSETS:
+        if symbol in excluded:
+            reject("position_limit", symbol)
+            continue
+        if symbol not in eligible or (allowed_symbols is not None and symbol not in allowed_symbols) or base in BLOCKED_BASE_ASSETS:
+            reject("market_filter", symbol or None)
             continue
         if any(word in base for word in ("UP", "DOWN", "BULL", "BEAR")):
+            reject("market_filter", symbol)
             continue
         try:
             volume = float(ticker.get("quoteVolume") or 0)
             move = abs(float(ticker.get("priceChangePercent") or 0))
             price = float(ticker.get("lastPrice") or 0)
         except (TypeError, ValueError):
+            reject("invalid_market_data", symbol)
             continue
-        if volume < MIN_24H_QUOTE_VOLUME or move < MIN_24H_MOVE_PCT or price <= 0:
+        if volume < MIN_24H_QUOTE_VOLUME:
+            reject("market_volume", symbol)
+            continue
+        if move < MIN_24H_MOVE_PCT:
+            reject("market_move", symbol)
+            continue
+        if price <= 0:
+            reject("invalid_market_data", symbol)
             continue
         liquid.append({
             "symbol": symbol,
@@ -2014,7 +2039,20 @@ def rank_market_tickers(
         item["opportunity_score"] = round(item.pop("_move") * 0.35 + min(item["volume"] / 10_000_000, 100) * 0.65, 4)
         ranked.append(item)
     ranked.sort(key=lambda item: (item["opportunity_score"], item["volume"]), reverse=True)
-    return ranked[:min(market_limit, candidate_limit)]
+    selected = ranked[:min(market_limit, candidate_limit)]
+    selected_symbols = {item["symbol"] for item in selected}
+    for item in ranked:
+        if item["symbol"] not in selected_symbols:
+            reject("market_shortlist", item["symbol"])
+    for item in liquid[market_limit:]:
+        reject("market_shortlist", item["symbol"])
+    if diagnostics is not None:
+        diagnostics.update({
+            "rejection_counts": rejected_counts,
+            "rejection_by_symbol": rejected_by_symbol,
+            "selected_symbols": [item["symbol"] for item in selected],
+        })
+    return selected
 
 
 def live_auto_symbol_scope(state: dict[str, Any]) -> list[str]:

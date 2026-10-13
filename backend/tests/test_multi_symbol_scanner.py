@@ -40,8 +40,10 @@ class MultiSymbolScannerTests(unittest.TestCase):
             {"symbol": "SOLUPUSDT", "lastPrice": "1", "quoteVolume": "20000000", "priceChangePercent": "3"},
             {"symbol": "BNBUSDT", "lastPrice": "100", "quoteVolume": "100", "priceChangePercent": "3"},
         ]
-        result = rank_market_tickers(exchange_info, tickers)
+        diagnostics = {}
+        result = rank_market_tickers(exchange_info, tickers, diagnostics=diagnostics)
         self.assertEqual([item["symbol"] for item in result], ["BTCUSDT"])
+        self.assertEqual(diagnostics["rejection_counts"], {"market_filter": 3, "market_volume": 1})
 
     def test_scanner_selects_top_candidates_and_excludes_occupied_symbols(self):
         symbols = [f"COIN{index}USDT" for index in range(30)]
@@ -53,10 +55,16 @@ class MultiSymbolScannerTests(unittest.TestCase):
             {"symbol": symbol, "lastPrice": "100", "quoteVolume": str(1_000_000 + index * 1_000_000), "priceChangePercent": str(index + 1)}
             for index, symbol in enumerate(symbols)
         ]
-        result = rank_market_tickers(exchange_info, tickers, candidate_limit=25, excluded_symbols={"COIN29USDT"})
+        diagnostics = {}
+        result = rank_market_tickers(
+            exchange_info, tickers, candidate_limit=25,
+            excluded_symbols={"COIN29USDT"}, diagnostics=diagnostics,
+        )
         self.assertEqual(len(result), 25)
         self.assertNotIn("COIN29USDT", {item["symbol"] for item in result})
         self.assertEqual(result[0]["symbol"], "COIN28USDT")
+        self.assertEqual(diagnostics["rejection_counts"]["position_limit"], 1)
+        self.assertEqual(diagnostics["rejection_counts"]["market_shortlist"], 4)
 
     def test_position_ceiling_is_five_and_gate_blocks_the_sixth(self):
         self.assertEqual(HARD_MAX_POSITIONS, 5)

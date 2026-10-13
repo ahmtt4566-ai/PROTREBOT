@@ -10,7 +10,31 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
     const user = {id: owner ? 'owner' : 'member', role: owner ? 'OWNER' : 'CUSTOMER', email: 'user@example.com', active: true, email_verified: true}
     const fillLock = {id: 'fill-lock-1', active: locked, symbol: 'BTCUSDT',
       violations: ['Stop mesafesi %6 sınırını aştı'], evidence: {stop_percent: '7.84', risk_usdt: '41.02', risk_budget_usdt: '30', margin_usdt: '170'}}
-    const original = {available, enabled, paused: locked, risk_percent: 0.5, daily_loss_percent: 5, symbols, fill_lock: fillLock}
+    const original = {
+      available, enabled, paused: locked, risk_percent: 0.5, daily_loss_percent: 5, symbols, fill_lock: fillLock,
+      universe: {
+        requested_count: 40, selected_count: 40, eligible_count: 46,
+        filter_counts: {
+          active_contracts: 650, age_under_30_days: 20, market_data_missing: 0,
+          invalid_market_data: 1, volume_below_minimum: 500, spread_too_wide: 83, eligible: 46,
+        },
+      },
+      scanner: {
+        stage: 'SCAN_COMPLETE', scanned_symbol_count: 40, candidate_count: 0,
+        rejection_counts: {
+          data_missing: 1, invalid_market_data: 0, market_volume: 0, market_move: 0,
+          market_filter: 0, market_shortlist: 0, signal_conditions: 20, confidence_low: 19,
+          spread_wide: 0, stop_too_wide: 0, minimum_margin: 0, position_limit: 0,
+          daily_limit: 0, risk_or_account_limit: 0,
+        },
+        near_misses: [
+          {symbol: 'LINKUSDT', reason_code: 'confidence_low', confidence: 78, confidence_threshold: 80, failed_checks: ['confidence']},
+          {symbol: 'ARBUSDT', reason_code: 'signal_conditions', confidence: 76, failed_checks: ['mtf']},
+          {symbol: 'OPUSDT', reason_code: 'market_move', market_move_percent: 0.12},
+        ],
+        last_24h: {scans: 3, candidates: 2, trades: 1},
+      },
+    }
     if (request.method() === 'POST' && path.startsWith('/api/v25/original-v2/')) {
       writes.push({path, body: request.postData() ? request.postDataJSON() : null})
       if (path.endsWith('/fill-lock/approve')) {
@@ -67,6 +91,19 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
   await expect(page.getByRole('heading', {name: 'LIVE AUTO TRADE', exact: true})).toBeVisible()
   return writes
 }
+
+test('OWNER sees Original V2 rejection stages, nearest symbols and 24-hour conversions', async ({page}) => {
+  await fixture(page)
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await expect(card.getByTestId('original-scan-24h')).toContainText('Son 24 saat: 3 tarama · 2 aday · 1 işleme dönüştü')
+  await expect(card.getByTestId('original-scan-diagnostics')).toContainText('Trend / sinyal koşulu yok: 20')
+  await expect(card.getByTestId('original-scan-diagnostics')).toContainText('Güven skoru düşük: 19')
+  await expect(card.getByTestId('original-scan-diagnostics')).toContainText('Spread geniş 83')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('LINKUSDT')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('Güven %78 / eşik %80')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('ARBUSDT')
+  await expect(card.getByTestId('original-scan-near-misses')).toContainText('OPUSDT')
+})
 
 test('global Binance ban shows countdown and disables test and connect actions', async ({page}) => {
   await fixture(page, {binanceBan: true})

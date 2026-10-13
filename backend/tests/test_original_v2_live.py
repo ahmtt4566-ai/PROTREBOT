@@ -576,17 +576,82 @@ def test_original_scan_telemetry_records_only_completed_scans(state, monkeypatch
     assert scanner["stage"] == ("BLOCKED" if scan_failure else "SCAN_COMPLETE")
     assert bool(scanner.get("last_scan_at")) is not scan_failure
     assert scan.await_args.args[3] == symbols
-    assert scan.await_args.kwargs == {"require_complete": True}
+    assert scan.await_args.kwargs["require_complete"] is True
+    assert isinstance(scan.await_args.kwargs["diagnostics"], dict)
     orders.assert_not_awaited()
     if not scan_failure:
         assert scanner["scanned_symbol_count"] == len(symbols)
         assert scanner["scanned_symbols"] == symbols
         assert scanner["candidate_count"] == 0
+        assert scanner["last_24h"] == {"scans": 1, "candidates": 0, "trades": 0}
         run(original.cycle(req.app, ("offline-key", "offline-secret")))
         assert original.public_config(state)["scanner"]["stage"] == "WAITING_NEXT_CANDLE"
         scan.assert_awaited_once()
         live.account_snapshot.assert_awaited_once()
         original.check_entry.assert_awaited_once()
+
+
+def test_original_live_counts_only_successful_candidate_orders_in_last_24h(state, monkeypatch):
+    req = request_for(state)
+    monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
+    monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=object()))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"positions": [], "open_orders": []}))
+    monkeypatch.setattr(original, "check_entry", AsyncMock())
+    symbols = ["BTCUSDT"]
+    monkeypatch.setattr(original, "resolve_live_universe", AsyncMock(return_value=symbols))
+    candidate = {"symbol": "BTCUSDT", "opportunity_score": 1.0}
+    decision = result()
+    monkeypatch.setattr(original.original, "live_candidates", AsyncMock(return_value=(
+        [(candidate, decision)], {"BTCUSDT": decision},
+    )))
+    monkeypatch.setattr(original, "build_spec", AsyncMock(return_value={"margin_usdt": 10.0}))
+    execute = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(live, "execute_live_order", execute)
+
+    run(original.cycle(req.app, ("offline-key", "offline-secret")))
+
+    scanner = original.public_config(state)["scanner"]
+    assert scanner["candidate_count"] == 1
+    assert scanner["last_24h"] == {"scans": 1, "candidates": 1, "trades": 1}
+    execute.assert_awaited_once()
+
+
+def test_original_live_cooldown_is_reported_without_becoming_an_empty_scan(state, monkeypatch):
+    req = request_for(state)
+    monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
+    monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=object()))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"positions": [], "open_orders": []}))
+    monkeypatch.setattr(original, "check_entry", AsyncMock())
+    monkeypatch.setattr(original, "resolve_live_universe", AsyncMock(return_value=["BTCUSDT"]))
+    cooldown = live.LiveRateLimitError("Binance market-data cooldown", retry_after=300, exchange_code=-1003)
+    monkeypatch.setattr(original.original, "live_candidates", AsyncMock(side_effect=cooldown))
+
+    with pytest.raises(live.LiveRateLimitError):
+        run(original.cycle(req.app, ("offline-key", "offline-secret")))
+
+    scanner = original.public_config(state)["scanner"]
+    assert scanner["stage"] == "RATE_LIMIT_WAIT"
+    assert scanner["last_failure"]["reason_code"] == "binance_rate_limit"
+    assert scanner["last_failure"]["message"] == "Binance market-data cooldown"
+    assert scanner.get("candidate_count") is None
+    assert state["original_v2_live"]["enabled"] is True
+
+
+def test_original_live_24h_summary_ignores_expired_or_invalid_scan_records(state, monkeypatch):
+    now = 2_000_000_000.0
+    monkeypatch.setattr(original.time, "time", lambda: now)
+    state["original_v2_live"]["scanner"] = {
+        "history": [
+            {"at": now - 86401, "candidates": 9, "trades": 8},
+            {"at": now - 3600, "candidates": 3, "trades": 1},
+            {"at": now - 100, "candidates": -1, "trades": 1},
+            {"at": now + 1, "candidates": 20, "trades": 20},
+        ],
+    }
+
+    scanner = original.public_config(state)["scanner"]
+
+    assert scanner["last_24h"] == {"scans": 1, "candidates": 3, "trades": 1}
 
 
 def test_missing_credentials_pause_without_exchange(state, monkeypatch):
@@ -645,6 +710,52 @@ def test_live_rejects_data_gap_while_demo_behavior_is_unchanged():
     eligible, results = run(demo_execution.candidates(CandleClient(gap=True), decisions.fixtures.AT, set()))
     assert eligible == []
     assert len(results) == 8
+
+
+def test_live_scan_diagnostics_account_for_every_symbol_without_changing_candidates():
+    symbols = list(decisions.SYMBOLS)
+    expected, expected_results = run(demo_execution.live_candidates(
+        CandleClient(), decisions.fixtures.AT, set(), symbols, require_complete=True,
+    ))
+    diagnostics = {}
+
+    actual, results = run(demo_execution.live_candidates(
+        CandleClient(), decisions.fixtures.AT, set(), symbols,
+        require_complete=True, diagnostics=diagnostics,
+    ))
+
+    assert [candidate["symbol"] for candidate, _ in actual] == [
+        candidate["symbol"] for candidate, _ in expected
+    ]
+    assert {
+        symbol: (value.signal.decision, value.signal.strategy_eligible, value.signal.reasons)
+        for symbol, value in results.items()
+    } == {
+        symbol: (value.signal.decision, value.signal.strategy_eligible, value.signal.reasons)
+        for symbol, value in expected_results.items()
+    }
+    assert diagnostics["scanned_symbol_count"] == len(symbols)
+    assert diagnostics["data_complete_count"] == len(symbols)
+    assert diagnostics["candidate_count"] == len(actual)
+    assert sum(diagnostics["rejection_counts"].values()) + len(actual) == len(symbols)
+    assert len(diagnostics["near_misses"]) == min(3, len(symbols))
+    assert all(item["symbol"] in symbols and item["reason_code"] for item in diagnostics["near_misses"])
+
+
+def test_live_scan_diagnostics_name_incomplete_candle_symbol_and_interval():
+    symbols = list(decisions.SYMBOLS)
+    diagnostics = {}
+
+    with pytest.raises(live.BinanceDemoError, match="INCOMPLETE_ORIGINAL_LIVE_HISTORY"):
+        run(demo_execution.live_candidates(
+            CandleClient(gap=True), decisions.fixtures.AT, set(), symbols,
+            require_complete=True, diagnostics=diagnostics,
+        ))
+
+    assert diagnostics["failure"]["stage"] == "market_data"
+    assert diagnostics["failure"]["symbol"] in symbols
+    assert diagnostics["failure"]["interval"] in strategy.INTERVALS
+    assert diagnostics["rejection_counts"]["data_missing"] == 1
 
 
 @pytest.mark.parametrize("hours", [1, 4, 12, 24])

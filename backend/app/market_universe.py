@@ -28,7 +28,23 @@ def ranked_original_live_symbols(
     book_tickers: Any,
     *,
     now_ms: int,
+    diagnostics: dict[str, Any] | None = None,
 ) -> tuple[list[str], int]:
+    counts = {
+        "active_contracts": 0,
+        "age_under_30_days": 0,
+        "market_data_missing": 0,
+        "invalid_market_data": 0,
+        "volume_below_minimum": 0,
+        "spread_too_wide": 0,
+        "eligible": 0,
+    }
+
+    def publish_diagnostics() -> None:
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update(counts)
+
     if (
         not isinstance(exchange_info, dict)
         or not isinstance(exchange_info.get("symbols"), list)
@@ -60,17 +76,27 @@ def ranked_original_live_symbols(
     book_map = symbol_map(book_tickers, "book ticker")
     minimum_age_ms = ORIGINAL_MIN_SYMBOL_AGE_DAYS * 24 * 60 * 60 * 1000
     active_contracts = [contract for contract in contracts if active_usdt_perpetual(contract)]
+    counts["active_contracts"] = len(active_contracts)
     if not active_contracts:
+        publish_diagnostics()
         raise ValueError("No active USDT perpetual contracts returned")
     age_qualified: set[str] = set()
     for contract in active_contracts:
         try:
             onboard_ms = int(contract["onboardDate"])
         except (KeyError, TypeError, ValueError, OverflowError):
+            counts["invalid_market_data"] += 1
             continue
         if onboard_ms > 0 and now_ms - onboard_ms >= minimum_age_ms:
             age_qualified.add(contract["symbol"])
-    if not age_qualified or not age_qualified.issubset(ticker_map) or not age_qualified.issubset(book_map):
+        elif onboard_ms > 0:
+            counts["age_under_30_days"] += 1
+        else:
+            counts["invalid_market_data"] += 1
+    missing_market_data = age_qualified - ticker_map.keys() | age_qualified - book_map.keys()
+    counts["market_data_missing"] = len(missing_market_data)
+    if not age_qualified or missing_market_data:
+        publish_diagnostics()
         raise ValueError("Incomplete Binance Futures daily market data")
     eligible: list[tuple[str, float]] = []
     for contract in contracts:
@@ -83,34 +109,40 @@ def ranked_original_live_symbols(
             onboard_ms = int(contract["onboardDate"])
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
-        if onboard_ms <= 0 or now_ms - onboard_ms < minimum_age_ms:
+        if onboard_ms <= 0:
+            continue
+        if now_ms - onboard_ms < minimum_age_ms:
             continue
 
         ticker = ticker_map.get(symbol)
         book = book_map.get(symbol)
         if ticker is None or book is None:
+            counts["market_data_missing"] += 1
             continue
         try:
             quote_volume = float(ticker["quoteVolume"])
             bid = float(book["bidPrice"])
             ask = float(book["askPrice"])
         except (KeyError, TypeError, ValueError, OverflowError):
+            counts["invalid_market_data"] += 1
             continue
-        if (
-            not all(math.isfinite(value) for value in (quote_volume, bid, ask))
-            or quote_volume < ORIGINAL_MIN_QUOTE_VOLUME_USDT
-            or bid <= 0
-            or ask < bid
-        ):
+        if not all(math.isfinite(value) for value in (quote_volume, bid, ask)) or bid <= 0 or ask < bid:
+            counts["invalid_market_data"] += 1
+            continue
+        if quote_volume < ORIGINAL_MIN_QUOTE_VOLUME_USDT:
+            counts["volume_below_minimum"] += 1
             continue
         midpoint = (ask + bid) / 2
         spread_bps = (ask - bid) / midpoint * 10_000
         if spread_bps > ORIGINAL_MAX_SPREAD_BPS:
+            counts["spread_too_wide"] += 1
             continue
         eligible.append((symbol, quote_volume))
 
     eligible.sort(key=lambda row: (-row[1], row[0]))
     ranked = [symbol for symbol, _volume in eligible[:ORIGINAL_MAX_SYMBOL_COUNT]]
+    counts["eligible"] = len(eligible)
+    publish_diagnostics()
     return ranked, len(eligible)
 
 

@@ -60,12 +60,44 @@ def test_original_live_universe_filters_age_volume_spread_and_ranks_by_quote_vol
         {"symbol": "CLOSEDUSDT", "bidPrice": "100", "askPrice": "100.04"},
     ]
 
+    filter_counts = {}
     ranked, eligible_count = ranked_original_live_symbols(
         {"symbols": contracts}, tickers, books, now_ms=now_ms,
+        diagnostics=filter_counts,
     )
 
     assert ranked == ["ETHUSDT", "BTCUSDT"]
     assert eligible_count == 2
+    assert filter_counts == {
+        "active_contracts": 5,
+        "age_under_30_days": 1,
+        "market_data_missing": 0,
+        "invalid_market_data": 0,
+        "volume_below_minimum": 1,
+        "spread_too_wide": 1,
+        "eligible": 2,
+    }
+
+
+def test_original_live_universe_exposes_missing_daily_market_data_before_failing():
+    now_ms = 2_000_000_000_000
+    old = now_ms - 31 * 24 * 60 * 60 * 1000
+    contracts = [contract("BTCUSDT", onboardDate=old), contract("ETHUSDT", onboardDate=old)]
+    diagnostics = {}
+
+    with pytest.raises(ValueError, match="Incomplete Binance Futures daily market data"):
+        ranked_original_live_symbols(
+            {"symbols": contracts},
+            [{"symbol": "BTCUSDT", "quoteVolume": "1000000"}],
+            [
+                {"symbol": "BTCUSDT", "bidPrice": "100", "askPrice": "100.04"},
+                {"symbol": "ETHUSDT", "bidPrice": "100", "askPrice": "100.04"},
+            ],
+            now_ms=now_ms,
+            diagnostics=diagnostics,
+        )
+
+    assert diagnostics["market_data_missing"] == 1
 
 
 def test_original_live_universe_caps_cached_ranked_list_at_owner_maximum():

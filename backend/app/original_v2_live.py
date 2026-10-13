@@ -28,6 +28,7 @@ from .v22_commercial import authenticated_user
 router = APIRouter(prefix="/api/v25/original-v2", tags=["Original V2 LIVE"])
 FLAG = "PROTREBOT_LIVE_KAIS_ORIGINAL_V2_ENABLED"
 SOURCE = "ORIGINAL_V2_LIVE"
+SCANNER_HISTORY_LIMIT = 128
 
 
 class Start(BaseModel):
@@ -102,6 +103,45 @@ def _today_universe(config: dict[str, Any]) -> dict[str, Any] | None:
     return universe
 
 
+def _scanner_history_summary(scanner: dict[str, Any], now: float) -> dict[str, int]:
+    history = scanner.get("history")
+    if not isinstance(history, list):
+        return {"scans": 0, "candidates": 0, "trades": 0}
+    recent = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        at = item.get("at")
+        candidates = item.get("candidates")
+        trades = item.get("trades")
+        if not isinstance(at, (int, float)) or isinstance(at, bool):
+            continue
+        try:
+            at_value = float(at)
+        except (OverflowError, ValueError):
+            continue
+        if (
+            math.isfinite(at_value) and now - 86400 <= at_value <= now
+            and type(candidates) is int and candidates >= 0
+            and type(trades) is int and trades >= 0
+        ):
+            recent.append({**item, "at": at_value})
+    return {
+        "scans": len(recent),
+        "candidates": sum(item["candidates"] for item in recent),
+        "trades": sum(item["trades"] for item in recent),
+    }
+
+
+def _record_scanner_scan(scanner: dict[str, Any], at: float, candidates: int) -> dict[str, Any]:
+    history = scanner.get("history")
+    if not isinstance(history, list):
+        history = []
+    history.append({"at": at, "candidates": candidates, "trades": 0})
+    scanner["history"] = history[-SCANNER_HISTORY_LIMIT:]
+    return scanner["history"][-1]
+
+
 def selected_symbols(config: dict[str, Any]) -> list[str]:
     universe = _today_universe(config)
     if universe is None:
@@ -116,15 +156,23 @@ async def resolve_live_universe(application: Any, client: Any, config: dict[str,
         info = await client.public_get("/fapi/v1/exchangeInfo")
         tickers = await client.public_get("/fapi/v1/ticker/24hr")
         book_tickers = await client.public_get("/fapi/v1/ticker/bookTicker")
-        ranked, eligible_count = ranked_original_live_symbols(
-            info, tickers, book_tickers, now_ms=int(time.time() * 1000),
-        )
+        filter_counts: dict[str, Any] = {}
+        try:
+            ranked, eligible_count = ranked_original_live_symbols(
+                info, tickers, book_tickers, now_ms=int(time.time() * 1000),
+                diagnostics=filter_counts,
+            )
+        except ValueError:
+            config["universe_filter_failure"] = filter_counts
+            raise
         universe = {
             "updated_day": datetime.now(timezone.utc).date().isoformat(),
             "updated_at": live.now_iso(),
             "ranked_symbols": ranked,
             "eligible_count": eligible_count,
+            "filter_counts": filter_counts,
         }
+        config.pop("universe_filter_failure", None)
         config["universe"] = universe
     symbols = universe["ranked_symbols"][:_valid_symbol_count(config)]
     service = getattr(application.state, "public_market_data", None)
@@ -158,14 +206,22 @@ def public_config(state: dict[str, Any]) -> dict[str, Any]:
         "selected_count": len(symbols),
         "eligible_count": int(cached_universe.get("eligible_count", 0)) if cached_universe is not None else 0,
         "updated_at": cached_universe.get("updated_at") if cached_universe is not None else None,
+        "filter_counts": (
+            copy.deepcopy(cached_universe.get("filter_counts", {}))
+            if cached_universe is not None
+            else copy.deepcopy(config.get("universe_filter_failure", {}))
+        ),
     }
+    scanner = copy.deepcopy(config.get("scanner"))
+    if isinstance(scanner, dict):
+        scanner["last_24h"] = _scanner_history_summary(scanner, time.time())
     expires = float(config.get("session_expires_at_epoch") or ((state.get("auto") or {}).get("session_until") if running(state) else 0) or 0)
     return {"available": available(), "enabled": running(state),
             "paused": config.get("paused", False), "pause_reason": config.get("pause_reason"),
             "risk_percent": config.get("risk_percent", 0.5), "daily_loss_percent": config.get("daily_loss_percent", 5),
             "daily": copy.deepcopy(config.get("daily")),
             "fill_lock": copy.deepcopy(config.get("fill_lock")),
-            "scanner": copy.deepcopy(config.get("scanner")),
+            "scanner": scanner,
             "universe": universe,
             "session": {"hours": config.get("session_hours", 1),
                         "started_at": config.get("session_started_at"),
@@ -657,6 +713,48 @@ async def verify_targets(client: Any, state: dict[str, Any], plan: dict[str, Any
     live.persist_state(state)
 
 
+def _entry_rejection_category(error: Exception) -> str:
+    key = str(getattr(error, "check_key", "") or "").lower()
+    detail = str(getattr(error, "detail", error)).lower()
+    combined = f"{key} {detail}"
+    if any(token in combined for token in ("daily", "günlük", "kayip", "kayıp", "loss limit", "trade limit")):
+        return "daily_limit"
+    if any(token in combined for token in ("position", "pozisyon", "occupancy", "duplicate", "same_direction")):
+        return "position_limit"
+    if "spread" in combined:
+        return "spread_wide"
+    if any(token in combined for token in ("minimum_margin", "margin floor", "minimum_quantity", "notional")):
+        return "minimum_margin"
+    return "risk_or_account_limit"
+
+
+def _record_order_rejection(
+    scanner: dict[str, Any], result: StrategyResult, category: str, reason: str,
+) -> None:
+    counts = scanner.setdefault("rejection_counts", {})
+    if not isinstance(counts, dict):
+        counts = scanner["rejection_counts"] = {}
+    counts[category] = int(counts.get(category, 0)) + 1
+    near_misses = scanner.get("near_misses")
+    if not isinstance(near_misses, list):
+        near_misses = []
+    analysis = result.legacy.get("analysis") or {}
+    updated = {
+        "symbol": result.signal.symbol,
+        "reason_code": category,
+        "reason": reason,
+        "confidence": analysis.get("confidence"),
+        "confidence_threshold": next(
+            (check.threshold for check in result.signal.quality_checks if check.key == "confidence"),
+            None,
+        ),
+        "failed_checks": [],
+        "progress": 5,
+    }
+    near_misses = [item for item in near_misses if not isinstance(item, dict) or item.get("symbol") != updated["symbol"]]
+    scanner["near_misses"] = [updated, *near_misses][:3]
+
+
 async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
     from . import v25_execution as live
     state = application.state.v25_execution
@@ -668,12 +766,17 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
         scanner.update(stage="BLOCKED")
         return
     if live.account_rate_limit_active(state):
-        scanner.update(stage="RATE_LIMIT_WAIT")
+        scanner.update(stage="RATE_LIMIT_WAIT", last_failure={
+            "stage": "cooldown", "reason_code": "active_cooldown",
+            "message": "Binance istek sınırı bekleniyor; bu döngüde tarama yapılmadı.",
+        })
+        scanner["last_24h"] = _scanner_history_summary(scanner, time.time())
         return
     at = int(time.time()) // 900 * 900
     if config.get("last_decision_time", -1) >= at:
         scanner.update(stage="WAITING_NEXT_CANDLE")
         return
+    scan_diagnostics: dict[str, Any] = {}
     try:
         if credentials is None:
             credentials = await live.auto_session_credentials(application, state)
@@ -696,29 +799,39 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
         symbols = await resolve_live_universe(application, client, config)
         if not symbols:
             config["last_decision_time"] = at
+            scanner["rejection_counts"] = {}
+            scanner["near_misses"] = []
+            _record_scanner_scan(scanner, time.time(), 0)
             scanner.update(stage="NO_ELIGIBLE_SYMBOLS", scanned_symbol_count=0,
-                           scanned_symbols=[], candidate_count=0, last_scan_at=live.now_iso())
+                           scanned_symbols=[], candidate_count=0, last_scan_at=live.now_iso(),
+                           last_failure=None, last_24h=_scanner_history_summary(scanner, time.time()))
             live.persist_state(state)
             return
         scanner.update(stage="SCANNING")
         eligible, _results = await original.live_candidates(
-            client, at, occupied, symbols, require_complete=True,
+            client, at, occupied, symbols, require_complete=True, diagnostics=scan_diagnostics,
         )
         config["last_decision_time"] = at
+        history_item = _record_scanner_scan(scanner, time.time(), len(eligible))
         scanner.update(stage="SCAN_COMPLETE", last_scan_at=live.now_iso(),
                        scanned_symbol_count=len(symbols), scanned_symbols=symbols,
-                       candidate_count=len(eligible))
+                       data_complete_count=scan_diagnostics.get("data_complete_count", 0),
+                       candidate_count=len(eligible),
+                       rejection_counts=scan_diagnostics.get("rejection_counts", {}),
+                       near_misses=scan_diagnostics.get("near_misses", []),
+                       last_failure=None,
+                       last_24h=_scanner_history_summary(scanner, time.time()))
         for candidate, result in eligible[:3]:
             if not running(state):
                 break
             signal = result.legacy["analysis"]
-            preview = await build_spec(client, result, state, snapshot)
-            body = live.LiveOrderRequest(
-                symbol=candidate["symbol"], direction=signal["direction"], margin_usdt=preview["margin_usdt"],
-                leverage=3, stop_loss=signal["stop_loss"], tp1=signal["tp1"], tp2=signal["tp2"], tp3=signal["tp3"],
-                intent_id=f"original-live-{config['owner_id']}-{at}-{candidate['symbol']}",
-            )
             try:
+                preview = await build_spec(client, result, state, snapshot)
+                body = live.LiveOrderRequest(
+                    symbol=candidate["symbol"], direction=signal["direction"], margin_usdt=preview["margin_usdt"],
+                    leverage=3, stop_loss=signal["stop_loss"], tp1=signal["tp1"], tp2=signal["tp2"], tp3=signal["tp3"],
+                    intent_id=f"original-live-{config['owner_id']}-{at}-{candidate['symbol']}",
+                )
                 await live.execute_live_order(
                     application,
                     body,
@@ -726,25 +839,56 @@ async def cycle(application: Any, credentials: tuple[str, str] | None) -> None:
                     credentials=credentials,
                     strategy_result=result,
                 )
-            except HTTPException as exc:
-                if getattr(exc, "check_key", None) != "symbol_occupancy":
-                    raise
-                config["last_skip_reason"] = "symbol_occupied"
-                scanner.update(stage="SYMBOL_OCCUPIED", last_skip_reason="symbol_occupied")
-                continue
+                history_item["trades"] += 1
+            except Exception as exc:
+                category = _entry_rejection_category(exc)
+                _record_order_rejection(
+                    scanner, result, category, live.sanitized_exception_message(exc),
+                )
+                if getattr(exc, "check_key", None) == "symbol_occupancy":
+                    config["last_skip_reason"] = "symbol_occupied"
+                    scanner.update(stage="SYMBOL_OCCUPIED", last_skip_reason="symbol_occupied")
+                    continue
+                raise
+        scanner["last_24h"] = _scanner_history_summary(scanner, time.time())
         live.persist_state(state)
     except live.LiveRateLimitError as exc:
-        scanner.update(stage="RATE_LIMIT_WAIT")
+        failure = scan_diagnostics.get("failure") or {}
+        scanner.update(stage="RATE_LIMIT_WAIT", last_failure={
+            **failure,
+            "stage": "cooldown",
+            "reason_code": "binance_rate_limit",
+            "message": live.sanitized_exception_message(exc),
+        })
+        scanner["last_24h"] = _scanner_history_summary(scanner, time.time())
+        live.persist_state(state)
         if exc.request_method not in {None, "GET"}:
             pause(state, live.sanitized_exception_message(exc))
         raise
     except Exception as exc:
         if (isinstance(exc, live.LiveExchangeError) and exc.transient_read_failure
                 and not exc.unknown_execution and exc.request_path == "/fapi/v1/income"):
-            scanner.update(stage="WAITING_RISK_DATA")
+            scanner.update(stage="WAITING_RISK_DATA", last_failure={
+                "stage": "risk_data",
+                "reason_code": "risk_data_unavailable",
+                "message": live.sanitized_exception_message(exc),
+            })
+            scanner["last_24h"] = _scanner_history_summary(scanner, time.time())
             live.persist_state(state)
             raise
         scanner.update(stage="BLOCKED")
+        failure = scan_diagnostics.get("failure") or {}
+        scanner["last_failure"] = {
+            **failure,
+            "stage": failure.get("stage", "cycle"),
+            "reason_code": failure.get("reason_code") or (
+                _entry_rejection_category(exc)
+                if isinstance(exc, (HTTPException, live.LiveExchangeError))
+                else "cycle_error"
+            ),
+            "message": live.sanitized_exception_message(exc),
+        }
+        scanner["last_24h"] = _scanner_history_summary(scanner, time.time())
         pause(state, live.sanitized_exception_message(exc))
         raise
 
