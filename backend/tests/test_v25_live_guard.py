@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from fastapi import HTTPException
 
 
@@ -2953,6 +2953,105 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
         with self._resolve(application, credentials):
             result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
         self.assertEqual(result, credentials)
+
+    def test_owner_started_grant_allows_submission_from_second_browser_session(self):
+        application, state, credentials = self._context()
+        application.state.maintenance = {"mode": "NORMAL"}
+        state["lock"] = asyncio.Lock()
+        state["auto"].update({"enabled": False, "session_until": 0.0})
+        state["auto_authorization"] = initial_state()["auto_authorization"]
+        state["live_auto_trade"] = False
+        state["policy"]["interval"] = "15m"
+        owner = {"id": self.USER_ID, "role": "OWNER", "auth_version": 1}
+        first_request = SimpleNamespace(
+            app=application,
+            state=SimpleNamespace(member=owner),
+            headers={"x-protrebot-session": "first-device-token"},
+            method="POST",
+        )
+        second_request = SimpleNamespace(
+            app=application,
+            state=SimpleNamespace(member=dict(owner)),
+            headers={"x-protrebot-session": "second-device-token"},
+            method="POST",
+        )
+        spec = {
+            "symbol": "BTCUSDT", "direction": "LONG", "side": "BUY", "close_side": "SELL",
+            "order_type": "MARKET", "margin_usdt": 5.0, "leverage": 1,
+            "notional_usdt": 5.0, "quantity": "0.050", "entry_price": "100.00",
+            "stop_loss": "98.00", "targets": ["102.00", "104.00", "106.00"],
+            "step": Decimal("0.001"), "min_qty": Decimal("0.001"),
+            "estimated_stop_loss_usdt": 0.1,
+        }
+        submit = AsyncMock(return_value={"status": "NEW", "orderId": 12345})
+        mfa = AsyncMock()
+        resolver = AsyncMock(return_value=credentials)
+
+        with patch.object(exchange_connections, "_require_live_mfa", new=mfa), \
+             patch.object(v25_execution, "execution_owner", return_value=owner), \
+             patch.object(v25_execution, "live_auto_start_gate", return_value=(True, "ready")), \
+             patch.object(v25_execution, "live_credentials_status", return_value=(
+                 self.API_KEY, self.SECRET_KEY, credential_fingerprint(self.API_KEY),
+             )), \
+             patch.object(v25_execution, "public_status", return_value={"enabled": True}), \
+             patch.object(v25_execution, "session_credentials_for_identity", new=resolver), \
+             patch("app.free_trial.require_background_entry", new=AsyncMock()), \
+             patch.multiple(
+                 v25_execution,
+                 readiness_for=Mock(return_value={"ready": True, "gates": []}),
+                 ensure_live_auto_symbol_allowed=Mock(),
+                 client_for_with_credentials=Mock(return_value=SimpleNamespace()),
+                 account_snapshot=AsyncMock(return_value=complete_reconciliation_snapshot()),
+                 spread_bps=AsyncMock(return_value=1.0),
+                 evaluate_entry_gates=Mock(return_value={"passed": True, "gates": [], "reason": None}),
+                 validate_live_isolated_snapshot=Mock(),
+                 build_live_spec=AsyncMock(return_value=spec),
+                 validate_protection_readiness=Mock(),
+                 set_live_isolated_margin=AsyncMock(return_value="ISOLATED"),
+                 apply_live_verified_leverage=AsyncMock(return_value={
+                     "applied_leverage": 1, "margin_type": "ISOLATED",
+                 }),
+                 live_liquidation_risk=AsyncMock(return_value={"verified": True, "model": "OFFLINE_FIXTURE"}),
+                 directional_entry_gates=Mock(return_value=[]),
+                 submit_entry=submit,
+                 install_protection=AsyncMock(),
+                 persist_state=Mock(),
+             ):
+            asyncio.run(v25_execution.v25_auto_start(
+                first_request,
+                v25_execution.AutoStartConfirmation(
+                    confirmation="CANLI OTOMATİK",
+                    totp_code="123456",
+                ),
+            ))
+
+            async def submit_with_boundary(*_args, **kwargs):
+                kwargs["on_submission_started"]()
+                return {"status": "NEW", "orderId": 12345}
+
+            submit.side_effect = submit_with_boundary
+            result = asyncio.run(v25_execution.execute_live_order(
+                application,
+                LiveOrderRequest(
+                    symbol="BTCUSDT", direction="LONG", margin_usdt=5, leverage=1,
+                    stop_loss=98, tp1=102, tp2=104, tp3=106, intent_id="second-device-intent",
+                ),
+                source="V25_AUTO",
+                request=second_request,
+            ))
+
+        self.assertNotEqual(first_request.headers["x-protrebot-session"], second_request.headers["x-protrebot-session"])
+        self.assertEqual(state["auto_authorization"]["user_id"], self.USER_ID)
+        self.assertEqual(state["auto_authorization"]["auth_version"], 1)
+        self.assertEqual(state["auto_authorization"]["session_id"], f"owner:{self.USER_ID}")
+        self.assertEqual(result["ok"], True)
+        self.assertEqual(submit.await_count, 1)
+        self.assertTrue(all(
+            call.args[2] == self.USER_ID and call.args[3] == "LIVE"
+            for call in resolver.await_args_list
+        ))
+        self.assertNotIn(self.API_KEY, json.dumps(state, default=str))
+        self.assertNotIn(self.SECRET_KEY, json.dumps(state, default=str))
 
     def test_h_plaintext_credentials_do_not_enter_state_events_or_output(self):
         application, state, credentials = self._context()
