@@ -100,8 +100,11 @@ export type OriginalV2LiveStatus = {
   pause_reason?: string | null
   risk_percent: number
   daily_loss_percent: number
+  risk_revision?: number
+  risk_limits?: {max_loss_per_trade_usdt: number; daily_loss_limit_usdt: number; max_margin_usdt: number; min_margin_usdt: number; leverage: number}
+  last_risk_adjustment?: {symbol: string; selected_percent: number; effective_percent: number; requested_loss_usdt: number; effective_loss_usdt: number; reasons: string[]} | null
   session?: {hours: number; started_at?: string | null; expires_at?: string | null; remaining_seconds: number; authority_limited: boolean; warning_sent: boolean} | null
-  daily?: {day: string; loss?: number; limit?: number; locked: boolean} | null
+  daily?: {day: string; opening_wallet?: number; loss?: number; limit?: number; locked: boolean} | null
   symbols: string[]
   universe?: {requested_count: number; selected_count: number; eligible_count: number; minimum_age_days?: number; updated_at?: string | null; filter_counts?: Record<string, number>} | null
   scanner?: {
@@ -141,13 +144,55 @@ type Props = {
   refresh: () => Promise<unknown>
   notice: string
   onNotice: (message: string) => void
+  walletBalance?: number | null
 }
 
-export default function OriginalV2LiveCard({className, status, entryChecks, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice}: Props) {
+const highRiskPhrase = 'YÜKSEK RİSKİ KABUL EDİYORUM'
+const riskLevel = (risk: number) => risk > 5 ? 'RED' : risk > 2 ? 'ORANGE' : risk > 1 ? 'YELLOW' : 'NORMAL'
+const dailyLevel = (risk: number) => risk > 10 ? 'RED' : risk > 5 ? 'ORANGE' : 'NORMAL'
+const warningNames = {NORMAL: 'Normal', YELLOW: 'Sarı uyarı', ORANGE: 'Turuncu uyarı', RED: 'Kırmızı uyarı'}
+const usdt = (value: number) => `${value.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} USDT`
+
+export default function OriginalV2LiveCard({className, status, entryChecks, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice, walletBalance}: Props) {
   const [risk, setRisk] = useState(String(status.risk_percent))
   const [dailyLoss, setDailyLoss] = useState(String(status.daily_loss_percent))
   const [symbolCount, setSymbolCount] = useState(String(status.universe?.requested_count ?? 40))
   const [hours, setHours] = useState('1')
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false)
+  const [highRiskConfirmation, setHighRiskConfirmation] = useState('')
+  const [draftRiskRevision, setDraftRiskRevision] = useState(status.risk_revision ?? 0)
+  useEffect(() => {
+    setRisk(String(status.risk_percent))
+    setDailyLoss(String(status.daily_loss_percent))
+    setDraftRiskRevision(status.risk_revision ?? 0)
+    setRiskAcknowledged(false)
+    setHighRiskConfirmation('')
+  }, [status.risk_revision, status.risk_percent, status.daily_loss_percent])
+  useEffect(() => {
+    setRiskAcknowledged(false)
+    setHighRiskConfirmation('')
+  }, [walletBalance])
+  const changeRisk = (value: string, daily = false) => {
+    if (daily) setDailyLoss(value)
+    else setRisk(value)
+    setRiskAcknowledged(false)
+    setHighRiskConfirmation('')
+  }
+  const selectedRisk = Number(risk)
+  const selectedDaily = Number(dailyLoss)
+  const validRisk = Number.isFinite(selectedRisk) && selectedRisk >= 0.5 && selectedRisk <= 10
+    && Number.isFinite(selectedDaily) && selectedDaily >= 1 && selectedDaily <= 25 && selectedDaily >= selectedRisk
+  const wallet = typeof walletBalance === 'number' && Number.isFinite(walletBalance) && walletBalance > 0 ? walletBalance : null
+  const openingWallet = status.daily?.day === new Date().toISOString().slice(0, 10)
+    && typeof status.daily.opening_wallet === 'number' && Number.isFinite(status.daily.opening_wallet) && status.daily.opening_wallet > 0
+    ? status.daily.opening_wallet : wallet
+  const consentReady = selectedRisk > 5 ? highRiskConfirmation === highRiskPhrase
+    : selectedRisk > 2 ? riskAcknowledged : true
+  const riskBody = {
+    risk_percent: selectedRisk, daily_loss_percent: selectedDaily,
+    risk_acknowledged: riskAcknowledged, high_risk_confirmation: highRiskConfirmation,
+    warning_balance_usdt: wallet, expected_risk_revision: draftRiskRevision,
+  }
   const [clock, setClock] = useState(Date.now)
   const [sessionClock, setSessionClock] = useState({received: Date.now(), remaining: status.session?.remaining_seconds ?? 0})
   useEffect(() => {
@@ -219,13 +264,17 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     }
   }
   const act = async (stop: boolean) => {
+    if (!stop && (!validRisk || wallet === null || !consentReady)) {
+      onNotice('Geçerli risk ayarı, güncel bakiye ve gerekli risk onayı olmadan strateji başlatılamaz.')
+      return
+    }
     if (inFlight.current) return
     inFlight.current = true
     setBusy(true)
     onNotice('')
     try {
       const payload = await request(stop ? '/original-v2/stop' : '/original-v2/start', stop ? undefined : {
-        confirmation, totp_code: code, risk_percent: Number(risk), daily_loss_percent: Number(dailyLoss),
+        confirmation, totp_code: code, ...riskBody,
         symbol_count: Number(symbolCount), session_hours: Number(hours),
       })
       if (!payload || typeof payload !== 'object' || !('enabled' in payload) || payload.enabled !== !stop) {
@@ -240,6 +289,28 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     } finally {
       setBusy(false)
       inFlight.current = false
+    }
+  }
+  const saveRisk = async () => {
+    if (inFlight.current || !validRisk || wallet === null || !consentReady) return
+    inFlight.current = true
+    setBusy(true)
+    onNotice('')
+    try {
+      const payload = await request('/original-v2/risk-settings', {...riskBody, totp_code: code})
+      if (!payload || typeof payload !== 'object' || !('risk_percent' in payload) || payload.risk_percent !== selectedRisk
+          || !('daily_loss_percent' in payload) || payload.daily_loss_percent !== selectedDaily
+          || !('risk_revision' in payload) || !Number.isSafeInteger(payload.risk_revision) || Number(payload.risk_revision) < draftRiskRevision) {
+        throw new Error('Risk değişikliğinin kalıcı kaydı doğrulanamadı; güncel ayarları kontrol edin.')
+      }
+      setCode('')
+      onNotice('Risk ayarı ve onayın kaydedildi. Yalnızca yeni işlemlere uygulanır; açık pozisyon, Stop ve TP değişmedi.')
+      await refresh()
+    } catch (error: unknown) {
+      onNotice(error instanceof Error ? error.message : 'Risk ayarı kaydedilemedi.')
+    } finally {
+      inFlight.current = false
+      setBusy(false)
     }
   }
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -326,18 +397,49 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     {status.daily && <p>Günlük kayıp: {typeof status.daily.loss === 'number' ? status.daily.loss.toFixed(2) : '—'} / {typeof status.daily.limit === 'number' ? status.daily.limit.toFixed(2) : '—'} USDT{status.daily.locked ? ' · Bugün yeni giriş kapalı' : ''}</p>}
     <form onSubmit={submit}>
       <div className="masterTradeLiveSetupGrid">
-        <label>İşlem riski (%)<input type="number" min="0.01" max="1" step="0.01" required value={risk} onChange={event => setRisk(event.target.value)} disabled={busy || status.enabled}/></label>
-        <label>Günlük kayıp sınırı (%)<input type="number" min="0.01" max="5" step="0.01" required value={dailyLoss} onChange={event => setDailyLoss(event.target.value)} disabled={busy || status.enabled}/></label>
+        <label>İşlem riski (%)<input type="number" min="0.5" max="10" step="0.01" required value={risk} onChange={event => changeRisk(event.target.value)} disabled={busy}/></label>
+        <label>Günlük kayıp sınırı (%)<input type="number" min={Math.max(1, selectedRisk || 1)} max="25" step="0.01" required value={dailyLoss} onChange={event => changeRisk(event.target.value, true)} disabled={busy}/></label>
         <label>İlk N sembolü tara<input type="number" min="10" max="100" step="1" required value={symbolCount} onChange={event => setSymbolCount(event.target.value)} disabled={busy || status.enabled}/></label>
         <label>Oturum süresi<select aria-label="Oturum süresi" value={status.enabled ? String(status.session?.hours ?? 1) : hours} onChange={event => setHours(event.target.value)} disabled={busy || status.enabled}>
           {[1, 4, 12, 24].map(value => <option key={value} value={value}>{value} saat</option>)}
         </select></label>
-        <label>2FA kodu<input type="password" data-private="true" autoComplete="one-time-code" required minLength={6} maxLength={32} value={code} onChange={event => setCode(event.target.value)} disabled={busy || status.enabled}/></label>
+        <label>2FA kodu<input type="password" data-private="true" autoComplete="one-time-code" required minLength={6} maxLength={32} value={code} onChange={event => setCode(event.target.value)} disabled={busy}/></label>
         <label>ORIGINAL V2 CANLI yazın<input required value={confirmation} onChange={event => setConfirmation(event.target.value)} disabled={busy || status.enabled}/></label>
       </div>
+      {!validRisk && <p role="alert">İşlem riski %0.5–10, günlük sınır %1–25 olmalı. Günlük sınır işlem riskinden küçük olamaz.</p>}
+      {wallet === null ? <p role="alert">Güncel Binance bakiyesi doğrulanamadı. Kayıp tahmini ve risk onayı için bağlantıyı yenileyin.</p> : validRisk && <div className="originalRiskWarning" data-level={riskLevel(selectedRisk)} data-testid="original-risk-warning">
+        {riskLevel(selectedRisk) !== 'NORMAL' && <strong>{warningNames[riskLevel(selectedRisk)]} · İşlem riski %{selectedRisk}</strong>}
+        <p>Gerçek bakiye: {usdt(wallet)} · Seçilen işlem riskiyle tahmini kayıp: <b>{usdt(wallet * selectedRisk / 100)}</b></p>
+        <p data-level={dailyLevel(selectedDaily)}>Günlük sınır: <b>{usdt((openingWallet ?? wallet) * selectedDaily / 100)}</b> · %{selectedDaily} · {warningNames[dailyLevel(selectedDaily)]}{openingWallet !== wallet ? ' (gün başlangıç bakiyesine göre)' : ' (güncel bakiye ile tahmin; girişte gün başlangıcı doğrulanır)'}</p>
+        <div className="originalRiskSeries" aria-label="Bileşik kayıp karşılaştırması">
+          {[0, 5, 10].map(count => {
+            const selectedBalance = wallet * (1 - selectedRisk / 100) ** count
+            const baselineBalance = wallet * 0.99 ** count
+            return <div key={count}>
+              <b>{count === 0 ? 'Şimdi' : `${count} kayıp sonrası`}</b>
+              <span>Seçilen %{selectedRisk}: {usdt(selectedBalance)}</span>
+              <div className="originalRiskBar" role="meter" aria-label={`Seçilen risk ${count} kayıp sonrası bakiye`} aria-valuemin={0} aria-valuemax={wallet} aria-valuenow={selectedBalance}><i style={{width: `${selectedBalance / wallet * 100}%`}}/></div>
+              <span>%1 ile: {usdt(baselineBalance)}</span>
+              <div className="originalRiskBar baseline" role="meter" aria-label={`Yüzde 1 risk ${count} kayıp sonrası bakiye`} aria-valuemin={0} aria-valuemax={wallet} aria-valuenow={baselineBalance}><i style={{width: `${baselineBalance / wallet * 100}%`}}/></div>
+            </div>
+          })}
+        </div>
+        <p>Bu hesap seçilen yüzdeyle, her kayıptan sonra kalan bakiye üzerinden yapılır; uygulanmış işlem sonucu veya garanti değildir.</p>
+        <p>Bu stratejide üst üste 5–10 kayıp olağan dışı değildir. Kayıplar tahminidir, ani fiyat hareketlerinde daha büyük olabilir.</p>
+        {selectedRisk > 5 && <p><b>Ani fiyat hareketlerinde kayıp daha büyük olabilir.</b></p>}
+        {status.risk_limits && <>
+          {wallet * selectedRisk / 100 > status.risk_limits.max_loss_per_trade_usdt && <p data-testid="original-risk-cap">Seçtiğin risk, mevcut Original/V25 işlem kaybı tavanı nedeniyle en fazla %{(status.risk_limits.max_loss_per_trade_usdt / wallet * 100).toLocaleString('tr-TR', {maximumFractionDigits: 4})} ({usdt(status.risk_limits.max_loss_per_trade_usdt)}) olarak uygulanabilir. Bu bir aday öncesi üst sınırdır.</p>}
+          {(openingWallet ?? wallet) * selectedDaily / 100 > status.risk_limits.daily_loss_limit_usdt && <p>Seçtiğin günlük sınır {usdt((openingWallet ?? wallet) * selectedDaily / 100)} olsa da diğer günlük güvenlik kapıları en fazla {usdt(status.risk_limits.daily_loss_limit_usdt)} kayıpta yeni girişleri durdurur.</p>}
+          <p>Teminat {status.risk_limits.min_margin_usdt}–{status.risk_limits.max_margin_usdt} USDT, kaldıraç {status.risk_limits.leverage}x ve Binance minimumları korunur. Adaya göre risk daha da düşebilir; minimumlar karşılanmazsa işlem açılmaz.</p>
+        </>}
+        {selectedRisk > 2 && selectedRisk <= 5 && <label><input type="checkbox" checked={riskAcknowledged} onChange={event => setRiskAcknowledged(event.target.checked)} disabled={busy}/> Bu riski anladım</label>}
+        {selectedRisk > 5 && <label>{highRiskPhrase} yazın<input value={highRiskConfirmation} onChange={event => setHighRiskConfirmation(event.target.value)} disabled={busy} autoComplete="off"/></label>}
+      </div>}
+      {status.last_risk_adjustment && <p data-testid="original-applied-risk">Son aday {status.last_risk_adjustment.symbol}: seçilen %{status.last_risk_adjustment.selected_percent}, hesaplanan risk %{status.last_risk_adjustment.effective_percent.toLocaleString('tr-TR', {maximumFractionDigits: 4})} ({usdt(status.last_risk_adjustment.effective_loss_usdt)}). {status.last_risk_adjustment.reasons.length > 0 && `Seçtiğin risk şu sebeple düşürüldü: ${status.last_risk_adjustment.reasons.join(' · ')}.`}</p>}
+      <button type="button" className="masterTradeLiveSecondary" onClick={() => void saveRisk()} disabled={busy || !status.available || !validRisk || wallet === null || !consentReady || code.length < 6}>Risk ayarını kaydet · Yalnızca yeni işlemler</button>
       <p>Önce mevcut LIVE bağlantısı, izinler, politika onayı ve ARM adımını tamamlayın. Borsa ve hesap limitleri ayrıca uygulanır. Açık pozisyon otomatik kapatılmaz.</p>
       <div className="masterTradeLiveSetupFooter">
-        <button type="submit" className="masterTradeLivePrimary" disabled={busy || status.enabled || fillLocked || !status.available || blocked || !armed || automationActive || confirmation !== 'ORIGINAL V2 CANLI'}>{renewing ? 'Original V2 oturumunu yenile' : 'Original V2 LIVE aç'}</button>
+        <button type="submit" className="masterTradeLivePrimary" disabled={busy || status.enabled || fillLocked || !status.available || blocked || !armed || automationActive || confirmation !== 'ORIGINAL V2 CANLI' || !validRisk || wallet === null || !consentReady}>{renewing ? 'Original V2 oturumunu yenile' : 'Original V2 LIVE aç'}</button>
         <button type="button" className="masterTradeLiveSecondary" onClick={() => void act(true)} disabled={busy || !status.enabled}>Acil durdur · Yeni girişleri kapat</button>
       </div>
     </form>

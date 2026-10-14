@@ -256,8 +256,8 @@ def test_persistence_diagnostics_is_get_only_and_start_keeps_its_handler():
 
 
 @pytest.mark.parametrize("field,value", [
-    ("risk_percent", 1.001), ("risk_percent", 0), ("risk_percent", float("nan")),
-    ("daily_loss_percent", 5.001), ("daily_loss_percent", 0), ("daily_loss_percent", float("inf")),
+    ("risk_percent", 10.001), ("risk_percent", 0.49), ("risk_percent", float("nan")),
+    ("daily_loss_percent", 25.001), ("daily_loss_percent", 0.99), ("daily_loss_percent", float("inf")),
 ])
 def test_hard_percentage_caps(field, value):
     with pytest.raises(ValidationError):

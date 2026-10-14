@@ -35,6 +35,7 @@ AuditAction = Literal[
     "campaign.created", "campaign.updated", "campaign.test_sent", "campaign.send_requested",
     "campaign.send_started", "campaign.cancelled", "campaign.completed",
     "payment.binance.approved", "payment.binance.rejected",
+    "original_live.risk_changed",
 ]
 AUDIT_ACTIONS: tuple[str, ...] = get_args(AuditAction)
 ACTION_FIELDS = {
@@ -67,6 +68,10 @@ ACTION_FIELDS = {
     "campaign.completed": frozenset(),
     "payment.binance.approved": frozenset({"status"}),
     "payment.binance.rejected": frozenset({"status"}),
+    "original_live.risk_changed": frozenset({
+        "risk_percent", "daily_loss_percent", "warning_level", "daily_warning_level",
+        "risk_acknowledged", "high_risk_confirmed", "warning_balance_usdt", "warning_version",
+    }),
 }
 
 
@@ -127,6 +132,22 @@ def allowed_snapshot(action: AuditAction, value: Mapping[str, Any]) -> dict[str,
     elif action.startswith("payment.binance."):
         if result["status"] not in ("pending", "approved", "rejected"):
             raise ValueError("Invalid payment audit status")
+    elif action == "original_live.risk_changed":
+        import math
+        from .original_live_risk import WARNING_VERSION, daily_warning, trade_warning
+        for key, maximum in (("risk_percent", 10), ("daily_loss_percent", 25)):
+            value = result[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= maximum:
+                raise ValueError("Invalid risk audit percentage")
+        if result["warning_level"] != trade_warning(result["risk_percent"]) or result["daily_warning_level"] != daily_warning(result["daily_loss_percent"]):
+            raise ValueError("Invalid risk audit warning")
+        if any(type(result[key]) is not bool for key in ("risk_acknowledged", "high_risk_confirmed")):
+            raise ValueError("Invalid risk audit approval")
+        balance = result["warning_balance_usdt"]
+        if balance is not None and (isinstance(balance, bool) or not isinstance(balance, (int, float)) or not math.isfinite(balance) or balance <= 0):
+            raise ValueError("Invalid risk audit balance")
+        if result["warning_version"] != WARNING_VERSION:
+            raise ValueError("Invalid risk warning version")
     return result
 
 

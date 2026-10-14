@@ -1050,3 +1050,18 @@ html:has(.masterTradePage[data-layout-tab="canli"]) { scroll-padding-top: 124px;
     & .masterTradeLiveSetupFooter { flex-wrap: wrap; }
   }
 }
+.originalRiskWarning{padding:16px;border:1px solid #334155;border-radius:12px;margin:12px 0;min-width:0}
+.originalRiskWarning[data-level="YELLOW"]{border-color:#eab308}
+.originalRiskWarning[data-level="ORANGE"]{border-color:#f97316}
+.originalRiskWarning[data-level="RED"]{border-color:#ef4444}
+.originalRiskWarning p[data-level="ORANGE"]{color:#fb923c}
+.originalRiskWarning p[data-level="RED"]{color:#f87171}
+.originalRiskSeries{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.originalRiskSeries>div{display:grid;gap:6px;min-width:0}
+.originalRiskSeries span{font-size:12px}
+.originalRiskBar{height:8px;overflow:hidden;background:#1e293b;border-radius:5px}
+.originalRiskBar i{display:block;height:100%;background:#f97316;border-radius:5px}
+.originalRiskBar.baseline i{background:#38bdf8}
+.originalRiskWarning label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.originalRiskWarning input[type="checkbox"]{width:auto}
+@media(max-width:640px){.originalRiskSeries{grid-template-columns:1fr}}

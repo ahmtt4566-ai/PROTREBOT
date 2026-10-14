@@ -103,6 +103,48 @@ def scenario(action):
     asyncio.run(run())
 
 
+def test_real_original_risk_audit_and_stale_writer_guard():
+    from app import v25_execution as live
+    from app.audit_log import write_audit
+    from app.original_live_risk import audit_snapshot
+
+    async def check(conn, before):
+        await conn.execute((MIGRATIONS / "20261014_001_original_live_risk_audit.sql").read_text(encoding="utf-8"))
+        await conn.execute("""CREATE TABLE application_state_snapshots (
+            state_key TEXT PRIMARY KEY, updated_at TIMESTAMPTZ NOT NULL, payload JSONB NOT NULL
+        )""")
+        previous = {"risk_percent": 0.5, "daily_loss_percent": 5}
+        choice = {**previous, "risk_percent": 10, "daily_loss_percent": 25,
+                  "high_risk_confirmed": True, "warning_balance_usdt": 1000, "risk_revision": 1}
+        payload = {"persistence_revision": 1, "original_v2_live": choice}
+        assert await conn.fetchrow(live.V25_RISK_SNAPSHOT_UPSERT_SQL, live.V25_SNAPSHOT_KEY, json.dumps(payload), 1) is None
+        with pytest.raises(RuntimeError, match="rollback probe"):
+            async with conn.transaction():
+                await conn.fetchrow(live.V25_RISK_SNAPSHOT_UPSERT_SQL, live.V25_SNAPSHOT_KEY, json.dumps(payload), 0)
+                await write_audit(conn, AuditActor("owner", "OWNER", str(uuid.uuid4())),
+                                  "original_live.risk_changed", "USER", "owner",
+                                  audit_snapshot(previous), audit_snapshot(choice))
+                raise RuntimeError("rollback probe")
+        assert await conn.fetchval("SELECT COUNT(*) FROM application_state_snapshots") == 0
+        assert await conn.fetchval("SELECT COUNT(*) FROM audit_log WHERE action='original_live.risk_changed'") == 0
+        async with conn.transaction():
+            await conn.fetchrow(live.V25_RISK_SNAPSHOT_UPSERT_SQL, live.V25_SNAPSHOT_KEY, json.dumps(payload), 0)
+            await write_audit(conn, AuditActor("owner", "OWNER", str(uuid.uuid4())),
+                              "original_live.risk_changed", "USER", "owner",
+                              audit_snapshot(previous), audit_snapshot(choice))
+        stale = {"persistence_revision": 2, "original_v2_live": previous}
+        assert await conn.fetchrow(live.V25_SNAPSHOT_UPSERT_SQL, live.V25_SNAPSHOT_KEY, json.dumps(stale)) is None
+        assert await conn.fetchval("SELECT payload->'original_v2_live'->>'risk_percent' FROM application_state_snapshots") == "10"
+        assert await conn.fetchval("SELECT COUNT(*) FROM audit_log WHERE action='original_live.risk_changed'") == 1
+        payload["persistence_revision"] = 3
+        assert await conn.fetchrow(live.V25_SNAPSHOT_UPSERT_SQL, live.V25_SNAPSHOT_KEY, json.dumps(payload)) is not None
+        payload["persistence_revision"] = 4
+        assert await conn.fetchrow(live.V25_RISK_SNAPSHOT_UPSERT_SQL, live.V25_SNAPSHOT_KEY, json.dumps(payload), 0) is None
+        payload["original_v2_live"]["risk_revision"] = 2
+        assert await conn.fetchrow(live.V25_RISK_SNAPSHOT_UPSERT_SQL, live.V25_SNAPSHOT_KEY, json.dumps(payload), 1) is not None
+    scenario(check)
+
+
 def test_real_free_trial_schema_guards_and_transaction_rollback(monkeypatch):
     monkeypatch.setenv("FREE_TRIAL_ENABLED", "true")
 

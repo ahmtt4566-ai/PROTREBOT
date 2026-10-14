@@ -160,6 +160,7 @@ def test_migration_only_extends_action_check_without_modifying_audit_rows_or_tri
         "20261010_005_support_audit_actions.sql", "20261010_007_approval_audit_actions.sql",
         "20261010_010_customer_event_audit.sql", "20261010_013_campaign_permissions_audit.sql",
         "20261011_002_binance_manual_entitlements.sql",
+        "20261014_001_original_live_risk_audit.sql",
     ):
         extension = (migrations / name).read_text(encoding="utf-8")
         check = re.search(r"CHECK \(action IN \((.*?)\)\)", extension, re.S)

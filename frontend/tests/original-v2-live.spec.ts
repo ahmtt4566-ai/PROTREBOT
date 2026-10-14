@@ -1,8 +1,10 @@
 import {expect, test, type Page} from '@playwright/test'
 
 const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT']
-async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false, pauseReason = '', expired = false} = {}) {
+async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false, pauseReason = '', expired = false, missingBalance = false, rejectRiskSave = false} = {}) {
   const writes: Array<{path: string; body: unknown}> = []
+  let riskPercent = 0.5, dailyPercent = 5, riskRevision = 0
+  await page.routeWebSocket('**', socket => socket.close())
   await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'original-live-ui'))
   await page.route('**/api/**', async route => {
     const request = route.request()
@@ -11,7 +13,8 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
     const fillLock = {id: 'fill-lock-1', active: locked, symbol: 'BTCUSDT',
       violations: ['Stop mesafesi %6 sınırını aştı'], evidence: {stop_percent: '7.84', risk_usdt: '41.02', risk_budget_usdt: '30', margin_usdt: '170'}}
     const original = {
-      available, enabled, paused: locked || !!pauseReason, pause_reason: pauseReason, risk_percent: 0.5, daily_loss_percent: 5, symbols, fill_lock: fillLock,
+      available, enabled, paused: locked || !!pauseReason, pause_reason: pauseReason, risk_percent: riskPercent, daily_loss_percent: dailyPercent, risk_revision: riskRevision, symbols, fill_lock: fillLock,
+      risk_limits: {max_loss_per_trade_usdt: 3, daily_loss_limit_usdt: 10, max_margin_usdt: 25, min_margin_usdt: 5, leverage: 3},
       session: enabled || pauseReason || expired ? {hours: 1, expires_at: new Date(Date.now() + (expired ? -3600000 : 3600000)).toISOString(), remaining_seconds: enabled && !expired ? 3600 : 0, authority_limited: false, warning_sent: false} : null,
       daily: {day: '2026-10-13', loss: dailyLossLocked ? 50 : 0, limit: 50, locked: dailyLossLocked},
       universe: {
@@ -41,6 +44,18 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
     }
     if (request.method() === 'POST' && path.startsWith('/api/v25/original-v2/')) {
       writes.push({path, body: request.postData() ? request.postDataJSON() : null})
+      if (path.endsWith('/risk-settings')) {
+        if (rejectRiskSave) {
+          await route.fulfill({status: 503, json: {detail: 'Risk ayarı ve onay kaydı birlikte kaydedilemedi; eski ayarlar korundu.'}})
+          return
+        }
+        const body = request.postDataJSON()
+        riskPercent = body.risk_percent
+        dailyPercent = body.daily_loss_percent
+        riskRevision += 1
+        await route.fulfill({json: {...original, risk_percent: riskPercent, daily_loss_percent: dailyPercent, risk_revision: riskRevision}})
+        return
+      }
       if (path.endsWith('/fill-lock/approve')) {
         if (rejectApproval) {
           await route.fulfill({status: 401, json: {detail: '2FA kodu geçersiz.'}})
@@ -68,7 +83,7 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
         policy: {allowed_symbols: symbols, interval: '15m', daily_trade_limit: 3, daily_loss_limit: 10, consecutive_loss_limit: 3},
         daily: {entries: 0, realized_pnl: 0, consecutive_losses: 0, unverified_closures: 0},
         emergency: {active: false}, reconciliation_required: false,
-        account: {wallet_balance: 1000, available_balance: 1000, unrealized_pnl: 0, positions: [], open_orders: []},
+        account: {wallet_balance: missingBalance ? null : 1000, available_balance: 1000, unrealized_pnl: 0, positions: [], open_orders: []},
         ...(owner && available ? {original_v2_live: original} : {}),
       },
       '/api/exchange-connections/status': {
@@ -236,11 +251,101 @@ test('OWNER can start only after explicit confirmation and 2FA; emergency only s
   await expect(card.getByText('Original V2 LIVE gözetimli oturumu açıldı.')).toBeVisible()
   expect(writes[0]).toEqual({path: '/api/v25/original-v2/start', body: {
     confirmation: 'ORIGINAL V2 CANLI', totp_code: '123456', risk_percent: 0.5, daily_loss_percent: 5,
+    symbol_count: 40, session_hours: 1, risk_acknowledged: false, high_risk_confirmation: '',
+    warning_balance_usdt: 1000, expected_risk_revision: 0,
   }})
   await expect(card.getByRole('button', {name: 'Acil durdur · Yeni girişleri kapat'})).toBeEnabled()
   await card.getByRole('button', {name: 'Acil durdur · Yeni girişleri kapat'}).click()
   await expect(card.getByText('Yeni girişler durduruldu; açık pozisyon ve Stop/TP korumaları korundu.')).toBeVisible()
   expect(writes.map(write => write.path)).toEqual(['/api/v25/original-v2/start', '/api/v25/original-v2/stop'])
+})
+
+for (const [percent, level] of [[1, 'NORMAL'], [2, 'YELLOW'], [5, 'ORANGE'], [10, 'RED']] as const) {
+  test(`risk ${percent} percent shows ${level} warning and exact approval gate`, async ({page}) => {
+    const writes = await fixture(page)
+    const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+    await card.getByLabel('Günlük kayıp sınırı (%)').fill('25')
+    await card.getByLabel('İşlem riski (%)').fill(String(percent))
+    await card.getByLabel('2FA kodu').fill('123456')
+    await expect(card.getByTestId('original-risk-warning')).toHaveAttribute('data-level', level)
+    const save = card.getByRole('button', {name: 'Risk ayarını kaydet · Yalnızca yeni işlemler'})
+    if (percent > 5) {
+      await expect(save).toBeDisabled()
+      await card.getByLabel('YÜKSEK RİSKİ KABUL EDİYORUM yazın').fill('YANLIŞ')
+      await expect(save).toBeDisabled()
+      await card.getByLabel('YÜKSEK RİSKİ KABUL EDİYORUM yazın').fill('YÜKSEK RİSKİ KABUL EDİYORUM')
+    } else if (percent > 2) {
+      await expect(save).toBeDisabled()
+      await card.getByLabel('Bu riski anladım').check()
+    } else {
+      await expect(card.getByLabel('Bu riski anladım')).toHaveCount(0)
+      await expect(card.getByLabel('YÜKSEK RİSKİ KABUL EDİYORUM yazın')).toHaveCount(0)
+    }
+    await expect(save).toBeEnabled()
+    await save.click()
+    await expect(card).toContainText('Yalnızca yeni işlemlere uygulanır; açık pozisyon, Stop ve TP değişmedi.')
+    expect(writes).toHaveLength(1)
+    expect(writes[0].path).toBe('/api/v25/original-v2/risk-settings')
+    expect(writes[0].body).toMatchObject({risk_percent: percent, daily_loss_percent: 25, warning_balance_usdt: 1000, expected_risk_revision: 0})
+  })
+}
+
+test('loss bars use compound real-balance amounts and show preserved risk caps', async ({page}) => {
+  await fixture(page)
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await card.getByLabel('İşlem riski (%)').fill('5')
+  await expect(card.getByTestId('original-risk-warning')).toContainText('50,00 USDT')
+  await expect(card.getByTestId('original-risk-warning')).toContainText('773,78 USDT')
+  await expect(card.getByTestId('original-risk-warning')).toContainText('598,74 USDT')
+  expect(Number(await card.getByRole('meter', {name: 'Seçilen risk 5 kayıp sonrası bakiye', exact: true}).getAttribute('aria-valuenow'))).toBeCloseTo(773.7809375, 5)
+  expect(Number(await card.getByRole('meter', {name: 'Yüzde 1 risk 5 kayıp sonrası bakiye', exact: true}).getAttribute('aria-valuenow'))).toBeCloseTo(950.9900499, 5)
+  await expect(card.getByTestId('original-risk-cap')).toContainText('%0,3 (3,00 USDT)')
+  await expect(card).toContainText('üst üste 5–10 kayıp olağan dışı değildir')
+  await page.setViewportSize({width: 390, height: 844})
+  await expect(card.getByTestId('original-risk-warning')).toBeVisible()
+})
+
+test('changing risk clears acknowledgement and daily limit cannot be below trade risk', async ({page}) => {
+  await fixture(page, {enabled: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await card.getByLabel('İşlem riski (%)').fill('3')
+  await card.getByLabel('Bu riski anladım').check()
+  await card.getByLabel('İşlem riski (%)').fill('4')
+  await expect(card.getByLabel('Bu riski anladım')).not.toBeChecked()
+  await card.getByLabel('Günlük kayıp sınırı (%)').fill('1')
+  await expect(card).toContainText('Günlük sınır işlem riskinden küçük olamaz.')
+  await expect(card.getByRole('button', {name: 'Risk ayarını kaydet · Yalnızca yeni işlemler'})).toBeDisabled()
+})
+
+test('unverified balance blocks risk consent without inventing loss estimates', async ({page}) => {
+  const writes = await fixture(page, {missingBalance: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await expect(card).toContainText('Güncel Binance bakiyesi doğrulanamadı.')
+  await expect(card.getByTestId('original-risk-warning')).toHaveCount(0)
+  await expect(card.getByRole('button', {name: 'Risk ayarını kaydet · Yalnızca yeni işlemler'})).toBeDisabled()
+  expect(writes).toEqual([])
+})
+
+test('audit failure cannot report a successful risk save', async ({page}) => {
+  await fixture(page, {rejectRiskSave: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await card.getByLabel('İşlem riski (%)').fill('2')
+  await card.getByLabel('2FA kodu').fill('123456')
+  await card.getByRole('button', {name: 'Risk ayarını kaydet · Yalnızca yeni işlemler'}).click()
+  await expect(card).toContainText('eski ayarlar korundu')
+  await expect(card.getByText('Risk ayarı ve onayın kaydedildi.', {exact: false})).toHaveCount(0)
+})
+
+test('saving risk while running never starts or stops automation', async ({page}) => {
+  const writes = await fixture(page, {enabled: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await card.getByLabel('İşlem riski (%)').fill('2')
+  await card.getByLabel('2FA kodu').fill('123456')
+  await card.getByRole('button', {name: 'Risk ayarını kaydet · Yalnızca yeni işlemler'}).click()
+  await expect(card).toContainText('Yalnızca yeni işlemlere uygulanır')
+  await expect(card).toContainText('OTURUM AÇIK')
+  await expect(card.getByTestId('original-runtime-status')).toContainText('%2')
+  expect(writes.map(write => write.path)).toEqual(['/api/v25/original-v2/risk-settings'])
 })
 
 test('OWNER without ARM cannot start Original V2', async ({page}) => {

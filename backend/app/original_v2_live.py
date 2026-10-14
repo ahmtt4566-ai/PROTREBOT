@@ -25,6 +25,7 @@ from .market_universe import (
 )
 from .strategies import original_v2_demo as strategy
 from .strategies.contracts import StrategyResult
+from . import original_live_risk as risk_settings
 from .v22_commercial import authenticated_user
 
 router = APIRouter(prefix="/api/v25/original-v2", tags=["Original V2 LIVE"])
@@ -34,12 +35,10 @@ SCANNER_HISTORY_LIMIT = 128
 logger = logging.getLogger(__name__)
 
 
-class Start(BaseModel):
+class Start(risk_settings.RiskChoice):
     model_config = ConfigDict(extra="forbid")
     confirmation: str
     totp_code: str = Field(min_length=6, max_length=32, repr=False)
-    risk_percent: float = Field(default=0.5, gt=0, le=1, allow_inf_nan=False)
-    daily_loss_percent: float = Field(default=5, gt=0, le=5, allow_inf_nan=False)
     symbol_count: int = Field(default=ORIGINAL_DEFAULT_SYMBOL_COUNT, ge=ORIGINAL_MIN_SYMBOL_COUNT, le=ORIGINAL_MAX_SYMBOL_COUNT, strict=True)
     session_hours: int = Field(default=1, strict=True)
 
@@ -235,6 +234,10 @@ def public_config(state: dict[str, Any]) -> dict[str, Any]:
     return {"available": available(), "enabled": running(state),
             "paused": config.get("paused", False), "pause_reason": config.get("pause_reason"),
             "risk_percent": config.get("risk_percent", 0.5), "daily_loss_percent": config.get("daily_loss_percent", 5),
+            "risk_revision": config.get("risk_revision", 0),
+            "risk_limits": risk_settings.limits(state),
+            "risk_projection": copy.deepcopy(config.get("risk_projection")),
+            "last_risk_adjustment": copy.deepcopy(config.get("last_risk_adjustment")),
             "daily": copy.deepcopy(config.get("daily")),
             "fill_lock": copy.deepcopy(config.get("fill_lock")),
             "scanner": scanner,
@@ -397,6 +400,18 @@ async def daily_guard(client: Any, state: dict[str, Any], snapshot: dict[str, An
 
 
 def execution_policy(state: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
+    from pydantic import ValidationError
+    config = settings(state)
+    try:
+        risk_settings.RiskChoice(
+            risk_percent=config.get("risk_percent", 0.5),
+            daily_loss_percent=config.get("daily_loss_percent", 5),
+            risk_acknowledged=config.get("risk_acknowledged", False),
+            high_risk_confirmation=risk_settings.HIGH_RISK_CONFIRMATION if config.get("high_risk_confirmed") is True else "",
+        )
+    except ValidationError as exc:
+        logger.error("ORIGINAL_RISK_CONSENT_INVALID")
+        raise HTTPException(423, "Original V2 risk sınırları veya yüksek risk onayı geçersiz; yeni giriş kapalı.") from exc
     fixed = strategy.fixed_profile()["execution_policy"]
     symbols = selected_symbols(settings(state))
     if not symbols:
@@ -447,8 +462,11 @@ async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
     rules = await live.live_symbol_rules(client, spec["symbol"], "MARKET")
     # The percentage budget includes estimated commission and slippage, not only stop distance.
     cost_per_unit = entry * Decimal(str(policy["fee_bps_per_side"] + policy["slippage_bps_per_side"])) * 2 / 10000
-    quantity = live.floor_step(min(Decimal(spec["quantity"]), budget / (abs(entry - stop) + cost_per_unit),
-                                  Decimal(str(policy["max_margin_per_trade"])) * 3 / entry), rules["step"] * 5)
+    native_quantity = Decimal(spec["quantity"])
+    risk_quantity = budget / (abs(entry - stop) + cost_per_unit)
+    margin_quantity = Decimal(str(policy["max_margin_per_trade"])) * 3 / entry
+    unrounded_quantity = min(native_quantity, risk_quantity, margin_quantity)
+    quantity = live.floor_step(unrounded_quantity, rules["step"] * 5)
     size_metrics = original.minimum_order_parts(
         quantity, entry, rules["step"], rules["min_qty"], rules["min_notional"],
     )
@@ -514,6 +532,28 @@ async def build_spec(client: Any, result: StrategyResult, state: dict[str, Any],
                 original_risk_budget=float(budget), initial_stop_loss=spec["stop_loss"],
                 original_cost_bps=policy["fee_bps_per_side"] * 2 + policy["slippage_bps_per_side"] * 2,
                 initial_quantity=live.decimal_text(quantity))
+    wallet = risk_settings.verified_wallet(snapshot)
+    selected_percent = settings(state)["risk_percent"]
+    requested_loss = wallet * selected_percent / 100
+    effective_loss = float(spec["estimated_stop_loss_usdt"])
+    reasons = []
+    if float(budget) < requested_loss - 1e-8:
+        reasons.append("Sabit Original V2 / V25 işlem kaybı tavanı")
+    requested_quantity = Decimal(str(requested_loss)) / (abs(entry - stop) + cost_per_unit)
+    if native_quantity == unrounded_quantity and native_quantity < requested_quantity:
+        reasons.append("Original V2 sabit miktar profili (mevcut teminat/kaldıraç sınırları dahil)")
+    if margin_quantity == unrounded_quantity and margin_quantity < requested_quantity:
+        reasons.append("Mevcut işlem başı teminat tavanı")
+    if quantity < unrounded_quantity:
+        reasons.append("Binance miktar adımı ve TP miktar bölüşümü için aşağı yuvarlama")
+    adjustment = {
+        "symbol": spec["symbol"], "selected_percent": selected_percent,
+        "effective_percent": effective_loss / wallet * 100,
+        "requested_loss_usdt": requested_loss, "effective_loss_usdt": effective_loss,
+        "reasons": reasons,
+    }
+    spec["risk_adjustment"] = adjustment
+    settings(state)["last_risk_adjustment"] = adjustment
     loss_budget_passed = float(spec["estimated_stop_loss_usdt"]) <= float(budget) + 1e-8
     live.record_live_entry_check(
         check_results, "risk_budget", loss_budget_passed,
@@ -1077,6 +1117,12 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
             raise HTTPException(423, "Original V2 için doğrulanmış LIVE bağlantısı gerekli.")
         if previous and (previous.get("owner_id") != user["id"] or previous.get("fingerprint") != fingerprint):
             raise HTTPException(423, "Original V2 hesap bağlantısı değişti; günlük limit kaydı korunuyor.")
+        client = live.client_for(request.app, request)
+        try:
+            snapshot = await live.account_snapshot(client)
+        except (live.LiveExchangeError, live.BinanceDemoError) as exc:
+            raise live.safe_exchange_error(exc) from exc
+        previous = await risk_settings.save_choice(request, user, state, body, snapshot, fingerprint)
         config = {**previous, "owner_id": user["id"], "risk_percent": body.risk_percent,
                   "fingerprint": fingerprint, "symbol_count": body.symbol_count,
                   "daily_loss_percent": body.daily_loss_percent, "enabled": False, "paused": False}
@@ -1085,8 +1131,7 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
                        scanned_symbols=[], candidate_count=0)
         state["original_v2_live"] = config
         try:
-            client = live.client_for(request.app, request)
-            await daily_guard(client, state, await live.account_snapshot(client))
+            await daily_guard(client, state, snapshot)
             if config.get("paused"):
                 raise HTTPException(423, "Original V2 başlatma sırasında durduruldu.")
             await live._start_live_auto_session(
@@ -1115,6 +1160,29 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
             if isinstance(exc, (live.LiveExchangeError, live.BinanceDemoError)):
                 raise live.safe_exchange_error(exc) from exc
             raise
+    return await status(request)
+
+@router.post("/risk-settings")
+async def update_risk(request: Request, body: risk_settings.RiskUpdate) -> dict[str, Any]:
+    from . import account_settings, v25_execution as live
+    user = authenticated_user(request, owner=True)
+    if not available():
+        raise HTTPException(423, "Original V2 LIVE sunucu ayarı kapalı.")
+    live.execution_owner(request)
+    state = request.app.state.v25_execution
+    async with state["lock"]:
+        if not state.get("recovery_ready"):
+            raise HTTPException(503, "Canlı durum kurtarma tamamlanmadı; risk ayarı değiştirilmedi.")
+        await account_settings.require_totp(request, user, body.totp_code, required=True)
+        _, _, fingerprint = live.live_credentials_status(request)
+        if not fingerprint:
+            raise HTTPException(423, "Risk ayarı için doğrulanmış LIVE bağlantısı gerekli.")
+        client = live.client_for(request.app, request)
+        try:
+            snapshot = await live.account_snapshot(client)
+        except (live.LiveExchangeError, live.BinanceDemoError) as exc:
+            raise live.safe_exchange_error(exc) from exc
+        await risk_settings.save_choice(request, user, state, body, snapshot, fingerprint)
     return await status(request)
 
 @router.post("/fill-lock/approve")

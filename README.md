@@ -501,6 +501,40 @@ block entries. A future-dated session stopped by a safety gate is displayed as
 stopped, not expired; its recorded pause reason remains visible. No session is
 automatically reopened or extended.
 
+Original V2 LIVE risk selection accepts 0.5–10% per trade and 1–25% daily loss,
+with the daily percentage never below the trade percentage. Trade warnings are
+normal through 1%, yellow above 1% through 2%, orange above 2% through 5% (checkbox
+required), and red above 5% (exact Turkish high-risk acceptance required).
+Daily warnings are normal through 5%, orange above 5% through 10%, and red above
+10%. The server validates ranges, consent, account binding, risk revision and
+the displayed balance against a fresh signed account snapshot. Unknown/nonpositive
+balances cannot authorize a change. Percentage loss charts compound the remaining
+wallet after 5/10 losses and compare the same series with 1% risk; they are
+estimates, not guarantees or measured strategy probabilities.
+
+Selected risk is an upper budget, not a promise to use that much. Original/V25
+fixed loss caps, 5–25 USDT margin bounds, 3x leverage, Binance minimums, amount
+rounding, daily latches and all existing entry gates remain unchanged. The card
+shows the policy cap and the latest candidate's actual calculated percentage
+with its limiting reasons. Unchanged choices do not create duplicate audit rows.
+Risk changes, including start-time changes, persist the snapshot and append-only
+`original_live.risk_changed` audit row in one transaction. Failed audit/snapshot
+writes do not apply the choice. Increasing daily limits never clears an existing
+daily lock. Snapshot writes also reject an older risk revision, even when a
+queued writer has a newer global persistence revision. Open plans, quantities,
+original Stop/TP and entry authority are not
+changed by `POST /api/v25/original-v2/risk-settings`; current 2FA remains required
+at this stage. Admin > Trading Center shows paginated persistent risk records.
+Risk transactions additionally compare the submitted risk revision with the
+stored database revision, rejecting concurrent changes from another process.
+
+Before deploying this risk feature, apply
+`backend/migrations/20261014_001_original_live_risk_audit.sql` after the existing
+audit migrations, using the normal approved migration workflow. It only extends
+the action allowlist and does not alter audit rows or append-only triggers.
+No production migration is automatically run by this change. Missing migration
+or unavailable audit storage rejects risk changes instead of silently applying them.
+
 Both frontend entrypoints validate Demo status, account and summary responses
 before storing them. Missing limits, HTML/proxy fallback bodies and malformed
 summaries produce a recoverable in-panel error, not a workspace crash or

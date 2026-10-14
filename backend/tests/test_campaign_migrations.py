@@ -31,8 +31,8 @@ def test_audit_and_permissions_exact_extension():
     from app.moderator_access import PERMISSIONS
     sql = (ROOT / "20261010_013_campaign_permissions_audit.sql").read_text(encoding="utf-8")
     campaign_actions = tuple(re.findall(r"'([^']+)'", sql.split("CHECK (action IN (")[1].split("));")[0]))
-    assert campaign_actions == AUDIT_ACTIONS[:-2]
-    assert AUDIT_ACTIONS[-2:] == ("payment.binance.approved", "payment.binance.rejected")
+    assert campaign_actions == AUDIT_ACTIONS[:-3]
+    assert AUDIT_ACTIONS[-3:] == ("payment.binance.approved", "payment.binance.rejected", "original_live.risk_changed")
     latest = (ROOT / "20261011_002_binance_manual_entitlements.sql").read_text(encoding="utf-8")
-    assert tuple(re.findall(r"'([^']+)'", latest.split("CHECK (action IN (")[1].split("));")[0])) == AUDIT_ACTIONS
+    assert tuple(re.findall(r"'([^']+)'", latest.split("CHECK (action IN (")[1].split("));")[0])) == AUDIT_ACTIONS[:-1]
     assert tuple(re.findall(r"'([^']+)'", sql.split("CHECK (permission IN (")[1].split("));")[0])) == PERMISSIONS

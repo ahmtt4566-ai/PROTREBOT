@@ -1039,6 +1039,46 @@ async def persist_state_awaited(state: dict[str, Any]) -> PersistenceWriteResult
 
 
 V25_SNAPSHOT_KEY = "v25_live:state"
+_V25_SNAPSHOT_INSERT_SQL = """
+    INSERT INTO application_state_snapshots (state_key, updated_at, payload)
+"""
+_V25_SNAPSHOT_UPSERT_SQL = """
+    ON CONFLICT (state_key) DO UPDATE
+    SET updated_at = NOW(), payload = EXCLUDED.payload
+    WHERE COALESCE(
+        NULLIF(EXCLUDED.payload->>'persistence_revision', '')::bigint,
+        0
+    ) >= COALESCE(
+        NULLIF(application_state_snapshots.payload->>'persistence_revision', '')::bigint,
+        0
+    )
+    AND COALESCE(
+        NULLIF(EXCLUDED.payload#>>'{original_v2_live,risk_revision}', '')::bigint,
+        0
+    ) >= COALESCE(
+        NULLIF(application_state_snapshots.payload#>>'{original_v2_live,risk_revision}', '')::bigint,
+        0
+    )
+"""
+_V25_SNAPSHOT_RETURNING_SQL = " RETURNING CASE WHEN xmax = 0 THEN 'INSERTED' ELSE 'UPDATED' END AS write_status"
+V25_SNAPSHOT_UPSERT_SQL = (
+    _V25_SNAPSHOT_INSERT_SQL + " VALUES ($1, NOW(), $2::jsonb)"
+    + _V25_SNAPSHOT_UPSERT_SQL + _V25_SNAPSHOT_RETURNING_SQL
+)
+V25_RISK_SNAPSHOT_UPSERT_SQL = _V25_SNAPSHOT_INSERT_SQL + """
+    SELECT $1, NOW(), $2::jsonb
+    WHERE $3::bigint = 0 OR EXISTS (
+        SELECT 1 FROM application_state_snapshots
+        WHERE state_key = $1 AND COALESCE(
+            NULLIF(payload#>>'{original_v2_live,risk_revision}', '')::bigint, 0
+        ) = $3
+    )
+""" + _V25_SNAPSHOT_UPSERT_SQL + """
+    AND COALESCE(
+        NULLIF(application_state_snapshots.payload#>>'{original_v2_live,risk_revision}', '')::bigint,
+        0
+    ) = $3
+""" + _V25_SNAPSHOT_RETURNING_SQL
 
 _SENSITIVE_EXCEPTION_VALUE = re.compile(
     r"(?i)(\b(?:api[_-]?key|secret(?:[_-]?key)?|authorization|token|signature|password|credential(?:s)?)\b\s*[:=]\s*)([^\s,;}\]]+)"
@@ -1098,20 +1138,7 @@ async def _persist_state_snapshot(
     if pool is None:
         return "SKIPPED"
     row = await pool.fetchrow(
-        """
-        INSERT INTO application_state_snapshots (state_key, updated_at, payload)
-        VALUES ($1, NOW(), $2::jsonb)
-        ON CONFLICT (state_key) DO UPDATE
-        SET updated_at = NOW(), payload = EXCLUDED.payload
-        WHERE COALESCE(
-            NULLIF(EXCLUDED.payload->>'persistence_revision', '')::bigint,
-            0
-        ) >= COALESCE(
-            NULLIF(application_state_snapshots.payload->>'persistence_revision', '')::bigint,
-            0
-        )
-        RETURNING CASE WHEN xmax = 0 THEN 'INSERTED' ELSE 'UPDATED' END AS write_status
-        """,
+        V25_SNAPSHOT_UPSERT_SQL,
         V25_SNAPSHOT_KEY,
         json.dumps(payload, ensure_ascii=False),
     )
