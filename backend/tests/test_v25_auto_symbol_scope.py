@@ -393,10 +393,10 @@ class AutoSymbolScopeTests(unittest.TestCase):
         application, state = application_for(["BTCUSDT"])
         request = SimpleNamespace(app=application)
         with patch.object(execution, "execution_owner", return_value={"id": "offline-owner"}) as owner, \
-                patch("app.exchange_connections._require_live_mfa", new=AsyncMock()), \
+                patch.object(execution, "require_live_understanding", new=AsyncMock()), \
                 patch.object(execution, "public_status", side_effect=lambda app, req: {"policy": app.state.v25_execution["policy"]}):
             result = asyncio.run(execution.v25_policy(
-                request, execution.PolicyUpdate(allowed_symbols=[], totp_code="123456"),
+                request, execution.PolicyUpdate(allowed_symbols=[], understood=True),
             ))
         owner.assert_called_once_with(request)
         self.assertEqual(result["policy"]["allowed_symbols"], [])

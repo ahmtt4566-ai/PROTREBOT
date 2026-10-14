@@ -228,7 +228,7 @@ class MultiSymbolScannerTests(unittest.TestCase):
         )
         with patch("app.v25_execution.execution_owner", return_value={"id": "TEST", "role": "OWNER"}), \
                 patch("app.v25_execution.live_owner_binding", return_value="owner:TEST"), \
-                patch("app.exchange_connections._require_live_mfa", new=AsyncMock()), \
+                patch("app.v25_execution.require_live_understanding", new=AsyncMock()), \
                 patch("app.v25_execution.live_auto_start_gate", return_value=(True, "ready")), \
                 patch("app.v25_execution.live_credentials_status", return_value=("offline-key", "offline-secret", "offline-fingerprint")), \
                 patch("app.v25_execution.session_id", return_value="offline-session"), \
@@ -237,7 +237,7 @@ class MultiSymbolScannerTests(unittest.TestCase):
                 patch("app.v25_execution.public_status", return_value={}), \
                 patch("app.account_settings.enabled", AsyncMock(return_value=False)):
             from app.v25_execution import AutoStartConfirmation
-            asyncio.run(v25_auto_start(request, AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
+            asyncio.run(v25_auto_start(request, AutoStartConfirmation(understood=True)))
         self.assertTrue(state["auto"]["enabled"])
         self.assertGreater(state["auto"]["session_until"], time.time())
 

@@ -181,6 +181,7 @@ export function MasterTradeLiveLayout({tab = 'canli', step, children, notice}: {
       const positions = className.includes('masterTradeLiveAccountTable')
       if (positions && tab === 'pozisyonlar') return null
       const sectionTab = activity || safety ? 'baglanti' : positions ? 'pozisyonlar' : 'canli'
+      if (connection && tab !== 'baglanti') return null
       const visible = tab === sectionTab || connection && tab === 'baglanti'
       const workflowStep = connection ? 0 : confirmations ? 1 : control ? (activeStep === 3 ? 3 : 2) : null
       const expanded = workflowStep === activeStep
@@ -198,5 +199,8 @@ export function MasterTradeLiveLayout({tab = 'canli', step, children, notice}: {
       </div>
     }), cards, tab)}
   </>
-  return <PremiumWorkspace>{cloneElement(children, {children: content})}</PremiumWorkspace>
+  return <PremiumWorkspace>{cloneElement(children, {children: tab === 'canli' ? <>
+    <h2>Canlı İşlem</h2><p>Original V2 bu hesapta kullanıma açık değil.</p><a href="/master-trade?tab=baglanti">Bağlantı ayarları →</a>
+    <details className="originalAdvanced"><summary>Gelişmiş · eski V25</summary>{content}</details>
+  </> : content})}</PremiumWorkspace>
 }

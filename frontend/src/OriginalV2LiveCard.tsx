@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState, type FormEvent} from 'react'
+import {useEffect, useRef, useState, type FormEvent, type ReactNode} from 'react'
 import {Database} from 'lucide-react'
 
 export type OriginalPersistenceDiagnostics = {
@@ -145,6 +145,10 @@ type Props = {
   notice: string
   onNotice: (message: string) => void
   walletBalance?: number | null
+  connected?: boolean
+  statusVerified?: boolean
+  prepareStart?: () => Promise<void>
+  overview?: ReactNode
 }
 
 const highRiskPhrase = 'YÜKSEK RİSKİ KABUL EDİYORUM'
@@ -153,30 +157,38 @@ const dailyLevel = (risk: number) => risk > 10 ? 'RED' : risk > 5 ? 'ORANGE' : '
 const warningNames = {NORMAL: 'Normal', YELLOW: 'Sarı uyarı', ORANGE: 'Turuncu uyarı', RED: 'Kırmızı uyarı'}
 const usdt = (value: number) => `${value.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} USDT`
 
-export default function OriginalV2LiveCard({className, status, entryChecks, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice, walletBalance}: Props) {
+export default function OriginalV2LiveCard({className, status, entryChecks, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice, walletBalance, connected = true, statusVerified = true, prepareStart, overview}: Props) {
   const [risk, setRisk] = useState(String(status.risk_percent))
   const [dailyLoss, setDailyLoss] = useState(String(status.daily_loss_percent))
   const [symbolCount, setSymbolCount] = useState(String(status.universe?.requested_count ?? 40))
   const [hours, setHours] = useState('1')
   const [riskAcknowledged, setRiskAcknowledged] = useState(false)
   const [highRiskConfirmation, setHighRiskConfirmation] = useState('')
+  const [understood, setUnderstood] = useState(false)
+  const ownRiskRevision = useRef<number | null>(null)
   const [draftRiskRevision, setDraftRiskRevision] = useState(status.risk_revision ?? 0)
   useEffect(() => {
     setRisk(String(status.risk_percent))
     setDailyLoss(String(status.daily_loss_percent))
     setDraftRiskRevision(status.risk_revision ?? 0)
-    setRiskAcknowledged(false)
-    setHighRiskConfirmation('')
+    if (ownRiskRevision.current !== status.risk_revision) {
+      setRiskAcknowledged(false)
+      setHighRiskConfirmation('')
+      setUnderstood(false)
+    }
+    ownRiskRevision.current = null
   }, [status.risk_revision, status.risk_percent, status.daily_loss_percent])
   useEffect(() => {
     setRiskAcknowledged(false)
     setHighRiskConfirmation('')
+    setUnderstood(false)
   }, [walletBalance])
   const changeRisk = (value: string, daily = false) => {
     if (daily) setDailyLoss(value)
     else setRisk(value)
     setRiskAcknowledged(false)
     setHighRiskConfirmation('')
+    setUnderstood(false)
   }
   const selectedRisk = Number(risk)
   const selectedDaily = Number(dailyLoss)
@@ -192,7 +204,10 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     risk_percent: selectedRisk, daily_loss_percent: selectedDaily,
     risk_acknowledged: riskAcknowledged, high_risk_confirmation: highRiskConfirmation,
     warning_balance_usdt: wallet, expected_risk_revision: draftRiskRevision,
+    understood,
   }
+  const riskApproved = (status.risk_revision ?? 0) > 0 && selectedRisk === status.risk_percent
+    && selectedDaily === status.daily_loss_percent && consentReady && understood
   const [clock, setClock] = useState(Date.now)
   const [sessionClock, setSessionClock] = useState({received: Date.now(), remaining: status.session?.remaining_seconds ?? 0})
   useEffect(() => {
@@ -212,7 +227,6 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     : status.session?.expires_at ? 'Oturum kapalı / giriş kapalı' : 'Oturum yok'
   const renewing = !status.enabled && sessionExpired
   const [code, setCode] = useState('')
-  const [confirmation, setConfirmation] = useState('')
   const [busy, setBusy] = useState(false)
   const [approval, setApproval] = useState('')
   const [diagnostics, setDiagnostics] = useState<OriginalPersistenceDiagnostics | null>(null)
@@ -254,7 +268,7 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
       }
       setCode('')
       setApproval('')
-      onNotice('Dolum kilidi onayınla kaldırıldı; otomasyon başlamadı. Yeniden açmak için ARM ve güncel 2FA gerekir.')
+      onNotice('Dolum kilidi onayınla kaldırıldı; otomasyon başlamadı. Yeniden başlatma için risk onayı ve ARM gerekir.')
       await refresh()
     } catch (error: unknown) {
       onNotice(error instanceof Error ? error.message : 'Dolum kilidi kaldırılamadı.')
@@ -264,7 +278,7 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     }
   }
   const act = async (stop: boolean) => {
-    if (!stop && (!validRisk || wallet === null || !consentReady)) {
+    if (!stop && (!validRisk || wallet === null || !consentReady || !riskApproved)) {
       onNotice('Geçerli risk ayarı, güncel bakiye ve gerekli risk onayı olmadan strateji başlatılamaz.')
       return
     }
@@ -273,15 +287,15 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     setBusy(true)
     onNotice('')
     try {
+      if (!stop) await prepareStart?.()
       const payload = await request(stop ? '/original-v2/stop' : '/original-v2/start', stop ? undefined : {
-        confirmation, totp_code: code, ...riskBody,
+        ...riskBody,
         symbol_count: Number(symbolCount), session_hours: Number(hours),
       })
       if (!payload || typeof payload !== 'object' || !('enabled' in payload) || payload.enabled !== !stop) {
         throw new Error('Original V2 LIVE sonucu doğrulanamadı. LIVE durumunu yenileyin.')
       }
       setCode('')
-      setConfirmation('')
       onNotice(stop ? 'Yeni girişler durduruldu; açık pozisyon ve Stop/TP korumaları korundu.' : 'Original V2 LIVE gözetimli oturumu açıldı.')
       await refresh()
     } catch (error: unknown) {
@@ -292,17 +306,18 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     }
   }
   const saveRisk = async () => {
-    if (inFlight.current || !validRisk || wallet === null || !consentReady) return
+    if (inFlight.current || !validRisk || wallet === null || !consentReady || !understood) return
     inFlight.current = true
     setBusy(true)
     onNotice('')
     try {
-      const payload = await request('/original-v2/risk-settings', {...riskBody, totp_code: code})
+      const payload = await request('/original-v2/risk-settings', riskBody)
       if (!payload || typeof payload !== 'object' || !('risk_percent' in payload) || payload.risk_percent !== selectedRisk
           || !('daily_loss_percent' in payload) || payload.daily_loss_percent !== selectedDaily
           || !('risk_revision' in payload) || !Number.isSafeInteger(payload.risk_revision) || Number(payload.risk_revision) < draftRiskRevision) {
         throw new Error('Risk değişikliğinin kalıcı kaydı doğrulanamadı; güncel ayarları kontrol edin.')
       }
+      ownRiskRevision.current = Number(payload.risk_revision)
       setCode('')
       onNotice('Risk ayarı ve onayın kaydedildi. Yalnızca yeni işlemlere uygulanır; açık pozisyon, Stop ve TP değişmedi.')
       await refresh()
@@ -322,9 +337,7 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
   const entryStatus = entriesReady
     ? 'Açık – sinyal bekleniyor'
     : `Engelli – ${entryBlocker?.reason || 'Giriş kontrolleri henüz doğrulanmadı.'}`
-  return <section className={`masterTradeLiveSection ${className ?? ''}`} aria-label="Kais Original V2 LIVE">
-    <header><div><span className="masterTradeLiveKicker">OWNER · ORIGINAL V2</span><h3>Kais Original V2 LIVE</h3></div>
-      <strong>{status.enabled ? 'OTURUM AÇIK' : status.paused ? 'GÜVENLİK KİLİDİ' : 'KAPALI'}</strong></header>
+  const technicalDetails = <>
     <div className="masterTradeLiveControlMeta" data-testid="original-runtime-status">
       <span><small>STRATEJİ</small><b>Original V2</b></span>
       <span><small>SEÇİLEN EVREN</small><b>{status.symbols.length} / {status.universe?.requested_count ?? 40} sembol</b></span>
@@ -338,7 +351,7 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
       <span><small>KALAN SÜRE</small><b data-testid="original-session-remaining">{remainingText}</b></span>
       <span><small>SEÇİLEN OTURUM</small><b>{status.session?.hours ?? 1} saat{status.session?.authority_limited ? ' · Yetki süresiyle sınırlı' : ''}</b></span>
     </div>
-    <details open className="originalEntryChecks" data-testid="original-entry-checks">
+    <details className="originalEntryChecks" data-testid="original-entry-checks">
       <summary>Giriş kontrolleri · {entryChecks.filter(check => check.passed).length}/{entryChecks.length} geçti</summary>
       <ul>
         {entryChecks.map(check => <li key={check.key} data-result={check.passed ? 'passed' : 'failed'}>
@@ -351,7 +364,7 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     <p>USDT-M Futures · 24 saatlik hacimde ilk N; hacim en az 1.000.000 USDT, liste yaşı en az {status.universe?.minimum_age_days ?? 45} gün (en uzun mum geçmişine göre), spread en fazla 8 bps. Evren UTC gününde bir kez yenilenir. Geçmişi eksik sembol veri eksik olarak elenir; tarama diğer sembollerle devam eder. Strateji: 3x · en fazla %6 stop · TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
     <small>Son taramadaki semboller: {(status.scanner?.scanned_symbols ?? status.symbols).map(symbol => symbol.replace('USDT', '')).join(' · ') || 'Günlük seçim bekleniyor'}</small>
     <small>Uygun: {status.universe?.eligible_count ?? 0} · Seçilen: {status.universe?.selected_count ?? status.symbols.length} · Liste yenileme: {status.universe?.updated_at ? new Date(status.universe.updated_at).toLocaleString('tr-TR') : 'Henüz yapılmadı'}</small>
-    <details open data-testid="original-scan-diagnostics">
+    <details data-testid="original-scan-diagnostics">
       <summary>Tarama teşhisi</summary>
       <p data-testid="original-scan-24h">
         Son 24 saat: {status.scanner?.last_24h?.scans ?? 0} tarama · {status.scanner?.last_24h?.candidates ?? 0} aday · {status.scanner?.last_24h?.trades ?? 0} işleme dönüştü
@@ -385,17 +398,28 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
         {status.scanner.last_failure.interval && ` · ${status.scanner.last_failure.interval}`}
       </p>}
     </details>
-    {status.pause_reason && <p role="status">{status.pause_reason}</p>}
+  </>
+  return <section className={`masterTradeLiveSection originalLiveCard ${className ?? ''}`} aria-label="Kais Original V2 LIVE">
+    <header className="originalStatusHero"><div><span className="masterTradeLiveKicker">KAIS ORIGINAL V2 · CANLI</span>
+      <h2>{!statusVerified ? 'Durum doğrulanamadı' : entriesReady ? 'Çalışıyor – sinyal bekleniyor' : status.enabled ? 'Çalışıyor – girişler engelli' : status.paused ? 'Durdu – yeni girişler kapalı' : 'Canlı işlemi 3 adımda başlat'}</h2>
+      <p>{status.enabled ? `${status.universe?.requested_count ?? status.symbols.length} coin · Son tarama: ${status.scanner?.last_scan_at ? new Date(status.scanner.last_scan_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'}) : 'bekleniyor'} · ${remainingText}` : status.pause_reason || 'Sıradaki adımı tamamla; açık pozisyonların korumaları değiştirilmez.'}</p>
+      {status.enabled && !entriesReady && <p role="status">{entryBlocker?.reason || 'Giriş kontrolleri doğrulanamadı.'}</p>}
+    </div>{status.enabled && <button type="button" onClick={() => void act(true)} disabled={busy}>Stratejiyi durdur</button>}</header>
+    {overview}
     {fillLocked && <div role="alert">
       <p>Dolum güvenlik kilidi · {status.fill_lock?.symbol}. Yeni LIVE girişler OWNER onayına kadar kapalıdır.</p>
       <p>{status.fill_lock?.violations.join(' · ')}</p>
       <p>Stop mesafesi: {status.fill_lock?.evidence?.stop_percent ?? '—'}% · Risk: {status.fill_lock?.evidence?.risk_usdt ?? '—'} / {status.fill_lock?.evidence?.risk_budget_usdt ?? '—'} USDT · Teminat: {status.fill_lock?.evidence?.margin_usdt ?? '—'} USDT</p>
       <p>Açık pozisyon değiştirilmedi. Kilidi kaldırmak pozisyon riskini düzeltmez ve otomasyonu başlatmaz.</p>
+      <label>Kurtarma için 2FA kodu<input type="password" data-private="true" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} disabled={busy}/></label>
       <label>DOLUM RİSKİNİ İNCELEDİM yazın<input value={approval} onChange={event => setApproval(event.target.value)} disabled={busy}/></label>
       <button type="button" onClick={() => void approve()} disabled={busy || approval !== 'DOLUM RİSKİNİ İNCELEDİM' || code.length < 6}>Dolum kilidini onayımla kaldır</button>
     </div>}
-    {status.daily && <p>Günlük kayıp: {typeof status.daily.loss === 'number' ? status.daily.loss.toFixed(2) : '—'} / {typeof status.daily.limit === 'number' ? status.daily.limit.toFixed(2) : '—'} USDT{status.daily.locked ? ' · Bugün yeni giriş kapalı' : ''}</p>}
-    <form onSubmit={submit}>
+    {status.daily?.locked && <p>Bugün günlük kayıp kilidi nedeniyle yeni giriş kapalı.</p>}
+    <details className="originalSettings" open={!status.enabled}><summary>{status.enabled ? 'Risk ayarlarını değiştir' : 'İlk kurulum · 3 adım'}</summary>
+    <form onSubmit={submit} aria-label="Risk ayarları ve kurulum">
+      <div className="originalSetupStep" data-active={!connected} data-complete={connected}><h3>{connected ? '✓' : '1'} · Binance hesabını bağla</h3><a href="/master-trade?tab=baglanti">Bağlantı ayarları →</a></div>
+      <fieldset className="originalSetupStep" data-active={connected && !riskApproved} data-complete={riskApproved} disabled={busy || !connected}><legend>{riskApproved ? '✓' : '2'} · Risk ayarlarını onayla</legend>
       <div className="masterTradeLiveSetupGrid">
         <label>İşlem riski (%)<input type="number" min="0.5" max="10" step="0.01" required value={risk} onChange={event => changeRisk(event.target.value)} disabled={busy}/></label>
         <label>Günlük kayıp sınırı (%)<input type="number" min={Math.max(1, selectedRisk || 1)} max="25" step="0.01" required value={dailyLoss} onChange={event => changeRisk(event.target.value, true)} disabled={busy}/></label>
@@ -403,8 +427,6 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
         <label>Oturum süresi<select aria-label="Oturum süresi" value={status.enabled ? String(status.session?.hours ?? 1) : hours} onChange={event => setHours(event.target.value)} disabled={busy || status.enabled}>
           {[1, 4, 12, 24].map(value => <option key={value} value={value}>{value} saat</option>)}
         </select></label>
-        <label>2FA kodu<input type="password" data-private="true" autoComplete="one-time-code" required minLength={6} maxLength={32} value={code} onChange={event => setCode(event.target.value)} disabled={busy}/></label>
-        <label>ORIGINAL V2 CANLI yazın<input required value={confirmation} onChange={event => setConfirmation(event.target.value)} disabled={busy || status.enabled}/></label>
       </div>
       {!validRisk && <p role="alert">İşlem riski %0.5–10, günlük sınır %1–25 olmalı. Günlük sınır işlem riskinden küçük olamaz.</p>}
       {wallet === null ? <p role="alert">Güncel Binance bakiyesi doğrulanamadı. Kayıp tahmini ve risk onayı için bağlantıyı yenileyin.</p> : validRisk && <div className="originalRiskWarning" data-level={riskLevel(selectedRisk)} data-testid="original-risk-warning">
@@ -432,18 +454,23 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
           {(openingWallet ?? wallet) * selectedDaily / 100 > status.risk_limits.daily_loss_limit_usdt && <p>Seçtiğin günlük sınır {usdt((openingWallet ?? wallet) * selectedDaily / 100)} olsa da diğer günlük güvenlik kapıları en fazla {usdt(status.risk_limits.daily_loss_limit_usdt)} kayıpta yeni girişleri durdurur.</p>}
           <p>Teminat {status.risk_limits.min_margin_usdt}–{status.risk_limits.max_margin_usdt} USDT, kaldıraç {status.risk_limits.leverage}x ve Binance minimumları korunur. Adaya göre risk daha da düşebilir; minimumlar karşılanmazsa işlem açılmaz.</p>
         </>}
-        {selectedRisk > 2 && selectedRisk <= 5 && <label><input type="checkbox" checked={riskAcknowledged} onChange={event => setRiskAcknowledged(event.target.checked)} disabled={busy}/> Bu riski anladım</label>}
+        {selectedRisk > 2 && selectedRisk <= 5 && <label><input type="checkbox" checked={riskAcknowledged && understood} onChange={event => {setRiskAcknowledged(event.target.checked); setUnderstood(event.target.checked)}} disabled={busy}/> Bu riski anladım</label>}
         {selectedRisk > 5 && <label>{highRiskPhrase} yazın<input value={highRiskConfirmation} onChange={event => setHighRiskConfirmation(event.target.value)} disabled={busy} autoComplete="off"/></label>}
       </div>}
       {status.last_risk_adjustment && <p data-testid="original-applied-risk">Son aday {status.last_risk_adjustment.symbol}: seçilen %{status.last_risk_adjustment.selected_percent}, hesaplanan risk %{status.last_risk_adjustment.effective_percent.toLocaleString('tr-TR', {maximumFractionDigits: 4})} ({usdt(status.last_risk_adjustment.effective_loss_usdt)}). {status.last_risk_adjustment.reasons.length > 0 && `Seçtiğin risk şu sebeple düşürüldü: ${status.last_risk_adjustment.reasons.join(' · ')}.`}</p>}
-      <button type="button" className="masterTradeLiveSecondary" onClick={() => void saveRisk()} disabled={busy || !status.available || !validRisk || wallet === null || !consentReady || code.length < 6}>Risk ayarını kaydet · Yalnızca yeni işlemler</button>
-      <p>Önce mevcut LIVE bağlantısı, izinler, politika onayı ve ARM adımını tamamlayın. Borsa ve hesap limitleri ayrıca uygulanır. Açık pozisyon otomatik kapatılmaz.</p>
-      <div className="masterTradeLiveSetupFooter">
-        <button type="submit" className="masterTradeLivePrimary" disabled={busy || status.enabled || fillLocked || !status.available || blocked || !armed || automationActive || confirmation !== 'ORIGINAL V2 CANLI' || !validRisk || wallet === null || !consentReady}>{renewing ? 'Original V2 oturumunu yenile' : 'Original V2 LIVE aç'}</button>
-        <button type="button" className="masterTradeLiveSecondary" onClick={() => void act(true)} disabled={busy || !status.enabled}>Acil durdur · Yeni girişleri kapat</button>
+      {!(selectedRisk > 2 && selectedRisk <= 5) && <label className="originalUnderstanding"><input type="checkbox" checked={understood} onChange={event => setUnderstood(event.target.checked)} disabled={busy}/> Gerçek parayla işlem açılacağını ve kayıp olabileceğini anladım</label>}
+      <button type="button" className="masterTradeLivePrimary" onClick={() => void saveRisk()} disabled={busy || !status.available || !validRisk || wallet === null || !consentReady || !understood || blocked}>Onayla ve devam et · Risk ayarını kaydet</button>
+      </fieldset>
+      <div className="originalSetupStep" data-active={connected && riskApproved} data-complete={status.enabled}>
+        <h3>{status.enabled ? '✓' : '3'} · Stratejiyi başlat</h3>
+        <p>Onay ve ARM arka planda tamamlanır. Her adayda sunucu güvenlik kontrolleri yeniden uygulanır.</p>
+        <button type="submit" className="masterTradeLivePrimary" disabled={busy || status.enabled || fillLocked || !status.available || blocked || (!prepareStart && !armed) || automationActive || !riskApproved || !validRisk || wallet === null || !consentReady}>{renewing ? 'Original V2 oturumunu yenile' : 'Kais Original V2’yi başlat'}</button>
       </div>
     </form>
+    </details>
     {notice && <p role="status">{notice}</p>}
+    <details className="originalDetails" data-testid="original-details"><summary>Detaylar · kontroller {entryChecks.filter(check => check.passed).length}/{entryChecks.length}</summary>
+    {technicalDetails}
     <button type="button" className="masterTradeLiveSecondary" onClick={() => void diagnose()} disabled={diagnosing || busy} title="Kalıcı kayıt teşhisi"><Database size={16} aria-hidden="true"/> {diagnosing ? 'Kayıt kontrol ediliyor...' : 'Kalıcı kayıt teşhisi'}</button>
     {diagnosticError && <p role="alert">{diagnosticError}</p>}
     {diagnostics && <div role="status" data-testid="original-persistence-diagnostics">
@@ -453,5 +480,7 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
       <p>Son yazma: {diagnostics.last_write ? `${diagnostics.last_write.result} · revision ${diagnostics.last_write.submitted_revision}` : 'Bu süreçte ölçülmedi'} · Sürüm: {diagnostics.build_commit?.slice(0, 7) || 'Bilinmiyor'}</p>
       <p>Son beklenen yazma: {diagnostics.last_awaited_write ? `${diagnostics.last_awaited_write.result} · revision ${diagnostics.last_awaited_write.submitted_revision}` : 'Bu süreçte ölçülmedi'}</p>
     </div>}
+    </details>
+    <div className="originalEmergencyBar"><button type="button" onClick={() => void act(true)} disabled={busy || !status.enabled && !automationActive}>Acil durdur · Yeni girişleri kapat</button><small>Açık pozisyon ve Binance Stop/TP korunur.</small></div>
   </section>
 }

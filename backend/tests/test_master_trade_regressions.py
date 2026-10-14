@@ -64,13 +64,13 @@ class MasterTradeRegressionTests(unittest.IsolatedAsyncioTestCase):
             state=SimpleNamespace(member={"id": "offline-owner"}),
         )
         with patch.object(v25, "execution_owner", return_value={"id": "offline-owner", "role": "OWNER"}), \
-                patch("app.exchange_connections._require_live_mfa", new=AsyncMock()), \
+                patch.object(v25, "require_live_understanding", new=AsyncMock()), \
                 patch.object(v25, "live_auto_start_gate", return_value=(True, "ready")), \
                 patch.object(v25, "authenticated_live_expiry", return_value=time.time() + 900), \
                 patch.object(v25, "public_status", return_value={}), \
                 patch.object(v25, "persist_state") as persist:
             with self.assertRaises(HTTPException) as rejected:
-                await v25.v25_auto_start(request, v25.AutoStartConfirmation(confirmation="CANLI OTOMATİK"))
+                await v25.v25_auto_start(request, v25.AutoStartConfirmation(understood=True))
         self.assertEqual(rejected.exception.status_code, 409)
         self.assertEqual(state["auto"]["session_until"], deadline)
         self.assertEqual(state["auto_authorization"], authorization)

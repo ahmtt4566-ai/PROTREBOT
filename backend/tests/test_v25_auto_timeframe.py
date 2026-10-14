@@ -15,7 +15,7 @@ from app import account_settings  # noqa: E402
 
 
 class LiveAutoTimeframeTests(unittest.TestCase):
-    def start(self, state, *, confirmation="CANLI OTOMATİK", gate=(True, "ready")):
+    def start(self, state, *, understood=True, gate=(True, "ready")):
         state.setdefault("lock", asyncio.Lock())
         request = SimpleNamespace(
             app=SimpleNamespace(state=SimpleNamespace(v25_execution=state)),
@@ -35,7 +35,7 @@ class LiveAutoTimeframeTests(unittest.TestCase):
         ), patch.object(account_settings, "enabled", AsyncMock(return_value=True)), \
                 patch.object(account_settings, "require_totp", new=AsyncMock()):
             return asyncio.run(execution.v25_auto_start(
-                request, execution.AutoStartConfirmation(confirmation=confirmation, totp_code="123456"),
+                request, execution.AutoStartConfirmation(understood=understood),
             ))
 
     def test_non_15m_returns_explicit_error_without_starting_or_mutating_state(self):
@@ -68,13 +68,13 @@ class LiveAutoTimeframeTests(unittest.TestCase):
         self.assertFalse(state["auto"]["enabled"])
         self.assertFalse(state["live_auto_trade"])
 
-    def test_invalid_confirmation_is_still_rejected_first(self):
+    def test_missing_understanding_is_still_rejected_first(self):
         state = execution.initial_state()
         state["policy"]["interval"] = "1h"
         with self.assertRaises(execution.HTTPException) as caught:
-            self.start(state, confirmation="WRONG CONFIRMATION")
+            self.start(state, understood=False)
         self.assertEqual(caught.exception.status_code, 422)
-        self.assertIn("CANLI OTOMATİK", caught.exception.detail)
+        self.assertIn("anladım", caught.exception.detail)
 
     def test_non_15m_cannot_bypass_owner_control(self):
         state = execution.initial_state()
@@ -111,7 +111,7 @@ class LiveAutoTimeframeTests(unittest.TestCase):
                 self.assertLogs("app.v25_execution", level="WARNING") as logs, \
                 TestClient(application) as client:
             response = client.post("/api/v25/auto/start", json={
-                "confirmation": "CANLI OTOMATİK", "totp_code": "123456",
+                "understood": True,
             })
         self.assertEqual(response.status_code, 422)
         detail = response.json()["detail"]

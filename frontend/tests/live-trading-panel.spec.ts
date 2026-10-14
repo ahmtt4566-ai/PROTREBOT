@@ -71,6 +71,10 @@ const openPanelWithStatus = async (page: Page, state: LiveStatus, mutations: str
     await route.continue()
   })
   await page.goto('/master-trade?tab=canli')
+  await page.locator('.originalAdvanced > summary').click()
+  await page.locator('.masterTradeFlowCard').evaluateAll(cards => {
+    for (const card of cards) (card as HTMLDetailsElement).open = true
+  })
   await expect(page.getByRole('heading', {name: 'LIVE AUTO TRADE'})).toBeVisible()
 }
 
@@ -101,7 +105,7 @@ test('shows OFF when Auto Trade is disabled and the live lock is closed', async 
   const headline = page.locator('header.masterTradeLiveHeader')
   await expect(headline.getByText('AUTO TRADE IS OFF', {exact: true})).toBeVisible()
   await expect(headline.locator('.masterTradeLiveHeadline > strong')).toHaveText('LOCKED')
-  await expect(page.getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
+  await expect(page.getByLabel('Auto Trade controls').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
 })
 
 test('uses the shared exposure ceiling and configurable liquidation buffer without implicit mutations', async ({page}) => {
@@ -110,7 +114,6 @@ test('uses the shared exposure ceiling and configurable liquidation buffer witho
     live_auto_trade: false, real_trading_locked: true, armed: false, readinessReady: false,
   }, mutations)
   const setup = page.locator('.masterTradeLiveSetup')
-  await page.locator('details').filter({has: setup}).locator('summary').click()
   const exposure = setup.getByRole('spinbutton', {name: /^Max exposure/})
   await expect(exposure).toHaveValue('350')
   await expect(exposure).toHaveAttribute('max', '350')
@@ -124,8 +127,12 @@ test('uses the shared exposure ceiling and configurable liquidation buffer witho
   expect(mutations).toEqual([])
   const saving = page.waitForRequest(request => request.method() === 'PUT' && new URL(request.url()).pathname.endsWith('/v25/policy'))
   await setup.getByRole('button', {name: 'SAVE SETUP', exact: true}).click()
+  await page.getByRole('dialog').getByLabel('Gerçek işlem ve kayıp riskini anladım').check()
+  await page.getByRole('dialog').getByRole('button', {name: 'EVET', exact: true}).click()
   const request = await saving
   expect(request.postDataJSON().liquidation_buffer_pct).toBe(0.75)
+  expect(request.postDataJSON().understood).toBe(true)
+  expect(request.postDataJSON()).not.toHaveProperty('totp_code')
   expect(mutations.filter(path => !path.endsWith('/v25/policy'))).toEqual([])
 })
 
@@ -156,7 +163,7 @@ test('shows backend-acknowledged policy checked and prevents acknowledging it ag
   await expect(checkbox).toBeChecked()
   await expect(checkbox).toBeDisabled()
   await expect(page.getByRole('button', {name: 'POLICY ACKNOWLEDGED', exact: true})).toBeDisabled()
-  await expect(page.getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
+  await expect(page.getByLabel('Auto Trade controls').getByRole('button', {name: 'START LIVE AUTO TRADE', exact: true})).toBeDisabled()
 })
 
 for (const interval of ['1m', '5m', '1h', '4h']) {
@@ -178,7 +185,7 @@ for (const interval of ['1m', '5m', '1h', '4h']) {
   })
 }
 
-test('15m keeps the existing Auto Trade confirmation flow', async ({page}) => {
+test('15m legacy Auto Trade uses an understanding checkbox without another MFA prompt', async ({page}) => {
   const mutations: string[] = []
   await openPanelWithStatus(page, {
     live_auto_trade: false, real_trading_locked: false, armed: true,
@@ -189,8 +196,9 @@ test('15m keeps the existing Auto Trade confirmation flow', async ({page}) => {
   await expect(start).toBeEnabled()
   await start.click()
   await expect(page.getByRole('dialog')).toContainText('REAL MONEY WILL BE USED')
-  await expect(page.getByPlaceholder('CANLI OTOMATİK')).toBeVisible()
-  await expect(page.getByRole('dialog').getByRole('button', {name: 'CONFIRM', exact: true})).toBeDisabled()
+  await expect(page.getByPlaceholder('CANLI OTOMATİK')).toHaveCount(0)
+  await expect(page.getByRole('dialog').getByLabel('Gerçek işlem ve kayıp riskini anladım')).not.toBeChecked()
+  await expect(page.getByRole('dialog').getByRole('button', {name: 'EVET', exact: true})).toBeDisabled()
   expect(mutations.filter(path => path.endsWith('/auto/start'))).toEqual([])
 })
 

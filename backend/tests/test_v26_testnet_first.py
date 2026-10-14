@@ -37,7 +37,8 @@ class V26TestnetFirstContracts(unittest.TestCase):
     def test_live_channel_is_fail_closed_until_explicit_gates(self):
         self.assertIn("BINANCE_LIVE_API_KEY", CREDENTIALS)
         self.assertIn("BINANCE_LIVE_SECRET_KEY", CREDENTIALS)
-        self.assertIn("CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM", EXECUTION)
+        self.assertIn("understood: bool = Field(default=False, strict=True)", EXECUTION)
+        self.assertIn("await require_live_understanding(request, user, body.understood)", EXECUTION)
         self.assertIn("LIVE_ARM_SECONDS = 24 * 60 * 60", EXECUTION)
         self.assertIn('"web_consent": {"accepted_at": None', EXECUTION)
 

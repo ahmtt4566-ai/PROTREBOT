@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export default defineConfig({
   testDir: resolve(root, 'frontend', 'tests'),
-  testMatch: ['original-v2-live.spec.ts', 'original-risk-admin.spec.ts', 'master-trade-live-ui.spec.ts'],
+  testMatch: ['original-v2-live.spec.ts', 'original-risk-admin.spec.ts', 'master-trade-live-ui.spec.ts', 'live-trading-panel.spec.ts'],
   outputDir: resolve(tmpdir(), `kaistrade-original-live-${randomUUID()}`),
   workers: 1,
   retries: 0,

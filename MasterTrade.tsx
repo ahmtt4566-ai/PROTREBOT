@@ -320,9 +320,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     const promise = (async () => {
       try {
         const response = await Promise.all([
-          forceLiveSnapshot
-            ? fetchWithTimeout(`${API_BASE}/v25/connect/read-only`, {method: 'POST'})
-            : fetchWithTimeout(`${API_BASE}/v25/status`),
+          fetchWithTimeout(`${API_BASE}/v25/status`, {cache: forceLiveSnapshot ? 'no-store' : 'default'}),
           fetchWithTimeout(`${API_BASE}/exchange-connections/status`),
         ])
         const [accountResponse, connectionResponse] = response
@@ -774,7 +772,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         </div>
 
         <div className="masterTradeSticky">
-        <section className={`masterTradeFocusPanel${masterTradeOffline ? ' offline' : ''}`} aria-label="Primary trade decision">
+        <section className={`masterTradeFocusPanel${masterTradeOffline ? ' offline' : ''}`} aria-label="Primary trade decision" hidden={layoutTab === 'canli' || layoutTab === 'baglanti'}>
           <div className="masterTradeFocusIdentity">
             <span className="panelEyebrow">PRIMARY DECISION</span>
             <strong>{draft.market}</strong>
@@ -1007,7 +1005,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
             if (!await refreshAccountData(force)) throw new Error('LIVE durum yenilemesi başarısız; işlem durumunu doğrulayın.')
           }} />
 
-        <div className="masterTradeDataGrid" hidden={layoutTab === 'canli'}>
+        <div className="masterTradeDataGrid" hidden={layoutTab === 'canli' || layoutTab === 'baglanti'}>
           <section className="masterTradePanel riskMonitorPanel" hidden={layoutTab !== 'baglanti'}>
             <div className="panelHeader">
               <div>

@@ -1094,10 +1094,10 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
         with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
             patch.object(v25_execution, "persist_state"), \
-            patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()):
+            patch.object(v25_execution, "require_live_understanding", new=AsyncMock()):
             asyncio.run(v25_execution.v25_web_consent(
                 request,
-                v25_execution.Confirmation(confirmation="CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM"),
+                v25_execution.Confirmation(understood=True),
             ))
 
         self.assertIsNone(state["policy_ack_digest"])
@@ -1118,10 +1118,10 @@ class V25LiveGuardCoreTests(unittest.TestCase):
         state["live_session_authorization"].update(user_id="owner", session_id=v25_execution.session_id(request))
         with patch.object(v25_execution, "live_credentials_status", return_value=("api-key-123456", "secret-key-123456", "fingerprint")), \
             patch.object(v25_execution, "persist_state"), \
-            patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()), \
+            patch.object(v25_execution, "require_live_understanding", new=AsyncMock()), \
             patch.object(v25_execution.time, "time", return_value=now):
             asyncio.run(v25_execution.v25_web_consent(
-                request, v25_execution.Confirmation(confirmation="CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM"),
+                request, v25_execution.Confirmation(understood=True),
             ))
         self.assertEqual(v25_execution.LIVE_CONSENT_SECONDS, 24 * 60 * 60)
         self.assertEqual(v25_execution.LIVE_ARM_SECONDS, 24 * 60 * 60)
@@ -1146,10 +1146,10 @@ class V25LiveGuardCoreTests(unittest.TestCase):
 
         with patch.object(v25_execution, "consent_status", return_value={"active": True, "fingerprint": "fingerprint"}), \
             patch.object(v25_execution, "persist_state"), \
-            patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()):
+            patch.object(v25_execution, "require_live_understanding", new=AsyncMock()):
             asyncio.run(v25_execution.v25_policy(
                 request,
-                v25_execution.PolicyUpdate(max_loss_per_trade=4),
+                v25_execution.PolicyUpdate(max_loss_per_trade=4, understood=True),
             ))
 
         self.assertIsNone(state["policy_ack_digest"])
@@ -3015,7 +3015,7 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
         mfa = AsyncMock()
         resolver = AsyncMock(return_value=credentials)
 
-        with patch.object(exchange_connections, "_require_live_mfa", new=mfa), \
+        with patch.object(v25_execution, "require_live_understanding", new=mfa), \
              patch.object(v25_execution, "execution_owner", return_value=owner), \
              patch.object(v25_execution, "live_auto_start_gate", return_value=(True, "ready")), \
              patch.object(v25_execution, "live_credentials_status", return_value=(
@@ -3048,8 +3048,7 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
             asyncio.run(v25_execution.v25_auto_start(
                 first_request,
                 v25_execution.AutoStartConfirmation(
-                    confirmation="CANLI OTOMATİK",
-                    totp_code="123456",
+                    understood=True,
                 ),
             ))
 

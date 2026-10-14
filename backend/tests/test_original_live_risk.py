@@ -138,6 +138,19 @@ def save(request, state, choice, snapshot=None, fingerprint="fp"):
     ))
 
 
+def test_initial_default_risk_understanding_is_audited_once():
+    request, state, conn = context()
+    choice = risk.RiskChoice(understood=True, warning_balance_usdt=1000)
+    config = save(request, state, choice)
+    assert config["risk_percent"] == 0.5 and config["daily_loss_percent"] == 5
+    assert config["risk_revision"] == 1 and config["understood"] is True
+    assert len(conn.audits) == 1
+    assert json.loads(conn.audits[0][8])["understood"] is False
+    assert json.loads(conn.audits[0][9])["understood"] is True
+    save(request, state, choice.model_copy(update={"expected_risk_revision": 1}))
+    assert len(conn.audits) == 1
+
+
 def test_risk_and_audit_commit_together_without_reopening_daily_lock_or_touching_positions():
     request, state, conn = context()
     old_plans = copy.deepcopy(state["plans"])
@@ -276,7 +289,7 @@ def test_unapproved_stored_high_risk_blocks_new_entry():
         original.execution_policy(state, {"wallet_balance": 1000})
 
 
-def test_risk_endpoint_keeps_mfa_and_account_gates_without_starting_automation(monkeypatch):
+def test_risk_endpoint_uses_understanding_without_repeating_mfa_or_starting_automation(monkeypatch):
     request, state, conn = context()
     state["recovery_ready"] = True
     monkeypatch.setenv(original.FLAG, "true")
@@ -284,21 +297,22 @@ def test_risk_endpoint_keeps_mfa_and_account_gates_without_starting_automation(m
     monkeypatch.setattr(live, "execution_owner", Mock())
     mfa = AsyncMock()
     monkeypatch.setattr(account_settings, "require_totp", mfa)
+    monkeypatch.setattr(account_settings, "enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(live, "live_credentials_status", Mock(return_value=("offline-key", "offline-secret", "fp")))
     monkeypatch.setattr(live, "client_for", Mock(return_value=object()))
     monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={"wallet_balance": 1000}))
     monkeypatch.setattr(original, "status", AsyncMock(side_effect=lambda req: original.public_config(state)))
     start = AsyncMock()
     monkeypatch.setattr(live, "_start_live_auto_session", start)
-    body = risk.RiskUpdate(**high_choice().model_dump(), totp_code="123456")
+    body = risk.RiskUpdate(**{**high_choice().model_dump(), "understood": True})
     response = asyncio.run(original.update_risk(request, body))
     assert response["risk_revision"] == 1
     assert conn.committed
-    mfa.assert_awaited_once()
+    mfa.assert_not_awaited()
     start.assert_not_awaited()
 
 
-@pytest.mark.parametrize("gate,status", [("owner", 403), ("recovery", 503), ("mfa", 401), ("credentials", 423)])
+@pytest.mark.parametrize("gate,status", [("owner", 403), ("recovery", 503), ("understanding", 422), ("credentials", 423)])
 def test_risk_update_denied_gates_preserve_risk_and_positions(monkeypatch, gate, status):
     request, state, conn = context()
     before = copy.deepcopy(state["original_v2_live"])
@@ -310,10 +324,11 @@ def test_risk_update_denied_gates_preserve_risk_and_positions(monkeypatch, gate,
         user.side_effect = HTTPException(403, "OWNER required")
     monkeypatch.setattr(original, "authenticated_user", user)
     monkeypatch.setattr(live, "execution_owner", Mock())
+    monkeypatch.setattr(account_settings, "enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(account_settings, "require_totp", AsyncMock(side_effect=HTTPException(401, "Invalid MFA") if gate == "mfa" else None))
     monkeypatch.setattr(live, "live_credentials_status", Mock(return_value=("", "", None)))
     with pytest.raises(HTTPException) as error:
-        asyncio.run(original.update_risk(request, risk.RiskUpdate(**high_choice().model_dump(), totp_code="123456")))
+        asyncio.run(original.update_risk(request, risk.RiskUpdate(**{**high_choice().model_dump(), "understood": gate != "understanding"})))
     assert error.value.status_code == status
     assert state["original_v2_live"] == before
     assert state["plans"] == plans
@@ -328,12 +343,13 @@ def test_risk_snapshot_exchange_error_is_explicit_and_cannot_apply_choice(monkey
     monkeypatch.setattr(original, "authenticated_user", Mock(return_value={"id": "owner", "role": "OWNER"}))
     monkeypatch.setattr(live, "execution_owner", Mock())
     monkeypatch.setattr(account_settings, "require_totp", AsyncMock())
+    monkeypatch.setattr(account_settings, "enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(live, "live_credentials_status", Mock(return_value=("offline-key", "offline-secret", "fp")))
     monkeypatch.setattr(live, "client_for", Mock(return_value=object()))
     exchange_error = live.LiveExchangeError("Binance hesap bakiyesi alınamadı.", http_status=503)
     monkeypatch.setattr(live, "account_snapshot", AsyncMock(side_effect=exchange_error))
     with pytest.raises(HTTPException) as error:
-        asyncio.run(original.update_risk(request, risk.RiskUpdate(**high_choice().model_dump(), totp_code="123456")))
+        asyncio.run(original.update_risk(request, risk.RiskUpdate(**{**high_choice().model_dump(), "understood": True})))
     assert error.value.status_code == 503
     assert state["original_v2_live"] == before
     assert not conn.committed

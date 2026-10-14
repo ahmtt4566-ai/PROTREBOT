@@ -8,6 +8,7 @@ type RiskRecord = {
   daily_warning_level: 'NORMAL' | 'ORANGE' | 'RED'
   risk_acknowledged: boolean
   high_risk_confirmed: boolean
+  understood?: boolean
   warning_balance_usdt: number | null
 }
 type RiskAuditItem = {id: number; created_at: string; actor_user_id: string; before: RiskRecord; after: RiskRecord}
@@ -23,6 +24,7 @@ function validRecord(value: unknown): value is RiskRecord {
     && ['NORMAL', 'ORANGE', 'RED'].includes(value.daily_warning_level)
     && 'risk_acknowledged' in value && typeof value.risk_acknowledged === 'boolean'
     && 'high_risk_confirmed' in value && typeof value.high_risk_confirmed === 'boolean'
+    && (!('understood' in value) || typeof value.understood === 'boolean')
     && 'warning_balance_usdt' in value && (value.warning_balance_usdt === null
       || typeof value.warning_balance_usdt === 'number' && Number.isFinite(value.warning_balance_usdt) && value.warning_balance_usdt > 0)
 }
@@ -82,7 +84,7 @@ export default function AdminOriginalRisk({token}: {token: string}) {
         <td>%{item.before.risk_percent} → %{item.after.risk_percent}</td>
         <td>%{item.before.daily_loss_percent} → %{item.after.daily_loss_percent}</td>
         <td>İşlem: {levelName[item.after.warning_level]}<br/>Günlük: {levelName[item.after.daily_warning_level]}</td>
-        <td>{item.after.high_risk_confirmed ? 'Yüksek risk kabul yazısı doğrulandı' : item.after.risk_acknowledged ? 'Bu riski anladım onayı' : 'Ek yüksek risk onayı gerekmiyor'}<br/>{item.after.warning_balance_usdt?.toLocaleString('tr-TR')} USDT</td>
+        <td>{item.after.high_risk_confirmed ? 'Yüksek risk kabul yazısı doğrulandı' : item.after.risk_acknowledged ? 'Bu riski anladım onayı' : item.after.understood === true ? 'İşlem ve kayıp riskini anladım onayı' : 'Ek yüksek risk onayı gerekmiyor'}<br/>{item.after.warning_balance_usdt?.toLocaleString('tr-TR')} USDT</td>
       </tr>)}</tbody>
     </table></div>}
     <div className="adminPagination">

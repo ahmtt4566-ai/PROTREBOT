@@ -620,7 +620,7 @@ def test_live_auto_grant_is_owner_scoped_and_not_capped_by_browser_token_expiry(
          patch("app.account_settings.enabled", AsyncMock(return_value=True)), \
          patch("app.account_settings.require_totp", new=AsyncMock()):
         asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
-            confirmation="CANLI OTOMAT\u0130K", totp_code="123456",
+            understood=True,
         )))
     assert state["live_session_authorization"]["auth_version"] == 1
     assert state["live_session_authorization"]["auth_expires_at_epoch"] is None
@@ -672,14 +672,14 @@ def test_save_only_writes_validated_permissions(valid):
     request = request_for(live.initial_state())
     body = vault.SaveCredentialsRequest(
         mode="LIVE", api_key="api-key-safe", secret_key="secret-safe",
-        confirmation="CANLI KASAYA KAYDET",
+        confirmation="CANLI KASAYA KAYDET", totp_code="123456",
     )
     run, _ = binance_check({"enableWithdrawals": not valid})
 
     async def check(*args, **kwargs):
         return await run()
 
-    mfa_check = AsyncMock(side_effect=AssertionError("API key save must not require 2FA"))
+    mfa_check = AsyncMock()
     with patch.object(vault, "_require_ready", new=AsyncMock(return_value=request.app.state.db_pool)), \
          patch.object(vault, "_require_live_mfa", new=mfa_check), \
          patch.object(vault, "ensure_schema", new=AsyncMock()), \
@@ -695,4 +695,4 @@ def test_save_only_writes_validated_permissions(valid):
             with pytest.raises(HTTPException):
                 asyncio.run(vault.exchange_connection_save(request, body))
             request.app.state.db_pool.execute.assert_not_awaited()
-    mfa_check.assert_not_awaited()
+    mfa_check.assert_awaited_once()

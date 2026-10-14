@@ -37,7 +37,7 @@ def state(monkeypatch):
     state["original_v2_live"] = {
         "enabled": True, "owner_id": "owner", "fingerprint": "fingerprint",
         "risk_percent": 0.5, "daily_loss_percent": 5, "paused": False,
-        "symbol_count": 40,
+        "symbol_count": 40, "understood": True,
         "universe": {
             "updated_day": datetime.now(timezone.utc).date().isoformat(),
             "minimum_age_days": original.ORIGINAL_MIN_SYMBOL_AGE_DAYS,
@@ -564,7 +564,7 @@ def test_start_requires_every_owner_gate(state, monkeypatch, disabled):
     if disabled == "customer":
         original.authenticated_user.side_effect = HTTPException(403, "OWNER required")
     body = original.Start(confirmation="NO" if disabled == "confirmation" else "ORIGINAL V2 CANLI",
-                          totp_code="123456")
+                          totp_code="123456", understood=disabled != "confirmation")
     with pytest.raises(HTTPException):
         run(original.start(req, body))
     native.assert_not_called()
@@ -992,7 +992,7 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
         assert kwargs == {"required": True}
         trace.append("2fa")
     async def start(*args, **kwargs):
-        assert kwargs == {"mfa_verified": True, "state_lock_held": True}
+        assert kwargs == {"state_lock_held": True}
         trace.append("existing-auto")
         state["auto"]["enabled"] = True
         state["auto_authorization"]["auth_expires_at_epoch"] = now + ((authority_hours or 48) if limit_source == "login" else 48) * 3600
@@ -1005,7 +1005,7 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
     monkeypatch.setattr(original, "daily_guard", AsyncMock())
     consent_hours = (authority_hours or 48) if limit_source == "consent" else 48
     monkeypatch.setattr(live, "consent_status", Mock(return_value={"active": True, "expires_at": datetime.fromtimestamp(now + consent_hours * 3600, timezone.utc).isoformat()}))
-    response = run(original.start(req, original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=hours)))
+    response = run(original.start(req, original.Start(understood=True, session_hours=hours)))
     assert response["enabled"]
     expected_expiry = now + min(hours, consent_hours) * 3600
     assert state["auto"]["session_until"] == expected_expiry
@@ -1016,7 +1016,7 @@ def test_start_success_consumes_fresh_2fa_then_existing_auto_authority(state, mo
     assert not response["session"]["warning_sent"]
     assert state["original_v2_live"]["session_id"] != "expired-session"
     assert response["daily"]["loss"] == 12
-    assert trace == ["2fa", "existing-auto"]
+    assert trace == ["existing-auto"]
     live.persist_state_awaited.assert_awaited_once_with(state)
 
 
@@ -1042,7 +1042,7 @@ def test_original_start_does_not_reacquire_live_state_lock(state, monkeypatch):
     }))
 
     response = run(asyncio.wait_for(
-        original.start(req, original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456")),
+        original.start(req, original.Start(understood=True)),
         timeout=1,
     ))
 
@@ -1053,7 +1053,7 @@ def test_original_start_does_not_reacquire_live_state_lock(state, monkeypatch):
 
 
 @pytest.mark.parametrize("renewal", [False, True])
-def test_2fa_failure_never_starts_or_fetches_exchange(state, monkeypatch, renewal):
+def test_missing_understanding_never_starts_or_fetches_exchange(state, monkeypatch, renewal):
     req = request_for(state)
     state["auto"]["enabled"] = False
     state["original_v2_live"]["enabled"] = False
@@ -1069,7 +1069,7 @@ def test_2fa_failure_never_starts_or_fetches_exchange(state, monkeypatch, renewa
     monkeypatch.setattr(live, "client_for", client)
     with pytest.raises(HTTPException) as error:
         run(original.start(req, original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456")))
-    assert error.value.status_code == 401
+    assert error.value.status_code == 422
     start.assert_not_awaited()
     client.assert_not_called()
 
@@ -1137,7 +1137,7 @@ def test_original_start_fails_closed_without_duration_authority(state, monkeypat
         consent["expires_at"] = datetime.fromtimestamp(time.time() - 1, timezone.utc).isoformat()
     monkeypatch.setattr(live, "consent_status", Mock(return_value=consent))
     with pytest.raises(HTTPException) as error:
-        run(original.start(request_for(state), original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=24)))
+        run(original.start(request_for(state), original.Start(understood=True, session_hours=24)))
     assert error.value.status_code == 423
     assert not original.running(state) and not state["auto"]["enabled"]
     assert state["real_trading_locked"] and state["armed_until"] == 0
@@ -1154,7 +1154,7 @@ def test_original_active_session_cannot_be_extended(state, monkeypatch, hours):
     monkeypatch.setattr(live, "_start_live_auto_session", start)
     expiry = state["auto"]["session_until"]
     with pytest.raises(HTTPException) as error:
-        run(original.start(request_for(state), original.Start(confirmation="ORIGINAL V2 CANLI", totp_code="123456", session_hours=hours)))
+        run(original.start(request_for(state), original.Start(understood=True, session_hours=hours)))
     assert error.value.status_code == 409
     assert state["auto"]["session_until"] == expiry
     code.assert_not_awaited()

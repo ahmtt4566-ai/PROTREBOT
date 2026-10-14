@@ -195,7 +195,7 @@ def test_original_start_cannot_clear_lock_even_with_arm_and_valid_mfa(locked_con
     monkeypatch.setattr(account_settings,"enabled",AsyncMock(return_value=True))
     monkeypatch.setattr(live,"live_auto_start_gate",Mock(return_value=(True,"ready")))
     with pytest.raises(HTTPException) as error:
-        run(original.start(request,original.Start(confirmation="ORIGINAL V2 CANLI",totp_code="123456")))
+        run(original.start(request,original.Start(understood=True)))
     assert error.value.status_code == 423
     assert original.fill_locked(state)
     account_settings.require_totp.assert_not_awaited()

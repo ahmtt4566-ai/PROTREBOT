@@ -37,13 +37,13 @@ def start_context(monkeypatch):
     return request, state
 
 
-def test_live_auto_missing_mfa_never_changes_authority(start_context):
+def test_live_auto_missing_understanding_never_changes_authority(start_context):
     request, state = start_context
     before = copy.deepcopy({key: value for key, value in state.items() if key != "lock"})
     with pytest.raises(HTTPException) as error:
         asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(confirmation="CANLI OTOMATİK")))
-    assert error.value.status_code == 401
-    assert "2FA kodu" in error.value.detail
+    assert error.value.status_code == 422
+    assert "anladım" in error.value.detail
     assert {key: value for key, value in state.items() if key != "lock"} == before
     account_settings.require_totp.assert_not_awaited()
     live.live_credentials_status.assert_not_called()
@@ -51,25 +51,20 @@ def test_live_auto_missing_mfa_never_changes_authority(start_context):
 
 
 @pytest.mark.parametrize("reason", ["Geçersiz 2FA kodu.", "Bu 2FA kodu zaten kullanıldı."])
-def test_invalid_or_replayed_mfa_never_starts(start_context, reason):
+def test_normal_start_does_not_rechallenge_logged_in_owner(start_context, reason):
     request, state = start_context
     before = copy.deepcopy({key: value for key, value in state.items() if key != "lock"})
     account_settings.require_totp.side_effect = HTTPException(401, reason)
-    with pytest.raises(HTTPException) as error:
-        asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
-            confirmation="CANLI OTOMATİK", totp_code="123456")))
-    assert error.value.status_code == 401
-    assert {key: value for key, value in state.items() if key != "lock"} == before
-    live.live_credentials_status.assert_not_called()
-    live.persist_state.assert_not_called()
+    asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(understood=True)))
+    assert state["auto"]["enabled"]
+    account_settings.require_totp.assert_not_awaited()
 
 
-def test_valid_mfa_rechecks_gate_before_start(start_context):
+def test_understanding_rechecks_gate_before_start(start_context):
     request, state = start_context
     asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
-        confirmation="CANLI OTOMATİK", totp_code="123456")))
-    account_settings.require_totp.assert_awaited_once_with(
-        request, {"id": "owner", "role": "OWNER"}, "123456", required=True)
+        understood=True)))
+    account_settings.require_totp.assert_not_awaited()
     assert live.live_auto_start_gate.call_count == 2
     assert state["auto"]["enabled"] and state["live_auto_trade"]
 
@@ -80,7 +75,7 @@ def test_mfa_cannot_bypass_changed_arm_gate(start_context):
     live.live_auto_start_gate.side_effect = [(True, "ready"), (False, "ARM expired")]
     with pytest.raises(HTTPException) as error:
         asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
-            confirmation="CANLI OTOMATİK", totp_code="123456")))
+            understood=True)))
     assert error.value.status_code == 423
     assert {key: value for key, value in state.items() if key != "lock"} == before
     live.persist_state.assert_not_called()
@@ -91,7 +86,7 @@ def test_mfa_disabled_account_preserves_existing_start(start_context):
     account_settings.enabled.return_value = False
     with pytest.raises(HTTPException) as error:
         asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
-            confirmation="CANLI OTOMATİK", totp_code="123456")))
+            understood=True)))
     assert error.value.status_code == 403
     assert not state["auto"]["enabled"]
     account_settings.require_totp.assert_not_awaited()
@@ -108,7 +103,7 @@ def test_async_account_mfa_read_cannot_overwrite_new_start_or_policy(start_conte
     account_settings.enabled.side_effect = enabled
     with pytest.raises(HTTPException) as error:
         asyncio.run(live.v25_auto_start(request, live.AutoStartConfirmation(
-            confirmation="CANLI OTOMATİK", totp_code="123456")))
+            understood=True)))
     assert error.value.status_code == (409 if change == "other-start" else 422)
     live.live_credentials_status.assert_not_called()
     live.persist_state.assert_not_called()

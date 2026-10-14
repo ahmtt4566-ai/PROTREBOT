@@ -1178,7 +1178,7 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
     await ensure_schema(pool)
     mode = normalize_mode(body.mode)
     if mode == "LIVE":
-        _require_live_owner(user)
+        await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != SAVE_CONFIRMATIONS[mode]:
         raise HTTPException(422, "Güvenli kaydetme onayı eksik.")
     api_key = body.api_key.get_secret_value().strip()
@@ -1303,7 +1303,7 @@ async def exchange_connection_deactivate(request: Request, body: ConnectionActio
     await ensure_session_cache(request)
     mode = normalize_mode(body.mode)
     if mode == "LIVE":
-        await _require_live_mfa(request, user, body.totp_code)
+        _require_live_owner(user)
     if body.confirmation.strip().upper() != "BAĞLANTIYI KAPAT":
         raise HTTPException(422, "Bağlantıyı kapatma onayı eksik.")
     scope, owner_id = _vault_scope(request, mode)
@@ -1328,7 +1328,7 @@ async def exchange_connection_delete(request: Request, body: ConnectionActionReq
     await ensure_session_cache(request)
     mode = normalize_mode(body.mode)
     if mode == "LIVE":
-        await _require_live_mfa(request, user, body.totp_code)
+        _require_live_owner(user)
     if body.confirmation.strip().upper() != DELETE_CONFIRMATION:
         raise HTTPException(422, f"Silmek için {DELETE_CONFIRMATION} onayı gerekir.")
     scope, owner_id = _vault_scope(request, mode)

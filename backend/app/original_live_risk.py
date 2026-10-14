@@ -32,6 +32,7 @@ class RiskChoice(BaseModel):
     risk_percent: float = Field(default=0.5, ge=0.5, le=10, allow_inf_nan=False, strict=True)
     daily_loss_percent: float = Field(default=5, ge=1, le=25, allow_inf_nan=False, strict=True)
     risk_acknowledged: bool = Field(default=False, strict=True)
+    understood: bool = Field(default=False, strict=True)
     high_risk_confirmation: str = Field(default="", max_length=64, repr=False)
     warning_balance_usdt: float | None = Field(default=None, gt=0, allow_inf_nan=False, strict=True)
     expected_risk_revision: int = Field(default=0, ge=0, strict=True)
@@ -48,7 +49,7 @@ class RiskChoice(BaseModel):
 
 
 class RiskUpdate(RiskChoice):
-    totp_code: str = Field(min_length=6, max_length=32, repr=False)
+    totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
 
 
 def verified_wallet(snapshot: dict[str, Any]) -> float:
@@ -91,6 +92,7 @@ def audit_snapshot(config: dict[str, Any]) -> dict[str, Any]:
         "warning_level": trade_warning(risk), "daily_warning_level": daily_warning(daily),
         "risk_acknowledged": config.get("risk_acknowledged", False),
         "high_risk_confirmed": config.get("high_risk_confirmed", False),
+        "understood": config.get("understood", False),
         "warning_balance_usdt": config.get("warning_balance_usdt"),
         "warning_version": WARNING_VERSION,
     }
@@ -116,12 +118,14 @@ async def save_choice(
         **previous, "owner_id": user["id"], "fingerprint": fingerprint,
         "risk_percent": body.risk_percent, "daily_loss_percent": body.daily_loss_percent,
         "risk_acknowledged": body.risk_acknowledged,
+        "understood": body.understood,
         "high_risk_confirmed": body.high_risk_confirmation == HIGH_RISK_CONFIRMATION,
         "warning_balance_usdt": wallet, "warning_version": WARNING_VERSION,
     }
     changed = not previous or any(previous.get(key, default) != candidate[key] for key, default in (
         ("risk_percent", 0.5), ("daily_loss_percent", 5),
         ("risk_acknowledged", False), ("high_risk_confirmed", False),
+        ("understood", False),
     ))
     if not changed:
         return previous
@@ -173,7 +177,7 @@ async def save_choice(
     previous.pop("last_risk_adjustment", None)
     for key in (
         "owner_id", "fingerprint", "risk_percent", "daily_loss_percent", "risk_acknowledged",
-        "high_risk_confirmed", "warning_balance_usdt", "warning_version", "risk_revision", "risk_projection",
+        "high_risk_confirmed", "understood", "warning_balance_usdt", "warning_version", "risk_revision", "risk_projection",
     ):
         previous[key] = candidate[key]
     if day is not None and isinstance(previous.get("daily"), dict):

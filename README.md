@@ -523,10 +523,37 @@ writes do not apply the choice. Increasing daily limits never clears an existing
 daily lock. Snapshot writes also reject an older risk revision, even when a
 queued writer has a newer global persistence revision. Open plans, quantities,
 original Stop/TP and entry authority are not
-changed by `POST /api/v25/original-v2/risk-settings`; current 2FA remains required
-at this stage. Admin > Trading Center shows paginated persistent risk records.
+changed by `POST /api/v25/original-v2/risk-settings`. Normal Original setup and
+risk updates require the server-validated understanding checkbox, not another
+TOTP challenge. Legacy V25 policy saves in Advanced also use understanding and
+still stop automation and invalidate policy acknowledgement. Admin > Trading
+Center shows paginated persistent risk records,
+including the initial acknowledgement when percentages stay at their defaults.
 Risk transactions additionally compare the submitted risk revision with the
 stored database revision, rejecting concurrent changes from another process.
+
+Master Trade > Canli uses three steps: connect Binance in Baglanti, acknowledge
+the risk settings, then start Original V2. Key entry/change/delete controls are
+not mounted in Canli; LIVE key saves require current TOTP verification on the
+server. Ordinary consent, policy acknowledgement and ARM use explicit
+understanding without repeating TOTP or requiring a typed LIVE phrase. Orange
+trade risk uses the same single checkbox for both risk and general understanding;
+red trade risk still additionally requires the exact high-risk acceptance text. Site MFA
+must still be enabled; OWNER, account binding, daily/fill locks, readiness and
+revision checks remain enforced. Fill-lock approval, recovery and emergency-lock
+release retain their special TOTP requirements.
+
+The dashboard shows verified wallet/daily results, positions, daily limit usage
+and recent events. Normal UI refreshes use GET status, never a reconnect POST;
+saving risk or acknowledging a fill lock must not replace current authority.
+Stop, TP1 and TP3 checks are independent read-only matches against actual active
+Binance algo orders, including identity and parameters;
+Stop-only evidence never implies verified take-profit protection. Missing or
+stale evidence stays unverified. Technical controls are collapsed under Details
+and legacy V25 actions under Advanced. The always-visible primary emergency
+button calls Original `/stop`: it prevents new entries without cancelling
+protection or closing positions. The separate destructive legacy emergency
+action remains clearly labelled in Advanced.
 
 Before deploying this risk feature, apply
 `backend/migrations/20261014_001_original_live_risk_audit.sql` after the existing

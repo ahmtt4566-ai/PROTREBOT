@@ -618,6 +618,7 @@ def recover_transient_market_data(state: dict[str, Any], method: str, path: str)
 
 class PolicyUpdate(BaseModel):
     totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
+    understood: bool = Field(default=False, strict=True)
     allowed_symbols: list[str] | None = None
     interval: Literal["1m", "5m", "15m", "1h", "4h"] | None = None
     allow_long: bool | None = None
@@ -645,7 +646,8 @@ class PolicyUpdate(BaseModel):
 
 
 class Confirmation(BaseModel):
-    confirmation: str = Field(min_length=1, max_length=80)
+    confirmation: str = Field(default="ANLADIM", min_length=1, max_length=80)
+    understood: bool = Field(default=False, strict=True)
     totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
 
 
@@ -3781,6 +3783,39 @@ def classify_plan_protection(
     return "MISSING", [], "REQUIRED_STOP_NOT_FOUND"
 
 
+def exchange_protection_view(plan: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, bool]:
+    result = {"stop": False, "tp1": False, "tp3": False}
+    if snapshot.get("open_algo_orders_available") is not True or not live_plan_can_mutate(plan):
+        return result
+    direction = str(plan.get("direction") or "").upper()
+    if direction not in {"LONG", "SHORT"} or not plan.get("symbol"):
+        logger.warning("LIVE_PROTECTION_DISPLAY_UNVERIFIED target=plan")
+        return result
+    rows = snapshot.get("open_algo_orders", [])
+    result["stop"] = classify_plan_protection(plan, rows)[0] == "MATCHED"
+    targets = plan.get("targets")
+    if not isinstance(targets, list) or len(targets) < 3 or not plan.get("intent_id"):
+        return result
+    common = {
+        "symbol": plan["symbol"], "side": "SELL" if direction == "LONG" else "BUY",
+        "type": "TAKE_PROFIT_MARKET", "workingType": "MARK_PRICE",
+    }
+    for label, params in (
+        ("tp1", {"triggerPrice": targets[0], "reduceOnly": "true", "clientAlgoId": client_id_for("TP12", plan["intent_id"])}),
+        ("tp3", {"triggerPrice": targets[2], "closePosition": "true", "clientAlgoId": client_id_for("TP3", plan["intent_id"])}),
+    ):
+        try:
+            if label == "tp1":
+                params["quantity"] = decimal_text(floor_step(
+                    Decimal(str(plan.get("initial_quantity") or plan.get("quantity"))) * Decimal("0.60"),
+                    Decimal(str(plan["step"])),
+                ))
+            result[label] = existing_entry_protection_algo({**common, **params}, rows) is not None
+        except (LiveExchangeError, KeyError, TypeError, ValueError, ArithmeticError):
+            logger.warning("LIVE_PROTECTION_DISPLAY_UNVERIFIED target=%s", label)
+    return result
+
+
 def record_protection_ownership_uncertain(
     state: dict[str, Any],
     plan: dict[str, Any],
@@ -4259,7 +4294,10 @@ def public_status(application: Any, request: Request | None = None) -> dict[str,
         "journal": journal,
         "performance": performance_payload({"journal": journal}, demo_only=False),
         "daily_performance": performance_payload({"journal": journal}, "daily", demo_only=False),
-        "plans": list(state.get("plans", {}).values())[:50],
+        "plans": [
+            {**plan, "exchange_protection": exchange_protection_view(plan, snapshot) if account_snapshot_ready else {"stop": False, "tp1": False, "tp3": False}}
+            for plan in list(state.get("plans", {}).values())[:50]
+        ],
         "events": state.get("events", [])[:80],
         "emergency": state.get("emergency"),
         "withdrawals_supported": False,
@@ -6316,11 +6354,10 @@ async def v25_connect(request: Request, body: Confirmation) -> dict[str, Any]:
 @router.put("/policy")
 async def v25_policy(request: Request, body: PolicyUpdate) -> dict[str, Any]:
     user = execution_owner(request)
-    from .exchange_connections import _require_live_mfa
-    await _require_live_mfa(request, user, body.totp_code)
+    await require_live_understanding(request, user, body.understood)
     state = request.app.state.v25_execution
     async with state["lock"]:
-        updates = body.model_dump(exclude_none=True, exclude={"totp_code"})
+        updates = body.model_dump(exclude_none=True, exclude={"totp_code", "understood"})
         if "max_direction_exposure_usdt" in body.model_fields_set:
             updates["max_direction_exposure_usdt"] = body.max_direction_exposure_usdt
         state["policy"] = sanitize_execution_policy({**state["policy"], **updates}, preserve_empty_allowed_symbols=True)
@@ -6336,10 +6373,7 @@ async def v25_policy(request: Request, body: PolicyUpdate) -> dict[str, Any]:
 @router.post("/policy/acknowledge")
 async def v25_policy_ack(request: Request, body: Confirmation) -> dict[str, Any]:
     user = execution_owner(request)
-    from .exchange_connections import _require_live_mfa
-    await _require_live_mfa(request, user, body.totp_code)
-    if body.confirmation.strip().upper() != "RİSK LİMİTLERİNİ ONAYLIYORUM":
-        raise HTTPException(422, "Onay için RİSK LİMİTLERİNİ ONAYLIYORUM yazın.")
+    await require_live_understanding(request, user, body.understood)
     state = request.app.state.v25_execution
     async with state["lock"]:
         state["policy_ack_digest"] = policy_digest(state["policy"])
@@ -6352,10 +6386,7 @@ async def v25_policy_ack(request: Request, body: Confirmation) -> dict[str, Any]
 async def v25_web_consent(request: Request, body: Confirmation) -> dict[str, Any]:
     """Create a fingerprint-bound, expiring 24-hour live consent."""
     user = execution_owner(request)
-    from .exchange_connections import _require_live_mfa
-    await _require_live_mfa(request, user, body.totp_code)
-    if body.confirmation.strip().upper() != "CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM":
-        raise HTTPException(422, "Onay için CANLI İŞLEM RİSKİNİ 24 SAAT KABUL EDİYORUM yazın.")
+    await require_live_understanding(request, user, body.understood)
     state = request.app.state.v25_execution
     async with state["lock"]:
         api_key, secret_key, fingerprint = live_credentials_status(request)
@@ -6863,10 +6894,7 @@ async def v25_adopt_external_position(
 @router.post("/arm")
 async def v25_arm(request: Request, body: Confirmation) -> dict[str, Any]:
     user = execution_owner(request)
-    from .exchange_connections import _require_live_mfa
-    await _require_live_mfa(request, user, body.totp_code)
-    if body.confirmation.strip().upper() != "CANLI EMİR RİSKİNİ KABUL EDİYORUM":
-        raise HTTPException(422, "Kilidi açmak için CANLI EMİR RİSKİNİ KABUL EDİYORUM yazın.")
+    await require_live_understanding(request, user, body.understood)
     state = request.app.state.v25_execution
     async with state["lock"]:
         if live_execution_blocked(state):
@@ -6959,16 +6987,20 @@ async def v25_auto_start(request: Request, body: AutoStartConfirmation) -> dict[
     return await _start_live_auto_session(request, body)
 
 
+async def require_live_understanding(request: Request, user: dict[str, Any], understood: bool) -> None:
+    from . import account_settings
+    if understood is not True:
+        raise HTTPException(422, "Gerçek parayla işlem ve kayıp riskini anladım kutusunu onaylayın.")
+    if not await account_settings.enabled(request, user):
+        raise HTTPException(403, "LIVE için site girişinde 2FA korumasını etkinleştirin.")
+
+
 async def _start_live_auto_session(
-    request: Request, body: Confirmation, *, mfa_verified: bool = False,
+    request: Request, body: Confirmation, *,
     state_lock_held: bool = False,
 ) -> dict[str, Any]:
     user = execution_owner(request)
-    from .exchange_connections import _require_live_mfa
-    if not mfa_verified:
-        await _require_live_mfa(request, user, getattr(body, "totp_code", None))
-    if body.confirmation.strip().upper() != "CANLI OTOMATİK":
-        raise HTTPException(422, "Otomasyonu açmak için CANLI OTOMATİK yazın.")
+    await require_live_understanding(request, user, body.understood)
     state = request.app.state.v25_execution
     from . import original_v2_live
     if original_v2_live.running(state):
@@ -6990,7 +7022,7 @@ async def _start_live_auto_session(
         if original_v2_live.running(state) or auto_session_is_active(state):
             raise HTTPException(409, "Canlı otomasyon zaten aktif; mevcut oturum uzatılmadı.")
         if state["policy"].get("interval") != "15m":
-            raise HTTPException(423, "2FA kontrolü sırasında politika değişti; LIVE Auto Trade yalnız 15m ile başlar.")
+            raise HTTPException(423, "Onay sırasında politika değişti; LIVE Auto Trade yalnız 15m ile başlar.")
         allowed, reason = live_auto_start_gate(request.app, state, request)
         if not allowed:
             raise HTTPException(423, reason)

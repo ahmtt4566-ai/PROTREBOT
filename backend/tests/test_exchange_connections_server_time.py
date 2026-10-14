@@ -295,7 +295,8 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
     def test_save_endpoint_maps_server_time_418_before_persisting(self):
         request = self._request()
         rejection = exchange_connections.BinanceServerTimeRejected("Binance server-time temporarily rejected the request (HTTP 418). Please wait briefly before retrying.", retry_after=10)
-        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(side_effect=rejection)):
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(side_effect=rejection)), \
+             patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()):
             with self.assertRaises(exchange_connections.HTTPException) as context:
                 asyncio.run(exchange_connection_save(request, SaveCredentialsRequest(mode="LIVE", api_key="api-key-safe", secret_key="secret-safe", confirmation="CANLI KASAYA KAYDET")))
         self.assertEqual(context.exception.status_code, 429)
@@ -402,6 +403,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         snapshot = {"wallet_balance": 100.0, "available_balance": 90.0, "positions": [], "open_orders": [], "hedge_mode": False}
         client = SimpleNamespace(time_offset_ms=0)
         with patch("app.exchange_connections.encrypt_credentials", return_value=b"encrypted-test-payload"), \
+             patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()), \
              patch.object(v25_execution, "client_for", return_value=client), \
              patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=snapshot)), \
                patch.object(v25_execution, "submit_entry", new=AsyncMock()) as submit_entry, \

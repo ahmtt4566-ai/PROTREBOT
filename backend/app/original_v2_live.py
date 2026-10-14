@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 
 class Start(risk_settings.RiskChoice):
     model_config = ConfigDict(extra="forbid")
-    confirmation: str
-    totp_code: str = Field(min_length=6, max_length=32, repr=False)
+    confirmation: str = "ANLADIM"
+    totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
     symbol_count: int = Field(default=ORIGINAL_DEFAULT_SYMBOL_COUNT, ge=ORIGINAL_MIN_SYMBOL_COUNT, le=ORIGINAL_MAX_SYMBOL_COUNT, strict=True)
     session_hours: int = Field(default=1, strict=True)
 
@@ -207,7 +207,7 @@ def preserve(payload: dict[str, Any]) -> dict[str, Any] | None:
     result = copy.deepcopy(value)
     result["enabled"] = False
     result["paused"] = True
-    result["pause_reason"] = "Yeniden başlatma sonrası 2FA ve ARM gerekli."
+    result["pause_reason"] = "Yeniden başlatma sonrası risk onayı ve ARM gerekli."
     return result
 
 
@@ -1093,14 +1093,11 @@ async def persistence_diagnostics(request: Request, response: Response = None) -
 
 @router.post("/start")
 async def start(request: Request, body: Start) -> dict[str, Any]:
-    from . import account_settings, v25_execution as live
+    from . import v25_execution as live
     user = authenticated_user(request, owner=True)
     if not available():
         raise HTTPException(423, "Original V2 LIVE sunucu ayarı kapalı.")
-    if body.confirmation != "ORIGINAL V2 CANLI":
-        raise HTTPException(422, "Original V2 onayı için ORIGINAL V2 CANLI yazın.")
-    if not await account_settings.enabled(request, user):
-        raise HTTPException(403, "Original V2 LIVE için önce 2FA açın.")
+    await live.require_live_understanding(request, user, body.understood)
     state = request.app.state.v25_execution
     async with state["lock"]:
         require_fill_unlocked(state)
@@ -1110,7 +1107,6 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
         allowed, reason = live.live_auto_start_gate(request.app, state, request)
         if not allowed:
             raise HTTPException(423, reason)
-        await account_settings.require_totp(request, user, body.totp_code, required=True)
         previous = settings(state)
         _, _, fingerprint = live.live_credentials_status(request)
         if not fingerprint:
@@ -1135,8 +1131,8 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
             if config.get("paused"):
                 raise HTTPException(423, "Original V2 başlatma sırasında durduruldu.")
             await live._start_live_auto_session(
-                request, live.Confirmation(confirmation="CANLI OTOMATİK"),
-                mfa_verified=True, state_lock_held=True,
+                request, live.Confirmation(understood=True),
+                state_lock_held=True,
             )
             started = time.time()
             consent = live.consent_status(state, request)
@@ -1164,7 +1160,7 @@ async def start(request: Request, body: Start) -> dict[str, Any]:
 
 @router.post("/risk-settings")
 async def update_risk(request: Request, body: risk_settings.RiskUpdate) -> dict[str, Any]:
-    from . import account_settings, v25_execution as live
+    from . import v25_execution as live
     user = authenticated_user(request, owner=True)
     if not available():
         raise HTTPException(423, "Original V2 LIVE sunucu ayarı kapalı.")
@@ -1173,7 +1169,7 @@ async def update_risk(request: Request, body: risk_settings.RiskUpdate) -> dict[
     async with state["lock"]:
         if not state.get("recovery_ready"):
             raise HTTPException(503, "Canlı durum kurtarma tamamlanmadı; risk ayarı değiştirilmedi.")
-        await account_settings.require_totp(request, user, body.totp_code, required=True)
+        await live.require_live_understanding(request, user, body.understood)
         _, _, fingerprint = live.live_credentials_status(request)
         if not fingerprint:
             raise HTTPException(423, "Risk ayarı için doğrulanmış LIVE bağlantısı gerekli.")

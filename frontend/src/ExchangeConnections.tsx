@@ -144,7 +144,7 @@ export default function ExchangeConnections() {
   const activateConnection = () => execute(`activate-${selected}`,async () => {
     if (selected === 'LIVE' && !window.confirm('Bu işlem yalnızca gerçek hesabın salt-okunur bağlantısını açar. Emir kilidi ayrıca kapalı kalacaktır. Devam edilsin mi?')) return
     const confirmation = selected === 'TESTNET' ? 'TESTNET BAĞLANTIYI AÇ' : 'CANLI SALT OKUNUR BAĞLANTIYI AÇ'
-    const next = await call<ConnectionStatus & {message:string}>('/activate',{method:'POST',body:JSON.stringify({mode:selected,confirmation,...(selected === 'LIVE' ? {totp_code:totpCode} : {})})})
+    const next = await call<ConnectionStatus & {message:string}>('/activate',{method:'POST',body:JSON.stringify({mode:selected,confirmation})})
     setStatus(next)
     if (selected === 'TESTNET') {
       const ownerToken = ownerAccessToken()
@@ -159,13 +159,13 @@ export default function ExchangeConnections() {
   })
 
   const deactivateConnection = () => execute(`deactivate-${selected}`,async () => {
-    const next = await call<ConnectionStatus & {message:string}>('/deactivate',{method:'POST',body:JSON.stringify({mode:selected,confirmation:'BAĞLANTIYI KAPAT',...(selected === 'LIVE' ? {totp_code:totpCode} : {})})})
+    const next = await call<ConnectionStatus & {message:string}>('/deactivate',{method:'POST',body:JSON.stringify({mode:selected,confirmation:'BAĞLANTIYI KAPAT'})})
     setStatus(next);setNotice({kind:'ok',text:next.message})
   })
 
   const deleteConnection = () => execute(`delete-${selected}`,async () => {
     if (!window.confirm(`${selected === 'TESTNET' ? 'Testnet' : 'Gerçek hesap'} şifreli anahtar kaydı kalıcı olarak silinsin mi?`)) return
-    const next = await call<ConnectionStatus & {message:string}>('/credentials',{method:'DELETE',body:JSON.stringify({mode:selected,confirmation:'ANAHTARI KALICI SİL',...(selected === 'LIVE' ? {totp_code:totpCode} : {})})})
+    const next = await call<ConnectionStatus & {message:string}>('/credentials',{method:'DELETE',body:JSON.stringify({mode:selected,confirmation:'ANAHTARI KALICI SİL'})})
     setStatus(next);setForms(current => ({...current,[selected]:emptyForm()}));setTotpCode('');setNotice({kind:'ok',text:next.message})
   })
 
@@ -201,7 +201,7 @@ export default function ExchangeConnections() {
 
         <label className="exchangeCheck"><input type="checkbox" checked={form.accepted} onChange={event => patchForm({accepted:event.target.checked})}/><span>Secret’ın yalnızca şifreli PostgreSQL kasasında tutulacağını ve kaydettikten sonra tekrar görüntülenmeyeceğini anladım.</span></label>
 
-        {selected === 'LIVE' && <label><span>OWNER 2FA kodu</span><input data-private="true" type="password" autoComplete="one-time-code" inputMode="numeric" maxLength={8} value={totpCode} onChange={event => setTotpCode(event.target.value)} placeholder="LIVE işlemleri için zorunlu"/></label>}
+        {selected === 'LIVE' && <label><span>OWNER 2FA kodu</span><input data-private="true" type="password" autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={totpCode} onChange={event => setTotpCode(event.target.value)} placeholder="Anahtar ekleme/değiştirme için zorunlu"/></label>}
 
         <div className="exchangeActions">
           <button className="secondary" onClick={testConnection} disabled={Boolean(busy) || (rateLimitSeconds !== null && rateLimitSeconds > 0) || !status?.vault.ready}>{busy === `test-${selected}` ? <LoaderCircle className="spin"/> : <Activity/>}{rateLimitSeconds === null ? 'BAĞLANTIYI TEST ET' : rateLimitSeconds > 0 ? `Retry in ${rateLimitSeconds}s` : 'Retry now'}</button>
@@ -228,9 +228,9 @@ export default function ExchangeConnections() {
 
         <div className="activationActions">
           {!connection?.active
-            ? <button className="activate" onClick={activateConnection} disabled={Boolean(busy) || (rateLimitSeconds !== null && rateLimitSeconds > 0) || !connection?.configured || !connection?.last_test_ok || (selected === 'LIVE' && totpCode.length < 6)}>{busy === `activate-${selected}` ? <LoaderCircle className="spin"/> : <Power/>}BAĞLANTIYI AKTİFLEŞTİR</button>
-            : <button className="deactivate" onClick={deactivateConnection} disabled={Boolean(busy) || (selected === 'LIVE' && totpCode.length < 6)}>{busy === `deactivate-${selected}` ? <LoaderCircle className="spin"/> : <PowerOff/>}BAĞLANTIYI KAPAT</button>}
-            <button className="delete" onClick={deleteConnection} disabled={Boolean(busy) || !connection?.configured || connection?.active || (selected === 'LIVE' && totpCode.length < 6)}>{busy === `delete-${selected}` ? <LoaderCircle className="spin"/> : <Trash2/>}ANAHTARI SİL</button>
+            ? <button className="activate" onClick={activateConnection} disabled={Boolean(busy) || (rateLimitSeconds !== null && rateLimitSeconds > 0) || !connection?.configured || !connection?.last_test_ok}>{busy === `activate-${selected}` ? <LoaderCircle className="spin"/> : <Power/>}BAĞLANTIYI AKTİFLEŞTİR</button>
+            : <button className="deactivate" onClick={deactivateConnection} disabled={Boolean(busy)}>{busy === `deactivate-${selected}` ? <LoaderCircle className="spin"/> : <PowerOff/>}BAĞLANTIYI KAPAT</button>}
+            <button className="delete" onClick={deleteConnection} disabled={Boolean(busy) || !connection?.configured || connection?.active}>{busy === `delete-${selected}` ? <LoaderCircle className="spin"/> : <Trash2/>}ANAHTARI SİL</button>
         </div>
       </section>
     </div>

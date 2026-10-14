@@ -70,7 +70,7 @@ ACTION_FIELDS = {
     "payment.binance.rejected": frozenset({"status"}),
     "original_live.risk_changed": frozenset({
         "risk_percent", "daily_loss_percent", "warning_level", "daily_warning_level",
-        "risk_acknowledged", "high_risk_confirmed", "warning_balance_usdt", "warning_version",
+        "risk_acknowledged", "high_risk_confirmed", "understood", "warning_balance_usdt", "warning_version",
     }),
 }
 
@@ -117,6 +117,8 @@ def opaque_id(value: str) -> str:
 
 def allowed_snapshot(action: AuditAction, value: Mapping[str, Any]) -> dict[str, Any]:
     result = {key: value[key] for key in ACTION_FIELDS[action] if key in value}
+    if action == "original_live.risk_changed":
+        result.setdefault("understood", False)
     if result.keys() != ACTION_FIELDS[action]:
         raise ValueError("Missing audit snapshot fields")
     if action == "ROLE_CHANGED":
@@ -141,7 +143,7 @@ def allowed_snapshot(action: AuditAction, value: Mapping[str, Any]) -> dict[str,
                 raise ValueError("Invalid risk audit percentage")
         if result["warning_level"] != trade_warning(result["risk_percent"]) or result["daily_warning_level"] != daily_warning(result["daily_loss_percent"]):
             raise ValueError("Invalid risk audit warning")
-        if any(type(result[key]) is not bool for key in ("risk_acknowledged", "high_risk_confirmed")):
+        if any(type(result[key]) is not bool for key in ("risk_acknowledged", "high_risk_confirmed", "understood")):
             raise ValueError("Invalid risk audit approval")
         balance = result["warning_balance_usdt"]
         if balance is not None and (isinstance(balance, bool) or not isinstance(balance, (int, float)) or not math.isfinite(balance) or balance <= 0):
