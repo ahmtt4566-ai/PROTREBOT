@@ -133,6 +133,83 @@ class V25SessionCredentialTests(unittest.TestCase):
             ),
         )
 
+    def test_profile_hydration_does_not_wait_for_live_locks(self):
+        from app import main
+
+        for blocked_lock in ("credential", "controller"):
+            with self.subTest(blocked_lock=blocked_lock), self.rotation_context() as (request, holder, old, new, account):
+                request.url = SimpleNamespace(path="/api/v22/profile")
+                state = request.app.state.v25_execution
+                lock = (
+                    exchange_connections._credential_lock(request, "LIVE")
+                    if blocked_lock == "credential"
+                    else state["lock"]
+                )
+                with patch.object(main, "restore_demo_state_for_user", new=AsyncMock(return_value=None)), \
+                     patch.object(main, "restore_v21_state_for_user", new=AsyncMock(return_value=None)):
+                    async def scenario():
+                        await lock.acquire()
+                        try:
+                            await asyncio.wait_for(main.hydrate_authenticated_user_state(request), timeout=0.1)
+                        finally:
+                            lock.release()
+                    asyncio.run(scenario())
+                self.assertEqual(state["live_session_authorization"]["fingerprint"], v25_execution.credential_fingerprint(old[0]))
+                self.assertTrue(state["connected"])
+                self.assertTrue(state["auto"]["enabled"])
+                self.assertEqual(request.app.state.live_account_cache["generation"], 0)
+
+    def test_live_status_hydration_still_synchronizes_current_vault_key(self):
+        from app import main
+
+        with self.rotation_context() as (request, holder, old, new, account):
+            request.url = SimpleNamespace(path="/api/v25/status")
+            holder["row"].update(
+                encrypted_payload=exchange_connections.encrypt_credentials(*new, mode="LIVE"),
+                fingerprint=exchange_connections.key_fingerprint(new[0]),
+            )
+            with patch.object(main, "restore_demo_state_for_user", new=AsyncMock(return_value=None)), \
+                 patch.object(main, "restore_v21_state_for_user", new=AsyncMock(return_value=None)):
+                asyncio.run(main.hydrate_authenticated_user_state(request))
+            self.assertEqual(v25_execution.live_credentials_status(request)[:2], new)
+            v25_execution.guard_execution_ownership(request)
+            self.assertFalse(request.app.state.v25_execution["connected"])
+            self.assertEqual(request.app.state.v25_execution["armed_until"], 0)
+
+    def test_blocked_live_binding_keeps_verified_vault_available_only_for_read_only_test(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            state = request.app.state.v25_execution
+            state["execution_state"] = "UNKNOWN"
+            holder["row"].update(
+                encrypted_payload=exchange_connections.encrypt_credentials(*new, mode="LIVE"),
+                fingerprint=exchange_connections.key_fingerprint(new[0]),
+            )
+            asyncio.run(exchange_connections.ensure_session_cache(request))
+            connection = exchange_connections.session_public_status(request.app, request)["connections"]["LIVE"]
+            self.assertTrue(connection["active"])
+            self.assertIn("belirsiz", connection["last_error"])
+            self.assertEqual(state["live_session_authorization"]["fingerprint"], v25_execution.credential_fingerprint(old[0]))
+            self.assertEqual(state["execution_state"], "UNKNOWN")
+            self.assertTrue(state["real_trading_locked"])
+            self.assertEqual(state["armed_until"], 0)
+            self.assertFalse(state["auto"]["enabled"])
+            with self.assertRaises(exchange_connections.HTTPException) as failure:
+                v25_execution.guard_execution_ownership(request)
+            self.assertEqual(failure.exception.status_code, 403)
+            result = asyncio.run(exchange_connections.exchange_connection_test(
+                request, exchange_connections.TestCredentialsRequest(mode="LIVE"),
+            ))
+            self.assertEqual(result["fingerprint"], exchange_connections.key_fingerprint(new[0]))
+            self.assertFalse(result["account"]["orders_created"])
+            exchange_connections._verify_request_credentials.assert_awaited_once_with(
+                request, "LIVE", new[0], new[1],
+            )
+            with patch.object(v25_execution, "background_authorization_active", new=AsyncMock(return_value=True)), \
+                 patch.object(exchange_connections, "authoritative_live_owner_active", new=AsyncMock(return_value=True)):
+                self.assertEqual(asyncio.run(v25_execution.auto_session_credentials(
+                    request.app, state, force_refresh=True,
+                )), ("", ""))
+
     def test_rotation_updates_vault_and_live_binding_without_opening_entries(self):
         with self.rotation_context() as (request, holder, old, new, account):
             result = asyncio.run(self.save_rotated_key(request, new))

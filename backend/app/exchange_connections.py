@@ -601,40 +601,42 @@ def session_public_status(application: Any, request: Request) -> dict[str, Any]:
     }
 
 
-async def ensure_session_cache(request: Request) -> None:
+async def ensure_session_cache(request: Request, *, include_live: bool = True) -> None:
     user = getattr(request.state, "member", None)
     if not user or not session_id(request):
         return
-    async with _credential_lock(request, "LIVE"):
-        await _load_session_cache(request)
+    async with _credential_lock(request, "LIVE") if include_live else nullcontext():
+        await _load_session_cache(request, include_live=include_live)
 
 
-async def _load_session_cache(request: Request) -> None:
+async def _load_session_cache(request: Request, *, include_live: bool = True) -> None:
     try:
-        await _read_session_cache(request)
+        await _read_session_cache(request, include_live=include_live)
     except HTTPException:
         raise
     except Exception as exc:
         from .error_monitoring import log_database_failure
-        scope, _ = _vault_scope(request, "LIVE")
-        _SESSION_CACHE.pop((scope, "LIVE"), None)
-        _SESSION_META.pop((scope, "LIVE"), None)
-        _lock_runtime(request.app, "LIVE", request)
+        mode = "LIVE" if include_live else "TESTNET"
+        scope, _ = _vault_scope(request, mode)
+        _SESSION_CACHE.pop((scope, mode), None)
+        _SESSION_META.pop((scope, mode), None)
+        _lock_runtime(request.app, mode, request)
         log_database_failure(logger, "credential_load", exc)
-        raise HTTPException(503, "Güncel şifreli anahtar kaydı okunamadı; LIVE bağlantısı kapalı.") from None
+        raise HTTPException(503, f"Güncel şifreli anahtar kaydı okunamadı; {mode} bağlantısı kapalı.") from None
 
 
-async def _read_session_cache(request: Request) -> None:
+async def _read_session_cache(request: Request, *, include_live: bool = True) -> None:
     pool = getattr(request.app.state, "db_pool", None)
     sid = session_id(request)
     user = getattr(request.state, "member", None)
     if not sid or not user:
         return
-    key = (f"owner:{user['id']}", "LIVE")
+    mode = "LIVE" if include_live else "TESTNET"
+    key = (f"owner:{user['id']}" if include_live else sid, mode)
     if pool is None:
         _SESSION_CACHE.pop(key, None)
         _SESSION_META.pop(key, None)
-        _lock_runtime(request.app, "LIVE", request)
+        _lock_runtime(request.app, mode, request)
         return
     await ensure_schema(pool)
     rows = await pool.fetch(
@@ -650,6 +652,8 @@ async def _read_session_cache(request: Request) -> None:
             _SESSION_META[(sid, mode)] = _row_meta(row)
         except VaultError as exc:
             _SESSION_META[(sid, mode)] = {**_row_meta(row), "active": False, "last_test_ok": False, "last_error": str(exc)}
+    if not include_live:
+        return
     live_row = await pool.fetchrow(
         """
         SELECT 'owner:' || user_id AS session_id, user_id, mode, encrypted_payload,
@@ -675,18 +679,26 @@ async def _read_session_cache(request: Request) -> None:
                 != normalize_fingerprint(str(live_row["fingerprint"]))
             ):
                 raise VaultError("Kasadaki anahtar kimliği doğrulanamadı; bağlantı kapalı.")
-            _SESSION_CACHE[key] = credentials
-            _SESSION_META[key] = _row_meta(live_row)
-            if _SESSION_META[key]["active"]:
-                _bind_live_credential(request, key_fingerprint(credentials[0]), _SESSION_META[key]["account"])
-            else:
-                _lock_runtime(request.app, "LIVE", request)
-        except (VaultError, HTTPException) as exc:
+        except VaultError as exc:
             _SESSION_CACHE.pop(key, None)
-            public_error = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
-            _SESSION_META[key] = {**_row_meta(live_row), "active": False, "last_test_ok": False, "last_error": public_error}
+            _SESSION_META[key] = {**_row_meta(live_row), "active": False, "last_test_ok": False, "last_error": str(exc)}
             _lock_runtime(request.app, "LIVE", request)
             logger.warning("LIVE credential context rejected: code=credential_context_invalid type=%s", type(exc).__name__)
+            return
+        _SESSION_CACHE[key] = credentials
+        _SESSION_META[key] = _row_meta(live_row)
+        if not _SESSION_META[key]["active"]:
+            _lock_runtime(request.app, "LIVE", request)
+            return
+        try:
+            _bind_live_credential(request, key_fingerprint(credentials[0]), _SESSION_META[key]["account"])
+        except HTTPException as exc:
+            _SESSION_META[key]["last_error"] = str(exc.detail)
+            _lock_runtime(request.app, "LIVE", request)
+            logger.warning(
+                "LIVE credential binding blocked: code=live_binding_blocked status=%s type=%s",
+                exc.status_code, type(exc).__name__,
+            )
 
 
 def _row_meta(row: Any) -> dict[str, Any]:

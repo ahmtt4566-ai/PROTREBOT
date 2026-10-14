@@ -3784,7 +3784,7 @@ async def demo_status(request: Request) -> dict[str, Any]:
     try:
         from .exchange_connections import ensure_session_cache
 
-        await ensure_session_cache(request)
+        await ensure_session_cache(request, include_live=False)
     except (ImportError, RuntimeError, ValueError):
         pass
     result = public_status(state_for(request))

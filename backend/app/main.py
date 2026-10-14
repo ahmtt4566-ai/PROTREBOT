@@ -1297,12 +1297,11 @@ async def hydrate_authenticated_user_state(request: Request) -> None:
         return
 
     try:
-        await ensure_session_cache(request)
+        await ensure_session_cache(request, include_live=request.url.path.startswith("/api/v25/"))
     except Exception as exc:
         logger.warning(
-            "User Demo credential context hydration failed; plans remain unmanaged: user_id=%s error=%s",
-            user_id,
-            str(exc)[:220],
+            "User credential context hydration failed; plans remain unmanaged: code=credential_hydration_failed type=%s",
+            type(exc).__name__,
         )
     current_session_id = session_id(request)
 

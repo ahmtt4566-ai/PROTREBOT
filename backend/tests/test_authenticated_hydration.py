@@ -50,6 +50,7 @@ class AuthenticatedHydrationTests(unittest.TestCase):
         )
         self.request = SimpleNamespace(
             app=self.application,
+            url=SimpleNamespace(path="/api/v22/profile"),
             state=SimpleNamespace(member={"id": "user-a"}),
             headers={"authorization": "Bearer current-session"},
         )

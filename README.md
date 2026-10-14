@@ -2880,6 +2880,14 @@ bir şifreli kayda uygulanamaz. Arayüz, ayrı LIVE durum isteği başarısız o
 başarıyla okunan kasa kartını gösterir; fingerprint uyuşmazlığında LIVE durumunu
 doğrulanmış saymaz. LIVE yanıtlarında anahtarın başı/sonu dahi paylaşılmaz.
 
+Profil, piyasa ve diğer genel sayfa istekleri LIVE işlem motorunun kilidini
+beklemez. LIVE kasa senkronizasyonu LIVE uçlarında yapılır; Demo bağlamı ayrı
+yüklenir. Bu ayrım giriş/üyelik doğrulamasını veya LIVE güvenlik kontrollerini
+atlamaz.
+Geçerli kasa kaydı ile LIVE oturumunu bağlama izni ayrı kontrol edilir. Oturum
+geçişi güvenlik nedeniyle reddedilirse kayıt salt-okunur bağlantı testi için
+okunabilir kalır; eski oturum kimliği korunur ve işlem girişleri kapalı kalır.
+
 ## Bir defalık yayın ayarları
 
 Render arka uç servisinde yalnızca mevcut temel değerler gerekir:
