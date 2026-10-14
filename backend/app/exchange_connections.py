@@ -774,13 +774,27 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
         except ValueError:
             payload = None
         code = payload.get("code") if isinstance(payload, dict) else None
-        if not isinstance(code, int):
+        exchange_code = code if type(code) is int else None
+        stage = {
+            "/sapi/v1/account/apiRestrictions": "API izinleri (para çekme/Futures)",
+            "/fapi/v3/account": "Futures hesap",
+            "/fapi/v1/positionSide/dual": "Futures pozisyon modu",
+        }.get(path, "Binance doğrulama")
+        logger.warning(
+            "LIVE_CONNECTION_TEST SIGNED_VERIFY_REJECTED path=%s status=%s exchange_code=%s",
+            path, response.status_code, exchange_code,
+        )
+        context = f"{stage} kontrolü başarısız (HTTP {response.status_code}"
+        if exchange_code is not None:
+            context += f", Binance kodu {exchange_code}"
+        context += "). "
+        if exchange_code is None:
             if response.status_code == 451:
-                raise VaultError("Binance sunucunun bulunduğu bölgeden erişime izin vermiyor (HTTP 451).")
+                raise VaultError(context + "Binance sunucunun bulunduğu bölgeden erişime izin vermiyor (HTTP 451).")
             if response.status_code >= 500:
-                raise VaultError(f"Binance doğrulama servisi geçici sunucu hatası döndürdü (HTTP {response.status_code}); tekrar deneyin.")
-            raise VaultError(f"Binance doğrulama erişimini reddetti (HTTP {response.status_code}); key, IP izinleri ve Futures yetkisini kontrol edin.")
-        raise VaultError(_safe_exchange_message(payload, api_key))
+                raise VaultError(context + f"Binance doğrulama servisi geçici sunucu hatası döndürdü (HTTP {response.status_code}); tekrar deneyin.")
+            raise VaultError(context + f"Binance doğrulama erişimini reddetti (HTTP {response.status_code}); key, IP izinleri ve Futures yetkisini kontrol edin.")
+        raise VaultError(context + _safe_exchange_message(payload, api_key))
     try:
         return response.json()
     except ValueError as exc:

@@ -1872,6 +1872,14 @@ para çekme izni açık veya doğrulanamayan anahtar reddedilir. Testnet'in para
 çekme desteği bulunmadığı ayrıca belirtilir; eski LIVE kasa kayıtları tekrar
 doğrulanmalıdır.
 
+Bağlantı testinde veya kayıtta Binance isteği reddederse HTTP 502 açıklaması
+başarısız kontrolü (API izinleri, Futures hesap veya pozisyon modu), Binance
+HTTP durumunu ve varsa sayısal Binance hata kodunu gösterir. Sunucu kaydındaki
+`LIVE_CONNECTION_TEST SIGNED_VERIFY_REJECTED` satırı yalnız endpoint, durum
+ve hata kodunu içerir; anahtar, imza ve Binance'in ham hata metni kaydedilmez.
+Bu bilgiler olmadan genel bir 502 hatası, anahtar/IP/yetki nedenlerinden
+hangisinin başarısız olduğunu kanıtlamaz. Ret durumunda anahtar kaydedilmez.
+
 Üyelik iptali ve parola/rol değişiklikleri her korunan istekte ortak auth
 kaydından doğrulanır. Arka plan LIVE/Demo yetkileri ilk doğrulanmış oturumun
 sürümüne ve imzalı bitiş zamanına bağlıdır; yeni bir status isteği eski yetkiyi

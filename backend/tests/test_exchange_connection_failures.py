@@ -64,3 +64,29 @@ def test_non_json_verification_rejection_has_safe_http_reason(status, reason):
                                            "/sapi/v1/account/apiRestrictions", "offline-private-key", "offline-private-secret", 1))
     assert reason in str(error.value) and str(status) in str(error.value)
     assert "offline-private-key" not in str(error.value) and "offline-private-secret" not in str(error.value)
+
+
+@pytest.mark.parametrize("path,stage", [
+    ("/sapi/v1/account/apiRestrictions", "API izinleri"),
+    ("/fapi/v3/account", "Futures hesap"),
+    ("/fapi/v1/positionSide/dual", "pozisyon modu"),
+])
+@pytest.mark.parametrize("code", [-2015, -2008, -3000])
+def test_signed_rejection_preserves_safe_stage_status_and_code(path, stage, code, caplog):
+    key, secret = "offline-private-key", "offline-private-secret"
+    host = "https://api.binance.com" if path.startswith("/sapi/") else "https://fapi.binance.com"
+    http = SimpleNamespace(get=AsyncMock(return_value=httpx.Response(
+        400, json={"code": code, "msg": f"{key} {secret} signature=private-signature"},
+        request=httpx.Request("GET", f"{host}{path}"),
+    )))
+    with caplog.at_level(logging.WARNING), pytest.raises(connections.VaultError) as error:
+        asyncio.run(connections._signed_get(http, host, path, key, secret, 1))
+    public_error = connections._exchange_test_http_exception(error.value)
+    assert public_error.status_code == 502
+    assert stage in public_error.detail
+    assert "HTTP 400" in public_error.detail
+    assert str(code) in public_error.detail
+    assert path in caplog.text and str(code) in caplog.text
+    for private in (key, secret, "private-signature"):
+        assert private not in public_error.detail + caplog.text
+    assert http.get.await_count == 1
