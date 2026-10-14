@@ -314,7 +314,8 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         exchange_connections._SESSION_CACHE[session_key] = ("api-key-safe", "secret-safe")
         exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True}
         rejection = exchange_connections.BinanceServerTimeRejected("Binance server-time temporarily rejected the request (HTTP 418). Please wait 7 seconds before retrying.", retry_after=7)
-        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(side_effect=rejection)):
+        with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(side_effect=rejection)), \
+             patch.object(exchange_connections, "_load_session_cache", new=AsyncMock()):
             with self.assertRaises(exchange_connections.HTTPException) as context:
                 asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
         self.assertEqual(context.exception.status_code, 429)
@@ -337,7 +338,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         exchange_connections._SESSION_META[session_key] = {"active": True, "configured": True, "user_id": "owner-server-time", "fingerprint": fingerprint}
         account = {"tested_at": "now", "orders_created": False}
         with patch.object(exchange_connections, "_verify_request_credentials", new=AsyncMock(return_value=account)) as verify, \
-             patch.object(exchange_connections, "ensure_session_cache", new=AsyncMock()), \
+             patch.object(exchange_connections, "_load_session_cache", new=AsyncMock()), \
              patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock(return_value={"connected": True, "real_trading_locked": True})) as connect:
             result = asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
         self.assertEqual(result["connected"], True)
@@ -365,7 +366,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
 
         application.state.db_pool.execute.side_effect = RuntimeError("offline database failure")
         with patch.object(exchange_connections, "_require_ready", new=AsyncMock(return_value=application.state.db_pool)), \
-             patch.object(exchange_connections, "ensure_session_cache", new=AsyncMock()), \
+             patch.object(exchange_connections, "_load_session_cache", new=AsyncMock()), \
              patch.object(exchange_connections, "_verify_request_credentials", new=AsyncMock()) as verify, \
              TestClient(application, raise_server_exceptions=False) as client:
             response = client.post("/api/exchange-connections/activate", headers=request.headers,
@@ -387,6 +388,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         status = {"connected": True, "real_trading_locked": True}
         mfa_check = AsyncMock(side_effect=AssertionError("Read-only API activation must not require 2FA"))
         with patch("app.exchange_connections.test_binance_credentials", new=AsyncMock(return_value=account)), \
+               patch.object(exchange_connections, "_load_session_cache", new=AsyncMock()), \
                patch.object(exchange_connections, "_require_live_mfa", new=mfa_check), \
                patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock(return_value=status)) as connect_read_only:
             result = asyncio.run(exchange_connection_activate(request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ")))
@@ -403,6 +405,7 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         snapshot = {"wallet_balance": 100.0, "available_balance": 90.0, "positions": [], "open_orders": [], "hedge_mode": False}
         client = SimpleNamespace(time_offset_ms=0)
         with patch("app.exchange_connections.encrypt_credentials", return_value=b"encrypted-test-payload"), \
+             patch.object(exchange_connections, "_load_session_cache", new=AsyncMock()), \
              patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()), \
              patch.object(v25_execution, "client_for", return_value=client), \
              patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=snapshot)), \

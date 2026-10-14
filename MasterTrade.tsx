@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefCallback } from 'react'
 import { Activity, BarChart3, Cable, Check, ChevronDown, Clock3, Crosshair, Gauge, History, ListChecks, LockKeyhole, ShieldX, UnlockKeyhole, Wallet, X, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
-import LiveTradingPanel, { type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
+import LiveTradingPanel, { liveCredentialStatusMatches, type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradePresentation, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
 import { PremiumWorkspace, useMemberAccess } from './premium-access'
@@ -318,14 +318,22 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       )
     }
     const promise = (async () => {
+      let connectionVerified = false
       try {
-        const response = await Promise.all([
+        const [accountResult, connectionResult] = await Promise.allSettled([
           fetchWithTimeout(`${API_BASE}/v25/status`, {cache: forceLiveSnapshot ? 'no-store' : 'default'}),
-          fetchWithTimeout(`${API_BASE}/exchange-connections/status`),
+          fetchWithTimeout(`${API_BASE}/exchange-connections/status`, {cache: 'no-store'}),
         ])
-        const [accountResponse, connectionResponse] = response
-        if (connectionResponse.ok) setLiveConnections(await connectionResponse.json() as SharedConnectionStatus)
-        else setLiveConnections(null)
+        if (connectionResult.status === 'rejected') {
+          setLiveConnections(null)
+          throw connectionResult.reason
+        }
+        const connectionResponse = connectionResult.value
+        const nextConnections = connectionResponse.ok ? await connectionResponse.json() as SharedConnectionStatus : null
+        setLiveConnections(nextConnections)
+        connectionVerified = connectionResponse.ok
+        if (accountResult.status === 'rejected') throw accountResult.reason
+        const accountResponse = accountResult.value
 
         if (accountResponse.status === 412) {
           setLiveStatusVerified(false)
@@ -345,12 +353,15 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
           account?:AccountSnapshot; plans?:AccountPlan[]; detail?:unknown;
           journal?:Array<Record<string,unknown>>; performance?:PerformanceSnapshot; daily_performance?:PerformanceSnapshot;
         }) | null
-        if (!accountResponse.ok || !accountPayload) {
+        const credentialMatch = Boolean(accountPayload && liveCredentialStatusMatches(accountPayload, nextConnections))
+        if (!accountResponse.ok || !accountPayload || !credentialMatch) {
           setLiveStatusVerified(false)
-          if ([401, 403].includes(accountResponse.status)) setLiveStatus(null)
+          if ([401, 403].includes(accountResponse.status) || !credentialMatch) setLiveStatus(null)
           accountRef.current = null
           setSnapshot(current => current ? {...current, account:null} : current)
-          const detail = accountPayload && typeof accountPayload.detail === 'string'
+          const detail = accountResponse.ok && !credentialMatch
+            ? 'LIVE durumu ile kayıtlı Binance anahtarı uyuşmuyor; yeni girişler kapalı.'
+            : accountPayload && typeof accountPayload.detail === 'string'
             ? accountPayload.detail
             : `Canlı hesap durumu alınamadı (HTTP ${accountResponse.status}).`
           setLiveStatusError(detail)
@@ -400,7 +411,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
       } catch (error) {
         setLiveStatusVerified(false)
         setLiveStatusError(error instanceof Error ? error.message : 'Canlı durum servisine ulaşılamadı.')
-        setLiveConnections(null)
+        if (!connectionVerified) setLiveConnections(null)
         accountRef.current = null
         setAccountSyncState('DISCONNECTED')
         setHistorySyncState('UNAVAILABLE')

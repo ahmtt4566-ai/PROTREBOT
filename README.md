@@ -2869,6 +2869,17 @@ $env:PYTHONPATH='backend'
 6. **Bağlantıyı aktifleştir** gerçek emir açmaz.
 7. Para çekme/transfer uçları yazılımda desteklenmez.
 
+LIVE bağlantısı ve LIVE doğrulaması aynı OWNER hesabının güncel şifreli kasa
+kaydını kullanır. Anahtar değişiminde eski onay/ARM/otomasyon yetkileri ve hesap
+cache'i geçersizleşir; yeni fingerprint yalnız doğrulanmış kayıt üzerinden
+bağlanır. Kasa kaydı eksik, açılamaz veya fingerprint ile tutarsızsa eski bellek
+anahtarına dönülmez. Kayıt hatasında önceki anahtar çifti korunur ve yeni girişler
+kilitli kalır. Açık pozisyon/emir veya belirsiz yürütme varsa aynı Binance hesabı
+kanıtlanmadan anahtar geçişi yapılamaz. Gecikmiş aktivasyon/silme işlemleri farklı
+bir şifreli kayda uygulanamaz. Arayüz, ayrı LIVE durum isteği başarısız olsa da
+başarıyla okunan kasa kartını gösterir; fingerprint uyuşmazlığında LIVE durumunu
+doğrulanmış saymaz. LIVE yanıtlarında anahtarın başı/sonu dahi paylaşılmaz.
+
 ## Bir defalık yayın ayarları
 
 Render arka uç servisinde yalnızca mevcut temel değerler gerekir:

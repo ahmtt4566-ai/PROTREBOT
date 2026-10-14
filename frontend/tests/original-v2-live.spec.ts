@@ -1,7 +1,9 @@
 import {expect, test, type Page} from '@playwright/test'
 
+test.use({baseURL: 'http://127.0.0.1:4174'})
+
 const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT']
-async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false, pauseReason = '', expired = false, missingBalance = false, rejectRiskSave = false, consentActive = true, policyAcknowledged = true, withPosition = false, missingTp = false, pendingAccountCheck = false, externalPosition = false, sharedDailyLimit = 10} = {}) {
+async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false, pauseReason = '', expired = false, missingBalance = false, rejectRiskSave = false, consentActive = true, policyAcknowledged = true, withPosition = false, missingTp = false, pendingAccountCheck = false, externalPosition = false, sharedDailyLimit = 10, statusFingerprintMismatch = false, statusUnavailable = false} = {}) {
   const writes: Array<{path: string; body: unknown}> = []
   let riskPercent = 0.5, dailyPercent = 5, riskRevision = 0
   let vaultFingerprint = 'saved-fixture-fingerprint'
@@ -103,13 +105,17 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
       }
       return
     }
+    if (path === '/api/v25/status' && statusUnavailable) {
+      await route.abort('failed')
+      return
+    }
     const bodies: Record<string, unknown> = {
       '/api/v22/profile': {user, access: {canAccessMasterTrade: true, isPremium: true, canExecuteLive: true}},
       '/api/v22/session': {user},
       '/api/markets': [{symbol: 'BTCUSDT', display: 'BTC/USDT', price: 90000, change: 1, volume: 1000000, status: 'TRADING', contractType: 'PERPETUAL', quoteAsset: 'USDT'}],
       '/api/v25/status': {
         connected: true, real_trading_locked: false, execution_state: 'LOCKED', armed,
-        recovery_ready: true, credentials: {configured: true, fingerprint: 'fixture-fingerprint'}, live_auto_trade: liveAutoTrade,
+        recovery_ready: true, credentials: {configured: true, fingerprint: statusFingerprintMismatch ? 'stale-fixture-fingerprint' : vaultFingerprint}, live_auto_trade: liveAutoTrade,
         auto_session_until: liveAutoTrade ? new Date(Date.now() + 3600000).toISOString() : null,
         readiness: {ready: !readinessFailure, gates: readinessFailure ? [{key: 'policy', label: 'Risk policy', passed: false}] : []}, authorization: {valid: consentActive, scope_match: true}, consent: {active: consentActive}, policy_acknowledged: policyAcknowledged,
         policy: {allowed_symbols: symbols, interval: '15m', daily_trade_limit: 3, daily_loss_limit: sharedDailyLimit, consecutive_loss_limit: 3, max_positions: 5},
@@ -144,7 +150,7 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
   })
   await page.goto('/master-trade?tab=canli', {waitUntil: 'domcontentloaded'})
   await expect(page.locator('.masterTradePage').first()).toBeVisible()
-  if (owner && available) await expect(page.getByRole('region', {name: 'Kais Original V2 LIVE'})).toBeVisible()
+  if (owner && available && !statusFingerprintMismatch && !statusUnavailable) await expect(page.getByRole('region', {name: 'Kais Original V2 LIVE'})).toBeVisible()
   return writes
 }
 
@@ -466,6 +472,22 @@ test('external positions cannot inherit protection checks and a tighter shared d
   await expect(card.locator('.originalPosition')).toContainText('Dış pozisyon · bot tarafından yönetilmiyor.')
   await expect(card.getByText('Binance’te ✓', {exact: true})).toHaveCount(0)
   await expect(card.getByRole('progressbar', {name: 'Günlük kayıp sınırı kullanımı'})).toHaveAttribute('aria-valuemax', '2')
+})
+
+test('LIVE credential fingerprint mismatch stays fail closed while the vault card remains current', async ({page}) => {
+  const writes = await fixture(page, {statusFingerprintMismatch: true})
+  await page.getByRole('tab', {name: 'Bağlantı', exact: true}).click()
+  await expect(page.getByRole('region', {name: 'Kayıtlı Binance bağlantısı'})).toContainText('saved-fixture-fingerprint')
+  await expect(page.locator('body')).toContainText('LIVE durumu ile kayıtlı Binance anahtarı uyuşmuyor')
+  expect(writes).toEqual([])
+})
+
+test('Vault connection card remains current when the separate LIVE status request fails', async ({page}) => {
+  const writes = await fixture(page, {statusUnavailable: true})
+  await page.getByRole('tab', {name: 'Bağlantı', exact: true}).click()
+  await expect(page.getByRole('region', {name: 'Kayıtlı Binance bağlantısı'})).toContainText('saved-fixture-fingerprint')
+  await expect(page.locator('body')).toContainText('Güncel LIVE durumu doğrulanamadı')
+  expect(writes).toEqual([])
 })
 
 test('only Connections mounts key inputs; saving a changed key requires one current MFA code', async ({page}) => {

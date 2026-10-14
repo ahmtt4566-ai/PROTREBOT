@@ -31,6 +31,7 @@ import os
 import re
 import time
 from collections.abc import Iterable
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, Literal
 from urllib.parse import urlencode
@@ -74,6 +75,7 @@ _CACHE: dict[str, tuple[str, str]] = {}
 _META: dict[str, dict[str, Any]] = {}
 _SESSION_CACHE: dict[tuple[str, str], tuple[str, str]] = {}
 _SESSION_META: dict[tuple[str, str], dict[str, Any]] = {}
+_CREDENTIAL_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
 SERVER_TIME_CACHE_TTL_SECONDS = 10.0
 BINANCE_VERIFICATION_REQUEST_TIMEOUT_SECONDS = max(
     1.0,
@@ -169,7 +171,7 @@ def normalize_fingerprint(value: str) -> str:
 def account_identity(account: Any, mode: str = "LIVE", fingerprint: str = "") -> str:
     """Return a stable, non-secret identity from a verified exchange account."""
     payload = account if isinstance(account, dict) else {}
-    for key in ("uid", "account_id", "accountId", "accountAlias"):
+    for key in ("account_identity", "uid", "account_id", "accountId", "accountAlias"):
         value = str(payload.get(key) or "").strip()
         if value:
             return f"BINANCE:{normalize_mode(mode)}:{value[:160]}"
@@ -360,6 +362,17 @@ def _vault_scope(request: Request, mode: str) -> tuple[str, str]:
     if not sid:
         raise HTTPException(401, "Oturum gerekli")
     return sid, sid
+
+
+def _credential_lock(request: Request, mode: str) -> asyncio.Lock:
+    scope, _ = _vault_scope(request, mode)
+    return _CREDENTIAL_LOCKS.setdefault((scope, normalize_mode(mode)), asyncio.Lock())
+
+
+def _controller_lock(request: Request, mode: str) -> asyncio.Lock | nullcontext[None]:
+    state = getattr(request.app.state, "v25_execution", None)
+    lock = state.get("lock") if mode == "LIVE" and isinstance(state, dict) else None
+    return lock if isinstance(lock, asyncio.Lock) else nullcontext()
 
 
 def _require_live_owner(user: dict[str, Any]) -> None:
@@ -564,7 +577,7 @@ def _session_connection(mode: str, key: tuple[str, str]) -> dict[str, Any]:
         "configured": bool(meta.get("configured")),
         "active": bool(meta.get("active")),
         "fingerprint": meta.get("fingerprint"),
-        "api_key_masked": masked_api_key(api_key),
+        "api_key_masked": None if mode == "LIVE" else masked_api_key(api_key),
         "last_test_ok": bool(meta.get("last_test_ok")),
         "last_test_at": meta.get("last_test_at"),
         "last_error": meta.get("last_error"),
@@ -589,10 +602,39 @@ def session_public_status(application: Any, request: Request) -> dict[str, Any]:
 
 
 async def ensure_session_cache(request: Request) -> None:
+    user = getattr(request.state, "member", None)
+    if not user or not session_id(request):
+        return
+    async with _credential_lock(request, "LIVE"):
+        await _load_session_cache(request)
+
+
+async def _load_session_cache(request: Request) -> None:
+    try:
+        await _read_session_cache(request)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        from .error_monitoring import log_database_failure
+        scope, _ = _vault_scope(request, "LIVE")
+        _SESSION_CACHE.pop((scope, "LIVE"), None)
+        _SESSION_META.pop((scope, "LIVE"), None)
+        _lock_runtime(request.app, "LIVE", request)
+        log_database_failure(logger, "credential_load", exc)
+        raise HTTPException(503, "Güncel şifreli anahtar kaydı okunamadı; LIVE bağlantısı kapalı.") from None
+
+
+async def _read_session_cache(request: Request) -> None:
     pool = getattr(request.app.state, "db_pool", None)
     sid = session_id(request)
     user = getattr(request.state, "member", None)
-    if pool is None or not sid or not user:
+    if not sid or not user:
+        return
+    key = (f"owner:{user['id']}", "LIVE")
+    if pool is None:
+        _SESSION_CACHE.pop(key, None)
+        _SESSION_META.pop(key, None)
+        _lock_runtime(request.app, "LIVE", request)
         return
     await ensure_schema(pool)
     rows = await pool.fetch(
@@ -618,13 +660,33 @@ async def ensure_session_cache(request: Request) -> None:
         """,
         user["id"],
     )
-    if live_row:
-        key = (f"owner:{user['id']}", "LIVE")
+    async with _controller_lock(request, "LIVE"):
+        if not live_row:
+            _SESSION_CACHE.pop(key, None)
+            _SESSION_META.pop(key, None)
+            _lock_runtime(request.app, "LIVE", request)
+            return
         try:
-            _SESSION_CACHE[key] = decrypt_credentials(bytes(live_row["encrypted_payload"]), mode="LIVE")
+            credentials = decrypt_credentials(bytes(live_row["encrypted_payload"]), mode="LIVE")
+            validate_key_pair(*credentials)
+            if (
+                str(live_row["user_id"]) != str(user["id"])
+                or normalize_fingerprint(key_fingerprint(credentials[0]))
+                != normalize_fingerprint(str(live_row["fingerprint"]))
+            ):
+                raise VaultError("Kasadaki anahtar kimliği doğrulanamadı; bağlantı kapalı.")
+            _SESSION_CACHE[key] = credentials
             _SESSION_META[key] = _row_meta(live_row)
-        except VaultError as exc:
-            _SESSION_META[key] = {**_row_meta(live_row), "active": False, "last_test_ok": False, "last_error": str(exc)}
+            if _SESSION_META[key]["active"]:
+                _bind_live_credential(request, key_fingerprint(credentials[0]), _SESSION_META[key]["account"])
+            else:
+                _lock_runtime(request.app, "LIVE", request)
+        except (VaultError, HTTPException) as exc:
+            _SESSION_CACHE.pop(key, None)
+            public_error = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+            _SESSION_META[key] = {**_row_meta(live_row), "active": False, "last_test_ok": False, "last_error": public_error}
+            _lock_runtime(request.app, "LIVE", request)
+            logger.warning("LIVE credential context rejected: code=credential_context_invalid type=%s", type(exc).__name__)
 
 
 def _row_meta(row: Any) -> dict[str, Any]:
@@ -639,6 +701,7 @@ def _row_meta(row: Any) -> dict[str, Any]:
     permission_safe = withdrawal_permissions_safe(str(row.get("mode") or "LIVE"), summary)
     return {
         "user_id": str(row.get("user_id") or "").strip(),
+        "encrypted_payload": row.get("encrypted_payload"),
         "configured": True,
         "active": bool(row.get("active")) and permission_safe,
         "fingerprint": str(row.get("fingerprint") or ""),
@@ -1110,6 +1173,66 @@ def _lock_runtime(application: Any, mode: str, request: Request) -> None:
         if authorization.get("user_id") != current_user_id(request):
             return
         _lock_live_controller(state)
+        state["snapshot_session_id"] = ""
+        cache = getattr(application.state, "live_account_cache", None)
+        if isinstance(cache, dict):
+            cache.update(value=None, expires=0.0, generation=cache.get("generation", 0) + 1)
+        if state.get("_app") is application:
+            from .v25_execution import persist_state
+            persist_state(state)
+
+
+def _live_credential_identity(request: Request, fingerprint: str, account: Any) -> str:
+    from .v25_execution import current_user_id, live_plan_is_active, unresolved_execution_evidence
+
+    identity = account_identity(account, "LIVE", fingerprint)
+    state = getattr(request.app.state, "v25_execution", None)
+    if not isinstance(state, dict):
+        return identity
+    authorization = state.get("live_session_authorization") or {}
+    if authorization.get("user_id") != current_user_id(request):
+        return identity
+    if normalize_fingerprint(str(authorization.get("fingerprint") or "")) == normalize_fingerprint(fingerprint):
+        return identity
+    if state.get("reconciliation_required") or state.get("execution_state") == "UNKNOWN" or unresolved_execution_evidence(state):
+        raise HTTPException(409, "LIVE yürütme durumu belirsiz; anahtar değişimi için önce kurtarma kontrolü gerekli.")
+    snapshot = state.get("snapshot") or {}
+    exposure = (
+        any(snapshot.get(key) for key in ("positions", "open_orders", "open_algo_orders"))
+        or any(live_plan_is_active(plan) for plan in state.get("plans", {}).values() if isinstance(plan, dict))
+    )
+    previous = str(authorization.get("trading_account_id") or "")
+    if exposure and (not previous or ":FINGERPRINT:" in previous or ":FINGERPRINT:" in identity or previous != identity):
+        raise HTTPException(409, "Açık pozisyon veya emir varken aynı Binance hesabı doğrulanmadan anahtar değiştirilemez.")
+    if previous and ":FINGERPRINT:" not in previous and ":FINGERPRINT:" not in identity and previous != identity:
+        raise HTTPException(403, "Yeni anahtar farklı bir Binance hesabına ait; LIVE bağlantısı kapalı kaldı.")
+    return identity
+
+
+def _bind_live_credential(request: Request, fingerprint: str, account: Any) -> None:
+    from .v25_execution import current_user_id, initial_state, persist_state
+
+    state = getattr(request.app.state, "v25_execution", None)
+    if not isinstance(state, dict):
+        return
+    authorization = state.get("live_session_authorization") or {}
+    if not authorization.get("user_id") or authorization.get("user_id") != current_user_id(request):
+        return
+    identity = _live_credential_identity(request, fingerprint, account)
+    if normalize_fingerprint(str(authorization.get("fingerprint") or "")) == normalize_fingerprint(fingerprint):
+        return
+    _lock_runtime(request.app, "LIVE", request)
+    state["live_session_authorization"] = {
+        **authorization, "fingerprint": normalize_fingerprint(fingerprint),
+        "trading_account_id": identity,
+    }
+    state["web_consent"] = initial_state()["web_consent"]
+    state["policy_ack_digest"] = None
+    snapshot = state.get("snapshot") or {}
+    if not any(snapshot.get(key) for key in ("positions", "open_orders", "open_algo_orders")):
+        state["snapshot"] = {}
+    if state.get("_app") is request.app:
+        persist_state(state)
 
 
 async def _require_ready(application: Any) -> Any:
@@ -1117,6 +1240,18 @@ async def _require_ready(application: Any) -> Any:
         reason = application.state.exchange_vault.get("reason") or "Şifreli kasa hazır değil."
         raise HTTPException(503, reason)
     return application.state.db_pool
+
+
+async def _connection_write(pool: Any, query: str, *args: Any) -> str:
+    try:
+        result = await pool.execute(query, *args)
+    except Exception as exc:
+        from .error_monitoring import log_database_failure
+        log_database_failure(logger, "credential_connection_write", exc)
+        raise HTTPException(503, "Bağlantı durumu kaydedilemedi; LIVE emir kilidi kapalı kaldı.") from None
+    if result in {"UPDATE 0", "DELETE 0"}:
+        raise HTTPException(409, "Kasa kaydı işlem sırasında değişti; güncel bağlantıyı yeniden kontrol edin.")
+    return result
 
 
 def _require_owner_member(request: Request) -> dict[str, Any]:
@@ -1187,6 +1322,13 @@ async def exchange_connection_test(request: Request, body: TestCredentialsReques
 
 @router.post("/save")
 async def exchange_connection_save(request: Request, body: SaveCredentialsRequest) -> dict[str, Any]:
+    _require_member(request)
+    async with _credential_lock(request, body.mode):
+        async with _controller_lock(request, body.mode):
+            return await _save_connection(request, body)
+
+
+async def _save_connection(request: Request, body: SaveCredentialsRequest) -> dict[str, Any]:
     user = _require_member(request)
     pool = await _require_ready(request.app)
     await ensure_schema(pool)
@@ -1195,6 +1337,7 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
         await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != SAVE_CONFIRMATIONS[mode]:
         raise HTTPException(422, "Güvenli kaydetme onayı eksik.")
+    _lock_runtime(request.app, mode, request)
     api_key = body.api_key.get_secret_value().strip()
     secret_key = body.secret_key.get_secret_value().strip()
     try:
@@ -1208,45 +1351,53 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
     fingerprint = key_fingerprint(api_key)
     scope, owner_id = _vault_scope(request, mode)
     if mode == "LIVE":
-        await pool.execute(
-            """
-            INSERT INTO protrebot_exchange_account_vault
-              (user_id, mode, encrypted_payload, fingerprint, active, last_test_ok,
-               last_test_at, last_error, account_summary, updated_at)
-            VALUES ($1, 'LIVE', $2, $3, TRUE, TRUE, NOW(), NULL, $4::jsonb, NOW())
-            ON CONFLICT (user_id, mode) DO UPDATE SET
-              encrypted_payload = EXCLUDED.encrypted_payload,
-              fingerprint = EXCLUDED.fingerprint,
-              active = TRUE,
-              last_test_ok = TRUE,
-              last_test_at = NOW(),
-              last_error = NULL,
-              account_summary = EXCLUDED.account_summary,
-              updated_at = NOW()
-            """,
-            owner_id, encrypted, fingerprint, json.dumps(account, ensure_ascii=False),
-        )
-    else:
-        await pool.execute(
-            """
-            INSERT INTO protrebot_exchange_session_vault
-              (session_id, user_id, mode, encrypted_payload, fingerprint, active, last_test_ok, last_test_at, last_error, account_summary, updated_at)
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, NOW(), NULL, $6::jsonb, NOW())
-            ON CONFLICT (session_id, mode) DO UPDATE SET
-              encrypted_payload = EXCLUDED.encrypted_payload,
-              fingerprint = EXCLUDED.fingerprint,
-              active = TRUE,
-              last_test_ok = TRUE,
-              last_test_at = NOW(),
-              last_error = NULL,
-              account_summary = EXCLUDED.account_summary,
-              updated_at = NOW()
-            """,
-            scope, user["id"], mode, encrypted, fingerprint, json.dumps(account, ensure_ascii=False),
-        )
+        _live_credential_identity(request, fingerprint, account)
+    try:
+        if mode == "LIVE":
+            await pool.execute(
+                """
+                INSERT INTO protrebot_exchange_account_vault
+                  (user_id, mode, encrypted_payload, fingerprint, active, last_test_ok,
+                   last_test_at, last_error, account_summary, updated_at)
+                VALUES ($1, 'LIVE', $2, $3, TRUE, TRUE, NOW(), NULL, $4::jsonb, NOW())
+                ON CONFLICT (user_id, mode) DO UPDATE SET
+                  encrypted_payload = EXCLUDED.encrypted_payload,
+                  fingerprint = EXCLUDED.fingerprint,
+                  active = TRUE,
+                  last_test_ok = TRUE,
+                  last_test_at = NOW(),
+                  last_error = NULL,
+                  account_summary = EXCLUDED.account_summary,
+                  updated_at = NOW()
+                """,
+                owner_id, encrypted, fingerprint, json.dumps(account, ensure_ascii=False),
+            )
+        else:
+            await pool.execute(
+                """
+                INSERT INTO protrebot_exchange_session_vault
+                  (session_id, user_id, mode, encrypted_payload, fingerprint, active, last_test_ok, last_test_at, last_error, account_summary, updated_at)
+                VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, NOW(), NULL, $6::jsonb, NOW())
+                ON CONFLICT (session_id, mode) DO UPDATE SET
+                  encrypted_payload = EXCLUDED.encrypted_payload,
+                  fingerprint = EXCLUDED.fingerprint,
+                  active = TRUE,
+                  last_test_ok = TRUE,
+                  last_test_at = NOW(),
+                  last_error = NULL,
+                  account_summary = EXCLUDED.account_summary,
+                  updated_at = NOW()
+                """,
+                scope, user["id"], mode, encrypted, fingerprint, json.dumps(account, ensure_ascii=False),
+            )
+    except Exception as exc:
+        from .error_monitoring import log_database_failure
+        log_database_failure(logger, "credential_save", exc)
+        raise HTTPException(503, "Anahtar kasaya kaydedilemedi; önceki kayıt korundu ve LIVE emir kilidi kapalı kaldı.") from None
     _SESSION_CACHE[(scope, mode)] = (api_key, secret_key)
     _SESSION_META[(scope, mode)] = {
         "user_id": str(user["id"]),
+        "encrypted_payload": encrypted,
         "configured": True,
         "active": True,
         "fingerprint": fingerprint,
@@ -1257,23 +1408,33 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
         "updated_at": now_iso(),
     }
     _lock_runtime(request.app, mode, request)
+    if mode == "LIVE":
+        _bind_live_credential(request, fingerprint, account)
     return {**session_public_status(request.app, request), "message": "Canlı anahtar OWNER hesabının şifreli kasasına kaydedildi." if mode == "LIVE" else "Anahtarlar bu oturum için güvenli kasaya kaydedildi ve otomasyon için hazır."}
 
 
 @router.post("/activate")
 async def exchange_connection_activate(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
+    _require_member(request)
+    async with _credential_lock(request, body.mode):
+        return await _activate_connection(request, body)
+
+
+async def _activate_connection(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
     user = _require_member(request)
     pool = await _require_ready(request.app)
-    await ensure_session_cache(request)
+    await _load_session_cache(request)
     mode = normalize_mode(body.mode)
     if mode == "LIVE":
         _require_live_owner(user)
     if body.confirmation.strip().upper() != ACTIVATE_CONFIRMATIONS[mode]:
         raise HTTPException(422, "Bağlantı aktifleştirme onayı eksik.")
+    _lock_runtime(request.app, mode, request)
     api_key, secret_key = session_credentials(request, mode, active_only=False)
     if not api_key or not secret_key:
         raise HTTPException(412, "Bu kanal için kasada kayıtlı anahtar yok.")
     scope, owner_id = _vault_scope(request, mode)
+    encrypted_payload = _SESSION_META.get((scope, mode), {}).get("encrypted_payload")
     if mode == "LIVE":
         from .v25_execution import guard_execution_ownership
         guard_execution_ownership(request)
@@ -1283,10 +1444,12 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
         table = "protrebot_exchange_account_vault" if mode == "LIVE" else "protrebot_exchange_session_vault"
         key_column = "user_id" if mode == "LIVE" else "session_id"
         key_value = owner_id if mode == "LIVE" else scope
-        await pool.execute(
-            f"UPDATE {table} SET active = FALSE, last_test_ok = FALSE, last_test_at = NOW(), last_error = $3, updated_at = NOW() WHERE {key_column} = $1 AND mode = $2",
+        await _connection_write(
+            pool,
+            f"UPDATE {table} SET active = FALSE, last_test_ok = FALSE, last_test_at = NOW(), last_error = $3, updated_at = NOW() WHERE {key_column} = $1 AND mode = $2 AND encrypted_payload = $4",
             key_value, mode,
             _rate_limit_public_message(exc) if isinstance(exc, BinanceServerTimeRejected) else str(exc)[:240],
+            encrypted_payload,
         )
         public_error = _rate_limit_public_message(exc) if isinstance(exc, BinanceServerTimeRejected) else str(exc)[:240]
         _SESSION_META[(scope, mode)].update({"active": False, "last_test_ok": False, "last_test_at": now_iso(), "last_error": public_error})
@@ -1295,12 +1458,15 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
     table = "protrebot_exchange_account_vault" if mode == "LIVE" else "protrebot_exchange_session_vault"
     key_column = "user_id" if mode == "LIVE" else "session_id"
     key_value = owner_id if mode == "LIVE" else scope
-    await pool.execute(
-        f"UPDATE {table} SET active = TRUE, last_test_ok = TRUE, last_test_at = NOW(), last_error = NULL, account_summary = $3::jsonb, updated_at = NOW() WHERE {key_column} = $1 AND mode = $2",
-        key_value, mode, json.dumps(account, ensure_ascii=False),
+    await _connection_write(
+        pool,
+        f"UPDATE {table} SET active = TRUE, last_test_ok = TRUE, last_test_at = NOW(), last_error = NULL, account_summary = $3::jsonb, updated_at = NOW() WHERE {key_column} = $1 AND mode = $2 AND encrypted_payload = $4",
+        key_value, mode, json.dumps(account, ensure_ascii=False), encrypted_payload,
     )
     _SESSION_META[(scope, mode)].update({"active": True, "last_test_ok": True, "last_test_at": account["tested_at"], "last_error": None, "account": account, "updated_at": now_iso()})
     if mode == "LIVE":
+        async with _controller_lock(request, mode):
+            _bind_live_credential(request, key_fingerprint(api_key), account)
         from .v25_execution import connect_read_only_for_request
 
         return {
@@ -1312,19 +1478,27 @@ async def exchange_connection_activate(request: Request, body: ConnectionActionR
 
 @router.post("/deactivate")
 async def exchange_connection_deactivate(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
+    _require_member(request)
+    async with _credential_lock(request, body.mode):
+        return await _deactivate_connection(request, body)
+
+
+async def _deactivate_connection(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
     user = _require_member(request)
     pool = await _require_ready(request.app)
-    await ensure_session_cache(request)
+    await _load_session_cache(request)
     mode = normalize_mode(body.mode)
     if mode == "LIVE":
         _require_live_owner(user)
     if body.confirmation.strip().upper() != "BAĞLANTIYI KAPAT":
         raise HTTPException(422, "Bağlantıyı kapatma onayı eksik.")
+    _lock_runtime(request.app, mode, request)
     scope, owner_id = _vault_scope(request, mode)
     table = "protrebot_exchange_account_vault" if mode == "LIVE" else "protrebot_exchange_session_vault"
     key_column = "user_id" if mode == "LIVE" else "session_id"
     key_value = owner_id if mode == "LIVE" else scope
-    await pool.execute(
+    await _connection_write(
+        pool,
         f"UPDATE {table} SET active = FALSE, updated_at = NOW() WHERE {key_column} = $1 AND mode = $2",
         key_value, mode,
     )
@@ -1337,9 +1511,15 @@ async def exchange_connection_deactivate(request: Request, body: ConnectionActio
 
 @router.delete("/credentials")
 async def exchange_connection_delete(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
+    _require_member(request)
+    async with _credential_lock(request, body.mode):
+        return await _delete_connection(request, body)
+
+
+async def _delete_connection(request: Request, body: ConnectionActionRequest) -> dict[str, Any]:
     user = _require_member(request)
     pool = await _require_ready(request.app)
-    await ensure_session_cache(request)
+    await _load_session_cache(request)
     mode = normalize_mode(body.mode)
     if mode == "LIVE":
         _require_live_owner(user)
@@ -1348,6 +1528,7 @@ async def exchange_connection_delete(request: Request, body: ConnectionActionReq
     scope, owner_id = _vault_scope(request, mode)
     if _SESSION_META.get((scope, mode), {}).get("active"):
         raise HTTPException(409, "Önce bağlantıyı devre dışı bırakın; sonra anahtarı silebilirsiniz.")
+    _lock_runtime(request.app, mode, request)
     api_key, secret_key = session_credentials(request, mode, active_only=False)
     if api_key and secret_key:
         try:
@@ -1361,12 +1542,13 @@ async def exchange_connection_delete(request: Request, body: ConnectionActionReq
             # connection has been deactivated.
             pass
     if mode == "LIVE":
-        await pool.execute(
-            "DELETE FROM protrebot_exchange_account_vault WHERE user_id = $1 AND mode = 'LIVE'",
-            owner_id,
+        await _connection_write(
+            pool,
+            "DELETE FROM protrebot_exchange_account_vault WHERE user_id = $1 AND mode = 'LIVE' AND active = FALSE AND encrypted_payload = $2",
+            owner_id, _SESSION_META.get((scope, mode), {}).get("encrypted_payload"),
         )
     else:
-        await pool.execute("DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1 AND mode = $2", scope, mode)
+        await _connection_write(pool, "DELETE FROM protrebot_exchange_session_vault WHERE session_id = $1 AND mode = $2", scope, mode)
     _SESSION_CACHE.pop((scope, mode), None)
     _SESSION_META.pop((scope, mode), None)
     _lock_runtime(request.app, mode, request)

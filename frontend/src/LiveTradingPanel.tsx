@@ -72,6 +72,15 @@ type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MAR
 
 export type SharedLiveStatus = LiveStatus
 export type SharedConnectionStatus = ConnectionStatus
+
+export function liveCredentialStatusMatches(status: SharedLiveStatus, connections: SharedConnectionStatus | null): boolean {
+  const connection = connections?.connections?.LIVE
+  if (connection?.active !== true) return status.credentials?.configured !== true && status.connected !== true
+  if (status.credentials?.configured !== true) return false
+  const normalize = (value: string | null | undefined) => (value || '').trim().toUpperCase().replace(/^SHA256:/, '')
+  const saved = normalize(connection?.fingerprint)
+  return Boolean(saved && saved === normalize(status.credentials?.fingerprint))
+}
 type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; masterTradeTab?: 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'; sharedStatus?: LiveStatus | null; sharedStatusVerified?: boolean; sharedStatusError?: string; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
 
 const V25 = `${API_BASE}/v25`
@@ -294,19 +303,24 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     }
     refreshInFlight.current = true
     try {
-      const [nextStatus, nextConnections] = await Promise.all([
+      const [statusResult, connectionResult] = await Promise.allSettled([
         call<LiveStatus>(V25, '/status'),
         call<ConnectionStatus>(CONNECTIONS, '/status'),
       ])
       if (confirmationOpen.current) return
+      setLocalConnections(connectionResult.status === 'fulfilled' ? connectionResult.value : null)
+      if (statusResult.status === 'rejected') throw statusResult.reason
+      if (connectionResult.status === 'rejected') throw connectionResult.reason
+      const nextStatus = statusResult.value
+      if (!liveCredentialStatusMatches(nextStatus, connectionResult.value)) {
+        throw new Error('LIVE durumu ile kayıtlı Binance anahtarı uyuşmuyor; yeni girişler kapalı.')
+      }
       setLocalStatus(nextStatus)
       setLocalStatusVerified(true)
-      setLocalConnections(nextConnections)
       setPolicyDraft(current => current || nextStatus.policy || {})
       return true
     } catch (error) {
       setLocalStatusVerified(false)
-      setLocalConnections(null)
       if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
       return false
     } finally {
@@ -591,8 +605,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setConfirm({
       title: 'LIVE bağlantısını kapat', expected: 'BAĞLANTIYI KAPAT',
       message: 'Yeni emir yetkileri ve otomasyon sıfırlanır. Açık pozisyonlar kapatılmaz; korumaları Binance üzerinden kontrol edin.',
-      action: async code => {
-        await call(CONNECTIONS, '/deactivate', {method: 'POST', body: JSON.stringify({mode:'LIVE', confirmation:'BAĞLANTIYI KAPAT', totp_code: code})})
+      action: async () => {
+        await call(CONNECTIONS, '/deactivate', {method: 'POST', body: JSON.stringify({mode:'LIVE', confirmation:'BAĞLANTIYI KAPAT'})})
       },
     })
     setConfirmText('')
@@ -603,8 +617,8 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     setConfirm({
       title: 'LIVE anahtarını sil', expected: 'ANAHTARI KALICI SİL',
       message: 'Önce bağlantı kapatılmalıdır. Doğrulanmış açık pozisyon varsa sunucu silmeyi reddeder. Şifreli anahtar bu oturumdan kalıcı silinir; gerçek emir gönderilmez.',
-      action: async code => {
-        await call(CONNECTIONS, '/credentials', {method:'DELETE', body:JSON.stringify({mode:'LIVE', confirmation:'ANAHTARI KALICI SİL', totp_code: code})})
+      action: async () => {
+        await call(CONNECTIONS, '/credentials', {method:'DELETE', body:JSON.stringify({mode:'LIVE', confirmation:'ANAHTARI KALICI SİL'})})
         setCredentials({apiKey:'', secretKey:'', accepted:false})
         setTestResult(null)
       },

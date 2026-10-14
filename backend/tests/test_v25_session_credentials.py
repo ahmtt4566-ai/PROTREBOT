@@ -2,6 +2,7 @@ import asyncio
 import sys
 import time
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -54,6 +55,279 @@ class V25SessionCredentialTests(unittest.TestCase):
             "user_id": "owner", "active": True, "configured": True,
             "account": {"api_permissions": {"withdrawal_check": "VERIFIED", "enableWithdrawals": False}},
         }
+
+    @contextmanager
+    def rotation_context(self):
+        old = ("OLD-LIVE-KEY-offline-AAA", "OLD-LIVE-SECRET-offline-AAA")
+        new = ("NEW-LIVE-KEY-offline-BBB", "NEW-LIVE-SECRET-offline-BBB")
+        account = {
+            "account_identity": "account-one", "tested_at": "now", "active_positions": 0,
+            "orders_created": False, **self.live_metadata()["account"],
+        }
+        state = v25_execution.initial_state()
+        state["lock"] = asyncio.Lock()
+        application = SimpleNamespace(state=SimpleNamespace(v25_execution=state))
+        request = self.request("rotation", application, method="POST")
+        fingerprint = v25_execution.credential_fingerprint(old[0])
+        state["live_session_authorization"].update(
+            user_id="owner", session_id="owner:owner", fingerprint=fingerprint,
+            trading_account_id="BINANCE:LIVE:account-one",
+        )
+        state.update(connected=True, armed_until=time.time() + 600, real_trading_locked=False)
+        state["auto"]["enabled"] = True
+        state["snapshot"] = {
+            "account_identity": "account-one", "wallet_balance": 100,
+            "positions": [], "open_orders": [], "open_algo_orders": [],
+        }
+        state["snapshot_session_id"] = "owner:owner"
+        scope = ("owner:owner", "LIVE")
+        with patch.dict("os.environ", {"PROTREBOT_VAULT_MASTER_KEY": "offline-rotation-vault-master-key"}), \
+             patch.dict(exchange_connections._SESSION_CACHE, {scope: old}, clear=True), \
+             patch.dict(exchange_connections._CREDENTIAL_LOCKS, {}, clear=True), \
+             patch.dict(exchange_connections._SESSION_META, {
+                 scope: {**self.live_metadata(), "fingerprint": exchange_connections.key_fingerprint(old[0]), "account": account},
+             }, clear=True), \
+             patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()), \
+             patch.object(exchange_connections, "_verify_request_credentials", new=AsyncMock(return_value=account)), \
+             patch.object(v25_execution, "persist_state"):
+            holder = {"row": {
+                "user_id": "owner", "mode": "LIVE",
+                "encrypted_payload": exchange_connections.encrypt_credentials(*old, mode="LIVE"),
+                "fingerprint": exchange_connections.key_fingerprint(old[0]),
+                "active": True, "last_test_ok": True, "account_summary": account,
+                "last_test_at": None, "last_error": None, "updated_at": None,
+            }}
+
+            async def execute(query, *args):
+                if "VALUES ($1, 'LIVE'" in query:
+                    holder["row"] = {
+                        **(holder["row"] or {}), "user_id": "owner", "mode": "LIVE",
+                        "encrypted_payload": args[1], "fingerprint": args[2],
+                        "active": True, "last_test_ok": True, "account_summary": args[3],
+                    }
+                elif query.lstrip().startswith("UPDATE protrebot_exchange_account_vault"):
+                    if "AND encrypted_payload = $4" in query and holder["row"]["encrypted_payload"] != args[3]:
+                        return "UPDATE 0"
+                    holder["row"]["active"] = "SET active = TRUE" in query
+                    if "account_summary = $3" in query:
+                        holder["row"]["account_summary"] = args[2]
+                elif query.lstrip().startswith("DELETE FROM protrebot_exchange_account_vault"):
+                    holder["row"] = None
+                return "UPDATE 1"
+
+            pool = SimpleNamespace(
+                execute=AsyncMock(side_effect=execute),
+                fetch=AsyncMock(return_value=[]),
+                fetchrow=AsyncMock(side_effect=lambda *args: holder["row"]),
+            )
+            application.state.db_pool = pool
+            application.state.exchange_vault = {"ready": True, "pool_id": id(pool)}
+            application.state.live_account_cache = {"value": {"wallet_balance": 100}, "expires": 999999, "generation": 0}
+            yield request, holder, old, new, account
+
+    def save_rotated_key(self, request, new):
+        return exchange_connections.exchange_connection_save(
+            request, exchange_connections.SaveCredentialsRequest(
+                mode="LIVE", api_key=new[0], secret_key=new[1],
+                confirmation="CANLI KASAYA KAYDET", totp_code="654321",
+            ),
+        )
+
+    def test_rotation_updates_vault_and_live_binding_without_opening_entries(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            result = asyncio.run(self.save_rotated_key(request, new))
+            state = request.app.state.v25_execution
+            self.assertEqual(exchange_connections.decrypt_credentials(holder["row"]["encrypted_payload"], mode="LIVE"), new)
+            self.assertEqual(
+                exchange_connections.normalize_fingerprint(state["live_session_authorization"]["fingerprint"]),
+                exchange_connections.normalize_fingerprint(result["connections"]["LIVE"]["fingerprint"]),
+            )
+            v25_execution.guard_execution_ownership(request)
+            self.assertFalse(state["connected"])
+            self.assertEqual(state["armed_until"], 0)
+            self.assertFalse(state["auto"]["enabled"])
+            self.assertTrue(state["real_trading_locked"])
+            self.assertIsNone(request.app.state.live_account_cache["value"])
+            self.assertEqual(state["snapshot"], {})
+            self.assertNotIn(old[0][:4], str(result))
+            self.assertNotIn(new[0][:4], str(result))
+            self.assertNotIn(new[1], str(result))
+
+    def test_failed_rotation_keeps_old_key_and_closes_entry_locks(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            original_execute = request.app.state.db_pool.execute.side_effect
+
+            async def fail_save(query, *args):
+                if "VALUES ($1, 'LIVE'" in query:
+                    raise RuntimeError(f"{new[0]} {new[1]} 654321 signature=offline-secret")
+                return await original_execute(query, *args)
+
+            request.app.state.db_pool.execute.side_effect = fail_save
+            with self.assertLogs(exchange_connections.logger, level="ERROR") as logs:
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(self.save_rotated_key(request, new))
+            self.assertEqual(failure.exception.status_code, 503)
+            for value in (*new, "654321", "signature=offline-secret"):
+                self.assertNotIn(value, str(logs.output) + str(failure.exception.detail))
+            self.assertEqual(exchange_connections.session_credentials(request, "LIVE", active_only=False), old)
+            self.assertEqual(exchange_connections.decrypt_credentials(holder["row"]["encrypted_payload"], mode="LIVE"), old)
+            self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+            self.assertEqual(request.app.state.v25_execution["armed_until"], 0)
+
+    def test_missing_vault_row_evicts_stale_live_key(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            holder["row"] = None
+            asyncio.run(exchange_connections.ensure_session_cache(request))
+            self.assertEqual(v25_execution.live_credentials_status(request), ("", "", None))
+            self.assertFalse(exchange_connections.session_public_status(request.app, request)["connections"]["LIVE"]["configured"])
+
+    def test_vault_fingerprint_mismatch_and_decrypt_failure_are_fail_closed(self):
+        for invalid in ("fingerprint", "ciphertext"):
+            with self.subTest(invalid=invalid), self.rotation_context() as (request, holder, old, new, account):
+                if invalid == "fingerprint":
+                    holder["row"]["fingerprint"] = exchange_connections.key_fingerprint(new[0])
+                else:
+                    holder["row"]["encrypted_payload"] = b"invalid-offline-ciphertext"
+                asyncio.run(exchange_connections.ensure_session_cache(request))
+                self.assertEqual(exchange_connections.session_credentials(request, "LIVE", active_only=False), ("", ""))
+                self.assertFalse(exchange_connections.session_public_status(request.app, request)["connections"]["LIVE"]["active"])
+
+    def test_reloaded_new_vault_key_repairs_locked_old_binding(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            exchange_connections._lock_runtime(request.app, "LIVE", request)
+            holder["row"].update(
+                encrypted_payload=exchange_connections.encrypt_credentials(*new, mode="LIVE"),
+                fingerprint=exchange_connections.key_fingerprint(new[0]),
+            )
+            asyncio.run(exchange_connections.ensure_session_cache(request))
+            v25_execution.guard_execution_ownership(request)
+            self.assertEqual(v25_execution.live_credentials_status(request)[:2], new)
+            self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+
+    def test_disconnect_delete_save_reconnect_uses_only_new_key(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            async def scenario():
+                await exchange_connections.exchange_connection_deactivate(
+                    request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="BAĞLANTIYI KAPAT"),
+                )
+                self.assertEqual(v25_execution.live_credentials_status(request), ("", "", None))
+                await exchange_connections.exchange_connection_delete(
+                    request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="ANAHTARI KALICI SİL"),
+                )
+                await self.save_rotated_key(request, new)
+                with patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock(return_value={"orders_created": False})) as connect:
+                    await exchange_connections.exchange_connection_activate(
+                        request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ"),
+                    )
+                    connect.assert_awaited_once()
+                self.assertEqual(v25_execution.live_credentials_status(request)[:2], new)
+            asyncio.run(scenario())
+
+    def test_unknown_account_rotation_with_open_position_is_rejected(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            account["account_identity"] = ""
+            state = request.app.state.v25_execution
+            state["snapshot"]["positions"] = [{"symbol": "BTCUSDT", "quantity": 1}]
+            with self.assertRaises(exchange_connections.HTTPException) as failure:
+                asyncio.run(self.save_rotated_key(request, new))
+            self.assertEqual(failure.exception.status_code, 409)
+            self.assertEqual(exchange_connections.decrypt_credentials(holder["row"]["encrypted_payload"], mode="LIVE"), old)
+            self.assertTrue(state["real_trading_locked"])
+
+    def test_invalid_key_pair_keeps_old_vault_record_and_entries_locked(self):
+        for invalid in (("short", "valid-offline-secret"), ("valid-offline-api", "")):
+            with self.subTest(invalid=invalid), self.rotation_context() as (request, holder, old, new, account):
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(self.save_rotated_key(request, invalid))
+                self.assertEqual(failure.exception.status_code, 422)
+                self.assertEqual(exchange_connections.decrypt_credentials(holder["row"]["encrypted_payload"], mode="LIVE"), old)
+                self.assertEqual(exchange_connections.session_credentials(request, "LIVE", active_only=False), old)
+                self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+
+    def test_vault_read_error_evicts_old_key_and_never_logs_secrets(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            request.app.state.db_pool.fetchrow.side_effect = RuntimeError(f"{old[0]} {old[1]} 654321 signature=offline-secret")
+            with self.assertLogs(exchange_connections.logger, level="ERROR") as logs:
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(exchange_connections.ensure_session_cache(request))
+            self.assertEqual(failure.exception.status_code, 503)
+            for value in (*old, "654321", "signature=offline-secret"):
+                self.assertNotIn(value, str(logs.output) + str(failure.exception.detail))
+            self.assertEqual(v25_execution.live_credentials_status(request), ("", "", None))
+            self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+
+    def test_save_and_status_reload_serialize_the_same_credential_record(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            async def scenario():
+                entered, release = asyncio.Event(), asyncio.Event()
+
+                async def verify(*args):
+                    entered.set()
+                    await release.wait()
+                    return account
+
+                with patch.object(exchange_connections, "_verify_request_credentials", new=AsyncMock(side_effect=verify)):
+                    save = asyncio.create_task(self.save_rotated_key(request, new))
+                    await entered.wait()
+                    reload = asyncio.create_task(exchange_connections.ensure_session_cache(request))
+                    await asyncio.sleep(0)
+                    self.assertFalse(reload.done())
+                    release.set()
+                    await asyncio.gather(save, reload)
+                v25_execution.guard_execution_ownership(request)
+                self.assertEqual(v25_execution.live_credentials_status(request)[:2], new)
+            asyncio.run(scenario())
+
+    def test_rotated_key_connects_fresh_readonly_snapshot_and_guard_still_rejects_mismatch(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            snapshot = {
+                "account_identity": "account-one", "wallet_balance": 250,
+                "available_balance": 250, "positions": [], "open_orders": [],
+                "open_algo_orders": [], "open_algo_orders_available": True,
+            }
+
+            def client_for(application, current_request):
+                self.assertEqual(v25_execution.live_credentials_status(current_request)[:2], new)
+                return SimpleNamespace(time_offset_ms=0)
+
+            async def scenario():
+                await self.save_rotated_key(request, new)
+                with patch.object(v25_execution, "client_for", side_effect=client_for), \
+                     patch.object(v25_execution, "account_snapshot", new=AsyncMock(return_value=snapshot)) as read, \
+                     patch.object(v25_execution, "submit_entry", new=AsyncMock()) as order:
+                    result = await exchange_connections.exchange_connection_activate(
+                        request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ"),
+                    )
+                    self.assertTrue(result["connected"])
+                    self.assertEqual(result["account"]["wallet_balance"], 250)
+                    self.assertTrue(result["real_trading_locked"])
+                    read.assert_awaited_once()
+                    order.assert_not_awaited()
+                exchange_connections._SESSION_CACHE[("owner:owner", "LIVE")] = old
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    v25_execution.guard_execution_ownership(request)
+                self.assertEqual(failure.exception.status_code, 403)
+            asyncio.run(scenario())
+
+    def test_delayed_activation_cannot_publish_proof_for_a_replaced_secret(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            replacement = (old[0], new[1])
+            ciphertext = exchange_connections.encrypt_credentials(*replacement, mode="LIVE")
+
+            async def verify(*args):
+                holder["row"]["encrypted_payload"] = ciphertext
+                return account
+
+            with patch.object(exchange_connections, "_verify_request_credentials", new=AsyncMock(side_effect=verify)), \
+                 patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock()) as connect:
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(exchange_connections.exchange_connection_activate(
+                        request, exchange_connections.ConnectionActionRequest(mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ"),
+                    ))
+            self.assertEqual(failure.exception.status_code, 409)
+            connect.assert_not_awaited()
+            self.assertEqual(exchange_connections.decrypt_credentials(holder["row"]["encrypted_payload"], mode="LIVE"), replacement)
+            self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
 
     def test_live_credentials_are_shared_between_owner_sessions(self):
         first = self.request("session-a")

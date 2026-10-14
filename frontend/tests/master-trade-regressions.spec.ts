@@ -12,13 +12,13 @@ async function setup(page:Page) {
   const user = {id:'master-owner', role:'OWNER', active:true, email_verified:true}
   await page.route('**/api/v22/{profile,session}', route => route.fulfill({json:{user, access:{isPremium:true, canAccessMasterTrade:true}}}))
   await page.route('**/api/v25/status', route => route.fulfill({status:fixture.statusCode, json:fixture.statusCode !== 200 ? {detail:fixture.statusDetail} : {
-    connected:true, credentials:{configured:true}, real_trading_locked:false, armed:true, live_auto_trade:false,
+    connected:true, credentials:{configured:true,fingerprint:'SHA256:OFFLINE'}, real_trading_locked:false, armed:true, live_auto_trade:false,
     execution_state:'ARMED', recovery_ready:true, authorization:{valid:true}, policy_acknowledged:true,
     readiness:{ready:true,gates:[{key:'risk',passed:true},{key:'protection',passed:true}]},
     account:{positions:[],open_orders:[]}, events:[],
     ...fixture.liveFields,
   }}))
-  await page.route('**/api/exchange-connections/status', route => route.fulfill({json:{connections:{LIVE:{configured:true,active:true}}}}))
+  await page.route('**/api/exchange-connections/status', route => route.fulfill({json:{vault:{ready:true},connections:{LIVE:{configured:true,active:true,fingerprint:'SHA256:OFFLINE'}}}}))
   await page.route('**/api/v25/auto/**', async route => {
     fixture.mutations.push(new URL(route.request().url()).pathname)
     await route.fulfill({json:{ok:true}})
@@ -206,7 +206,7 @@ test('connection keys stay masked and are cleared once saved even if activation 
     calls.push(path)
     if (path.endsWith('/save')) {
       expect(route.request().postDataJSON()).toEqual({
-        mode:'LIVE',api_key:key,secret_key:secret,confirmation:'CANLI KASAYA KAYDET',
+        mode:'LIVE',api_key:key,secret_key:secret,confirmation:'CANLI KASAYA KAYDET',totp_code:'123456',
       })
       await route.fulfill({json:{ok:true}})
     } else {
@@ -224,7 +224,8 @@ test('connection keys stay masked and are cleared once saved even if activation 
   await expect(secretInput).toHaveAttribute('type','password')
   await apiInput.fill(key)
   await secretInput.fill(secret)
-  const connectButton = card.getByRole('button',{name:'CONNECT ACCOUNT',exact:true})
+  await card.getByLabel('2FA kodu', {exact:true}).fill('123456')
+  const connectButton = card.getByRole('button',{name:'Kaydet ve bağla',exact:true})
   await connectButton.click()
   await expect(page.locator('.liveConfirm')).toHaveCount(0)
   await expect(apiInput).toHaveValue('')
@@ -252,13 +253,15 @@ for (const activationStatus of [403,500]) test(`activation HTTP ${activationStat
   const card = page.locator('.masterTradeLiveConnectionCard')
   await card.getByPlaceholder('Paste API key').fill('offline-private-api-key')
   await card.getByPlaceholder('Paste secret key').fill('offline-private-secret')
-  await card.getByRole('button',{name:'CONNECT ACCOUNT',exact:true}).click()
+  await card.getByLabel('2FA kodu', {exact:true}).fill('123456')
+  await card.getByRole('button',{name:'Kaydet ve bağla',exact:true}).click()
   await expect.poll(() => fixture.mutations.length).toBe(2)
   const recovery = page.getByTestId('live-status-unverified').getByRole('button',{name:'LIVE oturumunu geri bağla',exact:true})
   await expect(recovery).toBeVisible()
   await expect(card.getByPlaceholder('Paste API key')).toHaveValue('')
   await expect(card.getByPlaceholder('Paste secret key')).toHaveValue('')
   await page.goto('/master-trade?tab=canli',{waitUntil:'domcontentloaded'})
+  await page.getByText('Gelişmiş · eski V25', {exact:true}).click()
   await expect(recovery).toBeVisible()
   await expect(page.locator('.masterTradeLiveAssistantActions').getByRole('button',{name:'START LIVE AUTO TRADE',exact:true})).toBeDisabled()
   await page.setViewportSize({width:390,height:844})
@@ -272,7 +275,7 @@ test('Master Trade connection deletion requires deactivation and explicit confir
   let active = true, configured = true
   const writes:string[] = []
   await page.route('**/api/exchange-connections/status', route => route.fulfill({
-    json:{vault:{ready:true},connections:{LIVE:{active,configured}}},
+    json:{vault:{ready:true},connections:{LIVE:{active,configured,fingerprint:'SHA256:OFFLINE'}}},
   }))
   await page.route('**/api/exchange-connections/{deactivate,credentials}', async route => {
     const path = new URL(route.request().url()).pathname
@@ -280,7 +283,7 @@ test('Master Trade connection deletion requires deactivation and explicit confir
     if (path.endsWith('/deactivate')) {
       expect(route.request().postDataJSON()).toEqual({mode:'LIVE',confirmation:'BAĞLANTIYI KAPAT'})
       active = false
-      fixture.liveFields = {connected:false,real_trading_locked:true,live_auto_trade:false}
+      fixture.liveFields = {connected:false,real_trading_locked:true,live_auto_trade:false,armed:false,credentials:{configured:false}}
     } else {
       expect(active).toBe(false)
       expect(route.request().method()).toBe('DELETE')
