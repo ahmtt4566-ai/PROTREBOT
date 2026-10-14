@@ -122,6 +122,75 @@ class BinanceRateLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.pending, [])
         self.assertEqual(state.active, 0)
 
+    async def test_ban_starting_after_queue_entry_blocks_dispatch_on_every_host(self):
+        real_sleep = asyncio.sleep
+        for status in (418, 429):
+            for host, priority in ((self.HOST, False), ("https://fapi.binance.com", True), ("https://api.binance.com", False)):
+                with self.subTest(status=status, host=host, priority=priority):
+                    BINANCE_RATE_LIMITER.reset()
+                    BINANCE_GLOBAL_BAN.reset(clear_persistent=True)
+                    clock = [1_000.0]
+                    occupied, release_slot = asyncio.Event(), asyncio.Event()
+                    ban_waiting, release_ban, dispatched = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+                    async def blocker():
+                        async with BINANCE_RATE_LIMITER.slot(host):
+                            occupied.set()
+                            await release_slot.wait()
+
+                    async def reader():
+                        async with BINANCE_RATE_LIMITER.slot(host, priority=priority):
+                            dispatched.set()
+
+                    async def elapsed(seconds):
+                        ban_waiting.set()
+                        await release_ban.wait()
+                        clock[0] += seconds
+
+                    with patch("app.binance_rate_limit.BINANCE_MAX_CONCURRENT_REQUESTS_PER_HOST", 1), \
+                         patch("app.binance_rate_limit.time.time", side_effect=lambda: clock[0]), \
+                         patch("app.binance_rate_limit.asyncio.sleep", new=elapsed):
+                        first = asyncio.create_task(blocker())
+                        await occupied.wait()
+                        queued = asyncio.create_task(reader())
+                        await real_sleep(0)
+                        self.assertEqual(len(BINANCE_RATE_LIMITER._state_for(host).pending), 1)
+                        BINANCE_GLOBAL_BAN.record(httpx.Response(
+                            status, headers={"Retry-After": "60"}, json={"code": -1003},
+                            request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/klines"),
+                        ), source="original_live", egress_route="render_direct")
+                        signals = [
+                            asyncio.create_task(ban_waiting.wait()),
+                            asyncio.create_task(dispatched.wait()),
+                        ]
+                        try:
+                            release_slot.set()
+                            await asyncio.wait_for(asyncio.wait(signals, return_when=asyncio.FIRST_COMPLETED), timeout=1)
+                            self.assertFalse(dispatched.is_set())
+                            self.assertTrue(ban_waiting.is_set())
+                        finally:
+                            release_slot.set()
+                            release_ban.set()
+                            for signal in signals:
+                                signal.cancel()
+                            await asyncio.gather(*signals, return_exceptions=True)
+                            await asyncio.gather(first, queued)
+                        self.assertTrue(dispatched.is_set())
+                        self.assertFalse(BINANCE_GLOBAL_BAN.active())
+                        self.assertEqual(BINANCE_RATE_LIMITER._state_for(host).active, 0)
+                        self.assertEqual(BINANCE_RATE_LIMITER._state_for(host).pending, [])
+
+    async def test_explicit_exchange_ban_is_recorded_even_when_adaptive_backoff_is_disabled(self):
+        for status in (418, 429):
+            with self.subTest(status=status):
+                BINANCE_GLOBAL_BAN.reset(clear_persistent=True)
+                with patch("app.binance_rate_limit.RATE_LIMIT_AWARE_BACKOFF_ENABLED", False):
+                    BINANCE_RATE_LIMITER.observe(self.HOST, httpx.Response(
+                        status, headers={"Retry-After": "60"}, json={"code": -1003},
+                        request=httpx.Request("GET", self.HOST + "/fapi/v1/time"),
+                    ), source="connection_server_time", egress_route="quotaguard")
+                self.assertTrue(BINANCE_GLOBAL_BAN.active())
+
     async def test_http_429_and_418_create_cooldown(self):
         for status_code in (429, 418):
             BINANCE_RATE_LIMITER.reset()

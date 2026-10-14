@@ -458,6 +458,39 @@ class ExecutionReliabilityTests(unittest.TestCase):
         self.assertEqual(state["original_v2_live"]["scanner"]["stage"], "SCAN_COMPLETE")
         self.assertFalse(state["original_v2_live"]["paused"])
 
+    def test_ban_starting_during_queued_owner_recheck_blocks_live_dispatch(self):
+        import httpx
+
+        application, state = application_for_loop()
+        state["real_trading_locked"] = False
+        calls = 0
+
+        async def authority(*args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                execution.BINANCE_GLOBAL_BAN.record(httpx.Response(
+                    429, headers={"Retry-After": "60"}, json={"code": -1003},
+                    request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/klines"),
+                ), source="original_live", egress_route="render_direct")
+            return True
+
+        http = SimpleNamespace(request=AsyncMock(return_value=httpx.Response(
+            200, json={}, request=httpx.Request("POST", "https://offline.invalid/fapi/v1/order/test"),
+        )))
+        client = execution.BinanceLiveClient(
+            http, "OFFLINE_KEY_PLACEHOLDER", "OFFLINE_SECRET_PLACEHOLDER",
+            application=application, diagnostic_state=state, background_session=True,
+        )
+        with patch.object(execution, "background_authorization_active", new=authority), \
+             patch.object(execution, "is_armed", return_value=True):
+            with self.assertRaises(execution.LiveRateLimitError) as error:
+                asyncio.run(client._request("POST", "/fapi/v1/order/test", {}, signed=True))
+        self.assertEqual(error.exception.request_method, "POST")
+        self.assertEqual(error.exception.request_path, "/fapi/v1/order/test")
+        self.assertFalse(error.exception.unknown_execution)
+        http.request.assert_not_awaited()
+
     def test_supervisor_restarts_even_when_failure_reporting_raises(self):
         async def exercise():
             application, _state = application_for_loop()

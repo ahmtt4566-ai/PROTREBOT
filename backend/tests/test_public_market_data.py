@@ -9,6 +9,41 @@ from app.binance_rate_limit import BINANCE_GLOBAL_BAN
 from app.public_market_data import ORIGINAL_INTERVALS, ORIGINAL_REQUEST_INTERVAL_SECONDS, ORIGINAL_SYMBOLS, PublicMarketData
 
 
+@pytest.mark.parametrize("status", [418, 429])
+@pytest.mark.parametrize("phase", ["client_setup", "fallback"])
+def test_global_ban_stops_dispatch_after_client_setup_or_before_fallback(status, phase):
+    from app import main
+
+    async def scenario():
+        service = PublicMarketData()
+        application = SimpleNamespace(state=SimpleNamespace())
+        http = SimpleNamespace(get=AsyncMock())
+
+        def start_ban():
+            BINANCE_GLOBAL_BAN.record(httpx.Response(
+                status, headers={"Retry-After": "60"}, json={"code": -1003},
+                request=httpx.Request("GET", "https://fapi.binance.com/fapi/v1/klines"),
+            ), source="original_live", egress_route="render_direct")
+
+        async def prepare(_application):
+            if phase == "client_setup":
+                start_ban()
+            return http
+
+        async def fetch(url, **kwargs):
+            start_ban()
+            return httpx.Response(503, json={}, request=httpx.Request("GET", url))
+
+        http.get.side_effect = fetch
+        with patch.object(main, "ensure_market_data_http_client", new=prepare), \
+             patch.object(main, "FUTURES_MARKET_DATA_APIS", ("https://fapi.binance.com", "https://fapi1.binance.com")):
+            response = await main._fetch_public_market_data(application, service, "/fapi/v1/exchangeInfo", {})
+        assert response.status_code == status
+        assert response.json()["code"] == -1003
+        assert http.get.await_count == (0 if phase == "client_setup" else 1)
+
+    asyncio.run(scenario())
+
 def test_fifty_users_graph_analysis_and_live_share_one_candle_request():
     async def run():
         service = PublicMarketData(lambda: 100.0)

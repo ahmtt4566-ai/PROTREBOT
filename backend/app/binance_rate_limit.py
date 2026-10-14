@@ -415,6 +415,7 @@ class BinanceRateLimiter:
                 state.condition.notify_all()
             async with state.lock:
                 await self._wait(state)
+                await BINANCE_GLOBAL_BAN.wait()
             yield RateLimitPermit(self, host, state, source, egress_route)
         finally:
             async with state.condition:
@@ -469,16 +470,17 @@ class BinanceRateLimiter:
             is_rate_limited_code = int(code) == -1003
         except (TypeError, ValueError):
             is_rate_limited_code = False
+        rate_limited = status_code in {429, 418} or is_rate_limited_code
+        if rate_limited and source != "other":
+            BINANCE_GLOBAL_BAN.record(
+                response,
+                source=source,
+                egress_route=egress_route,
+                exchange_code=code,
+            )
         if not RATE_LIMIT_AWARE_BACKOFF_ENABLED:
             return
-        if status_code in {429, 418} or is_rate_limited_code:
-            if source != "other":
-                BINANCE_GLOBAL_BAN.record(
-                    response,
-                    source=source,
-                    egress_route=egress_route,
-                    exchange_code=code,
-                )
+        if rate_limited:
             delay = retry_after_seconds(response) or max(1, RATE_LIMIT_FALLBACK_SECONDS)
             state.cooldown_until = max(state.cooldown_until, time.monotonic() + delay)
         elif (

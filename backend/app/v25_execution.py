@@ -1532,6 +1532,20 @@ class BinanceLiveClient:
             await self.public_get("/fapi/v1/time")
             self.last_time_sync = time.monotonic()
 
+    def _require_global_ban_clear(self, method: str, path: str) -> None:
+        ban_status = BINANCE_GLOBAL_BAN.public_status()
+        if not ban_status["active"]:
+            return
+        error = LiveRateLimitError(
+            str(ban_status["message"]),
+            retry_after=int(ban_status["remaining_seconds"]),
+            exchange_code=-1003,
+        )
+        error.request_method, error.request_path = method, path
+        if method == "GET" and isinstance(self.diagnostic_state, dict):
+            begin_account_rate_limit_wait(self.diagnostic_state, error)
+        raise error
+
     async def signed(self, method: str, path: str, params: dict[str, Any] | None = None) -> Any:
         method = method.upper()
         if (method, path) not in PRIVATE_PATHS:
@@ -1547,17 +1561,7 @@ class BinanceLiveClient:
                 await require_background_entry(self.application, str(authorization.get("user_id") or ""), live=True)
             except HTTPException as exc:
                 raise LiveExchangeError(str(exc.detail), http_status=exc.status_code) from exc
-        ban_status = BINANCE_GLOBAL_BAN.public_status()
-        if ban_status["active"]:
-            error = LiveRateLimitError(
-                str(ban_status["message"]),
-                retry_after=int(ban_status["remaining_seconds"]),
-                exchange_code=-1003,
-            )
-            error.request_method, error.request_path = method, path
-            if method == "GET" and isinstance(self.diagnostic_state, dict):
-                begin_account_rate_limit_wait(self.diagnostic_state, error)
-            raise error
+        self._require_global_ban_clear(method, path)
         await self.sync_clock()
         payload = {key: value for key, value in dict(params or {}).items() if value is not None}
         return await self._request(method, path, payload, signed=True)
@@ -1567,17 +1571,7 @@ class BinanceLiveClient:
         method = method.upper()
         if (method, path) not in API_KEY_PATHS:
             raise LiveExchangeError("İzin verilmeyen canlı kullanıcı akışı işlemi.", http_status=500)
-        ban_status = BINANCE_GLOBAL_BAN.public_status()
-        if ban_status["active"]:
-            error = LiveRateLimitError(
-                str(ban_status["message"]),
-                retry_after=int(ban_status["remaining_seconds"]),
-                exchange_code=-1003,
-            )
-            error.request_method, error.request_path = method, path
-            if method == "GET" and isinstance(self.diagnostic_state, dict):
-                begin_account_rate_limit_wait(self.diagnostic_state, error)
-            raise error
+        self._require_global_ban_clear(method, path)
         return await self._request(method, path, {}, signed=False, api_key_header=True)
 
     async def _request(
@@ -1618,6 +1612,7 @@ class BinanceLiveClient:
                         raise LiveExchangeError("Canlı oturum yetkisi doğrulanamadı; yeni giriş gönderilmedi.", http_status=423)
                     if isinstance(self.diagnostic_state, dict) and (not is_armed(self.diagnostic_state) or live_execution_blocked(self.diagnostic_state) or self.diagnostic_state.get("real_trading_locked") is not False):
                         raise LiveExchangeError("Kuyruk beklemesinden sonra LIVE giriş yetkisi kapalı; emir gönderilmedi.", http_status=423)
+                self._require_global_ban_clear(method, path)
                 if method != "GET" and self.application is not None:
                     store = getattr(self.application.state, "live_account_cache", None)
                     if store is not None:

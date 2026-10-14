@@ -154,6 +154,31 @@ def test_active_global_ban_blocks_missing_cache_backfill(monkeypatch):
     run(scenario())
 
 
+def test_active_ban_keeps_websocket_cache_available_without_any_rest_request(monkeypatch):
+    async def scenario():
+        socket = FakeSocket()
+        stream = BinanceKlineStream(
+            connector=FakeConnector([socket]), wall_clock=lambda: 446_400,
+        )
+        await stream.configure(["BTCUSDT"])
+        rows = [[index * 900_000, "1", "2", "0.5", "1.5", "10"] for index in range(237, 497)]
+        stream._merge_rows("BTCUSDT", "15m", rows)
+        monkeypatch.setattr(BINANCE_GLOBAL_BAN, "remaining_seconds", lambda: 120)
+
+        async def forbidden_fetch(_params):
+            raise AssertionError("REST must not be used during a ban")
+
+        try:
+            await asyncio.wait_for(socket.recv_started.wait(), timeout=1)
+            assert await stream.get_candles("BTCUSDT", "15m", 260, forbidden_fetch) == rows
+            assert stream.connected
+            assert stream.rest_backfills == 0
+        finally:
+            await stream.close()
+
+    run(scenario())
+
+
 def test_stream_reconnects_after_socket_failure(monkeypatch):
     async def scenario():
         second_socket = FakeSocket()

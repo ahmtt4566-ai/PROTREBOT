@@ -477,6 +477,15 @@ and global Binance ban clock. A 418/429 cooldown prevents REST backfills until
 the persisted retry deadline expires; the WebSocket feed may remain connected.
 Signed account and order requests continue to use the configured QuotaGuard
 route, and strategy, risk, order and protection rules are unchanged.
+The shared signed-request queue rechecks the global ban after admission;
+LIVE also checks again after queued owner authorization, immediately before
+dispatch. Public market reads check before each upstream host, including fallback
+attempts and after client initialization. An active 418/429 ban blocks all these
+new REST dispatches, including priority protection requests and connection tests;
+requests already sent cannot be recalled. Explicit exchange bans remain recorded
+even if adaptive rate-limit backoff is disabled. A complete WebSocket candle cache
+remains readable during the ban, but missing history cannot trigger REST backfill
+and the LIVE scanner does not open new entries while the ban is active.
 
 Original V2 LIVE's listing-age filter covers the longest strategy candle window
 (260 candles at 4h is about 43.34 days), with a minimum of 45 days. Daily universe

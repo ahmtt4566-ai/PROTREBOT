@@ -1834,6 +1834,9 @@ async def _fetch_public_market_data(application: FastAPI, service: PublicMarketD
     last_error: httpx.HTTPError | None = None
     last_response: httpx.Response | None = None
     for host in hosts:
+        blocked = service.blocked(path)
+        if blocked is not None:
+            return blocked
         remaining = min(host_budget, total_deadline - time.monotonic())
         if remaining <= 0:
             break
