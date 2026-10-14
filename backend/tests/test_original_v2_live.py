@@ -40,6 +40,7 @@ def state(monkeypatch):
         "symbol_count": 40,
         "universe": {
             "updated_day": datetime.now(timezone.utc).date().isoformat(),
+            "minimum_age_days": original.ORIGINAL_MIN_SYMBOL_AGE_DAYS,
             "ranked_symbols": strategy.fixed_profile()["execution_policy"]["allowed_symbols"],
             "eligible_count": 8,
         },
@@ -89,6 +90,7 @@ def test_original_live_execution_policy_changes_only_the_daily_symbol_scope(stat
         symbol_count=10,
         universe={
             "updated_day": datetime.now(timezone.utc).date().isoformat(),
+            "minimum_age_days": original.ORIGINAL_MIN_SYMBOL_AGE_DAYS,
             "ranked_symbols": symbols,
             "eligible_count": 10,
         },
@@ -106,7 +108,7 @@ def test_original_live_execution_policy_changes_only_the_daily_symbol_scope(stat
 
 def test_original_live_universe_is_fetched_once_per_day_and_resliced_for_new_n():
     now_ms = int(time.time() * 1000)
-    onboard_date = now_ms - 31 * 24 * 60 * 60 * 1000
+    onboard_date = now_ms - 46 * 24 * 60 * 60 * 1000
     contracts = [
         {"symbol": f"TOKEN{index:02d}USDT", "baseAsset": f"TOKEN{index:02d}",
          "status": "TRADING", "contractType": "PERPETUAL", "quoteAsset": "USDT",
@@ -140,6 +142,44 @@ def test_original_live_universe_is_fetched_once_per_day_and_resliced_for_new_n()
     assert calls == ["/fapi/v1/exchangeInfo", "/fapi/v1/ticker/24hr", "/fapi/v1/ticker/bookTicker"]
     assert service.original_symbols == set(second)
     assert config["universe"]["eligible_count"] == 12
+    assert config["universe"]["minimum_age_days"] >= 45
+
+
+def test_pre_history_filter_cached_universe_is_not_reused(state):
+    universe = state["original_v2_live"]["universe"]
+    universe.pop("minimum_age_days")
+    assert original.selected_symbols(state["original_v2_live"]) == []
+    universe["minimum_age_days"] = 30
+    assert original.selected_symbols(state["original_v2_live"]) == []
+    universe["minimum_age_days"] = original.ORIGINAL_MIN_SYMBOL_AGE_DAYS
+    assert original.selected_symbols(state["original_v2_live"])
+
+
+def test_incomplete_history_pauses_session_before_its_scheduled_expiry(state, monkeypatch):
+    expires = int(time.time()) + 24 * 3600
+    state["original_v2_live"]["session_expires_at_epoch"] = expires
+    monkeypatch.setattr(live, "auto_session_credentials", AsyncMock(return_value=("offline-api-key", "offline-secret")))
+    monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
+    monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=CandleClient()))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={
+        "positions": [], "open_orders": [], "open_algo_orders": [],
+    }))
+    monkeypatch.setattr(original, "check_entry", AsyncMock())
+    monkeypatch.setattr(original, "execution_policy", Mock(return_value={
+        "max_loss_per_trade": "5", "max_margin_per_trade": "25",
+        "fee_bps_per_side": "4", "slippage_bps_per_side": "4",
+    }))
+    monkeypatch.setattr(demo_execution, "live_candidates", AsyncMock(
+        side_effect=live.BinanceDemoError("INCOMPLETE_ORIGINAL_LIVE_HISTORY", http_status=409),
+    ))
+    with pytest.raises(live.BinanceDemoError, match="INCOMPLETE_ORIGINAL_LIVE_HISTORY"):
+        run(original.cycle(request_for(state).app, None))
+    status = original.public_config(state)
+    assert status["paused"] is True
+    assert status["pause_reason"] == "INCOMPLETE_ORIGINAL_LIVE_HISTORY"
+    assert status["session"]["remaining_seconds"] == 0
+    assert datetime.fromisoformat(status["session"]["expires_at"]).timestamp() == expires
+    assert state["real_trading_locked"] is True
 
 
 @pytest.mark.parametrize("hours", [0, 2, 25, -1, 1.5, True, "4"])
@@ -729,9 +769,10 @@ def test_existing_live_lock_pauses_original_only(state):
 
 
 class CandleClient:
-    def __init__(self, gap=False):
+    def __init__(self, gap=False, short_history_symbol=None):
         self.data = decisions.fixtures.open_dataset()
         self.gap = gap
+        self.short_history_symbol = short_history_symbol
         self.calls = []
 
     async def public_get(self, path, params=None):
@@ -746,6 +787,8 @@ class CandleClient:
         rows = self.data.frames["BTCUSDT"][params["interval"]].closed(decisions.fixtures.AT)[-259:]
         if self.gap:
             rows = rows[:100] + rows[101:]
+        if params["symbol"] == self.short_history_symbol and params["interval"] == "4h":
+            rows = rows[-180:]
         return [[row["time"] * 1000, row["open"], row["high"], row["low"], row["close"], row["volume"],
                  (row["time"] + duration) * 1000 - 1, row.get("quote_volume") or 1_000_000] for row in rows]
 
@@ -829,16 +872,68 @@ def test_live_scan_diagnostics_name_incomplete_candle_symbol_and_interval():
     symbols = list(decisions.SYMBOLS)
     diagnostics = {}
 
-    with pytest.raises(live.BinanceDemoError, match="INCOMPLETE_ORIGINAL_LIVE_HISTORY"):
-        run(demo_execution.live_candidates(
-            CandleClient(gap=True), decisions.fixtures.AT, set(), symbols,
-            require_complete=True, diagnostics=diagnostics,
-        ))
+    eligible, results = run(demo_execution.live_candidates(
+        CandleClient(gap=True), decisions.fixtures.AT, set(), symbols,
+        require_complete=True, diagnostics=diagnostics,
+    ))
 
-    assert diagnostics["failure"]["stage"] == "market_data"
-    assert diagnostics["failure"]["symbol"] in symbols
-    assert diagnostics["failure"]["interval"] in strategy.INTERVALS
+    assert eligible == []
+    assert results == {}
+    assert diagnostics["failure"] is None
+    assert diagnostics["rejection_counts"]["data_missing"] == len(symbols)
+    assert diagnostics["data_complete_count"] == 0
+    assert all("INCOMPLETE_ORIGINAL_LIVE_HISTORY" in item["reason"] for item in diagnostics["near_misses"])
+
+
+def test_one_short_4h_history_is_excluded_without_stopping_other_symbols(monkeypatch):
+    evaluate = Mock(wraps=strategy.evaluate_live_universe)
+    monkeypatch.setattr(strategy, "evaluate_live_universe", evaluate)
+    diagnostics = {}
+    client = CandleClient(short_history_symbol="PONSUSDT")
+    _, results = run(demo_execution.live_candidates(
+        client, decisions.fixtures.AT, set(), ["PONSUSDT", "FILUSDT"],
+        require_complete=True, diagnostics=diagnostics,
+    ))
+    assert set(results) == {"FILUSDT"}
+    assert [call.args[0].symbol for call in evaluate.call_args_list] == ["FILUSDT"]
+    assert diagnostics["failure"] is None
+    assert diagnostics["data_complete_count"] == 1
     assert diagnostics["rejection_counts"]["data_missing"] == 1
+    rejection = next(item for item in diagnostics["near_misses"] if item["symbol"] == "PONSUSDT")
+    assert rejection["reason_code"] == "data_missing"
+    assert "4h" in rejection["reason"]
+    assert any(params and params["symbol"] == "FILUSDT" for _, params in client.calls)
+
+
+def test_cycle_keeps_session_open_after_one_symbol_has_short_history(state, monkeypatch):
+    application = request_for(state).app
+    client = CandleClient(short_history_symbol="PONSUSDT")
+    expires = time.time() + 24 * 3600
+    state["original_v2_live"]["session_expires_at_epoch"] = expires
+    monkeypatch.setattr(original.time, "time", lambda: decisions.fixtures.AT)
+    monkeypatch.setattr(live, "readiness_for", Mock(return_value={"ready": True}))
+    monkeypatch.setattr(live, "client_for_with_credentials", Mock(return_value=client))
+    monkeypatch.setattr(live, "account_snapshot", AsyncMock(return_value={
+        "positions": [{"symbol": "FILUSDT"}], "open_orders": [], "open_algo_orders": [],
+    }))
+    monkeypatch.setattr(original, "check_entry", AsyncMock())
+    monkeypatch.setattr(original, "resolve_live_universe", AsyncMock(return_value=["PONSUSDT", "FILUSDT"]))
+    monkeypatch.setattr(original, "execution_policy", Mock(return_value={
+        "max_loss_per_trade": "5", "max_margin_per_trade": "25",
+        "fee_bps_per_side": "4", "slippage_bps_per_side": "4",
+    }))
+    orders = AsyncMock()
+    monkeypatch.setattr(live, "execute_live_order", orders)
+    run(original.cycle(application, ("offline-api-key", "offline-secret")))
+    scanner = state["original_v2_live"]["scanner"]
+    assert scanner["stage"] == "SCAN_COMPLETE"
+    assert scanner["rejection_counts"]["data_missing"] == 1
+    assert scanner["data_complete_count"] == 1
+    assert scanner["last_failure"] is None
+    assert original.running(state)
+    assert state["real_trading_locked"] is False
+    assert state["original_v2_live"]["session_expires_at_epoch"] == expires
+    orders.assert_not_awaited()
 
 
 def test_live_scan_excludes_symbols_that_cannot_meet_minimum_order_parts(monkeypatch):

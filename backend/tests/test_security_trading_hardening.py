@@ -401,6 +401,42 @@ def test_verified_db_credentials_remain_usable_by_background_owner():
         )) == ("api-key-safe", "secret-safe")
 
 
+@pytest.mark.parametrize("failure,code", [
+    ("different_row_key", "vault_fingerprint_mismatch"),
+    ("different_decrypted_key", "decrypted_fingerprint_mismatch"),
+    ("decrypt_failure", "vault_decrypt_failed"),
+    ("withdrawals_enabled", "vault_permissions_unverified"),
+    ("missing_row", "vault_row_missing"),
+])
+def test_unprefixed_background_fingerprint_retains_vault_safety_checks(failure, code):
+    request = request_for(owned_state())
+    fingerprint = vault.key_fingerprint("api-key-safe")
+    row = {
+        "mode": "LIVE", "active": True,
+        "fingerprint": vault.key_fingerprint("different-key") if failure == "different_row_key" else fingerprint,
+        "encrypted_payload": b"ciphertext",
+        "account_summary": {
+            "api_permissions": {"withdrawal_check": "VERIFIED", "enableWithdrawals": failure == "withdrawals_enabled"},
+        },
+    }
+    request.app.state.db_pool.fetchrow = AsyncMock(side_effect=lambda query, *args: (
+        {"auth_version": 1, "security": {"active": True, "email_verified": True, "role": "OWNER"}}
+        if "commercial_auth_users" in query else None if failure == "missing_row" else row
+    ))
+    diagnostics = []
+    with patch.object(vault, "ensure_exchange_vault", new=AsyncMock(return_value=True)), \
+         patch.object(vault, "ensure_schema", new=AsyncMock()), \
+         patch.object(vault, "decrypt_credentials",
+                      return_value=("different-key" if failure == "different_decrypted_key" else "api-key-safe", "secret-safe"),
+                      side_effect=vault.VaultError("offline decrypt failure") if failure == "decrypt_failure" else None):
+        credentials = asyncio.run(vault.session_credentials_for_identity(
+            request.app, "old-browser-session", "alice", "LIVE",
+            vault.normalize_fingerprint(fingerprint), force_refresh=True, diagnostic_codes=diagnostics,
+        ))
+    assert credentials == ("", "")
+    assert diagnostics == [code]
+
+
 @pytest.mark.parametrize("headers", [
     {"x-protrebot-session": "cookie-session:alice"},
     {"authorization": "Bearer cookie-session:alice"},

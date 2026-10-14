@@ -19,6 +19,21 @@ def contract(symbol, **fields):
 def ticker(symbol):
     return {"symbol": symbol, "lastPrice": "1.2", "priceChangePercent": "-2.3", "quoteVolume": "100"}
 
+@pytest.mark.parametrize("age_days,eligible", [(30, False), (43.34, False), (44.999, False), (45, True), (46, True)])
+def test_original_live_age_covers_longest_strategy_history(age_days, eligible):
+    now_ms = 2_000_000_000_000
+    contracts = [
+        contract("OLDUSDT", onboardDate=now_ms - 90 * 86400000),
+        contract("PONSUSDT", onboardDate=now_ms - int(age_days * 86400000)),
+    ]
+    ranked, _ = ranked_original_live_symbols(
+        {"symbols": contracts},
+        [{"symbol": row["symbol"], "quoteVolume": "2000000"} for row in contracts],
+        [{"symbol": row["symbol"], "bidPrice": "100", "askPrice": "100.04"} for row in contracts],
+        now_ms=now_ms,
+    )
+    assert ("PONSUSDT" in ranked) is eligible
+
 
 def test_universe_has_no_500_limit_and_keeps_missing_quotes_unknown():
     info = {"symbols": [contract(f"TOKEN{index}USDT") for index in range(650)] + [
@@ -33,8 +48,8 @@ def test_universe_has_no_500_limit_and_keeps_missing_quotes_unknown():
 
 def test_original_live_universe_filters_age_volume_spread_and_ranks_by_quote_volume():
     now_ms = 2_000_000_000_000
-    old = now_ms - 31 * 24 * 60 * 60 * 1000
-    recent = now_ms - 29 * 24 * 60 * 60 * 1000
+    old = now_ms - 46 * 24 * 60 * 60 * 1000
+    recent = now_ms - 44 * 24 * 60 * 60 * 1000
     contracts = [
         contract("BTCUSDT", onboardDate=old),
         contract("ETHUSDT", onboardDate=old),
@@ -70,7 +85,7 @@ def test_original_live_universe_filters_age_volume_spread_and_ranks_by_quote_vol
     assert eligible_count == 2
     assert filter_counts == {
         "active_contracts": 5,
-        "age_under_30_days": 1,
+        "age_below_required_history": 1,
         "market_data_missing": 0,
         "invalid_market_data": 0,
         "volume_below_minimum": 1,
@@ -81,7 +96,7 @@ def test_original_live_universe_filters_age_volume_spread_and_ranks_by_quote_vol
 
 def test_original_live_universe_exposes_missing_daily_market_data_before_failing():
     now_ms = 2_000_000_000_000
-    old = now_ms - 31 * 24 * 60 * 60 * 1000
+    old = now_ms - 46 * 24 * 60 * 60 * 1000
     contracts = [contract("BTCUSDT", onboardDate=old), contract("ETHUSDT", onboardDate=old)]
     diagnostics = {}
 
@@ -102,7 +117,7 @@ def test_original_live_universe_exposes_missing_daily_market_data_before_failing
 
 def test_original_live_universe_caps_cached_ranked_list_at_owner_maximum():
     now_ms = 2_000_000_000_000
-    onboard_date = now_ms - 31 * 24 * 60 * 60 * 1000
+    onboard_date = now_ms - 46 * 24 * 60 * 60 * 1000
     contracts = [contract(f"TOKEN{index}USDT", onboardDate=onboard_date) for index in range(101)]
     tickers = [{"symbol": row["symbol"], "quoteVolume": str(2_000_000 - index)} for index, row in enumerate(contracts)]
     books = [{"symbol": row["symbol"], "bidPrice": "100", "askPrice": "100.04"} for row in contracts]

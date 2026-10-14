@@ -57,7 +57,7 @@ const scanRejectionLabels: Record<string, string> = {
 
 const universeFilterLabels: Record<string, string> = {
   active_contracts: 'Aktif sözleşme',
-  age_under_30_days: '30 günden yeni',
+  age_below_required_history: 'Gerekli geçmişten yeni',
   market_data_missing: 'Eksik günlük veri',
   invalid_market_data: 'Geçersiz günlük veri',
   volume_below_minimum: 'Hacim eşiği altı',
@@ -103,7 +103,7 @@ export type OriginalV2LiveStatus = {
   session?: {hours: number; started_at?: string | null; expires_at?: string | null; remaining_seconds: number; authority_limited: boolean; warning_sent: boolean} | null
   daily?: {day: string; loss?: number; limit?: number; locked: boolean} | null
   symbols: string[]
-  universe?: {requested_count: number; selected_count: number; eligible_count: number; updated_at?: string | null; filter_counts?: Record<string, number>} | null
+  universe?: {requested_count: number; selected_count: number; eligible_count: number; minimum_age_days?: number; updated_at?: string | null; filter_counts?: Record<string, number>} | null
   scanner?: {
     stage?: string
     last_cycle_at?: string
@@ -159,8 +159,13 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     return () => window.clearInterval(timer)
   }, [status.enabled, status.session?.expires_at])
   const remaining = status.enabled ? Math.max(0, Math.ceil(sessionClock.remaining - Math.max(0, clock - sessionClock.received) / 1000)) : 0
-  const remainingText = remaining > 0 ? `${Math.floor(remaining / 3600)} sa ${Math.floor(remaining % 3600 / 60)} dk ${remaining % 60} sn` : status.session?.expires_at ? 'Süre doldu / giriş kapalı' : 'Oturum yok'
-  const renewing = !status.enabled && !!status.session?.expires_at && Date.parse(status.session.expires_at) <= Date.now()
+  const sessionExpired = !!status.session?.expires_at && Date.parse(status.session.expires_at) <= Date.now()
+  const remainingText = remaining > 0
+    ? `${Math.floor(remaining / 3600)} sa ${Math.floor(remaining % 3600 / 60)} dk ${remaining % 60} sn`
+    : sessionExpired ? 'Süre doldu / giriş kapalı'
+    : status.paused ? 'Güvenlik nedeniyle durduruldu / giriş kapalı'
+    : status.session?.expires_at ? 'Oturum kapalı / giriş kapalı' : 'Oturum yok'
+  const renewing = !status.enabled && sessionExpired
   const [code, setCode] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [busy, setBusy] = useState(false)
@@ -272,7 +277,7 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
       </ul>
       <p>ARM başlatma aşamasında kullanılır; açık otomasyon kendi süresi ve yukarıdaki kapılarla kontrol edilir. Her adayda sembol, sinyal, risk, bakiye ve Binance emir kuralları sunucuda yeniden doğrulanır. “Açık” emir garantisi değildir.</p>
     </details>
-    <p>USDT-M Futures · 24 saatlik hacimde ilk N; hacim en az 1.000.000 USDT, liste yaşı en az 30 gün, spread en fazla 8 bps. Evren UTC gününde bir kez yenilenir. Strateji: 3x · en fazla %6 stop · TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
+    <p>USDT-M Futures · 24 saatlik hacimde ilk N; hacim en az 1.000.000 USDT, liste yaşı en az {status.universe?.minimum_age_days ?? 45} gün (en uzun mum geçmişine göre), spread en fazla 8 bps. Evren UTC gününde bir kez yenilenir. Geçmişi eksik sembol veri eksik olarak elenir; tarama diğer sembollerle devam eder. Strateji: 3x · en fazla %6 stop · TP1’de %60 kapanır; kalan TP3 veya ilk stopta kapanır. Stop taşınmaz.</p>
     <small>Son taramadaki semboller: {(status.scanner?.scanned_symbols ?? status.symbols).map(symbol => symbol.replace('USDT', '')).join(' · ') || 'Günlük seçim bekleniyor'}</small>
     <small>Uygun: {status.universe?.eligible_count ?? 0} · Seçilen: {status.universe?.selected_count ?? status.symbols.length} · Liste yenileme: {status.universe?.updated_at ? new Date(status.universe.updated_at).toLocaleString('tr-TR') : 'Henüz yapılmadı'}</small>
     <details open data-testid="original-scan-diagnostics">

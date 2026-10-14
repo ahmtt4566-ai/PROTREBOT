@@ -546,7 +546,8 @@ async def session_credentials_for_identity(
         logger.warning("LIVE credential resolution failed: decrypt_failed")
         report("vault_decrypt_failed")
         return "", ""
-    if key_fingerprint(credentials[0]) != fingerprint:
+    if normalize_fingerprint(key_fingerprint(credentials[0])) != normalize_fingerprint(fingerprint):
+        logger.warning("LIVE credential resolution failed: decrypted_fingerprint_mismatch")
         report("decrypted_fingerprint_mismatch")
         return "", ""
     report("vault_credentials_resolved")

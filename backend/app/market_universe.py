@@ -8,13 +8,21 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from .backtest_data import INTERVALS as INTERVAL_SECONDS
+from .strategies import original_v2_demo as original_strategy
+
 logger = logging.getLogger(__name__)
 
 ORIGINAL_DEFAULT_SYMBOL_COUNT = 40
 ORIGINAL_MIN_SYMBOL_COUNT = 10
 ORIGINAL_MAX_SYMBOL_COUNT = 100
 ORIGINAL_MIN_QUOTE_VOLUME_USDT = 1_000_000.0
-ORIGINAL_MIN_SYMBOL_AGE_DAYS = 30
+ORIGINAL_MIN_SYMBOL_AGE_DAYS = max(
+    45,
+    math.ceil(original_strategy.CANDLE_FETCH_LIMIT * max(
+        INTERVAL_SECONDS[interval] for interval in original_strategy.INTERVALS
+    ) / 86400),
+)
 ORIGINAL_MAX_SPREAD_BPS = 8.0
 
 
@@ -32,7 +40,7 @@ def ranked_original_live_symbols(
 ) -> tuple[list[str], int]:
     counts = {
         "active_contracts": 0,
-        "age_under_30_days": 0,
+        "age_below_required_history": 0,
         "market_data_missing": 0,
         "invalid_market_data": 0,
         "volume_below_minimum": 0,
@@ -90,7 +98,7 @@ def ranked_original_live_symbols(
         if onboard_ms > 0 and now_ms - onboard_ms >= minimum_age_ms:
             age_qualified.add(contract["symbol"])
         elif onboard_ms > 0:
-            counts["age_under_30_days"] += 1
+            counts["age_below_required_history"] += 1
         else:
             counts["invalid_market_data"] += 1
     missing_market_data = age_qualified - ticker_map.keys() | age_qualified - book_map.keys()

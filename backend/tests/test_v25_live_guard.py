@@ -2890,6 +2890,34 @@ class V25AutoAuthorizationRaceTests(unittest.TestCase):
             result = asyncio.run(v25_execution.fresh_auto_submission_credentials(application, state))
         self.assertEqual(result, ("", ""))
 
+    def test_account_vault_resolves_unprefixed_auto_fingerprint_after_forced_refresh(self):
+        application, state, credentials = self._context()
+        fingerprint = exchange_connections.key_fingerprint(self.API_KEY)
+        application.state.db_pool = SimpleNamespace(fetchrow=AsyncMock(return_value={
+            "user_id": self.USER_ID, "mode": "LIVE", "active": True,
+            "encrypted_payload": b"offline-ciphertext", "fingerprint": fingerprint,
+            "account_summary": {
+                "api_permissions": {"withdrawal_check": "VERIFIED", "enableWithdrawals": False},
+            },
+        }))
+        checks = []
+        with patch.object(v25_execution, "background_authorization_active", new=AsyncMock(return_value=True)), \
+             patch.object(exchange_connections, "authoritative_live_owner_active", new=AsyncMock(return_value=True)), \
+             patch.object(exchange_connections, "ensure_exchange_vault", new=AsyncMock(return_value=True)), \
+             patch.object(exchange_connections, "ensure_schema", new=AsyncMock()), \
+             patch.object(exchange_connections, "decrypt_credentials", return_value=credentials), \
+             patch.object(v25_execution, "readiness_for", return_value={"ready": True}):
+            actual = asyncio.run(v25_execution.fresh_auto_submission_credentials(
+                application, state, check_results=checks,
+            ))
+        self.assertEqual(actual, credentials)
+        self.assertTrue(next(check for check in checks if check["check"] == "api_key_validation")["passed"])
+        query = application.state.db_pool.fetchrow.await_args.args[0]
+        self.assertIn("protrebot_exchange_account_vault", query)
+        self.assertNotIn("protrebot_exchange_session_vault", query)
+        self.assertNotIn(self.API_KEY, str(checks))
+        self.assertNotIn(self.SECRET_KEY, str(checks))
+
     def test_owner_vault_fingerprint_failure_is_reported_without_credentials(self):
         application, state, _ = self._context()
         checks = []

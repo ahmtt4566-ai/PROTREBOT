@@ -29,6 +29,7 @@ POLICY_PATH = Path(__file__).with_name("original_v2_demo_policy.json")
 DOCUMENT_SHA256 = "be0178adeccb6e8bbe0974cae511a6809b80d8de1f7822ed60ab4cba973a1130"
 EXECUTION_POLICY_SHA256 = "8196421755c55ec40b1f180eda31813f9a6d19f539b9058a46456c69b2a7bc48"
 INTERVALS = ("15m", "1h", "4h")
+CANDLE_FETCH_LIMIT = 260
 logger = logging.getLogger(__name__)
 
 

@@ -621,14 +621,15 @@ async def _candidates(
     results, tickers, complete = {}, [], set()
     for symbol in symbols:
         frames, series_by_interval = {}, {}
+        incomplete_history = False
         for interval in strategy.INTERVALS:
             try:
                 if kline_fetch is None:
                     raw = await client.public_get(
-                        "/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": 260},
+                        "/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": strategy.CANDLE_FETCH_LIMIT},
                     )
                 else:
-                    raw = await kline_fetch(symbol, interval, 260)
+                    raw = await kline_fetch(symbol, interval, strategy.CANDLE_FETCH_LIMIT)
             except Exception:
                 if diagnostics is not None:
                     diagnostics["failure"] = {
@@ -656,15 +657,29 @@ async def _candidates(
             frames[interval] = series.closed(at)
             series_by_interval[interval] = series
             if require_complete and (
-                _duplicates or len(frames[interval]) != 259 or not series.history_complete(at)
+                _duplicates or len(frames[interval]) != strategy.CANDLE_FETCH_LIMIT - 1 or not series.history_complete(at)
             ):
                 code = "duplicate_candles" if _duplicates else (
                     "missing_or_wrong_interval_candles"
-                    if len(frames[interval]) != 259 else "candle_gap"
+                    if len(frames[interval]) != strategy.CANDLE_FETCH_LIMIT - 1 else "candle_gap"
                 )
                 category = "invalid_market_data" if _duplicates else "data_missing"
+                if live_universe and not _duplicates:
+                    logger.warning(
+                        "ORIGINAL_LIVE_HISTORY_REJECTED symbol=%s interval=%s reason=%s closed_candles=%d",
+                        symbol, interval, code, len(frames[interval]),
+                    )
+                    reject(
+                        symbol, "data_missing",
+                        f"INCOMPLETE_ORIGINAL_LIVE_HISTORY – {symbol} – {interval}: veri eksik ({code}).",
+                        progress=0, failed_checks=[interval],
+                    )
+                    incomplete_history = True
+                    break
                 fail_scan(code, symbol=symbol, interval=interval, category=category)
                 fail("INCOMPLETE_ORIGINAL_LIVE_HISTORY")
+        if incomplete_history:
+            continue
         try:
             decision = StrategyInput(symbol, at, frames)
             results[symbol] = (

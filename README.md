@@ -478,6 +478,20 @@ the persisted retry deadline expires; the WebSocket feed may remain connected.
 Signed account and order requests continue to use the configured QuotaGuard
 route, and strategy, risk, order and protection rules are unchanged.
 
+Original V2 LIVE's listing-age filter covers the longest strategy candle window
+(260 candles at 4h is about 43.34 days), with a minimum of 45 days. Daily universe
+caches without the current history requirement are refreshed, not reused.
+A symbol with insufficient or gapped history is rejected as `data_missing`;
+other symbols continue scanning. Duplicate/malformed candles, upstream failures,
+account permissions and order safety gates retain their fail-closed behavior.
+Background LIVE credentials are read from the OWNER account vault. Fingerprints
+are compared in the same normalized form before and after decryption, so the
+`SHA256:` display prefix cannot reject an otherwise identical authorized key.
+Changed keys, failed decryption and unverified withdrawal permissions still
+block entries. A future-dated session stopped by a safety gate is displayed as
+stopped, not expired; its recorded pause reason remains visible. No session is
+automatically reopened or extended.
+
 Both frontend entrypoints validate Demo status, account and summary responses
 before storing them. Missing limits, HTML/proxy fallback bodies and malformed
 summaries produce a recoverable in-panel error, not a workspace crash or

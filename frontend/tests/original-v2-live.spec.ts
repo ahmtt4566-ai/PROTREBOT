@@ -1,7 +1,7 @@
 import {expect, test, type Page} from '@playwright/test'
 
 const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT']
-async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false} = {}) {
+async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false, pauseReason = '', expired = false} = {}) {
   const writes: Array<{path: string; body: unknown}> = []
   await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'original-live-ui'))
   await page.route('**/api/**', async route => {
@@ -11,13 +11,13 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
     const fillLock = {id: 'fill-lock-1', active: locked, symbol: 'BTCUSDT',
       violations: ['Stop mesafesi %6 sınırını aştı'], evidence: {stop_percent: '7.84', risk_usdt: '41.02', risk_budget_usdt: '30', margin_usdt: '170'}}
     const original = {
-      available, enabled, paused: locked, risk_percent: 0.5, daily_loss_percent: 5, symbols, fill_lock: fillLock,
-      session: enabled ? {hours: 1, expires_at: new Date(Date.now() + 3600000).toISOString(), remaining_seconds: 3600, authority_limited: false, warning_sent: false} : null,
+      available, enabled, paused: locked || !!pauseReason, pause_reason: pauseReason, risk_percent: 0.5, daily_loss_percent: 5, symbols, fill_lock: fillLock,
+      session: enabled || pauseReason || expired ? {hours: 1, expires_at: new Date(Date.now() + (expired ? -3600000 : 3600000)).toISOString(), remaining_seconds: enabled && !expired ? 3600 : 0, authority_limited: false, warning_sent: false} : null,
       daily: {day: '2026-10-13', loss: dailyLossLocked ? 50 : 0, limit: 50, locked: dailyLossLocked},
       universe: {
-        requested_count: 40, selected_count: 40, eligible_count: 46,
+        requested_count: 40, selected_count: 40, eligible_count: 46, minimum_age_days: 45,
         filter_counts: {
-          active_contracts: 650, age_under_30_days: 20, market_data_missing: 0,
+          active_contracts: 650, age_below_required_history: 20, market_data_missing: 0,
           invalid_market_data: 1, volume_below_minimum: 500, spread_too_wide: 83, eligible: 46,
         },
       },
@@ -115,6 +115,22 @@ test('OWNER sees Original V2 rejection stages, nearest symbols and 24-hour conve
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('Kalan 2 USDT (0.2)')
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('Borsa minimumu 5 USDT / 0.001')
   await expect(card.getByTestId('original-scan-near-misses')).toContainText('OPUSDT')
+  await expect(card).toContainText('liste yaşı en az 45 gün')
+})
+
+test('paused session with future expiry shows safety stop rather than expired', async ({page}) => {
+  const writes = await fixture(page, {pauseReason: 'INCOMPLETE_ORIGINAL_LIVE_HISTORY'})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await expect(card.getByTestId('original-session-remaining')).toHaveText('Güvenlik nedeniyle durduruldu / giriş kapalı')
+  await expect(card).toContainText('INCOMPLETE_ORIGINAL_LIVE_HISTORY')
+  expect(writes).toEqual([])
+})
+
+test('expired session still reports expiry rather than safety stop', async ({page}) => {
+  const writes = await fixture(page, {pauseReason: 'Oturum süresi doldu', expired: true})
+  const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+  await expect(card.getByTestId('original-session-remaining')).toHaveText('Süre doldu / giriş kapalı')
+  expect(writes).toEqual([])
 })
 
 test('active Original V2 reports entries open after its startup ARM is consumed', async ({page}) => {

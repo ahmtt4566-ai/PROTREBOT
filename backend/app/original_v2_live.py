@@ -20,6 +20,7 @@ from .market_universe import (
     ORIGINAL_DEFAULT_SYMBOL_COUNT,
     ORIGINAL_MAX_SYMBOL_COUNT,
     ORIGINAL_MIN_SYMBOL_COUNT,
+    ORIGINAL_MIN_SYMBOL_AGE_DAYS,
     ranked_original_live_symbols,
 )
 from .strategies import original_v2_demo as strategy
@@ -90,6 +91,8 @@ def _valid_symbol_count(config: dict[str, Any]) -> int:
 def _today_universe(config: dict[str, Any]) -> dict[str, Any] | None:
     universe = config.get("universe")
     if not isinstance(universe, dict) or universe.get("updated_day") != datetime.now(timezone.utc).date().isoformat():
+        return None
+    if universe.get("minimum_age_days") != ORIGINAL_MIN_SYMBOL_AGE_DAYS:
         return None
     ranked = universe.get("ranked_symbols")
     if (
@@ -172,6 +175,7 @@ async def resolve_live_universe(application: Any, client: Any, config: dict[str,
             "updated_at": live.now_iso(),
             "ranked_symbols": ranked,
             "eligible_count": eligible_count,
+            "minimum_age_days": ORIGINAL_MIN_SYMBOL_AGE_DAYS,
             "filter_counts": filter_counts,
         }
         config.pop("universe_filter_failure", None)
@@ -216,6 +220,7 @@ def public_config(state: dict[str, Any]) -> dict[str, Any]:
         "requested_count": _valid_symbol_count(config),
         "selected_count": len(symbols),
         "eligible_count": int(cached_universe.get("eligible_count", 0)) if cached_universe is not None else 0,
+        "minimum_age_days": ORIGINAL_MIN_SYMBOL_AGE_DAYS,
         "updated_at": cached_universe.get("updated_at") if cached_universe is not None else None,
         "filter_counts": (
             copy.deepcopy(cached_universe.get("filter_counts", {}))

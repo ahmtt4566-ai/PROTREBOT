@@ -422,6 +422,7 @@ class ExecutionReliabilityTests(unittest.TestCase):
             "symbol_count": 40,
             "universe": {
                 "updated_day": datetime.now(timezone.utc).date().isoformat(),
+                "minimum_age_days": original_v2_live.ORIGINAL_MIN_SYMBOL_AGE_DAYS,
                 "ranked_symbols": ["BTCUSDT"],
                 "eligible_count": 1,
             },
