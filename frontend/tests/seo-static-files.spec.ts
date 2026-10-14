@@ -38,6 +38,9 @@ test('general crawling is allowed while private routes and sensitive query URLs 
   const allowed = (path:string) => rules.filter(rule => rule.pattern.test(path))
     .sort((left,right) => right.length-left.length || Number(right.allow)-Number(left.allow))[0]?.allow ?? true
   for (const path of ['/','/?lang=tr','/privacy','/privacy/','/terms','/risk','/pricing','/new-public-page','/assets/app.js','/og-image.png','/kaistrade-logo.png','/favicon.ico','/favicon-48x48.png','/favicon-96x96.png','/favicon-192x192.png','/favicon-512x512.png','/icon-192.png','/icon-512.png','/apple-touch-icon.png','/sitemap.xml','/robots.txt']) expect(allowed(path)).toBe(true)
+  for (const path of ['/favicon.ico','/favicon-48x48.png','/favicon-192x192.png','/apple-touch-icon.png']) {
+    expect(allowed(`${path}?v=kaistrade-mark-2`)).toBe(true)
+  }
   for (const path of ['/login','/register','/forgot-password','/reset-password','/profile','/admin','/admin/users','/dashboard','/settings','/settings/security','/master-trade','/billing','/verify-email','/local-owner-setup','/api','/api/v22/session','/api/v22/auth/google/callback','/?google_login=success','/?google_remember=1','/?token=private','/?lang=tr&token=private','/privacy?token=private','/assets/app.js?token=private','/?code=private','/?state=private','/?mfa_challenge=private']) {
     expect(allowed(path)).toBe(false)
   }

@@ -1,32 +1,45 @@
-"""Generate site icons from the existing KaisTrade pulse artwork."""
+"""Generate all site icons from the KaisTrade logo's circular brand mark."""
 from pathlib import Path
-from io import BytesIO
-import struct
 
 from PIL import Image
 
 PUBLIC = Path(__file__).resolve().parents[1] / "frontend" / "public"
-BACKGROUND = (255, 255, 255, 255)
+BACKGROUND = (10, 17, 24, 255)
 
 
 def main():
-    with Image.open(PUBLIC / "favicon-512x512.png") as original:
+    with Image.open(PUBLIC / "kaistrade-logo.png") as original:
         source = original.convert("RGBA")
-        bounds = source.getchannel("A").getbbox()
+        alpha = source.getchannel("A")
+        bounds = alpha.getbbox()
         if bounds is None:
-            raise ValueError("Existing KaisTrade icon has no visible artwork")
-        artwork = source.crop(bounds)
+            raise ValueError("KaisTrade logo has no visible artwork")
+        left, top, right, bottom = bounds
+        mark_right = next(
+            (x for x in range(left, right) if alpha.crop((x, top, x + 1, bottom)).getbbox() is None),
+            None,
+        )
+        if mark_right is None or not 0.9 <= (mark_right - left) / (bottom - top) <= 1.1:
+            raise ValueError("KaisTrade logo must start with a separate circular brand mark")
+        artwork = source.crop((left, top, mark_right, bottom))
     canvas = Image.new("RGBA", (512, 512), BACKGROUND)
-    artwork.thumbnail((410, 410), Image.Resampling.LANCZOS)
+    scale = 410 / max(artwork.size)
+    artwork = artwork.resize(
+        (round(artwork.width * scale), round(artwork.height * scale)),
+        Image.Resampling.LANCZOS,
+    )
     canvas.alpha_composite(artwork, ((512 - artwork.width) // 2, (512 - artwork.height) // 2))
-    for name, size in (("icon-192.png", 192), ("icon-512.png", 512), ("apple-touch-icon.png", 180)):
+    for name, size in (
+        ("favicon-48x48.png", 48),
+        ("favicon-96x96.png", 96),
+        ("favicon-192x192.png", 192),
+        ("favicon-512x512.png", 512),
+        ("icon-192.png", 192),
+        ("icon-512.png", 512),
+        ("apple-touch-icon.png", 180),
+    ):
         canvas.resize((size, size), Image.Resampling.LANCZOS).save(PUBLIC / name)
-    png = BytesIO()
-    canvas.resize((48, 48), Image.Resampling.LANCZOS).save(png, format="PNG")
-    payload = png.getvalue()
-    header = struct.pack("<HHH", 0, 1, 1)
-    entry = struct.pack("<BBBBHHII", 48, 48, 0, 0, 1, 32, len(payload), 22)
-    (PUBLIC / "favicon.ico").write_bytes(header + entry + payload)
+    canvas.save(PUBLIC / "favicon.ico", format="ICO", sizes=[(16, 16), (32, 32), (48, 48)])
 
 
 if __name__ == "__main__":

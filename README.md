@@ -1577,10 +1577,14 @@ Offline regressions: `backend/tests/test_trade_r_metrics.py`.
 ## Site favicon
 
 Both Vite entrypoints reference shared, same-origin site icons in
-`frontend/public`: a multi-size `favicon.ico`, a 96px PNG for search/browser
-surfaces, and a 180px Apple touch icon. These use the existing KaisTrade logo's
-round emblem, without changing the in-app wordmark. Keep these public URLs
-stable and crawlable. Google Search updates its icon after recrawling the home
+`frontend/public`: a 16/32/48px `favicon.ico`, 48px and 192px PNGs, and a
+180px Apple touch icon. `tools/generate-site-icons.py` extracts the existing
+KaisTrade logo's round emblem and renders its green ring and white pulse on
+a dark background, without changing the in-app wordmark. All legacy icon
+sizes are regenerated from the same logo; no white placeholder is retained.
+Both HTML heads use `?v=kaistrade-mark-2` to avoid the old browser cache.
+The static files are available without login and allowed by `robots.txt`.
+Google Search updates its icon after recrawling the home
 page; deployment does not guarantee an immediate search-result change.
 Regression checks: `node --test tools/site-icons.test.mjs`.
 
@@ -1787,8 +1791,8 @@ existing public `og-image.png` is used; no profit or performance claims are made
 Metadata is present in the HTTP HTML before JavaScript executes.
 Each entry point contains exactly one `WebSite` JSON-LD object with
 `name: KaisTrade`, `alternateName: Kais Trade` and the canonical homepage URL.
-The existing square transparent PNG favicons (48, 96, 192 and 512 pixels), ICO
-and 180-pixel Apple touch icon are retained and available for crawling.
+The square PNG favicons (48, 96, 192 and 512 pixels), ICO and 180-pixel Apple
+touch icon use the KaisTrade emblem on a dark background and remain crawlable.
 The social image is an existing 1200-by-630 PNG. Tests verify local image sizes
 and real HTTP image bytes/MIME types in both entry points and builds. Search
 engines choose whether and when to display the site name or favicon.

@@ -56,20 +56,31 @@ function assertIconPng(buffer, size) {
   const margin = Math.floor(size * .07)
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     if (x < margin || y < margin || x >= size - margin || y >= size - margin) {
-      assert.deepEqual([...rows[y].subarray(x * 4, x * 4 + 4)], [255, 255, 255, 255])
+      const pixel = [...rows[y].subarray(x * 4, x * 4 + 4)]
+      if (size < 48) assert.ok(pixel.slice(0, 3).every(channel => channel < 40), 'Small ICO border stays dark after resampling')
+      else assert.deepEqual(pixel, [10, 17, 24, 255])
     }
   }
   assert.ok(rows.some(row => {
-    for (let x = 0; x < size; x++) if (row[x * 4 + 1] > 180 && row[x * 4] < 100) return true
+    for (let x = 0; x < size; x++) {
+      const [red, green, blue] = row.subarray(x * 4, x * 4 + 3)
+      if (green > (size < 32 ? 100 : 180) && red < 100 && green > blue * 1.1) return true
+    }
     return false
-  }), 'Existing green pulse artwork is present')
+  }), 'KaisTrade green logo ring is present')
+  let white = 0
+  for (const row of rows) for (let x = 0; x < size; x++) {
+    if (Math.min(...row.subarray(x * 4, x * 4 + 3)) > 200) white++
+  }
+  assert.ok(white > size * size * (size >= 48 ? .03 : .01), 'White pulse remains visible on the dark background')
 }
 
 test('Both entrypoints declare stable same-origin favicon and touch icon URLs in the head', () => {
   const expected = [
-    {rel: 'icon', href: '/favicon.ico', type: 'image/x-icon', sizes: '48x48'},
-    {rel: 'icon', href: '/icon-512.png', type: 'image/png', sizes: '512x512'},
-    {rel: 'apple-touch-icon', href: '/apple-touch-icon.png', sizes: '180x180'},
+    {rel: 'icon', href: '/favicon.ico?v=kaistrade-mark-2', type: 'image/x-icon', sizes: '16x16 32x32 48x48'},
+    {rel: 'icon', href: '/favicon-48x48.png?v=kaistrade-mark-2', type: 'image/png', sizes: '48x48'},
+    {rel: 'icon', href: '/favicon-192x192.png?v=kaistrade-mark-2', type: 'image/png', sizes: '192x192'},
+    {rel: 'apple-touch-icon', href: '/apple-touch-icon.png?v=kaistrade-mark-2', sizes: '180x180'},
   ]
   for (const entry of ['../index.html', '../frontend/index.html']) {
     const html = readFileSync(new URL(entry, import.meta.url), 'utf8')
@@ -77,16 +88,17 @@ test('Both entrypoints declare stable same-origin favicon and touch icon URLs in
     assert.ok(head, `${entry} has a document head`)
     const links = Array.from(head.matchAll(/<link\b[^>]*>/gi), match =>
       Object.fromEntries(Array.from(match[0].matchAll(/([\w-]+)="([^"]*)"/g), attr => [attr[1], attr[2]])))
-    assert.equal(links.filter(link => link.rel === 'icon' || link.rel === 'apple-touch-icon').length, 3)
+    assert.equal(links.filter(link => link.rel === 'icon' || link.rel === 'apple-touch-icon').length, 4)
     for (const icon of expected) {
       assert.ok(links.some(link => Object.entries(icon).every(([key, value]) => link[key] === value)),
         `${entry} declares ${icon.href}`)
-      assert.ok(asset(icon.href.slice(1)).length > 0)
+      assert.ok(asset(new URL(icon.href, 'https://kaistrade.com').pathname.slice(1)).length > 0)
     }
   }
 })
 
 test('Search and Apple icons are real square PNGs with the declared sizes', () => {
+  for (const size of [48, 96, 192, 512]) assertIconPng(asset(`favicon-${size}x${size}.png`), size)
   for (const size of [192, 512]) assertIconPng(asset(`icon-${size}.png`), size)
   assertIconPng(asset('apple-touch-icon.png'), 180)
 })
@@ -98,17 +110,17 @@ test('Open Graph promotional PNG is exactly 1200 by 630 pixels', () => {
   assert.equal(png.readUInt32BE(20), 630)
 })
 
-test('Fallback ICO contains exactly one bounded 48px PNG entry', () => {
+test('Fallback ICO contains bounded 16px, 32px and 48px logo entries', () => {
   const ico = asset('favicon.ico')
   assert.equal(ico.readUInt16LE(0), 0)
   assert.equal(ico.readUInt16LE(2), 1)
-  assert.equal(ico.readUInt16LE(4), 1)
-  let offset = 6 + 16
-  for (const [index, size] of [48].entries()) {
+  assert.equal(ico.readUInt16LE(4), 3)
+  let offset = 6 + 3 * 16
+  for (const [index, size] of [16, 32, 48].entries()) {
     const entry = 6 + index * 16
     assert.equal(ico[entry], size)
     assert.equal(ico[entry + 1], size)
-    assert.equal(ico.readUInt16LE(entry + 4), 1)
+    assert.ok([0, 1].includes(ico.readUInt16LE(entry + 4)))
     assert.equal(ico.readUInt16LE(entry + 6), 32)
     const length = ico.readUInt32LE(entry + 8)
     assert.equal(ico.readUInt32LE(entry + 12), offset)

@@ -46,15 +46,31 @@ test('home page publishes complete KaisTrade metadata before JavaScript in both 
       '@context': 'https://schema.org', '@type': 'WebSite',
       name: 'KaisTrade', alternateName: 'Kais Trade', url: 'https://kaistrade.com/',
     }])
-    expect(metadata.icons).toHaveLength(3)
-    expect(metadata.icons).toContainEqual({href:'/favicon.ico',type:'image/x-icon',sizes:'48x48'})
-    expect(metadata.icons).toContainEqual({href:'/icon-512.png',type:'image/png',sizes:'512x512'})
+    expect(metadata.icons).toEqual([
+      {href:'/favicon.ico?v=kaistrade-mark-2',type:'image/x-icon',sizes:'16x16 32x32 48x48'},
+      {href:'/favicon-48x48.png?v=kaistrade-mark-2',type:'image/png',sizes:'48x48'},
+      {href:'/favicon-192x192.png?v=kaistrade-mark-2',type:'image/png',sizes:'192x192'},
+      {href:'/apple-touch-icon.png?v=kaistrade-mark-2',type:null,sizes:'180x180'},
+    ])
     for (const icon of metadata.icons) {
       if (!icon.href) throw new Error('Icon URL missing')
+      const pathname = new URL(icon.href,base).pathname
       const response = await request.get(base+icon.href)
       expect(response.status()).toBe(200)
-      expect(response.headers()['content-type']).toMatch(icon.href.endsWith('.ico') ? /^image\/(x-icon|vnd\.microsoft\.icon)\b/i : /^image\/png\b/i)
-      expect(await response.body()).toEqual(readFileSync(new URL('../public'+icon.href,import.meta.url)))
+      expect(response.headers()['content-type']).toMatch(pathname.endsWith('.ico') ? /^image\/(x-icon|vnd\.microsoft\.icon)\b/i : /^image\/png\b/i)
+      const body = await response.body()
+      expect(body).toEqual(readFileSync(new URL('../public'+pathname,import.meta.url)))
+      if (pathname.endsWith('.png')) {
+        const [width,height] = icon.sizes!.split('x').map(Number)
+        expect(body.subarray(0,8)).toEqual(Buffer.from([137,80,78,71,13,10,26,10]))
+        expect([body.readUInt32BE(16),body.readUInt32BE(20)]).toEqual([width,height])
+      } else {
+        expect(body.readUInt16LE(2)).toBe(1)
+        expect(body.readUInt16LE(4)).toBe(3)
+        for (const [index,size] of [16,32,48].entries()) {
+          expect([body[6+index*16],body[7+index*16]]).toEqual([size,size])
+        }
+      }
     }
     const logo = await request.get(`${base}/kaistrade-logo.png`)
     expect(logo.status()).toBe(200)
