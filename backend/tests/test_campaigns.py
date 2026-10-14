@@ -26,6 +26,7 @@ class CampaignPool(WorkerPool):
         self.campaigns = {}
         self.recipients = {}
         self.preferences = {}
+        self.marketing_accepted = {uid: True for uid in self.users}
         self.subscription_rows = []
         self.tests = {}
         self.budget = {"day": self.now.date(), "attempts": 0, "next_send_at": self.now}
@@ -52,7 +53,7 @@ class CampaignPool(WorkerPool):
                 self.budget.update(day=self.now.date(), attempts=1)
             self.budget["next_send_at"] = self.now + timedelta(seconds=.5)
             return "UPDATE 1"
-        if "campaign-pref:" in sql:
+        if "campaign-pref:" in sql or "pg_advisory_xact_lock(hashtext($1))" in sql:
             self.check(sql)
             return "SELECT 1"
         if "INSERT INTO notification_outbox" in sql and "'campaign.info'" in sql:
@@ -124,7 +125,8 @@ class CampaignPool(WorkerPool):
                     and self.outbox[r["outbox_id"]]["status"] in ("sent", "dead")]
         if "FROM commercial_auth_users u LEFT JOIN email_preferences" in sql:
             self.check(sql)
-            return [{"user_id": uid, "role": r["security"]["role"], "opt_out": self.preferences.get(uid, False)}
+            return [{"user_id": uid, "role": r["security"]["role"], "opt_out": self.preferences.get(uid, False),
+                     "marketing_opt_in": self.marketing_accepted.get(uid, False)}
                     for uid, r in sorted(self.users.items()) if uid not in self.erased and r["security"]["active"] and r["security"]["email_verified"]]
         if "FROM subscriptions WHERE user_id=ANY" in sql:
             self.check(sql)
@@ -145,6 +147,11 @@ class CampaignPool(WorkerPool):
         if "SELECT announcements_opt_out" in sql:
             self.check(sql)
             return self.preferences.get(args[0], False)
+        if "SELECT payload #> '{marketing_consent,accepted}'" in sql:
+            self.check(sql)
+            if "marketing_consent" in self.settings.get(args[0], {}):
+                return self.settings[args[0]]["marketing_consent"]["accepted"]
+            return self.marketing_accepted.get(args[0], False)
         return await super().fetchval(sql, *args)
 
     async def fetchrow(self, sql, *args):
@@ -264,6 +271,14 @@ def send(client, row, count=3, actor=OWNER, key="offline-campaign-send-key"):
     return client.post(ROOT + "/" + row["id"] + "/send", headers=actor,
         json={"idempotency_key": key, "confirmed_recipient_count": count, "content_hash": row["content_hash"]})
 
+def test_campaign_audience_excludes_missing_or_false_marketing_permission(campaigns):
+    client, pool = campaigns
+    pool.marketing_accepted.pop("customer")
+    pool.marketing_accepted["moderator"] = False
+    row = make(client, actor=OWNER)
+    assert send(client, row, count=1).status_code == 200
+    assert {recipient["user_id"] for recipient in pool.recipients.values()} == {"owner"}
+
 
 def process(client):
     with patch.object(campaign_worker, "send_campaign") as mail, patch.object(notification_worker, "send_notification") as approval_mail:
@@ -365,7 +380,7 @@ def test_audience_uses_canonical_entitlement_and_skips_optout(campaigns, group, 
         assert pool.recipients[row["id"], "customer"]["status"] == "skipped"
 
 
-@pytest.mark.parametrize("change", ["inactive", "erased", "optout", "cancel"])
+@pytest.mark.parametrize("change", ["inactive", "erased", "optout", "marketing_revoked", "cancel"])
 def test_delivery_rechecks_and_cancel_sends_no_mail(campaigns, change):
     client, pool = campaigns
     row = make(client, actor=OWNER)
@@ -378,6 +393,8 @@ def test_delivery_rechecks_and_cancel_sends_no_mail(campaigns, change):
                 pool.users[uid]["security"]["active"] = False
             elif change == "erased":
                 pool.erased.add(uid)
+            elif change == "marketing_revoked":
+                pool.marketing_accepted[uid] = False
             else:
                 pool.preferences[uid] = True
     mail, _ = process(client)
@@ -444,8 +461,27 @@ def test_unsubscribe_get_post_generic_token_and_resubscribe(campaigns):
     assert client.get(url).status_code == 200 and pool.preferences == before
     result = client.post(url, content="List-Unsubscribe=One-Click")
     assert result.status_code == 200 and pool.preferences["customer"] is True
-    assert client.post(url, content="action=subscribe").status_code == 200 and pool.preferences["customer"] is False
+    assert client.post(url, content="action=subscribe").status_code == 409 and pool.preferences["customer"] is True
     assert client.post("/announcements/unsubscribe?token=broken").json() == result.json()
+
+
+def test_unsubscribe_records_withdrawal_in_the_canonical_consent_ledger(campaigns):
+    from app import registration_consent as consent
+    client, pool = campaigns
+    doc = {}
+    consent.append_registration(doc, "customer", True, "PASSWORD_REGISTRATION")
+    pool.settings["customer"] = doc
+    token = unsubscribe_token(client.app.state.v22_commercial["secret"], "customer")
+    response = client.post("/announcements/unsubscribe?token=" + token,
+                           content="action=unsubscribe")
+    assert response.status_code == 200
+    latest = pool.settings["customer"]["marketing_consent"]
+    assert latest["accepted"] is False and latest["withdrawn_at"]
+    assert latest["source"] == "EMAIL_UNSUBSCRIBE"
+    assert len(pool.settings["customer"]["registration_consents"]) == 3
+    assert pool.settings["customer"]["registration_consents"][0]["accepted"] is True
+    assert client.post("/announcements/unsubscribe?token=" + token, content="action=unsubscribe").status_code == 200
+    assert len(pool.settings["customer"]["registration_consents"]) == 3
 
 
 def test_erasure_scrubs_recipient_preferences_and_blocks_delivery(campaigns):

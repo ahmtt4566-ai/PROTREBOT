@@ -1574,6 +1574,68 @@ is not relabelled as verified net position-close PnL; those entries have no R.
 This change does not introduce new DEMO closure accounting.
 Offline regressions: `backend/tests/test_trade_r_metrics.py`.
 
+## Registration agreement and optional marketing consent
+
+Password signup and new Google accounts require a literal boolean
+`terms_accepted: true`. `marketing_accepted` is independently optional and
+defaults to false. Missing required consent is rejected in Turkish; existing
+accounts keep their normal password/Google login and are not assigned a
+fabricated agreement acceptance. General registration consent never authorizes
+exchange connections or live orders.
+
+The complete supplied 24-section agreement is archived in
+`backend/app/legal/registration-2026-10-14.json` (version `2026-10-14.1`) and
+shared by the public `/terms` page and backend hashing. `/privacy` contains a
+separate Turkish disclosure draft. Registration links open these public pages
+in a new tab so the form is preserved. Do not overwrite published archives
+when changing a legal version; add a new versioned document.
+
+The existing authoritative `commercial_account_settings.payload` JSONB stores
+an append-only `registration_consents` ledger and the separate current
+`marketing_consent`. Each event contains user ID, server UTC time, acceptance,
+version, immutable document reference, SHA-256 text digest and source.
+Withdrawal appends an event with `withdrawn_at`; it never rewrites the terms
+event or old versions. Google creation writes this document in the same
+transaction as its identity/account. Password creation commits the canonical
+account, consent, verification token/pending state and snapshot in one PostgreSQL
+transaction before publishing the user in memory or sending verification mail.
+This also covers legacy verification tokens and deferred commit failures.
+Existing PostgreSQL/SQLite account-store locking and
+durable-required checks remain authoritative.
+
+This repository uses `backend/migrations`, not Supabase. No schema migration
+is needed for these backward-compatible JSONB fields; existing accounts
+without a marketing record are treated as not opted in, not backfilled with
+invented acceptance dates. `/account/marketing-consent` is authenticated and
+requires a strict boolean, the current event `revision` (null only when no
+event exists), and a 32-character hexadecimal `operation_id`. Identical retries
+are idempotent; stale revisions and replay after a later event return 409.
+Deploy frontend/backend together; old boolean-only preference requests are
+rejected rather than silently reactivating consent.
+
+Email unsubscribe and profile changes update the same ledger and record the
+withdrawal time/source. Legacy email preferences are synchronized in the same
+transaction. Email links only withdraw permission; renewed consent requires
+login and a fresh profile revision. Repeated unsubscribe does not add duplicate
+withdrawal events. Campaign audience and the final provider
+dispatch check explicit opt-in; withdrawal is serialized with dispatch using
+the existing account-store advisory lock. Transactional verification/security
+email is unaffected.
+
+Before public legal publication, fill the marked provider legal name/address,
+support/privacy contact, effective date, governing law/jurisdiction, supplier
+and transfer inventory, cookie inventory and retention periods, and obtain
+professional legal review. Placeholder text is deliberately not replaced by
+invented company data. Targeted regressions live in
+`backend/tests/test_registration_consent.py`, `test_google_oauth.py`,
+`test_campaigns.py` and the registration/account Playwright specs.
+Real PostgreSQL regressions are in `backend/tests/test_consent_postgres.py`.
+They require `CONSENT_TEST_POSTGRES_DSN` pointing only to the dedicated loopback
+`kaistrade_consent_test` database on port 55446 as `consent_test_owner`, never
+`DATABASE_URL`. Tests create/drop isolated schemas and do not run migrations.
+Database failure diagnostics log only fixed stage/code, exception type and
+validated SQLSTATE; raw exception messages and tracebacks are not logged.
+
 ## Site favicon
 
 Both Vite entrypoints reference shared, same-origin site icons in

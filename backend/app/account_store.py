@@ -176,17 +176,20 @@ async def save_action_token(request, token, user, kind):
     pool = getattr(request.app.state, "db_pool", None)
     try:
         if pool is not None:
-            await pool.execute("""INSERT INTO commercial_account_tokens
+            db = active_connection(request, user["id"]) or pool
+            await db.execute("""INSERT INTO commercial_account_tokens
                 (token_hash,user_id,kind,auth_version,email,expires) VALUES ($1,$2,$3,$4,$5,$6)""", *values)
         else:
             if auth.DURABLE_AUTH_REQUIRED or auth.runtime(request).get("authoritative_auth_enabled"):
                 raise HTTPException(503, "Kalıcı doğrulama deposu hazır değil")
-            db = connection(request)
+            active_db = active_local_connection(request, user["id"])
+            db = active_db or connection(request)
             try:
                 db.execute("""INSERT INTO commercial_account_tokens
                     (token_hash,user_id,kind,auth_version,email,expires) VALUES (?,?,?,?,?,?)""", values)
             finally:
-                db.close()
+                if active_db is None:
+                    db.close()
     except HTTPException:
         raise
     except Exception:

@@ -25,6 +25,7 @@ from .commercial_core import hash_password, issue_token, normalize_email, verify
 from .member_entitlements import subscription_for_request
 from .auth_failures import MFA_ACCOUNT, decode_state, enforce_failure_wait, new_state, record_failure
 from .password_policy import validate_new_password
+from .registration_consent import MarketingConsentUpdate, public_marketing, update_marketing
 
 router = APIRouter(prefix="/api/v22", tags=["Account settings"])
 DEFAULT_PREFERENCES = {"trading_mode": "MANUAL", "timeframe": "15m", "exchange": "BINANCE",
@@ -478,6 +479,7 @@ async def overview(request, user, *, current=True):
                 "features": [{"key": key, "label": {"canAccessMasterTrade": "Master Trade"}.get(key, key), "included": bool(value)}
                              for key, value in sub.get("entitlements", {}).items()]},
             "preferences": preferences(request, user, doc),
+            "marketing_consent": public_marketing(doc),
             "security": {"two_factor_enabled": bool(doc.get("two_factor_enabled")), "active_sessions": len(sessions),
                          "email_delivery_available": auth.gmail_configured(), "can_close_account": blocker is None and bool(user.get("active")),
                          "close_blocker": blocker},
@@ -492,6 +494,25 @@ async def account_overview(request: Request):
     user = await member(request)
     await track_session(request, auth.bearer(request), force=True)
     return await overview(request, user)
+
+
+@router.patch("/account/marketing-consent")
+async def change_marketing_consent(payload: MarketingConsentUpdate, request: Request):
+    user = await member(request)
+    async with store.edit(request, user["id"]) as doc:
+        update_marketing(doc, user["id"], payload.accepted,
+                         revision=payload.revision, operation_id=payload.operation_id)
+        db = store.active_connection(request, user["id"])
+        if db is not None:
+            await db.execute("SELECT pg_advisory_xact_lock(hashtextextended('campaign-pref:' || $1,0))", user["id"])
+            await db.execute(
+                """INSERT INTO email_preferences(user_id,announcements_opt_out,updated_at)
+                   VALUES ($1,$2,clock_timestamp())
+                   ON CONFLICT(user_id) DO UPDATE SET announcements_opt_out=$2,updated_at=clock_timestamp()""",
+                user["id"], not payload.accepted,
+            )
+        consent = public_marketing(doc)
+    return {"ok": True, "marketing_consent": consent}
 
 
 @router.patch("/account/profile")

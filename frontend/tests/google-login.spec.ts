@@ -117,7 +117,7 @@ test('Google registration requires explicit existing terms consent and no fabric
   let completeCalls = 0
   await page.route('**/api/v22/auth/google/pending', route => route.fulfill({json:{email:'new@example.test',display_name:'Google Fixture'}}))
   await page.route('**/api/v22/auth/google/complete', async route => {
-    expect(route.request().postDataJSON()).toEqual({terms_accepted:true})
+    expect(route.request().postDataJSON()).toEqual({terms_accepted:true,marketing_accepted:false})
     expect(route.request().headers()['x-requested-with']).toBe('XMLHttpRequest')
     completeCalls++
     state.sessionStatus = 200; state.profileStatus = 200
@@ -127,9 +127,9 @@ test('Google registration requires explicit existing terms consent and no fabric
   await expect(page.getByLabel('E-posta',{exact:true})).toHaveValue('new@example.test')
   await expect(page.locator('.authCard input[type=password]')).toHaveCount(0)
   await page.getByRole('button',{name:'HESAP OLUŞTUR',exact:true}).click()
-  await expect(page.getByRole('alert')).toContainText('kullanım koşullarını')
+  await expect(page.getByRole('alert')).toContainText("Kullanıcı Sözleşmesi'ni kabul etmelisiniz")
   expect(completeCalls).toBe(0)
-  await page.locator('.authCard .authCheck input[type=checkbox]').check()
+  await page.locator('.authCard .authConsent:not(.authMarketingConsent) input').check()
   await page.getByRole('button',{name:'HESAP OLUŞTUR',exact:true}).click()
   await expect.poll(() => page.evaluate(key => sessionStorage.getItem(key),SESSION_KEY)).toBe('cookie-session:assistant-member')
   expect(completeCalls).toBe(1)

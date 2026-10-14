@@ -720,7 +720,8 @@ async def ensure_infrastructure(application: FastAPI) -> None:
         try:
             await db_pool.fetchval("SELECT 1")
         except Exception as exc:
-            logger.exception("PostgreSQL pool health check failed: %s", _sanitize_db_error(exc))
+            from .error_monitoring import log_database_failure
+            log_database_failure(logger, "pool_health", exc)
             await db_pool.close()
             application.state.db_pool = None
             application.state.paper_schema_ready = False
@@ -732,7 +733,8 @@ async def ensure_infrastructure(application: FastAPI) -> None:
             application.state.paper_schema_ready = False
             application.state.market_twin_schema_ready = False
         except Exception as exc:
-            logger.exception("PostgreSQL pool creation failed: %s", _sanitize_db_error(exc))
+            from .error_monitoring import log_database_failure
+            log_database_failure(logger, "pool_creation", exc)
             application.state.db_pool = None
             infrastructure["paper_storage"] = "BEKLENİYOR" if PAPER_ENABLED else "DEVRE DIŞI"
 

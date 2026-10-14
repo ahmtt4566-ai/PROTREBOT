@@ -42,8 +42,15 @@ class Pool:
 
     @asynccontextmanager
     async def acquire(self):
-        async with self.lock:
+        if getattr(self, "connection_owner", None) is asyncio.current_task():
             yield self
+            return
+        async with self.lock:
+            self.connection_owner = asyncio.current_task()
+            try:
+                yield self
+            finally:
+                self.connection_owner = None
 
     @asynccontextmanager
     async def transaction(self):
@@ -56,6 +63,14 @@ class Pool:
 
     async def execute(self, query, *args):
         self.queries.append(query)
+        if "INSERT INTO email_preferences" in query:
+            return "OK"
+        if "DELETE FROM commercial_account_settings" in query:
+            self.account_settings.pop(args[0], None)
+            return "OK"
+        if "DELETE FROM commercial_auth_users" in query:
+            self.security.pop(args[0], None)
+            return "OK"
         if "INSERT INTO commercial_auth_failures" in query:
             self.auth_failures[args[0]] = json.loads(args[1])
             return "OK"
@@ -102,6 +117,9 @@ class Pool:
             return {"payload": row["payload"]}
         if "commercial_auth_limits" in query:
             return {"attempts": 1}
+        if "WHERE lower(security->>'email') = $1" in query:
+            return next(({"user_id": uid, **copy.deepcopy(row)} for uid, row in self.security.items()
+                         if row["security"].get("email") == args[0]), None)
         if "SELECT user_id FROM commercial_google_identities" in query:
             return copy.deepcopy(self.identities.get(args[:2]))
         if "SELECT identity.user_payload" in query:
@@ -296,6 +314,7 @@ def test_new_user_requires_terms_then_becomes_customer_free_without_password(set
 
 @pytest.mark.parametrize("failed_table,stage", [
     ("commercial_auth_users", "auth_user_insert"),
+    ("commercial_account_settings", "registration_consent_insert"),
     ("commercial_google_identities", "google_identity_insert"),
     ("application_state_snapshots", "commercial_snapshot_write"),
 ])
@@ -318,6 +337,7 @@ def test_new_registration_database_failure_is_safe_and_atomic(setup, caplog, fai
         result = client.post("/api/v22/auth/google/complete", json={"terms_accepted": True}, headers=HEADERS)
     assert result.status_code == 503
     assert not pool.identities and not pool.snapshot["users"]
+    assert not pool.account_settings
     assert not client.cookies.get("protrebot_session")
     assert f"stage={stage} error=DatabaseFailure sqlstate=23505" in caplog.text
     for private_value in ("private-token", "private-client-secret", "personal@example.test", IDENTITY["email"]):
@@ -438,7 +458,8 @@ def test_new_google_account_survives_stale_worker_snapshot_write(setup):
     app.state.v22_commercial["state"] = default_commercial_state()
     asyncio.run(google.merge_registered_users(app, pool))
     restored = app.state.v22_commercial["state"]
-    assert len(restored["users"]) == len(restored["profiles"]) == len(restored["subscriptions"]) == len(restored["acceptances"]) == 1
+    assert len(restored["users"]) == len(restored["profiles"]) == len(restored["subscriptions"]) == 1
+    assert len(restored["acceptances"]) == 2
     assert "_registration" not in restored["users"][0]
     with patch.object(auth, "apply_erasure_tombstones", AsyncMock()), \
             patch.object(auth, "persist_auth_security", AsyncMock()), \

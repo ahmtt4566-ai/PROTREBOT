@@ -71,7 +71,8 @@ class StartRequest(BaseModel):
 
 class CompleteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    terms_accepted: bool
+    terms_accepted: bool = False
+    marketing_accepted: bool = False
 
 
 class OAuthFailure(Exception):
@@ -326,7 +327,7 @@ async def identity_transaction(request: Request):
 @asynccontextmanager
 async def registration_guard(request: Request, email: str):
     if not configured():
-        yield
+        yield None
         return
     try:
         async with identity_transaction(request) as connection:
@@ -340,7 +341,7 @@ async def registration_guard(request: Request, email: str):
                 if found and not any(user.get("email") == normalize_email(email) for user in auth.runtime(request)["state"]["users"]):
                     auth.runtime(request)["state"]["users"].append(copy.deepcopy(found))
             await hydrate_user(request, email=normalize_email(email))
-            yield
+            yield connection
     except (HTTPException, asyncio.CancelledError):
         raise
     except Exception as exc:
@@ -348,7 +349,7 @@ async def registration_guard(request: Request, email: str):
         raise HTTPException(503, "Kalıcı kayıt güvenliği doğrulanamadı") from None
 
 
-async def resolve_identity(request: Request, identity: dict[str, str], *, create: bool) -> dict[str, Any] | None:
+async def resolve_identity(request: Request, identity: dict[str, str], *, create: bool, marketing_accepted: bool = False) -> dict[str, Any] | None:
     stage = "identity_lookup"
     try:
         async with identity_transaction(request) as connection:
@@ -382,13 +383,20 @@ async def resolve_identity(request: Request, identity: dict[str, str], *, create
                 state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": uid, "plan": "FREE",
                                                "status": "inactive", "started_at": created, "expires_at": None,
                                                "created_at": created, "updated_at": created})
-                state["acceptances"].append({"id": uuid.uuid4().hex, "user_id": uid, "terms_accepted": True,
-                                             "source": "GOOGLE_REGISTRATION", "accepted_at": created})
+                from .account_store import defaults
+                from .registration_consent import append_registration
+                account_doc = defaults()
+                state["acceptances"].extend(append_registration(account_doc, uid, marketing_accepted, "GOOGLE_REGISTRATION"))
                 auth.add_audit(state, "USER_REGISTERED", "Google kimliğiyle CUSTOMER kaydı oluşturuldu.", actor=uid, subject=uid)
                 stage = "auth_user_insert"
                 await connection.execute(
                     """INSERT INTO commercial_auth_users (user_id, auth_version, security)
                        VALUES ($1, $2, $3::jsonb)""", uid, 1, json.dumps(auth.auth_security(user)),
+                )
+                stage = "registration_consent_insert"
+                await connection.execute(
+                    "INSERT INTO commercial_account_settings (user_id, payload) VALUES ($1, $2::jsonb)",
+                    uid, json.dumps(account_doc),
                 )
                 stage = "google_identity_insert"
                 await connection.execute(
@@ -527,15 +535,15 @@ async def pending(request: Request, response: Response):
 @router.post("/complete")
 async def complete(payload: CompleteRequest, request: Request, response: Response):
     origin = trusted_origin(request)
-    if not payload.terms_accepted:
-        raise HTTPException(422, "Kullanım koşulları ve gizlilik politikası kabul edilmelidir")
+    from .registration_consent import require_terms
+    require_terms(payload.terms_accepted)
     try:
         attempt = await read_attempt(request, request.cookies.get(PENDING_COOKIE, ""),
                                      request.cookies.get(BINDING_COOKIE, ""), "consent", consume=True)
         if origin != attempt["origin"]:
             raise OAuthFailure("invalid_attempt")
         await auth.enforce_auth_limit(request, "register", attempt["identity"]["email"])
-        user = await resolve_identity(request, attempt["identity"], create=True)
+        user = await resolve_identity(request, attempt["identity"], create=True, marketing_accepted=payload.marketing_accepted)
         if user is None:
             raise OAuthFailure("account_unavailable")
         from .account_settings import enabled, login_challenge

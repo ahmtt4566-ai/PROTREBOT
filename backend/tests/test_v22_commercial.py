@@ -684,7 +684,7 @@ class V22CommercialTests(unittest.TestCase):
         state = default_commercial_state()
         application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool(), v22_commercial={"secret": b"temporary", "state": state, "lock": asyncio.Lock()}))
         request = offline_request(application)
-        payload = SimpleNamespace(terms_accepted=True, password="StrongPassword!123", confirm_password="StrongPassword!123", email="user@example.com", display_name="Test User")
+        payload = SimpleNamespace(terms_accepted=True, marketing_accepted=False, password="StrongPassword!123", confirm_password="StrongPassword!123", email="user@example.com", display_name="Test User")
         with patch("app.v22_commercial.DURABLE_AUTH_REQUIRED", True), patch.dict(os.environ, {"PROTREBOT_SESSION_SECRET": "", "PROTREBOT_WEB_ACCESS_TOKEN": ""}), patch("app.v22_commercial.gmail_configured", return_value=True):
             with self.assertRaisesRegex(HTTPException, "oturum anahtarı"):
                 asyncio.run(v22_register(payload, request))
@@ -692,18 +692,23 @@ class V22CommercialTests(unittest.TestCase):
 
     def test_durable_registration_rolls_back_when_database_persistence_fails(self):
         state = default_commercial_state()
-        application = SimpleNamespace(state=SimpleNamespace(db_pool=OfflineCanonicalPool(), v22_commercial={"secret": b"stable-test-secret", "state": state, "lock": asyncio.Lock()}))
+        pool = OfflineCanonicalPool()
+        application = SimpleNamespace(state=SimpleNamespace(db_pool=pool, v22_commercial={"secret": b"stable-test-secret", "state": state, "lock": asyncio.Lock(), "storage_lock": asyncio.Lock(), "auth_baseline": {}}))
         request = offline_request(application)
-        payload = SimpleNamespace(terms_accepted=True, password="StrongPassword!123", confirm_password="StrongPassword!123", email="user@example.com", display_name="Test User")
-        persist = AsyncMock(return_value=False)
-        with patch("app.v22_commercial.DURABLE_AUTH_REQUIRED", True), patch.dict(os.environ, {"PROTREBOT_SESSION_SECRET": "stable-test-session-secret-long-enough", "PROTREBOT_WEB_ACCESS_TOKEN": ""}), patch("app.v22_commercial.gmail_configured", return_value=True), patch("app.v22_commercial.persist_v22_commercial", new=persist), patch("app.v22_commercial.save_state"), patch("app.v22_commercial.send_auth_email") as send_email:
+        payload = SimpleNamespace(terms_accepted=True, marketing_accepted=False, password="StrongPassword!123", confirm_password="StrongPassword!123", email="user@example.com", display_name="Test User")
+        execute = pool.execute
+        async def failed_snapshot(query, *args):
+            if "INSERT INTO application_state_snapshots" in query:
+                raise RuntimeError("offline snapshot failure")
+            return await execute(query, *args)
+        with patch("app.v22_commercial.DURABLE_AUTH_REQUIRED", True), patch.dict(os.environ, {"PROTREBOT_SESSION_SECRET": "stable-test-session-secret-long-enough", "PROTREBOT_WEB_ACCESS_TOKEN": "", "PROTREBOT_EMAIL_VERIFICATION_V2_ENABLED": "false", "GOOGLE_CLIENT_ID": "", "GOOGLE_CLIENT_SECRET": ""}), patch("app.v22_commercial.gmail_configured", return_value=True), patch.object(pool, "execute", side_effect=failed_snapshot), patch("app.v22_commercial.save_state"), patch("app.v22_commercial.send_auth_email") as send_email:
             with self.assertRaisesRegex(HTTPException, "Kalıcı hesap veritabanı"):
                 asyncio.run(v22_register(payload, request))
         self.assertEqual(state["users"], [])
         self.assertEqual(state["profiles"], [])
         self.assertEqual(state["subscriptions"], [])
         self.assertEqual(state["auth_tokens"], [])
-        self.assertEqual(persist.await_count, 2)
+        self.assertEqual(pool.account_settings, {})
         send_email.assert_not_called()
 
     def test_gmail_delivery_requires_oauth_configuration_without_sending(self):

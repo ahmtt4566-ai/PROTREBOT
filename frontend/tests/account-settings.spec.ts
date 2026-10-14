@@ -9,6 +9,7 @@ const account = (): AccountOverview => ({
   preferences: {trading_mode: 'MANUAL', timeframe: '15m', exchange: 'BINANCE', risk_per_trade: 1, symbols: ['BTCUSDT', 'ETHUSDT']},
   security: {two_factor_enabled: false, active_sessions: 2, email_delivery_available: true, can_close_account: true, close_blocker: null},
   pending_email: null,
+  marketing_consent: {accepted:false,revision:null,version:null,accepted_at:null,withdrawn_at:null},
   sessions: [{id: 'current-session', current: true, device: 'Windows', browser: 'Chromium', created_at: '2026-10-05T12:00:00Z', last_seen_at: '2026-10-05T12:10:00Z', expires_at: '2026-10-06T12:00:00Z'}, {id: 'other-session', current: false, device: 'Android', browser: 'Chrome', created_at: '2026-10-04T12:00:00Z', last_seen_at: '2026-10-05T11:00:00Z', expires_at: '2026-10-06T12:00:00Z'}],
   activity: [{id: 'login-event', kind: 'LOGIN', message: 'Hesaba giriş yapıldı', created_at: '2026-10-05T12:00:00Z'}],
 })
@@ -38,6 +39,13 @@ async function prepare(page: Page, options: {width?: number; owner?: boolean; go
     mutations.push({path, method: request.method(), body})
     if (path.endsWith('/profile')) data.user.display_name = String(body.display_name)
     if (path.endsWith('/preferences')) data.preferences = request.postDataJSON() as AccountOverview['preferences']
+    if (path.endsWith('/marketing-consent')) {
+      expect(body.revision).toBe(data.marketing_consent?.revision)
+      expect(body.operation_id).toMatch(/^[a-f0-9]{32}$/)
+      data.marketing_consent = {accepted:body.accepted === true,revision:'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',version:'2026-10-14.1',accepted_at:body.accepted === true ? '2026-10-14T12:00:00Z' : null,withdrawn_at:body.accepted === false ? '2026-10-14T12:01:00Z' : null}
+      await route.fulfill({json:{ok:true,marketing_consent:data.marketing_consent}})
+      return
+    }
     if (path.endsWith('/email/request')) data.pending_email = {email: String(body.new_email), expires_at: '2026-10-05T13:00:00Z'}
     if (path.endsWith('/email/cancel')) data.pending_email = null
     if (path.endsWith('/sessions/revoke-others')) {data.sessions = data.sessions.filter(session => session.current); data.security.active_sessions = data.sessions.length}
@@ -65,6 +73,63 @@ for (const width of [1440, 1152, 390]) test(`Reference profile cards remain real
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({path: test.info().outputPath(`profile-settings-${width}.png`)})
   await page.screenshot({path: test.info().outputPath(`profile-settings-${width}-full.png`), fullPage: true})
+})
+
+test('Marketing consent can be withdrawn without changing trading preferences or session', async ({page}) => {
+  const {data, mutations} = await prepare(page)
+  data.marketing_consent = {accepted:true,revision:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',version:'2026-10-14.1',accepted_at:'2026-10-14T12:00:00Z',withdrawn_at:null}
+  await page.goto(`${base}/settings`)
+  const checkbox = page.getByRole('checkbox', {name:/KaisTrade'in kampanya/})
+  await expect(checkbox).toBeChecked()
+  await checkbox.uncheck()
+  await expect(page.getByRole('status')).toContainText('Ticari ileti onayı geri çekildi.')
+  expect(mutations).toEqual([{path:'/api/v22/account/marketing-consent',method:'PATCH',body:{accepted:false,revision:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',operation_id:expect.stringMatching(/^[a-f0-9]{32}$/)}}])
+  expect(data.preferences.trading_mode).toBe('MANUAL')
+  await page.reload()
+  await expect(page.getByRole('checkbox', {name:/KaisTrade'in kampanya/})).not.toBeChecked()
+  await expect(page.getByRole('heading', {name:'Profil & Ayarlar'})).toBeVisible()
+})
+
+test('Marketing consent failure restores the checkbox and shows an explicit error', async ({page}) => {
+  const {data} = await prepare(page)
+  data.marketing_consent = {accepted:true,revision:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',version:'2026-10-14.1',accepted_at:'2026-10-14T12:00:00Z',withdrawn_at:null}
+  await page.route('**/api/v22/account/marketing-consent', route => route.fulfill({status:503,json:{detail:'Onay kaydı saklanamadı.'}}))
+  await page.goto(`${base}/settings`)
+  const checkbox = page.getByRole('checkbox', {name:/KaisTrade'in kampanya/})
+  await expect(checkbox).toBeChecked()
+  await checkbox.click()
+  await expect(page.getByRole('alert')).toContainText('Onay kaydı saklanamadı.')
+  await expect(checkbox).toBeChecked()
+  await expect(checkbox).toBeEnabled()
+})
+
+test('Marketing consent malformed response cannot be shown as successful withdrawal', async ({page}) => {
+  const {data} = await prepare(page)
+  data.marketing_consent = {accepted:true,revision:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',version:'2026-10-14.1',accepted_at:'2026-10-14T12:00:00Z',withdrawn_at:null}
+  await page.route('**/api/v22/account/marketing-consent', route => route.fulfill({json:{ok:true}}))
+  await page.goto(`${base}/settings`)
+  await page.getByRole('checkbox', {name:/KaisTrade'in kampanya/}).click()
+  await expect(page.getByRole('alert')).toContainText('Ticari ileti tercihi sunucudan doğrulanamadı.')
+  await expect(page.getByRole('status').filter({hasText:'Ticari ileti onayı geri çekildi.'})).toHaveCount(0)
+})
+
+test('Marketing consent stale revision is rejected explicitly and never shown as saved', async ({page}) => {
+  const {data} = await prepare(page)
+  data.marketing_consent = {accepted:true,revision:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',version:'2026-10-14.1',accepted_at:'2026-10-14T12:00:00Z',withdrawn_at:null}
+  await page.route('**/api/v22/account/marketing-consent', route => route.fulfill({status:409,json:{detail:'Ticari ileti tercihi değişti. Güncel durumu yenileyin.'}}))
+  await page.goto(`${base}/settings`)
+  await page.getByRole('checkbox', {name:/KaisTrade'in kampanya/}).click()
+  await expect(page.getByRole('alert')).toContainText('Güncel durumu yenileyin.')
+  await expect(page.getByRole('checkbox', {name:/KaisTrade'in kampanya/})).toBeChecked()
+})
+
+test('Marketing consent missing revision response cannot confirm a withdrawal', async ({page}) => {
+  const {data} = await prepare(page)
+  data.marketing_consent = {accepted:true,revision:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',version:'2026-10-14.1',accepted_at:'2026-10-14T12:00:00Z',withdrawn_at:null}
+  await page.route('**/api/v22/account/marketing-consent', route => route.fulfill({json:{ok:true,marketing_consent:{accepted:false}}}))
+  await page.goto(`${base}/settings`)
+  await page.getByRole('checkbox', {name:/KaisTrade'in kampanya/}).click()
+  await expect(page.getByRole('alert')).toContainText('Ticari ileti tercihi sunucudan doğrulanamadı.')
 })
 
 test('Profile and saved defaults persist after reload with no execution mutations', async ({page}) => {

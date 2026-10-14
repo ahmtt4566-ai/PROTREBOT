@@ -6,6 +6,7 @@ import {accountDate, accountInitials, accountRequest, TRADING_TIMEFRAMES, type A
 import './profile-settings.css'
 import {accountRoleLabel} from './account-role'
 import {PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordPolicyError, passwordRules} from './password-policy'
+import {MARKETING_CONSENT_TEXT} from './compliance-content'
 
 type DialogKind = 'profile' | 'email' | 'password' | 'two-factor' | 'sessions' | 'activity' | 'close'
 type Notice = {kind: 'success' | 'error'; text: string}
@@ -35,6 +36,7 @@ export function AccountRecoveryScreen({codes, onSaved}: {codes: string[]; onSave
 export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentComplete}: {onLogout: () => void; onSessionEnded: () => void; onEnrollmentComplete: (codes: string[]) => void}) {
   const [data, setData] = useState<AccountOverview | null>(null)
   const [preferences, setPreferences] = useState<TradingPreferences | null>(null)
+  const [marketingChoice, setMarketingChoice] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -55,6 +57,7 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
     const overview = await accountRequest<AccountOverview>('/account/overview', {signal})
     if (signal?.aborted) return
     setData(overview)
+    setMarketingChoice(overview.marketing_consent?.accepted === true)
     setName(overview.user.display_name)
     setPreferences(current => current === null || replacePreferences ? overview.preferences : current)
   }, [])
@@ -90,6 +93,30 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
     await refresh(undefined, path === '/account/preferences')
     setNotice({kind: result.notification_sent === false ? 'error' : 'success', text: result.notification_sent === false
       ? `${message} Bilgilendirme e-postasının gönderimi doğrulanamadı.` : message})
+  }
+  const changeMarketingChoice = (accepted: boolean) => {
+    if (actionInFlight.current || !data?.marketing_consent) return
+    const previous = marketingChoice
+    const revision = data.marketing_consent.revision
+    const operationId = crypto.randomUUID().replaceAll('-', '')
+    setMarketingChoice(accepted)
+    void run(async () => {
+      try {
+        const result = await accountRequest<{ok: boolean; marketing_consent: NonNullable<AccountOverview['marketing_consent']>}>(
+          '/account/marketing-consent', {method:'PATCH', body:JSON.stringify({accepted, revision, operation_id:operationId})},
+        )
+        if (result.ok !== true || result.marketing_consent?.accepted !== accepted
+            || !/^[a-f0-9]{32}$/.test(result.marketing_consent?.revision || '')) {
+          throw new Error('Ticari ileti tercihi sunucudan doğrulanamadı. Sayfayı yenileyin.')
+        }
+        setMarketingChoice(result.marketing_consent.accepted)
+        setData(current => current ? {...current, marketing_consent:result.marketing_consent} : current)
+        setNotice({kind:'success', text:accepted ? 'Ticari ileti onayı kaydedildi.' : 'Ticari ileti onayı geri çekildi.'})
+      } catch (error) {
+        setMarketingChoice(previous)
+        throw error
+      }
+    })
   }
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -177,6 +204,7 @@ export default function ProfileSettings({onLogout, onSessionEnded, onEnrollmentC
             <div className="accountSymbolInput"><input aria-label="Sembol ekle" placeholder="BTCUSDT" value={symbolInput} maxLength={34} onChange={event => setSymbolInput(event.target.value)}/><button type="button" disabled={busy} onClick={addSymbol}>Ekle</button></div>
             <p>Yalnızca yeni ekranların başlangıç tercihleri. Auto Trade açılmaz; açık işlemler, risk politikası ve onay kapıları değişmez.</p><button className="accountPrimary" disabled={busy}><Save/>Tercihleri kaydet</button>
           </form></section>
+          {data.marketing_consent && <section className="accountCard"><h2>Ticari ileti tercihi</h2><label className="accountMarketingConsent"><input type="checkbox" checked={marketingChoice} disabled={busy} onChange={event => changeMarketingChoice(event.target.checked)}/>{MARKETING_CONSENT_TEXT}</label><p className="accountMuted">Bu tercih üyeliğinizi, güvenlik iletilerini ve işlem izinlerini etkilemez. Son onay: {accountDate(data.marketing_consent.accepted_at)} · Geri çekilme: {accountDate(data.marketing_consent.withdrawn_at)}</p></section>}
           <section className="accountCard"><h2>Son aktiviteler<button onClick={() => openDialog('activity')}>Tümünü görüntüle<ArrowRight/></button></h2>{data.activity.length ? activity() : <p className="accountMuted">Kayıtlı hesap aktivitesi yok.</p>}</section>
           <section className="accountCard accountDanger"><h2>Tehlikeli işlemler</h2><div><Trash2/><span><b>Hesabı kapat</b><p>Giriş ve erişim hakkınız sonlandırılır. Kayıtlarınız yetkili yönetici panelinde saklanmaya devam eder; borsadaki emirler otomatik kapatılmaz.</p></span><button disabled={busy || !data.security.can_close_account} onClick={() => openDialog('close')}>Hesabı kapat</button></div>{data.security.close_blocker && <p className="accountMuted">{data.security.close_blocker}</p>}</section>
         </div>

@@ -1,5 +1,6 @@
 import {expect, test, type Page} from '@playwright/test'
 import {mockAssistant} from './helpers/assistant-api'
+import {PUBLIC_POLICIES} from '../../compliance-content'
 
 const root = 'http://127.0.0.1:4176'
 
@@ -33,14 +34,76 @@ async function prepare(page: Page, options: {registrationFailure?: boolean; rese
   return {registrations, resends}
 }
 
-async function register(page: Page) {
+async function fillRegistration(page: Page) {
   await page.getByLabel('Ad soyad').fill('Ada')
   await page.getByLabel('E-posta', {exact: true}).fill('ada@example.test')
   await page.locator('input[autocomplete="new-password"]').nth(0).fill('Offline-Password1!')
   await page.locator('input[autocomplete="new-password"]').nth(1).fill('Offline-Password1!')
-  await page.getByRole('checkbox').check()
+}
+
+async function register(page: Page) {
+  await fillRegistration(page)
+  await page.getByRole('checkbox', {name: /KaisTrade Kullanıcı Sözleşmesi/}).check()
   await page.getByRole('button', {name: 'HESAP OLUŞTUR', exact: true}).click()
 }
+
+test('Complete registration agreement and privacy are public without authentication', async ({page}) => {
+  await page.route('https://**', route => route.abort())
+  await page.routeWebSocket('wss://**', socket => socket.close())
+  const authRequests:string[] = []
+  await page.route('**/api/**', route => {
+    authRequests.push(route.request().url())
+    return route.fulfill({status:401,json:{detail:'Not authenticated'}})
+  })
+  for (const policy of ['terms','privacy'] as const) {
+    await page.goto(`${root}/${policy}`)
+    const article = page.getByRole('article')
+    await expect(article).toBeVisible()
+    const text = (await article.innerText()).replace(/\s+/g,' ')
+    expect(text).toContain(PUBLIC_POLICIES[policy].paragraphs.join(' ').replace(/\s+/g,' '))
+    await expect(page.locator('input[type=password]')).toHaveCount(0)
+  }
+  expect(authRequests).toEqual([])
+})
+
+for (const width of [320, 390, 768, 1440]) test(`Separate registration consents remain accessible at ${width}px`, async ({page}) => {
+  await page.setViewportSize({width, height:900})
+  const {registrations} = await prepare(page)
+  const terms = page.getByRole('checkbox', {name:/KaisTrade Kullanıcı Sözleşmesi/})
+  const marketing = page.getByRole('checkbox', {name:/KaisTrade'in kampanya/})
+  await expect(terms).not.toBeChecked()
+  await expect(marketing).not.toBeChecked()
+  await fillRegistration(page)
+  await marketing.check()
+  await expect(terms).not.toBeChecked()
+  await page.getByRole('button', {name:'HESAP OLUŞTUR', exact:true}).click()
+  await expect(page.getByRole('alert')).toContainText("Devam etmek için Kullanıcı Sözleşmesi'ni kabul etmelisiniz.")
+  expect(registrations).toEqual([])
+  await terms.check()
+  await expect(marketing).toBeChecked()
+  await marketing.uncheck()
+  await expect(terms).toBeChecked()
+  await terms.focus()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Shift+Tab')
+  expect(await terms.evaluate(input => input.matches(':focus-visible'))).toBe(true)
+  const checkedStyle = await terms.evaluate(input => {
+    const style = getComputedStyle(input)
+    return {background:style.backgroundColor,image:style.backgroundImage,radius:style.borderRadius,outline:style.outlineWidth}
+  })
+  expect(checkedStyle.background).toBe('rgb(100, 227, 161)')
+  expect(checkedStyle.image).not.toBe('none')
+  expect(checkedStyle.radius).toBe('5px')
+  expect(checkedStyle.outline).toBe('2px')
+  await expect(page.getByRole('link', {name:'Kullanıcı Sözleşmesi', exact:true})).toHaveAttribute('href','/terms')
+  await expect(page.getByRole('link', {name:'Kullanıcı Sözleşmesi', exact:true})).toHaveAttribute('target','_blank')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({path:test.info().outputPath(`registration-consent-${width}.png`),fullPage:true})
+  await page.getByRole('button', {name:'HESAP OLUŞTUR', exact:true}).click()
+  await expect(page.getByRole('heading', {name:'E-postanızı kontrol edin'})).toBeVisible()
+  expect(registrations).toHaveLength(1)
+  expect(registrations[0]).toMatchObject({terms_accepted:true,marketing_accepted:false})
+})
 
 test('Verification polling waits four seconds and never overlaps requests', async ({page}) => {
   await prepare(page)

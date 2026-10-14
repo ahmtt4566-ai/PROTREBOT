@@ -5,6 +5,7 @@ import { API_BASE, COOKIE_SESSION_PREFIX, USER_SESSION_KEY, clearDemoCredentials
 import {withRequestDeadline} from './browser-request'
 import {applyPageMetadataForPath} from './public-page-metadata'
 import {PASSWORD_MAX_LENGTH, passwordPolicyError, passwordRules} from './password-policy'
+import {MARKETING_CONSENT_TEXT} from './compliance-content'
 import AdminPanel from './AdminPanel'
 import ModeratorPanel from './ModeratorPanel'
 import {authenticatedPath, type AccountRole} from './account-role'
@@ -79,8 +80,10 @@ class AuthRequestError extends Error {
   constructor(message:string, readonly status:number, readonly retryAfter = 0, readonly emailDelivery = false) { super(message) }
 }
 
-function TermsConsent({accepted,error,onChange}:{accepted:boolean;error:string;onChange:(value:boolean)=>void}) {
-  return <><label className={`authCheck ${error ? 'authCheckError' : ''}`}><input type="checkbox" checked={accepted} onChange={event => onChange(event.target.checked)}/><span><a href="/terms" onClick={event => event.stopPropagation()}>Kullanım Koşulları</a> ve <a href="/privacy" onClick={event => event.stopPropagation()}>Gizlilik Politikası'nı</a> kabul ediyorum.</span></label>{error && <p className="authInlineError" role="alert">{error}</p>}</>
+const EMPTY_REGISTRATION = {display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false,marketing_accepted:false}
+
+function TermsConsent({accepted,marketingAccepted,error,onChange,onMarketingChange}:{accepted:boolean;marketingAccepted:boolean;error:string;onChange:(value:boolean)=>void;onMarketingChange:(value:boolean)=>void}) {
+  return <div className="authConsentGroup"><label className={`authCheck authConsent ${error ? 'authCheckError' : ''}`}><input type="checkbox" checked={accepted} aria-invalid={Boolean(error)} aria-describedby={error ? 'auth-terms-error' : undefined} onChange={event => onChange(event.target.checked)}/><span>KaisTrade <a href="/terms" target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}>Kullanıcı Sözleşmesi</a>'ni okudum ve kabul ediyorum. <a href="/privacy" target="_blank" rel="noopener noreferrer" onClick={event => event.stopPropagation()}>Gizlilik Politikası</a> hakkında bilgilendirildim.</span></label>{error && <p id="auth-terms-error" className="authInlineError" role="alert">{error}</p>}<label className="authCheck authConsent authMarketingConsent"><input type="checkbox" checked={marketingAccepted} onChange={event => onMarketingChange(event.target.checked)}/><span>{MARKETING_CONSENT_TEXT}<small>İsteğe bağlı · Üyelik erişiminizi etkilemez.</small></span></label></div>
 }
 
 async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
@@ -153,7 +156,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
   const [mfaChallenge,setMfaChallenge] = useState(() => new URLSearchParams(location.search).get('mfa_challenge') || '')
   const [mfaCode,setMfaCode] = useState('')
   const [enrollmentRecoveryCodes,setEnrollmentRecoveryCodes] = useState<string[]>([])
-  const [register,setRegister] = useState({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
+  const [register,setRegister] = useState({...EMPTY_REGISTRATION})
   const [email,setEmail] = useState('')
   const queryToken = new URLSearchParams(window.location.search).get('token') || ''
   const [resetToken,setResetToken] = useState(window.location.pathname === '/reset-password' ? queryToken : '')
@@ -305,7 +308,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
         try {
           const pending = await request<{email:string;display_name:string}>('/auth/google/pending',{signal:controller.signal})
           if (controller.signal.aborted) return
-          setRegister({display_name:pending.display_name,email:pending.email,password:'',confirm_password:'',terms_accepted:false})
+          setRegister({...EMPTY_REGISTRATION,display_name:pending.display_name,email:pending.email})
           setMode('google-consent'); setMessage('Google hesabınız doğrulandı. Kaydı tamamlamak için koşulları kabul edin.')
         } catch (error) {
           if (controller.signal.aborted) return
@@ -422,10 +425,10 @@ export default function AuthGate({children}:{children:ReactNode}) {
       else if (!passwordRules(register.password).every(([,passed]) => passed)) errors.password = `Eksik parola şartları: ${missingPasswordRules.join(', ')}.`
       if (!register.confirm_password) errors.confirm_password = 'Şifrenizi tekrar girin.'
       else if (register.password !== register.confirm_password) errors.confirm_password = 'Şifreler eşleşmiyor.'
-      if (!register.terms_accepted) setTermsError('Devam etmek için kullanım koşullarını ve gizlilik politikasını kabul etmelisiniz.')
+      if (!register.terms_accepted) setTermsError("Devam etmek için Kullanıcı Sözleşmesi'ni kabul etmelisiniz.")
       else setTermsError('')
     }
-    if (isGoogleConsent) setTermsError(register.terms_accepted ? '' : 'Devam etmek için kullanım koşullarını ve gizlilik politikasını kabul etmelisiniz.')
+    if (isGoogleConsent) setTermsError(register.terms_accepted ? '' : "Devam etmek için Kullanıcı Sözleşmesi'ni kabul etmelisiniz.")
     if (mode === 'reset') {
       const error = passwordPolicyError(resetPassword.password)
       if (error) errors.password = error
@@ -478,26 +481,26 @@ export default function AuthGate({children}:{children:ReactNode}) {
         setMfaChallenge(''); setMfaCode(''); setMode('login')
         await loadSession(result.token,result.remember ?? remember)
       } else if (isGoogleConsent) {
-        const result = await request<AuthResult>('/auth/google/complete',{method:'POST',body:JSON.stringify({terms_accepted:register.terms_accepted})})
+        const result = await request<AuthResult>('/auth/google/complete',{method:'POST',body:JSON.stringify({terms_accepted:register.terms_accepted,marketing_accepted:register.marketing_accepted})})
         if ('mfa_required' in result) {setMfaChallenge(result.challenge_id); setMfaCode(''); setMode('mfa')}
         else {saveUserSessionToken(result.token,result.remember ?? remember); await loadSession(result.token,result.remember)}
-        setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
+        setRegister({...EMPTY_REGISTRATION})
         if (!('mfa_required' in result)) setMode('login')
       } else if (mode === 'bootstrap') {
         if (!ownerSetupAvailable) throw new Error('Yerel yönetici kurulumu kullanılamıyor.')
         const result = await request<{token:string;user:User}>('/bootstrap',{method:'POST',body:JSON.stringify({...register,remember})})
         saveUserSessionToken(result.token,remember); setMemberMenuOpen(false); setToken(result.token); setSession({user:result.user}); setOwnerSetupAvailable(false)
-        setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
+        setRegister({...EMPTY_REGISTRATION})
       } else if (mode === 'register') {
         const result = await request<{verification_status_token?:string;message:string;email_verification_v2_enabled?:boolean}>('/auth/register',{method:'POST',body:JSON.stringify(register)})
         if (result.email_verification_v2_enabled) {
-          setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
+          setRegister({...EMPTY_REGISTRATION})
           history.pushState(null,'','/verify-email')
           window.dispatchEvent(new Event('protrebot-email-verification'))
           return
         }
         setEmail(register.email); setVerificationStatusToken(result.verification_status_token || ''); setVerificationInput(''); setVerificationNotice(true); setVerificationMailFailed(false); setResendSeconds(60); setMode('verify'); setMessage(result.message)
-        setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
+        setRegister({...EMPTY_REGISTRATION})
       } else if (mode === 'forgot') {
         const result = await request<{development_reset_token?:string;message:string}>('/auth/forgot-password',{method:'POST',body:JSON.stringify({email})})
         if (result.development_reset_token) setResetToken(result.development_reset_token)
@@ -525,7 +528,7 @@ export default function AuthGate({children}:{children:ReactNode}) {
     sessionRequest.current?.abort()
     setSessionUnavailable(false)
     clearDemoCredentials(token)
-    setLogin({email:'',password:''}); setRegister({display_name:'',email:'',password:'',confirm_password:'',terms_accepted:false})
+    setLogin({email:'',password:''}); setRegister({...EMPTY_REGISTRATION})
     setEmail(''); setResetToken(''); setResetPassword({password:'',confirm_password:'',totp_code:''}); setMfaChallenge(''); setMfaCode('')
     setVerificationLinkToken(''); setVerificationStatusToken(''); setVerificationInput('')
     clearUserSessionToken(); setMemberMenuOpen(false); setToken(''); setSession(null); setMode('login'); setMessage('Oturum sonlandırıldı.')
@@ -575,9 +578,9 @@ export default function AuthGate({children}:{children:ReactNode}) {
             <label className={fieldErrors.email ? 'authFieldError' : ''}>E-posta<input type="email" autoComplete="email" value={register.email} onChange={event => {setRegister({...register,email:event.target.value});setFieldErrors(current => ({...current,email:''}))}} placeholder="siz@ornek.com"/>{fieldErrors.email && <em role="alert">{fieldErrors.email}</em>}</label>
             <label className={fieldErrors.password ? 'authFieldError' : ''}>Parola<div className="authPassword"><input data-private="true" type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={register.password} onChange={event => {setRegister({...register,password:event.target.value});setFieldErrors(current => ({...current,password:''}))}}/><button type="button" onClick={() => setShowPassword(value => !value)} aria-label="Parolayı göster veya gizle">{showPassword ? <EyeOff/> : <Eye/>}</button></div><div className={`passwordMeter strength${registrationStrength.score}`}><i style={{width:`${registrationStrength.score * 20}%`}}/><span>{registrationStrength.label} · tüm şartlar sağlanmalı</span></div><div className="passwordRules">{passwordRules(register.password).map(([label,passed]) => <span className={passed ? 'passed' : 'missing'} key={label}>{passed ? '✓' : '•'} {label}</span>)}</div>{fieldErrors.password && <em role="alert">{fieldErrors.password}</em>}</label>
             <label className={fieldErrors.confirm_password ? 'authFieldError' : ''}>Parola tekrar<div className="authPassword"><input data-private="true" type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password" value={register.confirm_password} onChange={event => {setRegister({...register,confirm_password:event.target.value});setFieldErrors(current => ({...current,confirm_password:''}))}}/><button type="button" onClick={() => setShowConfirmPassword(value => !value)} aria-label="Parola tekrarını göster veya gizle">{showConfirmPassword ? <EyeOff/> : <Eye/>}</button></div>{fieldErrors.confirm_password && <em role="alert">{fieldErrors.confirm_password}</em>}</label>
-            <TermsConsent accepted={register.terms_accepted} error={termsError} onChange={value => {setRegister({...register,terms_accepted:value});setTermsError('')}}/>
+            <TermsConsent accepted={register.terms_accepted} marketingAccepted={register.marketing_accepted} error={termsError} onChange={value => {setRegister({...register,terms_accepted:value});setTermsError('')}} onMarketingChange={value => setRegister({...register,marketing_accepted:value})}/>
           </>}
-          {isGoogleConsent && <><label>Ad soyad<input value={register.display_name} readOnly/></label><label>E-posta<input type="email" value={register.email} readOnly/></label><TermsConsent accepted={register.terms_accepted} error={termsError} onChange={value => {setRegister({...register,terms_accepted:value});setTermsError('')}}/></>}
+          {isGoogleConsent && <><label>Ad soyad<input value={register.display_name} readOnly/></label><label>E-posta<input type="email" value={register.email} readOnly/></label><TermsConsent accepted={register.terms_accepted} marketingAccepted={register.marketing_accepted} error={termsError} onChange={value => {setRegister({...register,terms_accepted:value});setTermsError('')}} onMarketingChange={value => setRegister({...register,marketing_accepted:value})}/></>}
           {mode === 'mfa' && <label>2FA veya kurtarma kodu<input data-private="true" required autoComplete="one-time-code" value={mfaCode} onChange={event => setMfaCode(event.target.value)} placeholder="Authenticator veya kurtarma kodu"/><small>İlk doğrulama tamamlandı; oturum henüz açılmadı.</small>{fieldErrors.mfa && <em role="alert">{fieldErrors.mfa}</em>}</label>}
           {mode === 'forgot' && <label>E-posta<input required type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="siz@ornek.com"/><small>Kayıtlıysa yenileme bağlantısı hazırlanır.</small></label>}
           {mode === 'verify' && <label className={fieldErrors.verification ? 'authFieldError' : ''}>Doğrulama kodu<input required value={verificationInput} onChange={event => {setVerificationInput(event.target.value);setFieldErrors(current => ({...current,verification:''}))}} placeholder="E-posta doğrulama kodu"/><small>{message || 'Kayıt sonrası e-postanızdaki kodu girin.'}</small>{fieldErrors.verification && <em>{fieldErrors.verification}</em>}</label>}

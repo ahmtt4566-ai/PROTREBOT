@@ -87,13 +87,16 @@ async def audit(conn, actor, row, action):
 async def audience(conn, group: str):
     users = await conn.fetch(
         """SELECT u.user_id,u.security->>'role' AS role,
-             COALESCE(p.announcements_opt_out,FALSE) AS opt_out
+             COALESCE(p.announcements_opt_out,FALSE) AS opt_out,
+             COALESCE(a.payload #> '{marketing_consent,accepted}' = 'true'::jsonb,FALSE) AS marketing_opt_in
            FROM commercial_auth_users u LEFT JOIN email_preferences p ON p.user_id=u.user_id
+           LEFT JOIN commercial_account_settings a ON a.user_id=u.user_id
            WHERE u.security->'active'='true'::jsonb AND u.security->'email_verified'='true'::jsonb
              AND NOT EXISTS (SELECT 1 FROM commercial_erased_users e WHERE e.user_hash =
                encode(sha256(convert_to(u.user_id,'UTF8')),'hex'))
            ORDER BY u.user_id FOR SHARE OF u""",
     )
+    users = [user for user in users if user["marketing_opt_in"] is True]
     if group == "team_only":
         return [u for u in users if u["role"] in ("OWNER", "MODERATOR")]
     if group == "premium_users":

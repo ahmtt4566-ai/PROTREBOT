@@ -144,7 +144,7 @@ async def preference_page():
 <title>KaisTrade duyuru tercihi</title><body style="font-family:Arial;max-width:520px;margin:48px auto;padding:24px">
 <h1>Duyuru tercihiniz</h1><p>Bu tercih yalnız bilgilendirme duyurularını etkiler. Hesap ve güvenlik e-postaları devam eder.</p>
 <form method="post"><button name="action" value="unsubscribe">Bu tür duyuruları almak istemiyorum</button>
-<button name="action" value="subscribe">Tekrar abone ol</button></form></body></html>"""
+<a href="/settings">Tekrar izin vermek için profil ayarlarını aç</a></form></body></html>"""
 
 
 @router.post("/announcements/unsubscribe")
@@ -159,6 +159,8 @@ async def preference_change(request: Request, token: str = Query("", max_length=
     action = form.get("action", ["unsubscribe"])[0]
     if action not in ("unsubscribe", "subscribe"):
         raise HTTPException(422, "Geçersiz tercih.")
+    if action == "subscribe":
+        raise HTTPException(409, "Tekrar ticari ileti izni vermek için giriş yapıp profil ayarlarını kullanın.")
     bucket = "campaign-unsubscribe:" + hashlib.sha256((request.client.host if request.client else "unknown").encode()).hexdigest()
     try:
         counter = await pool.fetchrow(
@@ -173,8 +175,20 @@ async def preference_change(request: Request, token: str = Query("", max_length=
             raise HTTPException(429, "Bir dakika bekleyip yeniden deneyin.", headers={"Retry-After": "60"})
         uid = token_user(request.app.state.v22_commercial["secret"], token)
         if uid:
-            async with pool.acquire() as conn, conn.transaction():
+            from . import account_store
+            from .registration_consent import update_marketing
+            async with account_store.edit(request, uid) as doc:
+                conn = account_store.active_connection(request, uid)
                 await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('campaign-pref:' || $1,0))", uid)
+                user = await conn.fetchrow(
+                    "SELECT auth_version, security FROM commercial_auth_users WHERE user_id = $1 FOR SHARE", uid,
+                )
+                if user is None:
+                    raise HTTPException(400, "Duyuru tercihi güncellenemedi.")
+                current = doc.get("marketing_consent")
+                if not current or current["accepted"] is not False or current["source"] != "EMAIL_UNSUBSCRIBE":
+                    update_marketing(doc, uid, False, revision=current["id"] if current else None,
+                                     operation_id=uuid.uuid4().hex, source="EMAIL_UNSUBSCRIBE")
                 await conn.execute(
                     """INSERT INTO email_preferences(user_id,announcements_opt_out,updated_at)
                        SELECT user_id,$2,clock_timestamp() FROM commercial_auth_users WHERE user_id=$1

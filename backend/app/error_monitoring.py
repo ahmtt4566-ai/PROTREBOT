@@ -17,6 +17,13 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+def log_database_failure(target: logging.Logger, stage: str, exc: BaseException) -> None:
+    sqlstate = getattr(exc, "sqlstate", None)
+    safe_code = sqlstate if isinstance(sqlstate, str) and re.fullmatch(r"[A-Z0-9]{5}", sqlstate) else None
+    target.error("Database operation failed: code=storage_write_failed stage=%s error_type=%s sqlstate=%s",
+                 stage, type(exc).__name__, safe_code)
+
 SENSITIVE_KEY_RE = re.compile(r"(?:password|passwd|secret|token|api[_-]?key|apikey|authorization|cookie|credential|private[_-]?key|signature|x-mbx-apikey|listen[_-]?key)", re.I)
 SENSITIVE_VALUE_RE = re.compile(
     r"(?P<key>signature|secret(?:[_-]?key)?|api[_-]?key|apikey|token|password|passwd|authorization|cookie|x-mbx-apikey|listen[_-]?key)"

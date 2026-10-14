@@ -424,7 +424,8 @@ async def persist_v22_commercial(application: Any) -> bool:
         rt["storage_status"] = "POSTGRESQL_KALICI"
         return True
     except Exception as exc:
-        logger.exception("persist_v22_commercial database write failed: %s", _sanitize_db_error(exc))
+        from .error_monitoring import log_database_failure
+        log_database_failure(logger, "commercial_snapshot", exc)
         rt["storage_status"] = "YEREL_YEDEK"
         return False
 
@@ -1096,11 +1097,13 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     display_name: str = Field(min_length=2, max_length=80)
     email: str = Field(min_length=5, max_length=180)
     password: str = Field(min_length=10, max_length=256)
     confirm_password: str = Field(min_length=10, max_length=256)
-    terms_accepted: bool = False
+    terms_accepted: bool = Field(default=False, strict=True)
+    marketing_accepted: bool = Field(default=False, strict=True)
 
 
 class EmailTokenRequest(BaseModel):
@@ -1413,19 +1416,17 @@ async def v22_login(payload: LoginRequest, request: Request, response: Response 
 
 @router.post("/auth/register")
 async def v22_register(payload: RegisterRequest, request: Request, response: Response = None):
-    from .google_oauth import registration_guard
     started = time.monotonic()
     try:
-        async with registration_guard(request, payload.email):
-            return await register_password_user(payload, request, response)
+        return await register_password_user(payload, request, response)
     finally:
         await asyncio.sleep(max(0.0, REGISTRATION_RESPONSE_SECONDS - (time.monotonic() - started)))
 
 
 async def register_password_user(payload: RegisterRequest, request: Request, browser_response: Response = None):
     await enforce_auth_limit(request, "register", payload.email)
-    if not payload.terms_accepted:
-        raise HTTPException(422, "Kullanım koşullarını kabul etmelisiniz")
+    from .registration_consent import require_terms
+    require_terms(payload.terms_accepted)
     if payload.password != payload.confirm_password:
         raise HTTPException(422, "Parolalar eşleşmiyor")
     validate_new_password(payload.password)
@@ -1438,11 +1439,14 @@ async def register_password_user(payload: RegisterRequest, request: Request, bro
     expose_dev_token = dev_tokens_exposed()
     if not gmail_configured() and not expose_dev_token:
         raise HTTPException(503, email_service.unavailable_message(), headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"})
+    base_url = app_base_url()
     created_user = None
     async with rt["lock"]:
         await apply_erasure_tombstones(request.app)
+        from .password_registration import create
+        created_user, verification_token = await create(request, payload, browser_response)
         state = rt["state"]
-        if any(item.get("email") == email for item in state["users"]):
+        if created_user is None:
             hash_password(payload.password)
             # Return the same shape with unlinked identifiers, never account data.
             synthetic = {
@@ -1460,44 +1464,22 @@ async def register_password_user(payload: RegisterRequest, request: Request, bro
                 "to_email": email, "display_name": synthetic["display_name"],
                 "subject": "KaisTrade hesap bilgilendirmesi",
                 "title": "Bu e-postayla zaten bir hesabın var. Giriş yap veya şifreni sıfırla.",
-                "action_url": f"{app_base_url()}/login", "action_label": "Hesabına giriş yap",
+                "action_url": f"{base_url}/login", "action_label": "Hesabına giriş yap",
                 "information_only": True,
             }
         else:
-            user_id = uuid.uuid4().hex
-            user = {
-                "id": user_id, "email": email, "display_name": payload.display_name.strip(),
-                "role": "CUSTOMER", "active": True, "auth_version": 1,
-                "email_verified": False, "password": hash_password(payload.password), "created_at": now_iso(),
-            }
-            created_user = user
-            state["users"].append(user)
-            state["profiles"].append({"id": uuid.uuid4().hex, "user_id": user_id, "full_name": user["display_name"], "avatar_url": None, "role": "user", "preferences": {}, "created_at": user["created_at"], "updated_at": user["created_at"]})
-            state["subscriptions"].append({"id": uuid.uuid4().hex, "user_id": user_id, "plan": "FREE", "status": "inactive", "started_at": user["created_at"], "expires_at": None, "created_at": user["created_at"], "updated_at": user["created_at"]})
-            if email_verification.enabled():
-                user["email_verified_at"] = None
-                verification_token = await email_verification.registration_link(request, user)
-            else:
-                verification_token = issue_one_time_token(state, user, rt["secret"], kind="EMAIL_VERIFY")
-                from .account_store import save_action_token
-                await save_action_token(request, verification_token, user, "EMAIL_VERIFY")
+            user = created_user
+            user_id = user["id"]
             verification_status_token = issue_token(user_id, user["role"], rt["secret"], kind="EMAIL_STATUS", ttl_seconds=24 * 60 * 60)
-            add_audit(state, "USER_REGISTERED", "Yeni kullanıcı hesabı oluşturuldu.", actor=user_id, subject=user_id)
-            save_state(state)
             response = {"user": public_user(user), "message": "E-posta kayıt için uygunsa doğrulama bağlantısı gönderildi.", "email_verification_required": True, "verification_status_token": verification_status_token}
             if expose_dev_token:
                 response["development_verification_token"] = verification_token
             mail = {"to_email": email, "display_name": user["display_name"], "subject": VERIFY_SUBJECT,
-                    "title": "Hesabını doğrula", "action_url": f"{app_base_url()}/verify-email?token={verification_token}",
+                    "title": "Hesabını doğrula", "action_url": f"{base_url}/verify-email?token={verification_token}",
                     "action_label": "E-posta adresimi doğrula"}
             if email_verification.enabled():
                 mail.update(title="E-posta adresini onayla", action_label="E-postamı doğrula",
                             expiry="30 dakika", verification_v2=True)
-    persisted = await persist_v22_commercial(request.app)
-    if DURABLE_AUTH_REQUIRED and not persisted:
-        if created_user:
-            await rollback_password_registration(request, created_user["id"])
-        raise HTTPException(503, "Kalıcı hesap veritabanı hazır değil; kayıt güvenli şekilde tamamlanamadı")
     if gmail_configured():
         try:
             await asyncio.to_thread(send_auth_email, **mail)
@@ -1509,7 +1491,8 @@ async def register_password_user(payload: RegisterRequest, request: Request, bro
                 await rollback_password_registration(request, created_user["id"])
             raise HTTPException(503, "Doğrulama maili gönderilemedi. Lütfen tekrar dene veya Google ile giriş yap.", headers={"X-Email-Delivery-Error": "1", "Retry-After": "60"}) from None
     if email_verification.enabled():
-        await email_verification.complete_registration(request, browser_response, created_user or synthetic)
+        if created_user is None:
+            await email_verification.complete_registration(request, browser_response, synthetic)
         response["email_verification_v2_enabled"] = True
     return response
 
@@ -1517,12 +1500,8 @@ async def register_password_user(payload: RegisterRequest, request: Request, bro
 async def rollback_password_registration(request: Request, user_id: str) -> None:
     rt = runtime(request)
     async with rt["lock"]:
-        for key, field in (("users", "id"), ("profiles", "user_id"), ("subscriptions", "user_id"), ("auth_tokens", "user_id")):
-            rt["state"][key] = [item for item in rt["state"].get(key, []) if item.get(field) != user_id]
-        save_state(rt["state"])
-    await persist_v22_commercial(request.app)
-    if email_verification.enabled():
-        await email_verification.rollback_registration(request, user_id)
+        from .password_registration import rollback
+        await rollback(request, user_id)
 
 
 @router.post("/auth/verify-email")

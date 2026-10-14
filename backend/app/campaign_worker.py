@@ -111,6 +111,7 @@ async def deliver_campaign(conn, lease, application):
     )
     if row is None:
         return
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", "account-settings:" + row["recipient_user_id"])
     recipient = await conn.fetchrow(
         """SELECT u.security->>'email' AS email,COALESCE(p.announcements_opt_out,FALSE) AS opt_out
            FROM commercial_auth_users u LEFT JOIN email_preferences p ON p.user_id=u.user_id
@@ -122,12 +123,16 @@ async def deliver_campaign(conn, lease, application):
     await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('campaign-pref:' || $1,0))", row["recipient_user_id"])
     opt_out = await conn.fetchval("SELECT announcements_opt_out FROM email_preferences WHERE user_id=$1", row["recipient_user_id"])
     test = bool(data.get("test"))
+    marketing_accepted = await conn.fetchval(
+        "SELECT payload #> '{marketing_consent,accepted}' = 'true'::jsonb FROM commercial_account_settings WHERE user_id=$1",
+        row["recipient_user_id"],
+    )
     reason = None
     if campaign["status"] == "cancelled" or not test and campaign["status"] != "sending":
         reason = "cancelled"
     elif recipient is None or not recipient["email"]:
         reason = "recipient_unavailable"
-    elif opt_out:
+    elif opt_out or not test and marketing_accepted is not True:
         reason = "opt_out"
     if reason:
         await finish(conn, row, "dead", "campaign_cancelled" if reason == "cancelled" else reason)
