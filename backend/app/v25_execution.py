@@ -3927,6 +3927,7 @@ def credential_resolution_detail(codes: list[str]) -> str:
         "owner_inactive": "OWNER hesap yetkisi aktif değil.",
         "vault_unavailable": "OWNER key kasasına ulaşılamadı.",
         "vault_row_missing": "OWNER key kasasında etkin LIVE anahtarı bulunamadı.",
+        "vault_inactive": "OWNER kasasındaki LIVE bağlantısı devre dışı.",
         "vault_fingerprint_mismatch": "Kasa kimliği, yetkili LIVE hesap kimliğiyle eşleşmedi.",
         "vault_permissions_unverified": "Binance API izinleri güvenli kullanım için doğrulanamadı.",
         "vault_decrypt_failed": "Şifreli OWNER key kasası çözülemedi.",
@@ -3964,6 +3965,10 @@ async def auto_session_credentials(
     force_refresh: bool = False,
     check_results: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
+    state["credential_resolution_retryable"] = False
+    if not any((state.get(key) or {}).get("user_id") for key in ("auto_authorization", "live_session_authorization")):
+        state["credential_resolution_reason"] = "monitoring_authorization_pending"
+        return "", ""
     authorized = await background_authorization_active(application, state)
     record_live_entry_check(
         check_results,
@@ -3972,6 +3977,7 @@ async def auto_session_credentials(
         "OWNER oturum yetkisi güncel." if authorized else "OWNER oturum yetkisi, kullanıcı hesabı yetki sürümünde doğrulanamadı.",
     )
     if not authorized:
+        state["credential_resolution_reason"] = "OWNER oturum yetkisi güncel olarak doğrulanamadı."
         return "", ""
     authorizations = [state.get("auto_authorization") or {}, state.get("live_session_authorization") or {}]
     attempted: set[tuple[str, str, str]] = set()
@@ -3998,6 +4004,7 @@ async def auto_session_credentials(
         # entry consent expires. Entry paths independently require active
         # consent through readiness_for/fresh_auto_submission_credentials.
         if usable_live_credentials(credentials):
+            state["credential_resolution_reason"] = None
             record_live_entry_check(
                 check_results,
                 "live_key_vault",
@@ -4011,6 +4018,7 @@ async def auto_session_credentials(
         False,
         credential_resolution_detail(diagnostics),
     )
+    state["credential_resolution_reason"] = credential_resolution_detail(diagnostics)
     return "", ""
 
 
@@ -5768,7 +5776,11 @@ async def execution_loop(application: Any) -> None:
                 continue
             automation_telemetry("AUTOMATION_LOOP running", reason="loop_running")
             credentials = await auto_session_credentials(application, application.state.v25_execution)
-            if not usable_live_credentials(credentials):
+            if state.get("credential_resolution_reason") == "monitoring_authorization_pending":
+                state["auto"]["last_skip_reason"] = "monitoring_authorization_pending"
+                await asyncio.sleep(5)
+                continue
+            if not usable_live_credentials(credentials) and state.get("credential_resolution_retryable", True):
                 credentials = await auto_session_credentials(
                     application,
                     application.state.v25_execution,
@@ -5784,6 +5796,10 @@ async def execution_loop(application: Any) -> None:
                 automation_telemetry(refresh_event, reason=refresh_event)
             if not usable_live_credentials(credentials):
                 state = application.state.v25_execution
+                reason = state.get("credential_resolution_reason") or "OWNER kasasındaki LIVE anahtarı çözümlenemedi."
+                if state.get("last_credential_resolution_failure") != reason:
+                    add_event(state, "LIVE_CREDENTIALS_UNAVAILABLE", reason)
+                    state["last_credential_resolution_failure"] = reason
                 from . import original_v2_live
                 if original_v2_live.running(state):
                     original_v2_live.pause(state, "Original V2 LIVE credential bağlantısı kesildi")
@@ -5814,6 +5830,7 @@ async def execution_loop(application: Any) -> None:
                 await asyncio.sleep(5)
                 continue
             reconciliation_stage = "account_reconciliation"
+            state["last_credential_resolution_failure"] = None
             application.state.v25_execution["monitoring_credentials_stale_since"] = None
             async with application.state.v25_execution["lock"]:
                 await reconcile(application, credentials=credentials)
@@ -5985,7 +6002,25 @@ async def shutdown_v25_execution(application: Any) -> None:
 
 @router.get("/status")
 async def v25_status(request: Request) -> dict[str, Any]:
+    from .exchange_connections import ensure_session_cache
+
+    user = execution_owner(request)
+    await ensure_session_cache(request)
     execution_owner(request)
+    state = request.app.state.v25_execution
+    api_key, secret_key, _ = live_credentials_status(request)
+    snapshot = state.get("snapshot") or {}
+    if (
+        user.get("role") == "OWNER" and usable_live_credentials((api_key, secret_key))
+        and (not state.get("connected") or snapshot.get("wallet_balance") is None
+             or state.get("snapshot_session_id") != live_owner_binding(request))
+    ):
+        from . import account_settings
+
+        if not await account_settings.enabled(request, user):
+            raise HTTPException(403, "LIVE hesap bağlantısı için önce 2FA'yı etkinleştirin.")
+        guard_execution_ownership(request, claim=True)
+        return await connect_read_only_for_request(request.app, request)
     return public_status(request.app, request)
 
 

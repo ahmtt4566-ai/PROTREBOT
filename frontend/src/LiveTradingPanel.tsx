@@ -13,6 +13,8 @@ import {preferredRiskMargin} from '../../account-risk-sizing'
 import {PremiumWorkspace, useMemberAccess} from '../../premium-access'
 import OriginalV2LiveCard, {type OriginalV2EntryCheck, type OriginalV2LiveStatus, type OriginalPersistenceDiagnostics} from './OriginalV2LiveCard'
 import OriginalLiveOverview from './OriginalLiveOverview'
+import {readLiveStatusResponses, liveCredentialStatusMatches} from './live-status-read'
+export {liveCredentialStatusMatches} from './live-status-read'
 
 type LivePolicy = Record<string, unknown>
 type LiveStatus = {
@@ -78,14 +80,7 @@ export type SharedConnectionStatus = ConnectionStatus
 
 const normalizeCredentialFingerprint = (value: string | null | undefined) => (value || '').trim().toUpperCase().replace(/^SHA256:/, '')
 
-export function liveCredentialStatusMatches(status: SharedLiveStatus, connections: SharedConnectionStatus | null): boolean {
-  const connection = connections?.connections?.LIVE
-  if (connection?.active !== true) return status.credentials?.configured !== true && status.connected !== true
-  if (status.credentials?.configured !== true) return false
-  const saved = normalizeCredentialFingerprint(connection?.fingerprint)
-  return Boolean(saved && saved === normalizeCredentialFingerprint(status.credentials?.fingerprint))
-}
-type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; masterTradeTab?: 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'; sharedStatus?: LiveStatus | null; sharedStatusVerified?: boolean; sharedStatusError?: string; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
+type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; masterTradeTab?: 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'; sharedStatus?: LiveStatus | null; sharedStatusVerified?: boolean; sharedStatusError?: string; sharedStatusLoading?: boolean; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
 
 const V25 = `${API_BASE}/v25`
 const CONNECTIONS = `${API_BASE}/exchange-connections`
@@ -177,10 +172,10 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
-export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedStatusVerified = true, sharedStatusError = '', sharedConnections, onRefreshStatus}: Props) {
+export default function LiveTradingPanel({active, symbol, analysis, masterTrade, masterTradeTab, sharedStatus, sharedStatusVerified = true, sharedStatusError = '', sharedStatusLoading, sharedConnections, onRefreshStatus}: Props) {
   const [originalNotice, setOriginalNotice] = useState('')
   const [connectionNotice, setConnectionNotice] = useState<{kind: 'info' | 'ok' | 'error'; text: string} | null>(null)
-  const {freeTrial} = useMemberAccess()
+  const {freeTrial, userId} = useMemberAccess()
   const tradingDefaults = useTradingPreferences()
   const defaultsApplied = useRef(false)
   const [sizingNotice, setSizingNotice] = useState('')
@@ -195,6 +190,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   }, [active, masterTrade, masterTradeTab, tradingDefaults.preferences, tradingDefaults.untouched])
   const [localStatus, setLocalStatus] = useState<LiveStatus | null>(null)
   const [localStatusVerified, setLocalStatusVerified] = useState(false)
+  const [localStatusError, setLocalStatusError] = useState('')
   const [localConnections, setLocalConnections] = useState<ConnectionStatus | null>(null)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
   const [credentials, setCredentials] = useState({apiKey: '', secretKey: '', accepted: false})
@@ -213,7 +209,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const [externalHistory, setExternalHistory] = useState<ExternalHistory | null>(null)
   const [reviewResult, setReviewResult] = useState<{message: string; notional?: number; estimated_stop_loss_usdt?: number} | null>(null)
   const [credentialModalOpen, setCredentialModalOpen] = useState(false)
-  const [refreshPending, setRefreshPending] = useState(false)
+  const [refreshPending, setRefreshPending] = useState(true)
   const [adoptionCandidate, setAdoptionCandidate] = useState<{
     symbol: string
     candidatePlan: any
@@ -228,6 +224,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
   const status = sharedStatus !== undefined ? sharedStatus : localStatus
   const statusVerified = sharedStatus !== undefined ? sharedStatusVerified : localStatusVerified
   const connections = sharedConnections !== undefined ? sharedConnections : localConnections
+  const statusLoading = sharedStatusLoading ?? refreshPending
   const backendBan = connections?.binance_ban
 
   useEffect(() => {
@@ -307,24 +304,23 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
     }
     refreshInFlight.current = true
     try {
-      const [statusResult, connectionResult] = await Promise.allSettled([
-        call<LiveStatus>(V25, '/status'),
-        call<ConnectionStatus>(CONNECTIONS, '/status'),
-      ])
+      const [statusResponse, connectionResponse] = await readLiveStatusResponses(setLocalConnections)
+      const connectionResult = await connectionResponse.json() as ConnectionStatus
+      const nextStatus = await statusResponse.json() as LiveStatus
       if (confirmationOpen.current) return
-      setLocalConnections(connectionResult.status === 'fulfilled' ? connectionResult.value : null)
-      if (statusResult.status === 'rejected') throw statusResult.reason
-      if (connectionResult.status === 'rejected') throw connectionResult.reason
-      const nextStatus = statusResult.value
-      if (!liveCredentialStatusMatches(nextStatus, connectionResult.value)) {
+      setLocalConnections(connectionResult)
+      if (!statusResponse.ok) throw new Error(errorMessage(nextStatus, `Canlı hesap durumu alınamadı (HTTP ${statusResponse.status}).`))
+      if (!liveCredentialStatusMatches(nextStatus, connectionResult)) {
         throw new Error('LIVE durumu ile kayıtlı Binance anahtarı uyuşmuyor; yeni girişler kapalı.')
       }
       setLocalStatus(nextStatus)
       setLocalStatusVerified(true)
+      setLocalStatusError('')
       setPolicyDraft(current => current || nextStatus.policy || {})
       return true
     } catch (error) {
       setLocalStatusVerified(false)
+      setLocalStatusError(error instanceof Error ? error.message : 'LIVE durumu okunamadı.')
       if (!quiet) setNotice({kind: 'error', text: error instanceof Error ? error.message : 'LIVE durumu okunamadı.'})
       return false
     } finally {
@@ -999,8 +995,10 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
 
   if (!active) return null
   if (!masterTrade) return <section className="originalLiveWorkspace" aria-label="Canlı İşlem"><h2>Canlı İşlem</h2><p>Canlı strateji ve risk ayarları Master Trade’de, API anahtarları yalnız Bağlantı sekmesinde yönetilir.</p><a href="/master-trade?tab=canli">Canlı İşlem’i aç →</a><a href="/master-trade?tab=baglanti">Bağlantı ayarları →</a></section>
-  const statusNotice = !statusVerified
-    ? <div className="liveNotice error" role="alert" data-testid="live-status-unverified"><TriangleAlert aria-hidden="true"/><span>{blocker}</span>{[sharedStatusError, notice.text].some(message => message.includes('LIVE kontrolü başka bir kullanıcı veya oturuma ait.')) && <button type="button" className="masterTradeLiveSecondary" onClick={recoverSession} disabled={Boolean(busy)} title="Aynı OWNER ve hesap için 2FA ile oturumu geri bağla"><RefreshCw size={16} aria-hidden="true"/> LIVE oturumunu geri bağla</button>}</div>
+  const statusNotice = !statusVerified && statusLoading
+    ? <p role="status">Kayıtlı anahtar ve güncel Binance bakiyesi okunuyor; emir yetkisi kapalı.</p>
+    : !statusVerified
+    ? <div className="liveNotice error" role="alert" data-testid="live-status-unverified"><TriangleAlert aria-hidden="true"/><span>{localStatusError && !sharedStatusError ? `${localStatusError} ` : ''}{blocker}</span>{[sharedStatusError, notice.text].some(message => message.includes('LIVE kontrolü başka bir kullanıcı veya oturuma ait.')) && <button type="button" className="masterTradeLiveSecondary" onClick={recoverSession} disabled={Boolean(busy)} title="Aynı OWNER ve hesap için 2FA ile oturumu geri bağla"><RefreshCw size={16} aria-hidden="true"/> LIVE oturumunu geri bağla</button>}</div>
     : !liveArmed && status?.live_lock_reason?.message
       ? <div className="liveNotice error" role="alert" data-testid="live-arm-cancellation"><TriangleAlert aria-hidden="true"/><span>{status.live_lock_reason.message}</span></div>
       : status?.account_rate_limit?.pending_verification
@@ -1021,10 +1019,12 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       {statusNotice}
       {globalBanActive && <p role="alert" data-testid="binance-global-ban">{globalBanMessage}</p>}
       <OriginalV2LiveCard
+        key={userId}
         className="masterTradeLiveOriginalCard" status={status.original_v2_live}
         entryChecks={originalEntryChecks} armed={liveArmed} automationActive={status.live_auto_trade === true}
         blocked={Boolean(busy) || !statusVerified || !connected || recoveryRequired || freeTrial || globalBanActive}
         connected={connected && statusVerified} statusVerified={statusVerified} prepareStart={prepareOriginal}
+        loading={statusLoading && !snapshotVerified} balanceError={sharedStatusError || localStatusError || status.connection?.last_error || status.recovery_error || status.account_rate_limit?.message} userId={userId}
         request={(path, body) => call(V25, path, {method: 'POST', ...(body ? {body: JSON.stringify(body)} : {})})}
         readDiagnostics={() => call(V25, '/original-v2/persistence-diagnostics', {method: 'GET', cache: 'no-store'})}
         refresh={() => refresh(false)} notice={originalNotice} onNotice={setOriginalNotice}
@@ -1146,7 +1146,7 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
           </div>
           <p>API anahtarını yalnız burada ekleyebilir veya değiştirebilirsin. Secret şifrelenir, tekrar gösterilmez.</p>
         </div>
-        <strong className={`masterTradeLiveConnectionStatus ${connected && statusVerified ? 'masterTradeLiveConnected' : ''}`}><i className={connected && statusVerified ? 'connected' : ''} /> {connected && statusVerified ? 'Binance bağlı' : 'Bağlantı doğrulanamadı'}</strong>
+        <strong className={`masterTradeLiveConnectionStatus ${connected && statusVerified ? 'masterTradeLiveConnected' : ''}`}><i className={connected && statusVerified ? 'connected' : ''} /> {connected && statusVerified ? 'Binance bağlı' : statusLoading ? 'Bağlantı okunuyor…' : 'Bağlantı doğrulanamadı'}</strong>
       </div>
 
       {(connectionNotice || liveConnection?.last_error) && <div className={`liveNotice ${connectionNotice?.kind ?? 'error'}`}
@@ -1160,9 +1160,9 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       <section className="originalSurface" aria-label="Kayıtlı Binance bağlantısı">
         <h3>Binance Futures</h3>
         <p>{connected && statusVerified ? 'Salt-okunur hesap bağlantısı açık. Bu sayfa emir göndermez.' : 'Bağlantıyı doğrula; strateji ayrı başlatılır.'}</p>
-        <p>{liveConnection?.configured === true ? '✓ Mevcut anahtar şifreli kasada kayıtlı' : liveConnection?.configured === false ? 'Anahtar henüz kaydedilmedi' : 'Kayıtlı anahtar durumu okunamadı'}</p>
-        <p>{liveConnection?.last_test_ok === true ? '✓ Kayıtlı anahtarın son testi başarılı' : liveConnection?.last_test_ok === false ? 'Kayıtlı anahtarın testi doğrulanamadı' : 'Son kayıtlı test durumu okunamadı'}</p>
-        <p>{liveConnection?.account?.api_permissions?.withdrawal_check === 'VERIFIED' && liveConnection.account.api_permissions.enableWithdrawals === false ? '✓ Para çekme izni kapalı' : 'Para çekme izni henüz doğrulanamadı'}</p>
+        <p>{liveConnection?.configured === true ? '✓ Mevcut anahtar şifreli kasada kayıtlı' : statusLoading ? 'Kayıtlı anahtar durumu okunuyor…' : liveConnection?.configured === false ? 'Anahtar henüz kaydedilmedi' : 'Kayıtlı anahtar durumu okunamadı'}</p>
+        <p>{liveConnection?.last_test_ok === true ? '✓ Kayıtlı anahtarın son testi başarılı' : statusLoading && !liveConnection ? 'Kayıtlı test durumu okunuyor…' : liveConnection?.last_test_ok === false ? 'Kayıtlı anahtarın testi doğrulanamadı' : 'Son kayıtlı test durumu okunamadı'}</p>
+        <p>{liveConnection?.account?.api_permissions?.withdrawal_check === 'VERIFIED' && liveConnection.account.api_permissions.enableWithdrawals === false ? '✓ Para çekme izni kapalı' : statusLoading && !liveConnection ? 'API izin kaydı okunuyor…' : 'Para çekme izni henüz doğrulanamadı'}</p>
         <p>IP kısıtlamasını Binance panelinden ayarla. Bu ekran IP kısıtlamasını doğrulamaz.</p>
         <p>Anahtar izi: <b>{text(liveConnection?.fingerprint)}</b></p>
         <p>Son kayıtlı test: {date(liveConnection?.last_test_at)}</p>

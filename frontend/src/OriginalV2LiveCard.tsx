@@ -147,6 +147,9 @@ type Props = {
   walletBalance?: number | null
   connected?: boolean
   statusVerified?: boolean
+  loading?: boolean
+  balanceError?: string | null
+  userId?: string | null
   prepareStart?: () => Promise<void>
   overview?: ReactNode
 }
@@ -157,11 +160,35 @@ const dailyLevel = (risk: number) => risk > 10 ? 'RED' : risk > 5 ? 'ORANGE' : '
 const warningNames = {NORMAL: 'Normal', YELLOW: 'Sarı uyarı', ORANGE: 'Turuncu uyarı', RED: 'Kırmızı uyarı'}
 const usdt = (value: number) => `${value.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} USDT`
 
-export default function OriginalV2LiveCard({className, status, entryChecks, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice, walletBalance, connected = true, statusVerified = true, prepareStart, overview}: Props) {
+export default function OriginalV2LiveCard({className, status, entryChecks, armed, automationActive, blocked, request, readDiagnostics, refresh, notice, onNotice, walletBalance, connected = true, statusVerified = true, loading = false, balanceError, userId, prepareStart, overview}: Props) {
   const [risk, setRisk] = useState(String(status.risk_percent))
   const [dailyLoss, setDailyLoss] = useState(String(status.daily_loss_percent))
   const [symbolCount, setSymbolCount] = useState(String(status.universe?.requested_count ?? 40))
-  const [hours, setHours] = useState('1')
+  const [hours, setHours] = useState(String(status.session?.hours ?? 1))
+  const hoursEdited = useRef(false)
+  const hoursStorageKey = userId ? `protrebot-original-live-hours:${userId}` : null
+  useEffect(() => {
+    if (hoursEdited.current) return
+    try {
+      const saved = hoursStorageKey ? localStorage.getItem(hoursStorageKey) : null
+      setHours(saved && ['1', '4', '12', '24'].includes(saved) ? saved : String(status.session?.hours ?? 1))
+    } catch (error) {
+      if (!(error instanceof DOMException)) throw error
+      onNotice('Son oturum süresi tarayıcıdan okunamadı; sunucudaki son seçim kullanılıyor.')
+      setHours(String(status.session?.hours ?? 1))
+    }
+  }, [hoursStorageKey, status.session?.hours])
+  const changeHours = (value: string) => {
+    hoursEdited.current = true
+    setHours(value)
+    if (!hoursStorageKey) return
+    try {
+      localStorage.setItem(hoursStorageKey, value)
+    } catch (error) {
+      if (!(error instanceof DOMException)) throw error
+      onNotice('Oturum süresi bu tarayıcıya kaydedilemedi; seçim yalnız bu sayfa açıkken korunacak.')
+    }
+  }
   const [riskAcknowledged, setRiskAcknowledged] = useState(false)
   const [highRiskConfirmation, setHighRiskConfirmation] = useState('')
   const [understood, setUnderstood] = useState(false)
@@ -419,17 +446,20 @@ export default function OriginalV2LiveCard({className, status, entryChecks, arme
     <details className="originalSettings" open={!status.enabled}><summary>{status.enabled ? 'Risk ayarlarını değiştir' : 'İlk kurulum · 3 adım'}</summary>
     <form onSubmit={submit} aria-label="Risk ayarları ve kurulum">
       <div className="originalSetupStep" data-active={!connected} data-complete={connected}><h3>{connected ? '✓' : '1'} · Binance hesabını bağla</h3><a href="/master-trade?tab=baglanti">Bağlantı ayarları →</a></div>
-      <fieldset className="originalSetupStep" data-active={connected && !riskApproved} data-complete={riskApproved} disabled={busy || !connected}><legend>{riskApproved ? '✓' : '2'} · Risk ayarlarını onayla</legend>
+      <fieldset className="originalSetupStep" data-active={connected && wallet !== null && !riskApproved} data-complete={riskApproved} disabled={busy || !connected || wallet === null}><legend>{riskApproved ? '✓' : '2'} · Risk ayarlarını onayla</legend>
       <div className="masterTradeLiveSetupGrid">
         <label>İşlem riski (%)<input type="number" min="0.5" max="10" step="0.01" required value={risk} onChange={event => changeRisk(event.target.value)} disabled={busy}/></label>
         <label>Günlük kayıp sınırı (%)<input type="number" min={Math.max(1, selectedRisk || 1)} max="25" step="0.01" required value={dailyLoss} onChange={event => changeRisk(event.target.value, true)} disabled={busy}/></label>
         <label>İlk N sembolü tara<input type="number" min="10" max="100" step="1" required value={symbolCount} onChange={event => setSymbolCount(event.target.value)} disabled={busy || status.enabled}/></label>
-        <label>Oturum süresi<select aria-label="Oturum süresi" value={status.enabled ? String(status.session?.hours ?? 1) : hours} onChange={event => setHours(event.target.value)} disabled={busy || status.enabled}>
+        <label>Oturum süresi<select aria-label="Oturum süresi" value={status.enabled ? String(status.session?.hours ?? 1) : hours} onChange={event => changeHours(event.target.value)} disabled={busy || status.enabled}>
           {[1, 4, 12, 24].map(value => <option key={value} value={value}>{value} saat</option>)}
         </select></label>
       </div>
       {!validRisk && <p role="alert">İşlem riski %0.5–10, günlük sınır %1–25 olmalı. Günlük sınır işlem riskinden küçük olamaz.</p>}
-      {wallet === null ? <p role="alert">Güncel Binance bakiyesi doğrulanamadı. Kayıp tahmini ve risk onayı için bağlantıyı yenileyin.</p> : validRisk && <div className="originalRiskWarning" data-level={riskLevel(selectedRisk)} data-testid="original-risk-warning">
+      {wallet === null ? loading
+        ? <p role="status">Anahtar hazır olunca güncel Binance bakiyesi okunacak; risk onayı bekliyor.</p>
+        : <p role="alert">Güncel Binance bakiyesi doğrulanamadı. {balanceError || 'Binance hesap yanıtında geçerli pozitif bakiye yok veya hesap bağlantısı doğrulanmadı.'} Risk onayı kapalı; bağlantı durumunu kontrol edin.</p>
+        : validRisk && <div className="originalRiskWarning" data-level={riskLevel(selectedRisk)} data-testid="original-risk-warning">
         {riskLevel(selectedRisk) !== 'NORMAL' && <strong>{warningNames[riskLevel(selectedRisk)]} · İşlem riski %{selectedRisk}</strong>}
         <p>Gerçek bakiye: {usdt(wallet)} · Seçilen işlem riskiyle tahmini kayıp: <b>{usdt(wallet * selectedRisk / 100)}</b></p>
         <p data-level={dailyLevel(selectedDaily)}>Günlük sınır: <b>{usdt((openingWallet ?? wallet) * selectedDaily / 100)}</b> · %{selectedDaily} · {warningNames[dailyLevel(selectedDaily)]}{openingWallet !== wallet ? ' (gün başlangıç bakiyesine göre)' : ' (güncel bakiye ile tahmin; girişte gün başlangıcı doğrulanır)'}</p>

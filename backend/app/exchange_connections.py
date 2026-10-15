@@ -541,16 +541,7 @@ async def session_credentials_for_identity(
         return "", ""
     await ensure_schema(pool)
     if normalized == "LIVE":
-        row = await pool.fetchrow(
-            """
-            SELECT 'owner:' || user_id AS session_id, user_id, mode, encrypted_payload,
-                   fingerprint, active, account_summary, last_test_ok, last_test_at,
-                   last_error, updated_at
-            FROM protrebot_exchange_account_vault
-            WHERE user_id = $1 AND mode = 'LIVE' AND active = TRUE
-            """,
-            user_id,
-        )
+        row = await _read_live_vault_record(pool, user_id, retry_missing=True)
     else:
         row = await pool.fetchrow(
             """
@@ -582,6 +573,9 @@ async def session_credentials_for_identity(
         )
         report("vault_row_missing" if not row else "vault_fingerprint_mismatch")
         return "", ""
+    if not row.get("active"):
+        report("vault_inactive")
+        return "", ""
     if not withdrawal_permissions_safe(normalized, _row_meta(row).get("account")):
         logger.warning("LIVE credential resolution failed: withdrawal_permissions_unverified")
         report("vault_permissions_unverified")
@@ -597,6 +591,8 @@ async def session_credentials_for_identity(
         report("decrypted_fingerprint_mismatch")
         return "", ""
     report("vault_credentials_resolved")
+    _SESSION_CACHE[key] = credentials
+    _SESSION_META[key] = _row_meta(row)
     return credentials
 
 
@@ -640,8 +636,12 @@ async def ensure_session_cache(request: Request, *, include_live: bool = True) -
         user = _require_member(request)
     if not user or not session_id(request):
         return
+    loaded = getattr(request.state, "exchange_cache_loaded", set())
+    if include_live in loaded:
+        return
     async with _credential_lock(request, "LIVE") if include_live else nullcontext():
         await _load_session_cache(request, include_live=include_live)
+    request.state.exchange_cache_loaded = loaded | {include_live}
 
 
 async def _load_session_cache(request: Request, *, include_live: bool = True) -> None:
@@ -674,6 +674,8 @@ async def _read_session_cache(request: Request, *, include_live: bool = True) ->
         _SESSION_CACHE.pop(key, None)
         _SESSION_META.pop(key, None)
         _lock_runtime(request.app, mode, request)
+        if include_live:
+            raise HTTPException(503, "Şifreli kasa veritabanı hazır değil; LIVE bağlantısı kapalı.")
         return
     await ensure_schema(pool)
     rows = await pool.fetch(
@@ -691,7 +693,7 @@ async def _read_session_cache(request: Request, *, include_live: bool = True) ->
             _SESSION_META[(sid, mode)] = {**_row_meta(row), "active": False, "last_test_ok": False, "last_error": str(exc)}
     if not include_live:
         return
-    live_row = await _read_live_vault_record(pool, user["id"])
+    live_row = await _read_live_vault_record(pool, user["id"], retry_missing=True)
     async with _controller_lock(request, "LIVE"):
         if not live_row:
             _SESSION_CACHE.pop(key, None)
@@ -729,17 +731,20 @@ async def _read_session_cache(request: Request, *, include_live: bool = True) ->
             )
 
 
-async def _read_live_vault_record(pool: Any, user_id: str) -> Any:
-    return await pool.fetchrow(
-        """
+async def _read_live_vault_record(pool: Any, user_id: str, *, retry_missing: bool = False) -> Any:
+    query = """
         SELECT 'owner:' || user_id AS session_id, user_id, mode, encrypted_payload,
                fingerprint, active, last_test_ok, last_test_at, last_error,
                account_summary, updated_at
         FROM protrebot_exchange_account_vault
         WHERE user_id = $1 AND mode = 'LIVE'
-        """,
-        user_id,
-    )
+        """
+    row = await pool.fetchrow(query, user_id)
+    if row is None and retry_missing:
+        await asyncio.sleep(0.25)
+        row = await pool.fetchrow(query, user_id)
+        logger.info("LIVE vault initial read retry result=%s", "resolved" if row is not None else "missing")
+    return row
 
 
 def _row_meta(row: Any) -> dict[str, Any]:

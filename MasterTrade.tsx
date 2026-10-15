@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { Activity, BarChart3, Cable, Check, ChevronDown, Clock3, Crosshair, Gauge, History, ListChecks, LockKeyhole, ShieldX, UnlockKeyhole, Wallet, X, XCircle } from 'lucide-react'
 import { API_BASE, userSessionToken } from './api'
 import LiveTradingPanel, { liveCredentialStatusMatches, type SharedConnectionStatus, type SharedLiveStatus } from './frontend/src/LiveTradingPanel'
+import {readLiveStatusResponses} from './frontend/src/live-status-read'
 import { buildTradeDecision, buildTriggerMonitor, type MtfAnalysis, type TradeDecision, type TriggerLifecycle, type TriggerMonitor } from './masterTradeDecision'
 import { MasterTradeChartLabels, MasterTradeMetricTile, MasterTradeMetricVisual, MasterTradePresentation, MasterTradeValue, masterTradeTone } from './MasterTradeLayout'
 import { PremiumWorkspace, useMemberAccess } from './premium-access'
@@ -155,6 +156,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   const [liveStatus, setLiveStatus] = useState<SharedLiveStatus | null>(null)
   const [liveStatusVerified, setLiveStatusVerified] = useState(false)
   const [liveStatusError, setLiveStatusError] = useState('')
+  const [liveStatusLoading, setLiveStatusLoading] = useState(true)
   const [liveConnections, setLiveConnections] = useState<SharedConnectionStatus | null>(null)
   const [selectedTrade, setSelectedTrade] = useState<TradeHistoryRow | null>(null)
   const [markets, setMarkets] = useState<MarketRow[]>([])
@@ -319,21 +321,15 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
     }
     const promise = (async () => {
       let connectionVerified = false
+      setLiveStatusLoading(true)
       try {
-        const [accountResult, connectionResult] = await Promise.allSettled([
-          fetchWithTimeout(`${API_BASE}/v25/status`, {cache: forceLiveSnapshot ? 'no-store' : 'default'}),
-          fetchWithTimeout(`${API_BASE}/exchange-connections/status`, {cache: 'no-store'}),
-        ])
-        if (connectionResult.status === 'rejected') {
-          setLiveConnections(null)
-          throw connectionResult.reason
-        }
-        const connectionResponse = connectionResult.value
+        const [accountResponse, connectionResponse] = await readLiveStatusResponses(connections => {
+          connectionVerified = true
+          setLiveConnections(connections)
+        })
         const nextConnections = connectionResponse.ok ? await connectionResponse.json() as SharedConnectionStatus : null
         setLiveConnections(nextConnections)
         connectionVerified = connectionResponse.ok
-        if (accountResult.status === 'rejected') throw accountResult.reason
-        const accountResponse = accountResult.value
 
         if (accountResponse.status === 412) {
           setLiveStatusVerified(false)
@@ -417,6 +413,8 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         setHistorySyncState('UNAVAILABLE')
         setSnapshot(current => current ? {...current, account:null, accountError:error instanceof Error ? error.message : 'ACCOUNT DISCONNECTED'} : current)
         throw error
+      } finally {
+        setLiveStatusLoading(false)
       }
     })()
     accountRefreshInFlight.current = {forceLiveSnapshot, promise}
@@ -808,9 +806,9 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
           <div className="masterTradeFocusConnection">
             {masterLayoutV2 ? <span className="masterTradeConnectionBadge" role="status" data-connected={Boolean(liveStatusVerified && liveStatus?.connected)}>
               <i aria-hidden="true"/>{liveStatusVerified && liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}
-              {!liveStatusVerified ? 'DURUM DOĞRULANAMADI' : liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'} · {liveStatusVerified && liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}
+              {!liveStatusVerified ? liveStatusLoading ? 'DURUM OKUNUYOR' : 'DURUM DOĞRULANAMADI' : liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'} · {liveStatusVerified && liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}
             </span> : <>
-            <span className={liveStatusVerified && liveStatus?.connected ? 'positive' : 'muted'}>{!liveStatusVerified ? 'DURUM DOĞRULANAMADI' : liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
+            <span className={liveStatusVerified && liveStatus?.connected ? 'positive' : 'muted'}>{!liveStatusVerified ? liveStatusLoading ? 'DURUM OKUNUYOR' : 'DURUM DOĞRULANAMADI' : liveStatus?.connected ? 'CONNECTED' : 'DISCONNECTED'}</span>
             <strong className={liveStatusVerified && liveStatus?.real_trading_locked === false ? 'positive' : 'warning'}>{liveStatusVerified && liveStatus?.real_trading_locked === false ? <UnlockKeyhole aria-hidden="true"/> : <LockKeyhole aria-hidden="true"/>}{liveStatusVerified && liveStatus?.real_trading_locked === false ? 'UNLOCKED' : 'LOCKED'}</strong>
             </>}
           </div>
@@ -1012,7 +1010,7 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
         </div>
 
         <div className="masterTradeOperationsPanel" id={`master-panel-${layoutTab === 'analiz' ? 'operations' : layoutTab}`} role="tabpanel" aria-labelledby={`master-tab-${layoutTab}`} hidden={layoutTab === 'analiz'}>
-          <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade masterTradeTab={layoutTab} sharedStatus={liveStatus} sharedStatusVerified={liveStatusVerified} sharedStatusError={liveStatusError} sharedConnections={liveConnections} onRefreshStatus={async (force = false) => {
+          <LiveTradingPanel active symbol={draft.market} analysis={analysis} masterTrade masterTradeTab={layoutTab} sharedStatus={liveStatus} sharedStatusVerified={liveStatusVerified} sharedStatusError={liveStatusError} sharedStatusLoading={liveStatusLoading} sharedConnections={liveConnections} onRefreshStatus={async (force = false) => {
             if (!await refreshAccountData(force)) throw new Error('LIVE durum yenilemesi başarısız; işlem durumunu doğrulayın.')
           }} />
 

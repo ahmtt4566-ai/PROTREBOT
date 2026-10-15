@@ -3,12 +3,13 @@ import {expect, test, type Page} from '@playwright/test'
 test.use({baseURL: 'http://127.0.0.1:4174'})
 
 const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT']
-async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false, pauseReason = '', expired = false, missingBalance = false, rejectRiskSave = false, consentActive = true, policyAcknowledged = true, withPosition = false, missingTp = false, pendingAccountCheck = false, externalPosition = false, sharedDailyLimit = 10, statusFingerprintMismatch = false, statusUnavailable = false, connectionConfigured = true, saveFailure = '', saveResponseMismatch = false, activateFailure = false, activateUnverified = false, vaultStatusUnavailable = false} = {}) {
+async function fixture(page: Page, {owner = true, available = true, armed = true, enabled = false, liveAutoTrade = enabled, locked = false, dailyLossLocked = false, readinessFailure = false, rejectApproval = false, binanceBan = false, pauseReason = '', expired = false, missingBalance = false, rejectRiskSave = false, consentActive = true, policyAcknowledged = true, withPosition = false, missingTp = false, pendingAccountCheck = false, externalPosition = false, sharedDailyLimit = 10, statusFingerprintMismatch = false, statusUnavailable = false, connectionConfigured = true, saveFailure = '', saveResponseMismatch = false, activateFailure = false, activateUnverified = false, vaultStatusUnavailable = false, firstVaultUnavailable = false, firstBalanceMissing = false, sessionHours = 1} = {}) {
   const writes: Array<{path: string; body: unknown}> = []
   let riskPercent = 0.5, dailyPercent = 5, riskRevision = 0
   let vaultFingerprint = 'saved-fixture-fingerprint'
   let vaultConfigured = connectionConfigured, vaultActive = connectionConfigured, vaultTestOk = connectionConfigured
   let connectionConnected = connectionConfigured
+  let vaultReads = 0, balanceReads = 0
   await page.route('https://**', route => route.abort())
   await page.routeWebSocket('**', socket => socket.close())
   await page.addInitScript(() => sessionStorage.setItem('protrebot-v25-session', 'original-live-ui'))
@@ -28,7 +29,7 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
     const original = {
       available, enabled, paused: locked || !!pauseReason, pause_reason: pauseReason, risk_percent: riskPercent, daily_loss_percent: dailyPercent, risk_revision: riskRevision, symbols, fill_lock: fillLock,
       risk_limits: {max_loss_per_trade_usdt: 3, daily_loss_limit_usdt: 10, max_margin_usdt: 25, min_margin_usdt: 5, leverage: 3},
-      session: enabled || pauseReason || expired ? {hours: 1, expires_at: new Date(Date.now() + (expired ? -3600000 : 3600000)).toISOString(), remaining_seconds: enabled && !expired ? 3600 : 0, authority_limited: false, warning_sent: false} : null,
+      session: {hours: sessionHours, expires_at: enabled || pauseReason || expired ? new Date(Date.now() + (expired ? -3600000 : sessionHours * 3600000)).toISOString() : null, remaining_seconds: enabled && !expired ? sessionHours * 3600 : 0, authority_limited: false, warning_sent: false},
       daily: {day: new Date().toISOString().slice(0, 10), loss: dailyLossLocked ? 50 : 0, limit: 50, locked: dailyLossLocked},
       universe: {
         requested_count: 40, selected_count: 40, eligible_count: 46, minimum_age_days: 45,
@@ -141,6 +142,11 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
       await route.abort('failed')
       return
     }
+    if (path === '/api/exchange-connections/status' && ++vaultReads === 1 && firstVaultUnavailable) {
+      await route.fulfill({status: 503, json: {detail: 'Şifreli kasa veritabanı hazır değil.'}})
+      return
+    }
+    const transientMissingBalance = path === '/api/v25/status' && ++balanceReads === 1 && firstBalanceMissing
     const bodies: Record<string, unknown> = {
       '/api/v22/profile': {user, access: {canAccessMasterTrade: true, isPremium: true, canExecuteLive: true}},
       '/api/v22/session': {user},
@@ -154,7 +160,7 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
         account_rate_limit: {pending_verification: pendingAccountCheck},
         daily: {entries: 0, realized_pnl: 0, consecutive_losses: 0, unverified_closures: 0},
         emergency: {active: false}, reconciliation_required: false,
-        account: {wallet_balance: missingBalance ? null : 1000, available_balance: 1000, unrealized_pnl: 0, positions: withPosition ? [{symbol: 'BTCUSDT', direction: 'LONG', entry_price: '100', quantity: '1', unrealized_pnl: 2}] : [], open_orders: []},
+        account: {wallet_balance: missingBalance || transientMissingBalance ? null : 1000, available_balance: 1000, unrealized_pnl: 0, positions: withPosition ? [{symbol: 'BTCUSDT', direction: 'LONG', entry_price: '100', quantity: '1', unrealized_pnl: 2}] : [], open_orders: []},
         plans: withPosition ? [{symbol: 'BTCUSDT', direction: 'LONG', status: 'AÇIK', provenance_state: externalPosition ? 'READ_ONLY_EXTERNAL' : 'CONFIRMED', stop_loss: '90', targets: ['110', '115', '120'], exchange_protection: {stop: true, tp1: !missingTp, tp3: !missingTp}}] : [],
         ...(owner && available ? {original_v2_live: original} : {}),
       },
@@ -185,6 +191,63 @@ async function fixture(page: Page, {owner = true, available = true, armed = true
   if (owner && available && !statusFingerprintMismatch && !statusUnavailable && !vaultStatusUnavailable) await expect(page.getByRole('region', {name: 'Kais Original V2 LIVE'})).toBeVisible()
   return writes
 }
+
+for (const delayed of ['vault', 'balance'] as const) {
+  test(`initial ${delayed} delay recovers automatically without mutations`, async ({page}) => {
+    await page.addInitScript(() => {
+      const observed: string[] = []
+      Object.assign(window, {initialLiveErrors: observed})
+      new MutationObserver(() => {
+        const alerts = [...document.querySelectorAll('[data-testid="live-status-unverified"], .originalSetupStep [role="alert"]')]
+        for (const alert of alerts) if (alert.textContent) observed.push(alert.textContent)
+      }).observe(document, {childList: true, subtree: true})
+    })
+    const writes = await fixture(page, {firstVaultUnavailable: delayed === 'vault', firstBalanceMissing: delayed === 'balance'})
+    const card = page.getByRole('region', {name: 'Kais Original V2 LIVE'})
+    await expect(card.getByTestId('original-risk-warning')).toBeVisible({timeout: 2500})
+    await expect(card.getByLabel('İşlem riski (%)')).toBeEnabled()
+    await expect(page.getByTestId('live-status-unverified')).toHaveCount(0)
+    expect(await page.evaluate(() => Reflect.get(window, 'initialLiveErrors'))).toEqual([])
+    expect(writes).toEqual([])
+  })
+}
+
+test('status reader waits for vault and retries an empty balance exactly once', async ({page}) => {
+  const reads: string[] = []
+  let balanceReads = 0
+  await page.route('**/initial-read-fixture', route => route.fulfill({contentType: 'text/html', body: '<html><body>Offline fixture</body></html>'}))
+  await page.route('**/api/exchange-connections/status', route => {
+    reads.push('vault')
+    return route.fulfill({json: {vault: {ready: true}, connections: {LIVE: {configured: true, active: true, fingerprint: 'offline'}}}})
+  })
+  await page.route('**/api/v25/status', route => {
+    reads.push('balance')
+    return route.fulfill({json: {connected: true, credentials: {configured: true, fingerprint: 'offline'}, account: {wallet_balance: ++balanceReads === 1 ? null : 1000}}})
+  })
+  await page.goto('/initial-read-fixture')
+  const result = await page.evaluate(async () => {
+    const {readLiveStatusResponses} = await import(window.location.origin + '/frontend/src/live-status-read.ts')
+    const started = performance.now()
+    const [response] = await readLiveStatusResponses()
+    return {elapsed: performance.now() - started, status: await response.json()}
+  })
+  expect(reads).toEqual(['vault', 'balance', 'vault', 'balance'])
+  expect(result.elapsed).toBeGreaterThanOrEqual(350)
+  expect(result.status.account.wallet_balance).toBe(1000)
+})
+
+test('last selected session duration survives reload and uses saved server hours', async ({page}) => {
+  const writes = await fixture(page, {sessionHours: 24})
+  const hours = page.getByRole('combobox', {name: 'Oturum süresi'})
+  await expect(hours).toHaveValue('24')
+  await hours.selectOption('12')
+  await page.reload()
+  await expect(hours).toHaveValue('12')
+  await hours.selectOption('24')
+  await page.reload()
+  await expect(hours).toHaveValue('24')
+  expect(writes).toEqual([])
+})
 
 test('OWNER sees Original V2 rejection stages, nearest symbols and 24-hour conversions', async ({page}) => {
   await fixture(page)

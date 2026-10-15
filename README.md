@@ -2,6 +2,26 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## LIVE ilk okuma ve oturum süresi
+
+LIVE anahtarı oturum kasasından değil, OWNER hesabının şifreli hesap kasasından
+okunur. İlk hesap kaydı boşsa 250 ms beklenip yalnız bir kez yeniden okunur;
+devre dışı kayıt, izin/kimlik uyuşmazlığı veya şifre çözme hatası bu yolla aşılmaz.
+İstek içinde başarıyla yüklenen kasa tekrar yüklenmez. Kasa/veritabanı hatası
+LIVE isteğine açık hata olarak döner; eski anahtarla devam edilmez.
+
+Bağlantı durumu önce, LIVE durum ve bakiye sonra okunur. Geçici okuma hatasında
+ekran 350 ms bekleyip bir kez yeniden dener; beklerken kalıcı hata göstermez.
+Etkin anahtarla henüz hesap snapshot'ı yoksa durum isteği yalnız salt-okunur
+hesap kontrolü yapar. ARM, risk izni, otomasyon veya emir başlatmaz.
+Doğrulanmış pozitif bakiye gelince risk onayı alanı kendiliğinden açılır.
+İzleme yetkisi henüz kurulmadığında arka plan döngüsü kasa hatası üretmek yerine
+yetkiyi bekler; gerçek hatalar anahtar/secret içermeyen sebeple bildirilir.
+
+Oturum süresi sunucudaki son açılan oturumdan alınır. Başlatmadan yapılan son
+seçim de tarayıcıda kullanıcı kimliğine göre saklanır; başka hesaba taşınmaz.
+Bu tercih mevcut izin süresini uzatmaz ve güvenlik kapılarını değiştirmez.
+
 ## Production e-posta bağlantısı kısıtı
 
 Production veya barındırılan ortamda `APP_BASE_URL` tam olarak

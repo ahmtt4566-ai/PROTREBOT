@@ -1298,11 +1298,17 @@ async def hydrate_authenticated_user_state(request: Request) -> None:
 
     try:
         await ensure_session_cache(request, include_live=request.url.path.startswith("/api/v25/"))
+    except HTTPException:
+        if request.url.path.startswith("/api/v25/"):
+            raise
+        logger.warning("User credential context hydration failed: code=credential_hydration_failed")
     except Exception as exc:
         logger.warning(
             "User credential context hydration failed; plans remain unmanaged: code=credential_hydration_failed type=%s",
             type(exc).__name__,
         )
+        if request.url.path.startswith("/api/v25/"):
+            raise HTTPException(503, "LIVE anahtar bağlamı hazırlanamadı; güncel bağlantı doğrulanmadı.") from None
     current_session_id = session_id(request)
 
     demo_store = getattr(request.app.state, "_binance_demo_user_state", {})
@@ -1409,7 +1415,10 @@ async def owner_preview_gate(request, call_next):
         if requires_premium(request.url.path, request.method) and not request.state.premium and not trial_safety_action:
             logger.warning("Premium operation denied user_id=%s path=%s", request.state.member["id"], request.url.path)
             return apply_cors_headers(request, JSONResponse({"detail": "Premium üyelik gerekli.", "code": "PREMIUM_REQUIRED"}, status_code=403))
-        await hydrate_authenticated_user_state(request)
+        try:
+            await hydrate_authenticated_user_state(request)
+        except HTTPException as exc:
+            return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
     request.state.web_owner_authenticated = bool(
         owner_access_authenticated
     )
