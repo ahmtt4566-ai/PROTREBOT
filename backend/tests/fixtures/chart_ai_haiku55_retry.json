@@ -1,0 +1,411 @@
+{
+  "description": "Exact nine synthetic Haiku 5.5 replies; small-count offline regression only.",
+  "source_sha256": "a08960f3fb10e3b462e2d45b17f2524726233ac662bc6556f1c32db83070661f",
+  "image_sha256": "06d5f0a841cc9fac5b56cdac850a46ac90187091a740f32fba6b6edf496c5f35",
+  "market_context": {
+    "symbol": "BTCUSDT",
+    "timeframe": "15m",
+    "captured_at": "2026-10-15T15:01:34.394262Z",
+    "price_updated_at": "2026-10-15T15:01:34.394262Z",
+    "market_updated_at": "2026-10-15T15:01:34.394262Z",
+    "price": 81800.0,
+    "indicators": {
+      "rsi": 46.8,
+      "macd": -24.7,
+      "adx": 19.0,
+      "atr": 165.0,
+      "volume_ratio": 0.84
+    },
+    "levels": {
+      "entry": 81820.0,
+      "stop_loss": 80700.0,
+      "tp1": 82400.0,
+      "tp2": 83000.0,
+      "tp3": 83600.0,
+      "support": 81350.0,
+      "resistance": 82080.0
+    },
+    "direction": "NEUTRAL",
+    "confidence": 58.0,
+    "signal": "WAIT",
+    "mtf": [
+      {
+        "symbol": "BTCUSDT",
+        "timeframe": "1m",
+        "available": true,
+        "direction": "NEUTRAL",
+        "confidence": 45.0,
+        "trend": "Karışık",
+        "momentum": "Nötr",
+        "updated_at": "2026-10-15T15:01:34.394262Z"
+      },
+      {
+        "symbol": "BTCUSDT",
+        "timeframe": "5m",
+        "available": true,
+        "direction": "SHORT",
+        "confidence": 52.0,
+        "trend": "Güçlü düşüş",
+        "momentum": "Negatif",
+        "updated_at": "2026-10-15T15:01:34.394262Z"
+      },
+      {
+        "symbol": "BTCUSDT",
+        "timeframe": "15m",
+        "available": true,
+        "direction": "NEUTRAL",
+        "confidence": 58.0,
+        "trend": "Karışık",
+        "momentum": "Nötr",
+        "updated_at": "2026-10-15T15:01:34.394262Z"
+      },
+      {
+        "symbol": "BTCUSDT",
+        "timeframe": "1h",
+        "available": true,
+        "direction": "SHORT",
+        "confidence": 65.0,
+        "trend": "Güçlü düşüş",
+        "momentum": "Negatif",
+        "updated_at": "2026-10-15T15:01:34.394262Z"
+      },
+      {
+        "symbol": "BTCUSDT",
+        "timeframe": "4h",
+        "available": true,
+        "direction": "SHORT",
+        "confidence": 70.0,
+        "trend": "Güçlü düşüş",
+        "momentum": "Negatif",
+        "updated_at": "2026-10-15T15:01:34.394262Z"
+      }
+    ],
+    "data_warnings": []
+  },
+  "responses": [
+    {
+      "request": 1,
+      "case": 1,
+      "repetition": 1,
+      "attempt": 1,
+      "model": "claude-haiku-5-5",
+      "question": "Bu grafiği yorumla",
+      "input_tokens": 6559,
+      "output_tokens": 884,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_01551SWW3qcE9hHPq1SSi3ns",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Grafikte önceki sert düşüşten sonra fiyat dar bir bant içinde yatay seyrediyor. {tf_1h} ve {tf_4h} grafiklerinde görünüm düşüş yönlü, {tf_1m} ve {tf_15m} grafiklerinde nötr.",
+            "important_levels": "Fiyat {fiyat}, giriş {giris} seviyesinde. Destek {destek}, direnç {direnc} seviyesinde; fiyat bu iki seviye arasında bulunuyor. Stop {stop} seviyesinde. Hedefler {tp1}, {tp2} ve {tp3} seviyelerinde.",
+            "bullish_scenario": "Direnç {direnc} üzerinde kalıcılık yükseliş yönlü görünümü destekleyebilir; bu durumda {tp1} ve üzeri seviyeler izlenebilir. Hacmin artarak bu bölgeyi aşağıdan yukarı geçmesi yükseliş işareti olarak okunabilir.",
+            "bearish_scenario": "Destek {destek} altına kalıcı sarkma düşüş yönlü görünümü destekleyebilir ve fiyatın {stop} seviyesine doğru zayıflamasına yol açabilir. Yüksek {tf_1h} ve {tf_4h} düşüş yönlü görünümü bu ihtimali güçlendirebilir.",
+            "risks": "RSI {rsi}, {rsi_50} eşiğinin altında; zayıflık işareti veriyor. MACD histogramı {macd}, {macd_0} eşiğinin altında. ADX {adx} ile trend gücü zayıf ve hacim oranı {hacim_orani} ile düşük; bu durum yatay seyri ve yanıltıcı kırılımları artırabilir. Güven skoru {guven}; {tf_1h} grafiğinde güven skoru {mtf_1h_guven} ve {tf_4h} grafiğinde güven skoru {mtf_4h_guven}. Veri {yakalama_zamani} anına aittir ve tarayıcı kaynaklıdır; güncel olmayabilir.",
+            "image_warning": ""
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "82dd88c0a69fa95a340ac465db2e54cc9e92641a3298910840024146cb2f6700",
+      "original_passed": false,
+      "original_rule": "written_value",
+      "expected_code": null,
+      "expected_haiku55_microusd": 1098,
+      "spurious_image_warning": false
+    },
+    {
+      "request": 1,
+      "case": 1,
+      "repetition": 1,
+      "attempt": 2,
+      "model": "claude-haiku-5-5",
+      "question": "Bu grafiği yorumla",
+      "input_tokens": 6559,
+      "output_tokens": 971,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_01Rp1CseR7DNrtgikvGEXkKJ",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Grafikte önceki sert düşüşten sonra fiyat dar bir bant içinde yatay seyrediyor. {tf_1h} ve {tf_4h} grafiklerinde görünüm düşüş yönlü olsa da {tf_ana} grafiğinde trend karışık ve momentum nötr. Güven skoru {guven}; {tf_1h} grafiğinde güven skoru {mtf_1h_guven}, {tf_4h} grafiğinde güven skoru {mtf_4h_guven}.",
+            "important_levels": "Fiyat {fiyat}, giriş {giris} seviyesinde. Destek {destek}, direnç {direnc} seviyesinde; fiyat bu iki seviye arasında hareket ediyor. Stop {stop} seviyesinde. Hedef seviyeleri {tp1}, {tp2} ve {tp3} olarak ekranda gösteriliyor. ATR {atr} seviyesinde.",
+            "bullish_scenario": "Direnç {direnc} seviyesinin üzerinde kalıcılık yükseliş yönlü görünümü destekleyebilir; bu durumda {tp1} seviyesi ilk izlenecek hedef olarak ekranda yer alıyor. Hacmin artarak bu seviyeyi desteklemesi yükseliş işareti olarak yorumlanabilir.",
+            "bearish_scenario": "Destek {destek} seviyesinin altında kalıcılık düşüş yönlü görünümü destekleyebilir ve fiyat {stop} seviyesine doğru yönelebilir. {tf_1h} ve {tf_4h} grafiklerindeki düşüş yönlü görünüm bu senaryoyu güçlendirebilir.",
+            "risks": "RSI {rsi}, {rsi_50} eşiğinin altında; bu zayıflık işareti olarak okunabilir. MACD histogramı {macd} ile {macd_0} eşiğinin altında. ADX {adx} ve hacim oranı {hacim_orani} düşük olduğundan trend gücü zayıf ve yatay seyir sürebilir. Veriler tarayıcı kaynaklı ve doğrulanmamış; {yakalama_zamani} anındaki görüntü sonrasında piyasa değişmiş olabilir. Grafik sentetik test verisi olarak etiketlenmiştir.",
+            "image_warning": "grafikte alakasız yazı var"
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "fe9f173274e55fa383b320bf0f86e69c6dc824c6e6facec71e09e798de0d1c96",
+      "original_passed": false,
+      "original_rule": "written_value",
+      "expected_code": null,
+      "expected_haiku55_microusd": 1142,
+      "spurious_image_warning": true
+    },
+    {
+      "request": 2,
+      "case": 2,
+      "repetition": 1,
+      "attempt": 1,
+      "model": "claude-haiku-5-5",
+      "question": "Riskler neler?",
+      "input_tokens": 6555,
+      "output_tokens": 1068,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_01QhvkAv3eFEHzmmwWiEcVsg",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Fiyat {fiyat} seviyesinde, RSI {rsi} ile {rsi_50} eşiğinin altında ve MACD histogramı {macd} ile {macd_0} eşiğinin altında; bu zayıf bir momentum görünümü. Üst zaman dilimlerinde ({tf_1h} ve {tf_4h}) düşüş yönlü görünüm hakim, {tf_5m} grafiği de düşüş yönlü.",
+            "important_levels": "Fiyat {fiyat}; giriş {giris}, destek {destek}, direnç {direnc}, stop {stop} seviyesinde. Hedef seviyeleri olarak {tp1}, {tp2} ve {tp3} gösterilmektedir. ATR {atr} ve ADX {adx} değerleri, hareket genişliği ve trend gücü hakkında bağlam sağlar.",
+            "bullish_scenario": "Direnç {direnc} seviyesinin üzerinde kalıcılık yükseliş yönlü görünümü destekleyebilir; bu durumda {tp1} seviyesi bir sonraki izlenecek nokta olabilir. Bu senaryo için hacmin artması ve RSI değerinin {rsi_50} eşiğinin üzerine geçmesi önemli bir teyit olabilir.",
+            "bearish_scenario": "Destek {destek} seviyesinin altında kalıcılık düşüş yönlü görünümü güçlendirebilir ve fiyatın {stop} seviyesine doğru yönelme ihtimalini artırabilir. Üst zaman dilimlerindeki düşüş yönlü yapı bu senaryoyu destekler.",
+            "risks": "Güven skoru {guven} olduğu için sinyal kesin değildir ve yön {tf_ana} grafiğinde nötr kalmaktadır. Hacim oranı {hacim_orani} ile düşük seyretmekte, ADX {adx} ile trend zayıf görünmektedir; bu da yatay seyri ve yanlış kırılımları olası kılabilir. {tf_1m} grafiği {mtf_1m_guven} güvenle nötr, {tf_15m} grafiği ise {mtf_15m_guven} güvenle nötrdür. Üst zaman dilimlerindeki düşüş yönlü görünüm ({tf_1h} güven {mtf_1h_guven}, {tf_4h} güven {mtf_4h_guven}) kısa vadeli yükselişleri sınırlayabilir. Veriler tarayıcı kaynaklı ve doğrulanmamıştır; veri gecikmesi ve piyasa oynaklığı analizi değiştirebilir.",
+            "image_warning": ""
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "1a7b51f01ff8ec4c0da624de0c81daa75262d7fe97cb939b76508b8f8028f196",
+      "original_passed": true,
+      "original_rule": null,
+      "expected_code": null,
+      "expected_haiku55_microusd": 1190,
+      "spurious_image_warning": false
+    },
+    {
+      "request": 3,
+      "case": 3,
+      "repetition": 1,
+      "attempt": 1,
+      "model": "claude-haiku-5-5",
+      "question": "Yukarı ve aşağı senaryolar",
+      "input_tokens": 6564,
+      "output_tokens": 1077,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_012QGK1hcof8JcXLt1WMxjr9",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Fiyat {fiyat} seviyesinde, RSI {rsi} ile {rsi_50} eşiğinin altında ve MACD histogramı {macd} ile {macd_0} eşiğinin altında; bu zayıflık işaretidir. Grafikte önceki sert düşüşten sonra fiyat dar bir bant içinde yatay seyrediyor. Güven skoru {guven}; {tf_1h} grafiğinde güven skoru {mtf_1h_guven} ve {tf_4h} grafiğinde güven skoru {mtf_4h_guven} ile daha geniş zaman dilimleri düşüş yönlü görünüyor. {tf_1m} grafiğinde güven skoru {mtf_1m_guven} ve {tf_5m} grafiğinde güven skoru {mtf_5m_guven}.",
+            "important_levels": "Fiyat {fiyat}; giriş {giris}, destek {destek}, direnç {direnc}, stop {stop}. Hedefler {tp1}, {tp2} ve {tp3} olarak ekranda gösteriliyor. ATR {atr} ile oynaklık ölçülüyor, ADX {adx} ile trend gücü zayıf görünüyor.",
+            "bullish_scenario": "Fiyatın {direnc} direncinin üzerinde kalıcı olması yükseliş yönlü görünümü destekleyebilir. Bu durumda {tp1} ve sonrasında {tp2} seviyeleri ekrandaki yukarı referanslar olarak izlenebilir. Hacmin artarak bu bölgeyi desteklemesi yükseliş işareti olarak yorumlanabilir.",
+            "bearish_scenario": "Fiyatın {destek} desteğinin altında kalıcı olması düşüş yönlü görünümü destekleyebilir. Böyle bir kırılımda {stop} seviyesi ekranda belirtilen aşağı referans olarak öne çıkar. {tf_1h} ve {tf_4h} grafiklerindeki düşüş yönlü görünüm bu senaryoyu güçlendirebilir.",
+            "risks": "Hacim oranı {hacim_orani} ile düşük seyrediyor ve ADX {adx} zayıf trendi gösteriyor; bu da yatay seyrin sürebileceğini ve sahte kırılımların oluşabileceğini düşündürür. Üst zaman dilimlerindeki düşüş yönlü görünüm ile {tf_15m} nötr görünümü arasında uyumsuzluk var. Veriler tarayıcı kaynaklı ve doğrulanmamış; {yakalama_zamani} anındaki görünüm zamanla değişebilir.",
+            "image_warning": ""
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "2d9bbf7c1b10082f2b92c396044556efda54cd1709b7be9281b83c804c77a2bb",
+      "original_passed": true,
+      "original_rule": null,
+      "expected_code": null,
+      "expected_haiku55_microusd": 1195,
+      "spurious_image_warning": false
+    },
+    {
+      "request": 4,
+      "case": 4,
+      "repetition": 1,
+      "attempt": 1,
+      "model": "claude-haiku-5-5",
+      "question": "Bu grafiği yorumla",
+      "input_tokens": 6559,
+      "output_tokens": 936,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_01NA3C7D1aTCU7BKQ7rD7uAp",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Grafik önceki yüksek seviyelerden aşağı yönlü bir hareketin ardından yatay, daralan bir banda girmiş görünüyor. {tf_1h} ve {tf_4h} grafiklerinde düşüş yönlü görünüm daha belirgin; {tf_1m} ve {tf_15m} grafiklerinde ise nötr görünüm hakim.",
+            "important_levels": "Fiyat {fiyat}; giriş referansı {giris}, destek {destek}, direnç {direnc}, stop {stop} seviyesinde. Hedef referansları {tp1}, {tp2} ve {tp3} olarak ekranda gösteriliyor. Fiyat {destek} desteği ile {direnc} direnci arasında hareket ediyor.",
+            "bullish_scenario": "{direnc} direncinin üzerinde kalıcılık, yükseliş yönlü görünümü destekleyebilir; bu durumda {tp1} seviyesi bir sonraki referans olarak izlenebilir. Hacmin artarak bu bölgeyi onaylaması bu ihtimali güçlendirebilir.",
+            "bearish_scenario": "{destek} desteğinin altında kalıcılık düşüş yönlü görünümü destekleyebilir; bu durumda {stop} seviyesine doğru zayıflık izlenebilir. {tf_1h} ve {tf_4h} grafiklerindeki düşüş yönlü görünüm bu senaryoyu destekliyor.",
+            "risks": "RSI {rsi}, {rsi_50} eşiğinin altında; zayıflık işareti taşıyor. MACD histogramı {macd}, {macd_0} eşiğinin altında. ADX {adx} ile trend gücü zayıf ve {hacim_orani} hacim oranı düşük; bu da yatay seyri ve yanıltıcı kırılımları artırabilir. Güven skoru {guven}, {tf_1m} grafiğinde {mtf_1m_guven} ve {tf_5m} grafiğinde {mtf_5m_guven} olduğundan sinyal netliği sınırlı. Veriler tarayıcı kaynaklı ve doğrulanmamış olup, sinyal durumu WAIT olarak görünüyor.",
+            "image_warning": "grafikte alakasız yazı var"
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "2116b54884aab71794232bd383d68964583401b671a83529d8b402fcc15946b1",
+      "original_passed": true,
+      "original_rule": null,
+      "expected_code": null,
+      "expected_haiku55_microusd": 1124,
+      "spurious_image_warning": false
+    },
+    {
+      "request": 5,
+      "case": 1,
+      "repetition": 2,
+      "attempt": 1,
+      "model": "claude-haiku-5-5",
+      "question": "Bu grafiği yorumla",
+      "input_tokens": 6559,
+      "output_tokens": 949,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_017FfPH7w5CfVXqvTzN5zGFE",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Fiyat {fiyat} seviyesinde; önceki düşüş sonrası fiyat {destek} ile {direnc} arasında yatay bir bantta seyrediyor. {tf_1h} ve {tf_4h} grafiklerinde düşüş yönlü görünüm daha belirgin; {tf_15m} grafiğinde ise yön nötr. Güven skoru {guven}; {tf_1h} grafiğinde güven skoru {mtf_1h_guven}, {tf_4h} grafiğinde güven skoru {mtf_4h_guven}.",
+            "important_levels": "Fiyat {fiyat}; giriş referansı {giris}, destek {destek}, direnç {direnc}, stop {stop} seviyesinde. Hedef referansları {tp1}, {tp2} ve {tp3} seviyelerinde gösteriliyor. Destek ve direnç arasındaki bant dar seyrediyor.",
+            "bullish_scenario": "Direnç {direnc} üzerinde kalıcılık yükseliş yönlü görünümü destekleyebilir; bu durumda {tp1} seviyesi ilk referans olarak izlenebilir. Hacimde belirgin artış eşlik ederse yükseliş işareti güçlenebilir.",
+            "bearish_scenario": "Destek {destek} altında kalıcılık düşüş yönlü görünümü destekleyebilir ve fiyatın {stop} seviyesine doğru yönelmesi gündeme gelebilir. {tf_1h} ve {tf_4h} grafiklerindeki düşüş yönlü görünüm bu senaryoyu destekler.",
+            "risks": "RSI {rsi}, {rsi_50} eşiğinin altında; MACD histogramı {macd}, {macd_0} eşiğinin altında ve negatif. ADX {adx} ile trend gücü zayıf, ATR {atr} ile oynaklık orta düzeyde. Hacim oranı {hacim_orani} ile düşük seyrediyor; bu da yatay seyri belirsiz kılabilir. Üst zaman dilimlerinin düşüş yönlü olması, {tf_15m} nötr görünümünü etkileyebilir. Veriler tarayıcı kaynaklı ve doğrulanmamış; grafik {yakalama_zamani} anına aittir.",
+            "image_warning": ""
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "85b7be10f687b2d350852ace331015905e6f567d97590d965082dad04e563bbc",
+      "original_passed": true,
+      "original_rule": null,
+      "expected_code": null,
+      "expected_haiku55_microusd": 1131,
+      "spurious_image_warning": false
+    },
+    {
+      "request": 6,
+      "case": 2,
+      "repetition": 2,
+      "attempt": 1,
+      "model": "claude-haiku-5-5",
+      "question": "Riskler neler?",
+      "input_tokens": 6555,
+      "output_tokens": 958,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_01A6TKkzWfLC7SdS96uiSD42",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Fiyat {fiyat} seviyesinde, yakın dönemde düşüş sonrası daralan bir bant içinde yatay seyrediyor. {tf_1h} ve {tf_4h} grafiklerinde düşüş yönlü görünüm mevcut; {tf_1m} ve {tf_15m} grafiklerinde ise nötr görünüm var.",
+            "important_levels": "Fiyat {fiyat}; giriş {giris}, destek {destek}, direnç {direnc}, stop {stop} seviyesinde. Yukarıda {tp1}, {tp2} ve {tp3} seviyeleri izleniyor. RSI {rsi}, {rsi_50} eşiğinin altında; MACD histogramı {macd} ile {macd_0} eşiğinin altında. ADX {adx} ve hacim oranı {hacim_orani} düşük seyrediyor.",
+            "bullish_scenario": "Direnç {direnc} seviyesinin üzerinde kalıcılık yükseliş yönlü görünümü destekleyebilir; bu durumda {tp1} seviyesi bir sonraki izleme noktası olur. Hacmin artarak bu bölgeyi onaylaması yükseliş işareti niteliğindedir.",
+            "bearish_scenario": "Destek {destek} seviyesinin altında kalıcılık düşüş yönlü görünümü destekleyebilir; bu durumda {stop} seviyesine doğru bir hareket izlenebilir. Üst zaman dilimlerindeki düşüş yönlü görünüm bu senaryoyu güçlendirebilir.",
+            "risks": "Zaman dilimleri arasında yön uyumsuzluğu var: {tf_1m} ve {tf_15m} nötr, {tf_1h} ve {tf_4h} düşüş yönlü. {tf_ana} grafiğinde ADX {adx} ve hacim oranı {hacim_orani} olduğundan yatay seyir uzayabilir ve sahte kırılımlar görülebilir. ATR {atr} değeri, fiyatın kısa sürede geniş hareket edebileceğini gösteriyor. Veriler tarayıcı kaynaklı ve doğrulanmamış; {yakalama_zamani} anındaki veriler sonradan değişebilir. Görselde sembolle çelişen bir bilgi yok.",
+            "image_warning": ""
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "0a6337a6932a7aafb8567bf8c7bf22b8a966dbaafb288e0ab2112cf01c134d3a",
+      "original_passed": true,
+      "original_rule": null,
+      "expected_code": null,
+      "expected_haiku55_microusd": 1135,
+      "spurious_image_warning": false
+    },
+    {
+      "request": 7,
+      "case": 3,
+      "repetition": 2,
+      "attempt": 1,
+      "model": "claude-haiku-5-5",
+      "question": "Yukarı ve aşağı senaryolar",
+      "input_tokens": 6564,
+      "output_tokens": 1035,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_01SNt28YMGiijWR7xU3Nn5RS",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Fiyat {fiyat} seviyesinde, RSI {rsi} ve MACD histogramı {macd} ile {macd_0} eşiğinin altında; zayıflık işareti taşıyor ancak belirgin bir yön oluşmamış. Yakın vadeli yapı daralan bant ve düşük hacim ile yatay seyrediyor. Daha geniş görünüm {tf_1h} ve {tf_4h} grafiklerinde düşüş yönlü.",
+            "important_levels": "Fiyat {fiyat}; destek {destek}, direnç {direnc}, giriş {giris} seviyesinde. Stop {stop} seviyesi olarak gösteriliyor. Hedefler {tp1}, {tp2} ve {tp3} seviyelerinde. Hacim oranı {hacim_orani} ile düşük seyrediyor.",
+            "bullish_scenario": "{direnc} direncinin üzerinde kalıcılık, fiyatın {giris} giriş seviyesinin üstünde tutunması ve hacmin artmasıyla {tp1} seviyesine doğru yükseliş yönlü bir hareket görünümü güçlenebilir. Bu durumda {tp2} ve {tp3} seviyeleri sonraki referanslar olur. Ancak {tf_1h} ve {tf_4h} grafiklerindeki düşüş yönlü görünüm bu senaryoya karşı bir ağırlık oluşturur.",
+            "bearish_scenario": "{destek} desteğinin altında kalıcılık düşüş yönlü görünümü destekleyebilir. Bu durumda fiyatın {stop} seviyesine doğru zayıflaması gündeme gelir. {tf_5m} ve {tf_1h} grafiklerindeki düşüş yönlü yapı bu senaryoyu destekleyen unsurlar arasındadır.",
+            "risks": "Güven skoru {guven}; {tf_1m} grafiğinde güven skoru {mtf_1m_guven} ve {tf_15m} grafiğinde güven skoru {mtf_15m_guven} ile sinyal net değil. ADX {adx} ile trend gücü zayıf, ATR {atr} ile oynaklık orta düzeyde. Hacim oranı {hacim_orani} olduğu için kırılımlar sahte olabilir. Çoklu zaman dilimi sinyalleri birbiriyle çelişiyor. Veri tarayıcı kaynaklı ve doğrulanmamış; {yakalama_zamani} anındaki görünüm zamanla değişebilir.",
+            "image_warning": ""
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "5da3f042c0becd788b8e6c278be81ffeddb1798c9e8f748195ad62a6c1ed3b6e",
+      "original_passed": true,
+      "original_rule": null,
+      "expected_code": null,
+      "expected_haiku55_microusd": 1174,
+      "spurious_image_warning": false
+    },
+    {
+      "request": 8,
+      "case": 4,
+      "repetition": 2,
+      "attempt": 1,
+      "model": "claude-haiku-5-5",
+      "question": "Bu grafiği yorumla",
+      "input_tokens": 6559,
+      "output_tokens": 897,
+      "stop_reason": "tool_use",
+      "content": [
+        {
+          "id": "toolu_01ByvGaVPA2xerzEfpQPuh9G",
+          "caller": {
+            "type": "direct"
+          },
+          "input": {
+            "general_direction": "{sembol} {tf_ana} grafiğinde görünüm nötr. Grafik önceki düşüşün ardından dar bir bant içinde yatay seyri gösteriyor. {tf_1h} ve {tf_4h} grafiklerinde düşüş yönlü görünüm hakim, {tf_1m} ve {tf_15m} grafiklerinde ise nötr görünüm var.",
+            "important_levels": "Fiyat {fiyat}; destek {destek}, direnç {direnc}, giriş {giris}, stop {stop} seviyesinde. Hedefler olarak {tp1}, {tp2} ve {tp3} ekranda gösteriliyor. RSI {rsi}, {rsi_50} eşiğinin altında; MACD histogramı {macd}, {macd_0} eşiğinin altında.",
+            "bullish_scenario": "Direnç {direnc} üzerinde kalıcılık yükseliş yönlü görünümü destekleyebilir; bu durumda {tp1} seviyesi bir sonraki izlenecek bölge olarak öne çıkar. Hacim oranı {hacim_orani} ile düşük olduğundan bu hareketin güçlü bir teyit alması gerekir.",
+            "bearish_scenario": "Destek {destek} altında kalıcılık düşüş yönlü görünümü destekleyebilir; {stop} seviyesine doğru bir hareket gündeme gelebilir. {tf_1h} ve {tf_4h} grafiklerindeki düşüş yönlü görünüm bu senaryoyu güçlendirebilir.",
+            "risks": "ADX {adx} ile trend gücü zayıf; ATR {atr} seviyesinde oynaklık var. Hacim oranı {hacim_orani} olduğundan yatay bant kırılımları yanıltıcı olabilir. {tf_5m} ve {tf_1h} grafiklerindeki düşüş yönlü görünüm ile {tf_15m} grafiğindeki nötr görünüm arasında çelişki bulunuyor. Veriler tarayıcı kaynaklı ve doğrulanmamış olduğundan güncelliği ayrıca kontrol edilmelidir. Güven skoru {guven}.",
+            "image_warning": "grafikte alakasız yazı var"
+          },
+          "name": "submit_chart_analysis",
+          "type": "tool_use",
+          "toolset_name": null
+        }
+      ],
+      "content_sha256": "f102453e97c32de0d0ebcde3481eae00f907f7b068a0fa789f5e609cc78d4537",
+      "original_passed": true,
+      "original_rule": null,
+      "expected_code": null,
+      "expected_haiku55_microusd": 1105,
+      "spurious_image_warning": false
+    }
+  ]
+}

@@ -318,8 +318,34 @@ class ChartAiStore:
             if row["provider_started_at"] is not None:
                 raise ChartAiQuotaError("call_already_started", "Bu analiz çağrısı zaten başlatılmış.", 409)
             await conn.execute(
-                "UPDATE chart_ai_requests SET provider_started_at=$3 WHERE user_hash=$1 AND request_key=$2",
+                """UPDATE chart_ai_requests SET provider_started_at=$3,generation_attempts=1
+                   WHERE user_hash=$1 AND request_key=$2""",
                 account_hash, key, now,
+            )
+
+    async def start_retry(self, user_id: str, key: UUID, token: UUID,
+                          first_cost: int, next_max_cost: int) -> None:
+        validate_cost(first_cost)
+        validate_cost(next_max_cost)
+        if first_cost + next_max_cost > REQUEST_RESERVATION_MICROUSD:
+            raise ChartAiQuotaError("budget_unavailable", "Şu an analiz yapılamıyor, daha sonra tekrar dene", 503)
+        account_hash = user_hash(user_id)
+        async with self._transaction(account_hash) as conn:
+            now = await self._now(conn)
+            row = self._require_lease(await self._row(conn, account_hash, key), token)
+            if row["status"] != "processing" or now >= row["lease_expires_at"]:
+                raise ChartAiQuotaError("lease_conflict", "Analiz rezervasyonunun süresi dolmuş.", 409)
+            if (row["provider_started_at"] is None or row["generation_attempts"] != 1
+                    or row["accounted_microusd"] != 0 or row["budget_state"] != "reserved"):
+                raise ChartAiQuotaError("retry_conflict", "İkinci analiz üretimi başlatılamadı.", 409)
+            budget = await self._budget(conn, row["month_start"])
+            if (budget["reserved_microusd"] < REQUEST_RESERVATION_MICROUSD
+                    or budget["spent_microusd"] + budget["reserved_microusd"] > MONTHLY_BUDGET_MICROUSD):
+                raise ChartAiQuotaError("budget_unavailable", "Şu an analiz yapılamıyor, daha sonra tekrar dene", 503)
+            await self._settle_budget(conn, row["month_start"], first_cost, release=first_cost)
+            await conn.execute(
+                """UPDATE chart_ai_requests SET generation_attempts=2,accounted_microusd=$3
+                   WHERE user_hash=$1 AND request_key=$2""", account_hash, key, first_cost,
             )
 
     async def succeed(self, user_id: str, key: UUID, token: UUID, result_text: str, cost_microusd: int) -> ChartRequest:
@@ -357,8 +383,14 @@ class ChartAiStore:
                 raise ChartAiQuotaError("cost_before_call", "Çağrı başlamadan maliyet kaydedilemez.", 409)
             cost_microusd = 0
         await self._budget(conn, row["month_start"])
+        accounted = row["accounted_microusd"]
         if cost_microusd is not None:
-            await self._settle_budget(conn, row["month_start"], cost_microusd)
+            if cost_microusd < accounted:
+                raise ChartAiQuotaError("cost_conflict", "Analiz maliyet kaydıyla uyuşmazlık var.", 409)
+            await self._settle_budget(
+                conn, row["month_start"], cost_microusd - accounted,
+                release=REQUEST_RESERVATION_MICROUSD - accounted,
+            )
         succeeded = result_text is not None
         await conn.execute(
             """UPDATE chart_ai_quota_periods SET reserved=reserved-1,used=used+$3
@@ -366,21 +398,23 @@ class ChartAiStore:
         )
         await conn.execute(
             """UPDATE chart_ai_requests SET status=$3,completed_at=$4,result_expires_at=$5,
-               result_text=$6,error_code=$7,budget_state=$8,cost_microusd=$9
+               result_text=$6,error_code=$7,budget_state=$8,cost_microusd=$9,accounted_microusd=$10
                WHERE user_hash=$1 AND request_key=$2""",
             row["user_hash"], row["request_key"], "succeeded" if succeeded else "failed", now,
             now + RESULT_RETENTION if succeeded else None, result_text, error_code,
             "settled" if cost_microusd is not None else "held", cost_microusd,
+            cost_microusd if cost_microusd is not None else accounted,
         )
         updated = await self._row(conn, row["user_hash"], row["request_key"])
         if updated is None:
             raise ChartAiStorageError("Grafik analizi sonucu kaydedilemedi.")
         return updated
 
-    async def _settle_budget(self, conn: ChartAiConnection, month: date, cost: int) -> None:
+    async def _settle_budget(self, conn: ChartAiConnection, month: date, cost: int,
+                             *, release: int = REQUEST_RESERVATION_MICROUSD) -> None:
         await conn.execute(
             """UPDATE chart_ai_monthly_budget SET reserved_microusd=reserved_microusd-$2,
-               spent_microusd=spent_microusd+$3 WHERE month_start=$1""", month, REQUEST_RESERVATION_MICROUSD, cost,
+               spent_microusd=spent_microusd+$3 WHERE month_start=$1""", month, release, cost,
         )
         await self._warn(conn, month)
 
@@ -395,10 +429,16 @@ class ChartAiStore:
                 return
             if row["status"] != "failed" or row["budget_state"] != "held":
                 raise ChartAiQuotaError("cost_conflict", "Analiz maliyet kaydıyla uyuşmazlık var.", 409)
+            accounted = row["accounted_microusd"]
+            if cost_microusd < accounted:
+                raise ChartAiQuotaError("cost_conflict", "Analiz maliyet kaydıyla uyuşmazlık var.", 409)
             await self._budget(conn, row["month_start"])
-            await self._settle_budget(conn, row["month_start"], cost_microusd)
+            await self._settle_budget(
+                conn, row["month_start"], cost_microusd - accounted,
+                release=REQUEST_RESERVATION_MICROUSD - accounted,
+            )
             await conn.execute(
-                """UPDATE chart_ai_requests SET budget_state='settled',cost_microusd=$3
+                """UPDATE chart_ai_requests SET budget_state='settled',cost_microusd=$3,accounted_microusd=$3
                    WHERE user_hash=$1 AND request_key=$2""", account_hash, key, cost_microusd,
             )
 

@@ -73,7 +73,20 @@ def require_enabled() -> None:
         raise HTTPException(503, {"code": "feature_disabled", "message": "Grafik AI özelliği şu anda kapalı."})
 
 
-router = APIRouter(prefix="/api/chart-ai", tags=["Chart AI"], dependencies=[Depends(require_enabled)])
+def require_owner_pilot(request: Request) -> None:
+    value = os.getenv("CHART_AI_OWNER_ONLY", "true").strip().lower()
+    if value not in {"true", "false", "1", "0"}:
+        logger.warning("Chart AI configuration rejected code=configuration_invalid")
+        raise HTTPException(503, {"code": "configuration_invalid", "message": "Grafik AI pilot ayarı doğrulanamadı."})
+    user = authenticated_user(request)
+    if value in {"true", "1"} and user["role"] != "OWNER":
+        raise HTTPException(403, {"code": "owner_only", "message": "Grafik AI şu anda yalnız OWNER için açık."})
+
+
+router = APIRouter(
+    prefix="/api/chart-ai", tags=["Chart AI"],
+    dependencies=[Depends(require_enabled), Depends(require_owner_pilot)],
+)
 
 
 def member_access(request: Request) -> tuple[str, QuotaAccess]:

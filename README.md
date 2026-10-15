@@ -80,7 +80,7 @@ ve onay durumunu verir. OWNER'in limit/kalan/donem zamanlari `null` olur.
 Arayuz daha sonraki adimda `resets_at` degerini yerel saate cevirir.
 Adim 4'te `analysis_enabled: false` ve `availability.code: analysis_not_enabled`
 analiz gonderiminin acik olmadigini belirtir. Adim 6'da ayni alanlar
-aracsiz servisin yapilandirilmis/kullanilabilir durumunu bildirir;
+yalniz cikti tool'u olan servisin yapilandirilmis/kullanilabilir durumunu bildirir;
 kota, ilk onay ve butce gonderimde ayrica denetlenir.
 
 Onay govdesi tam olarak `{"policy_version":"chart-ai-v1","accepted":true}`
@@ -162,11 +162,18 @@ degistirilemez; hicbir veri emir/risk dogrulamasi olarak kullanilamaz.
 uretilen sentetik gorsellerle calisir; hassas gercek gorsel kullanilmaz.
 Sonraki adimda endpoint entegrasyonu yapilirken bu dogrulayicilar kullanilmali,
 gorseli diske tasiyabilen multipart/spooled upload yolu eklenmemelidir.
-### Adim 6 - aracsiz analiz, rezervasyon ve kendi sonucunu okuma
+### Adim 6 - tek cikti tool'u, rezervasyon ve kendi sonucunu okuma
 
 [Analiz servisi](backend/app/chart_ai_service.py) sabit
-`claude-haiku-4-5-20251001` modelini kullanir. SDK'ya `tools` veya
-`tool_choice` gonderilmez; generic Kais prompt'u ve yanit filtresi degismez.
+`claude-haiku-5-5` modelini kullanir. SDK'ya yalniz
+`submit_chart_analysis` cikti tool'u gonderilir; `tool_choice` bu tool'u
+zorlar, `strict: true` kullanilir ve paralel tool kullanimi kapalidir.
+Sayim ve uretimde ayni `thinking: {"type": "adaptive"}` ve
+`output_config: {"effort": "low"}` ayarlari vardir. Tool **calistirilmaz**:
+yalniz yapilandirilmis yanit girdisi alinir; tool sonucu gonderilmez.
+Yalniz icerik/bicim reddinde bir kez yeni uretim yapilabilir; en fazla iki
+uretim vardir. Trading, ARM, risk veya emir aracina baglanti yoktur.
+Generic Kais prompt'u ve yanit filtresi degismez.
 `CHART_AI_ENABLED` varsayilan kapali kalir. Haiku adaptoru yalniz bu flag
 acikken ve analiz istendiginde ag istegi yapabilir; API key `ANTHROPIC_API_KEY`
 ortam ayarindan okunur, gizli tutulur ve loglanmaz. Deployment ayari degistirilmez.
@@ -216,30 +223,135 @@ Rezervasyon atomiktir: ayni UUID ve icerik tekrar yeni hak veya AI uretimi
 tuketmez; farkli icerik ayni UUID ile 409 alir. Kullanici basina tek devam
 eden analiz vardir. Aylik ayri 25 USD butceden 0,02 USD rezervasyon ayrilir;
 OWNER da butceye tabidir. Onaylanan sekilde once ucretsiz `count_tokens`
-kontrolu yapilir, sonra **yalniz bir `messages.create`** cagirilir.
-Sayim ve uretim birlikte 30 saniyeyle sinirlidir, SDK retry sayisi sifirdir.
+kontrolu yapilir, sonra **en fazla iki `messages.create`** cagirilir.
+Ilk yanit yalniz `response_unsafe` veya `response_invalid` ile reddedilirse
+ayni girdiyle bir kez yeniden uretilir; ikinci yanit da ayni denetimden gecer.
+Onceki yanit modele geri verilmez, kurtarilmaz veya duzeltilmez.
+Ilk sayim ve uretim en fazla 30 saniye, ikinci uretim en fazla 30 saniye;
+sayim, denetim ve iki uretim toplam en fazla 60 saniyedir.
+Son maliyet/kota yazimi mevcut depo zaman asimlariyla tamamlanir.
+SDK ag retry sayisi sifirdir. Refusal (`provider_refusal`), `max_tokens`
+(`response_truncated`), timeout, saglayici/usage/token siniri veya butce
+hatasinda ikinci uretim yoktur. Shutdown yeni ikinci uretim baslatmaz;
+devam eden isler icin 70 saniyelik guvenli kapanis penceresi vardir.
 Sayim 8.000 tokeni asarsa uretim yapilmaz; cikti en fazla 1.500 tokendir.
 
-Model yalniz dolu JSON aciklama alanlari uretir: `general_direction`,
+Token sayimi da ayni tool semasi, secimi ve dusunme/efor ayarlarini kapsar.
+Strict API semasinda alti alan da zorunludur; `image_warning` bos olabilir.
+API'nin desteklemedigi `minLength/maxLength` semadan cikarilir; yerel
+Pydantic denetiminde aciklama alanlari yine 1-2000 karakterle sinirlidir.
+Model yalniz tek, dogru adli `tool_use` blogunda dolu aciklama alanlari uretir:
+`general_direction`,
 `important_levels`, `bullish_scenario`, `bearish_scenario`, `risks`.
-Rakam/fiyat/yaziyla sayisal seviye, islem talimati, al/sat, kesin/garanti,
-kazanma olasiligi iddiasi, gizlenmis karakterler, araca ait blok,
-eksik/fazla/tekrar eden JSON alani, bos veya kesilmis yanit basari sayilmaz.
-Sayisal model metni ihtiyatli bicimde tumden reddedilir; gorunen fiyatlari
-sunucu mevcut `levels` degerlerinden birebir ekler.
+`stop_reason` mutlaka `tool_use` olmalidir. Duz metin, Markdown, yanlis/coklu
+tool, eksik/fazla alan, bos veya kesilmis yanit basari sayilmaz; metinden
+JSON kurtarma yoktur.
+Model degerlere yalniz etiketlerle atif yapar: `{sembol}`, `{fiyat}`, `{giris}`, `{stop}`,
+`{tp1}`, `{tp2}`, `{tp3}`, `{destek}`, `{direnc}`, `{rsi}`, `{macd}`, `{adx}`,
+`{atr}`, `{hacim_orani}`, `{guven}`, `{tf_ana}`, mevcut MTF zaman dilimi/guven
+etiketleri ve `{yakalama_zamani}`. Standart esikler yalniz `{rsi_30}`,
+`{rsi_50}`, `{rsi_70}`, `{macd_0}`. Soru/gorsel yazisi etiket ekleyemez.
+Bilinmeyen, bozuk/ic ice veya eksik veriye ait etiket reddedilir.
+Etiketin hemen ardindan kesme isareti veya harf gelirse ret: `{destek}'te`,
+`{tf_1h}da` kullanilamaz; `{destek} seviyesinde`, `{tf_1h} grafiğinde`,
+`{stop} seviyesi` gibi ayri sozcukler kullanilir.
+Yerlesimden once etiketler maskelenir; kalan rakamlar ve Turkce/Ingilizce
+yaziyla fiyat/seviye/gosterge/yuzde/sure reddedilir. "Bir", "ilk", "ikinci",
+"iki/uc senaryo" gibi normal ifadeler korunur. Dar sayma istisnasi yalniz tek sozcuk
+`iki/uc/dort` ve hemen ardindan `seviye`, `hedef`, `destek`,
+`direnc`, `gosterge`, `senaryo`, `risk`, `zaman dilimi` icindir.
+Yalin isimler ve zararsiz hal ekleri kabul edilir: "iki senaryoda",
+"uc riskte", "iki zaman diliminde", "iki seviyede", "uc hedefe".
+"Fiyat bu iki seviye arasinda" serbesttir; "iki seviyesinde", "elli seviyesi",
+"seksen bir bin", "RSI degeri iki seviye" hala reddedilir. Deger bildiren
+kullanim, iyelik/deger eki ("hedefi", "destegi", "seviyesi", "seviyesinde")
+veya cok sozcuklu sayi bu istisnadan yararlanamaz.
+Etiketler tek geciste yalniz mevcut
+baglam degerleriyle degistirilir; yeni seviye hesaplanmaz. Zaman dilimleri
+Turkce, yakalama zamani UTC olarak sunucu tarafindan bicimlendirilir.
+`{guven}` ve `{mtf_*_guven}` sunucuda `70/100` gibi puan/toplam
+biciminde yerlesir; yuzde isareti model tarafinda eklenirse hala ret.
+Gosterge baglaminda `sifir/sifirdan/sifira/sifirin` gibi yaziyla degerler
+reddedilir; MACD esigi `{macd_0}` ile belirtilir. "Grafik sifirdan cizildi"
+gibi normal anlatim korunur; onceden reddedilen finansal deger kaliplari
+("MACD sifirdan hesaplandi" dahil) acilmaz.
+Her aciklama alani icin teknik kisaltmalar haric sik Ingilizce kelime orani
+ve Turkce kelime/karakter destegi denetlenir. En az iki Ingilizce kelime ve
+%35 oran veya en az dort Ingilizce kelime, %20 oran ve Turkce kelimelerin
+iki katindan fazla Ingilizce varsa ret; Turkce destek yoksa da ret.
+Bu hafif sezgisel denetim kusursuz dil tespiti degildir; yeni paket,
+ag cagrisi veya dil modeli yuklemesi kullanmaz. Generic sohbet degismez.
+"Ihtimal/olasilik" tek basina ve kosullu senaryoda serbesttir.
+Kazanma/basari/kar ihtimali veya olasiligi, sayi/yuzdeyle olasilik
+bildirme ve sayisal etiketi olasiliga donusturme reddedilir.
+Yuzde, islem tavsiyesi ("tavsiye edilir", "ac", "al", "sat",
+"girmelisin"), kesin kazanc/garanti getiri kaliplari ve gizlenmis karakterler
+reddedilir. "Kesin" tek basina yasak degildir.
+Satin alma/alim/satis sinyali kaliplari da reddedilir; talimat bunun yerine
+"yukselis isareti" ve "dusus isareti" gibi betimleyici dili ister.
+Talimat RSI orta esiginin altini zayiflik, ustunu guc olarak aciklar;
+tek basina islem karari saymaz ve `stop` adini aynen korur.
+Model zaman dilimlerini her zaman etiketle yazar; "on bes dakikalik"
+yerine `{tf_ana} grafiğinde` kullanir. NEUTRAL/SHORT/LONG yerine Turkce
+yon adlari, "zarar durdurma" yerine `stop` istenir.
+Modelden kendi uyari/feragat cumlesini yazmamasi istenir; sabit uyarilar
+sunucuya aittir. `talimat` yasagi (olumsuz cumlelerde de) degismez.
+Gorsel ici talimat uygulanmaz veya alintilanmaz; yalniz
+"grafikte alakasız yazı var" istege bagli `image_warning` alaninda
+gonderilebilir; diger tek izinli deger bos metindir. Doluysa risklerde
+gosterilir; dis API `result_text` sozlesmesi degismez.
+Talimat uyarinin yalniz rol/komut/pozisyon acma-kapatma yazilari icin
+verilmesini ister; baslik, sembol ve test grafigi etiketleri icin verilmez.
+Sunucu gorselde gercek komut varligini bagimsiz olarak dogrulamaz.
+OCR yoktur; tum keyfi gorsel
+yazilarinin tekrarinin tespit edildigi iddia edilmez.
+Sunucu mevcut `levels` degerlerini ve veri uyarilarini ayrica ekler.
 Sonuc: genel yon, onemli seviyeler, yukselis/dusus senaryolari,
 riskler/veri uyarilari ve sabit **"Bu analiz yatırım tavsiyesi değildir."**.
+Sistem talimatinda alti alanli, fiyat icermeyen etiketli sentetik ornek
+ve "yanlis -> dogru" eslestirmeleri vardir. Alakasiz gorsel yazisindan
+ana metnin hicbir alaninda soz edilmemesi, yalniz `image_warning` kullanilmasi
+istenir; `talimat` yasagi gevsetilmez.
 Yanit denetimi kural tabanlidir; gercek model kalite/uyum dogrulamasi
 ayrica onaylanacak deneme ve yayin kontrollerinde yapilmalidir.
+Onceki dort sentetik gercek Haiku yanitina ek olarak son Haiku 5.5/Sonnet 5.5
+karsilastirmasindaki sekiz yanit da cevrimdisi fixture'da korunur; Sonnet
+yalniz gecmis yanit verisidir, backend model secenegi degildir. Testler
+sahte saglayiciyla ret, hak iadesi ve bilinen maliyet muhasebesini denetler.
+Son sekiz istekli Haiku denemesinin dokuz ham yaniti da ayri cevrimdisi
+fixture'da korunur. Her yanit bagimsiz olarak sahte saglayiciyla oynatilir;
+ilk istegin iki "bu iki seviye" yaniti yeni dar sayma kuralindan gecer.
+Normal grafikte ikinci yanitin dolu `image_warning` uretmesi anlamsal bir
+uyari hatasidir; mevcut kontrol alanin yalniz bicimini dogrular, OCR yapmaz.
 
 Basari hak tuketir ve sonuc 24 saat saklanir. Basarili uretim maliyeti
-Haiku fiyatlariyla input token basina 1, output token basina 5 mikro-USD'dir;
-normal ust sinir 15.500 mikro-USD'dir. Hata/güvensiz yanit hak tuketmez,
+Haiku 5.5 fiyatlariyla milyon input token $0.10, milyon output token $0.50'dir.
+normal deneme basi ust sinir $0.00155 (1.550 mikro-USD), iki uretim icin
+$0.00310'dur. Kesirli mikro-USD deneme maliyeti
+tam sayiya yukari yuvarlanir, butce eksik hesaplanmaz. Aylik $25 butce,
+$20 uyari ve istek basina $0.02 guvenli rezervasyon degismez.
+Beklenmedik 100.000 token ustu input kullaniminda yuksek baglam tarifesi
+($0.50/$2.50) uygulanir; rezervasyonu asan maliyet tahmin edilmez, tutulur.
+Hata/güvensiz yanit hak tuketmez,
 ancak saglayicinin bilinen gercek maliyeti aylik butceye yazilir.
 Uretimden once hata/sayim hatasi butce rezervasyonunu tamamen serbest
 birakir. Uretim sonrasi timeout/saglayici hatasinda maliyet bilinmiyorsa
 butce rezervasyonu tutulur; kullanici kotasi yine serbest birakilir.
+Ikinci uretimden once ilk maliyet atomik olarak harcanan butceye aktarilir;
+ayni miktar rezervasyondan dusulur. Ikinci maliyet bilinmiyorsa ilk maliyet
+kalici kalir ve yalniz kalan rezervasyon tutulur. Sonradan uzlastirmada
+iki denemenin toplam maliyeti verilir; ilk tutar ikinci kez yazilmaz.
+Basarida tek kullanici hakki duser; iki basarisiz denemede hak iade edilir.
+Loglarda deneme numarasi ve toplam deneme sayisi bulunur; yanit/gorsel/anahtar yoktur.
 Yuzde 80 esiginde yalniz mevcut aylik tek outbox kaydi olusur; mail gonderilmez.
+
+Bu davranis icin [002 retry migration](backend/migrations/20261015_002_chart_ai_retry.sql)
+yalniz hazirlanmistir; 001 sonrasinda ayrica onayla uygulanmalidir.
+Uretim sayisi (`generation_attempts`) ve kalici muhasebelesen tutar
+(`accounted_microusd`) eklenir; eski durum/kota/butce kisitlari korunur.
+Runtime migration yapilmaz. Bu degisiklik icin hicbir gercek veritabaninda
+migration veya PostgreSQL dogrulayici calistirilmadi; yalniz sahte depo ve
+statik migration sozlesme testleri kullanildi.
 
 HTTP sonucu:
 
@@ -280,6 +392,245 @@ yayin kontrolunde ayrica dogrulanacaktir.
 sahte SDK kullanir; gercek Anthropic client olusturulmasi testte engellenir.
 Gercek AI, Binance, e-posta veya canli migration calistirilmamistir.
 Gercek model cagrisi ve Adim 7 icin ayri onay gerekir.
+
+### Adim 7(a) - yerel OWNER paneli (canli yayin degil)
+
+[Panel](ChartAiPanel.tsx) Master Trade analiz ekraninda grafik araclarinin yaninda
+mavi cerceveli **Yapay Zekaya Sor** dugmesiyle acilir. Referans ve eski grafik
+duzeni desteklenir; masaustunde sag panel, mobilde ekran icinde modal kullanilir.
+Sayfa/panel acilisi analiz uretmez. Kullanici sadece grafik SVG'sini yakalar veya
+PNG/JPEG/WebP yukler; onizlemeyi gorur, ilk kullanim uyarisi ve sorusuyla gonderir.
+Kullanim/bayrak yaniti beklenirken dugme olusturulmaz; kapali bayrakta hicbir
+hesaba gosterilmez. Ozellik acikken Master Trade'e erisebilen tum oturum
+hesaplarinda dugme gorunur. Sunucu `owner_only` cevabi verirse musteriye
+yalniz pilotun hesabina henuz acilmadigi bilgisi gosterilir; kota verisi,
+gorsel yukleme/yakalama, soru ve analiz gonderimi acilmaz. Dugmenin
+gorunmesi analiz yetkisi vermez; sunucudaki OWNER kapisi korunur.
+Vercel arayuzu backend'den once yayinlarsa, eski backend'in kullanim ucundaki
+404 cevabi da ozelligin henuz bulunmadigi kabul edilerek dugmeyi gizler.
+Uretilen metin HTML olarak islenmez. Bakiye, hesap ve anahtarlar baglama eklenmez.
+Gorsel, base64, soru ve baglam tarayici deposuna veya dosyaya yazilmaz.
+Yalniz kullaniciya ozel sessionStorage kaydinda UUID/sembol/zaman dilimi tutulur.
+Yenileme veya bilinmeyen HTTP sonucu ayni UUID'yi GET ile sorgular; yeniden POST
+yapmaz. Paneli kapatmak baslamis uretimi iptal etmez. Yerel bekleyen kaydi birakmak
+da sunucudaki isi iptal etmez ve acik onay gerektirir.
+
+`CHART_AI_ENABLED=false` varsayilan olarak korunur. Yeni `CHART_AI_OWNER_ONLY`
+varsayilan `true` olup **tum Grafik AI API yollarinda sunucunun dogruladigi OWNER**
+rolunu zorunlu tutar; istemcide rol taklidi yeterli degildir. Gecersiz/bos pilot
+ayari 503 ile kapali kalir. Acik `false`/`0` eski uyelik/kota akislarini korur;
+bu pilotta `true` kalir. Diger uyelere analiz yetkisi acilmasi ayri onayli
+asamadir; yalniz bilgilendirme paneli gorunur. Mevcut sohbet ve LIVE kontrolleri degismez.
+
+Yerel test: `node frontend\node_modules\playwright\cli.js test --config
+frontend\playwright.chart-ai.config.ts`; sadece yerel Vite ve sahte HTTP yanitlari
+kullanilir, dis ag engellenir, trace kapatilir. Python Grafik AI testleri sahte
+havuz/saglayici kullanir. Bu asamada migration veya gercek AI cagrisi yoktur.
+
+**Sonraki asamalarin her biri ayri onay ve duraklama gerektirir:**
+
+1. Gecici PostgreSQL'de 001 -> 002 sirasi, tekrar uygulama ve muhasebe testi.
+2. Canli schemanin yalniz SALT OKUNUR incelemesi: 001'in uygulanip uygulanmadigi,
+   tablolar/kolonlar/constraint/indeksler ve outbox onkosullari. Yazma yok.
+3. Ayrica onayli migration/deploy plani: eksikse once 001, sonra 002; ozellik
+   kapali, devam eden analizler bosaltilmis, butce/rezervasyonlar korunmus olmali.
+   Deploy backend'i yeniden baslatir: **once acik LIVE pozisyonlar ve varsa
+   Binance'teki ilgili stop emirlerinin mevcut oldugu dogrulanir**. Koruma
+   dogrulanamazsa deploy durdurulur; emir acma/degistirme/kapatma yapilmaz.
+   Deploy zamanini kullanici secer. Canlida ilk acilis kapali, sonraki ayri
+   onayla yalniz OWNER pilotu olur.
+
+Commit/push/migration icin acik onay gerekir. Push oncesi tam dosya listesi
+gosterilir; `feature/chart-ai` degisiklikleri acik dosya listesiyle ayrilir,
+`git add .`/`-A` kullanilmaz. Ilgisiz coin logo manifesti ve baska ozellikler
+pakete alinmaz; gerekiyorsa ayri temiz yayin worktree'si hazirlanir.
+
+### Adim 7(b) - silinen, izole yerel PostgreSQL dogrulamasi
+
+PostgreSQL 17.11 ile bu ise ozel yeni cluster, yalniz `127.0.0.1` uzerinde
+rastgele port ve SCRAM kimlik dogrulamasi kullanilarak test edildi. Mevcut
+PostgreSQL servisi veya canli `DATABASE_URL` kullanilmadi; uygulama/backend,
+saglayici, Binance ve e-posta servisleri baslatilmadi.
+
+Iki gecici veritabaninda **28 kontrol gecti**: gerekli eski schema uzerinde
+001 -> 002 sirasi, 001 olmadan 002'nin reddi ve rollback, her iki dosyanin
+tekrar uygulanmasi, sekiz eski istek durumunun korunmasi ve yeni kolonlarin
+backfill'i. Eski 3.700 mikro-USD harcama ve 60.000 mikro-USD rezervasyon
+aynen korundu; kota, onay, eski kolonlar, indeks ve outbox sozlesmeleri degismedi.
+Mevcut on bir depo/yarislama/kota kontrolu de gercek gecici PostgreSQL'de gecti.
+Ikinci uretimde kaydedilmis maliyet tekrar migration sonrasinda korundu;
+170 mikro-USD ilk maliyet, toplam 250 mikro-USD'ye tamamlanirken yalniz
+80 mikro-USD fark yazildi, rezervasyon sifirlandi ve tek hak tuketildi.
+
+Iki veritabani silinip yokluklari sorgulandi; sunucu kapatildi, portun kapali
+oldugu ve cluster klasorunun silindigi dogrulandi. Bu sonuc canli schema
+uyumlulugunu dogrulamaz. Tasarim onayi ve 2c salt-okunur inceleme daha sonra
+tamamlandi; asagidaki sonuc **canli migration/deploy izni vermez**.
+
+Sahte verili masaustu/mobil buton, panel ve alt kontrollerin PNG'leri
+istege bagli yerel testle uretilebilir: `CHART_AI_SCREENSHOT_DIR` acik bir
+yerel klasore ayarlanip Grafik AI Playwright testleri
+`--grep "local design screenshots"` secicisiyle calistirilir.
+Bu testler analiz gondermez; tum API yanitlari sahtedir ve dis ag engellenir.
+Goruntuler repo disinda tutulur; normal testte klasor verilmezse bu iki
+goruntu alma testi atlanir.
+
+### Adim 7(c) - onayli SALT OKUNUR canli schema sonucu
+
+Adres yalniz terminalde gizli girisle alindi; ortamdan/dosyadan okunmadi,
+adresi veya parolasi rapora yazilmadi. TLS sertifika/hostname dogrulamasi
+zorunluydu. Baglanti baslangicinda `default_transaction_read_only=on`,
+`statement_timeout=5s`, `lock_timeout=500ms`,
+`idle_in_transaction_session_timeout=5s` kullanildi. Her SELECT ayri
+READ ONLY transaction icinde bu ayarlar tekrar dogrulanarak calisti.
+Baglanti kapatildi ve gecici VS Code giris gorevi kaldirildi.
+
+Catalog incelemesinde hic `chart_ai_*` tablosu bulunmadi: kota donemleri,
+onaylar, aylik butce ve istek tablolari yok. Grafik AI indeks/kisitlari da yok.
+`notification_outbox` mevcut; `outbox_kind_priority` ve `outbox_payload_contract`
+kisitlari dogrulanmis, eski onay/kampanya dallari mevcut ve `chart_ai.budget_warning`
+dali yok. Outbox'in dort indeksi valid/ready; iki koruyucu trigger aktif.
+Bilinen migration kayit tablosu/adayi bulunmadi.
+
+**001 schema acisindan uygulanmamis; kismi kurulum bulgusu yok.**
+Bu, gecmiste uygulanip sonra kaldirilmis olamayacagini kanitlamaz; migration
+tarihcesi bulunmadi. **002 dogrudan hazir degil: once 001 gerekir.**
+001'in gerekli outbox CHECK onkosullari mevcut. Canli trigger fonksiyon
+govdeleri okunmadi; yerel dosyalarla birebir ayni olduklari iddia edilmez.
+Kullanici, e-posta, anahtar, islem veya outbox kaydi okunmadi; DDL/DML,
+VACUUM/ANALYZE, migration veya deploy yapilmadi.
+
+### Adim 7(d) - UYGULANMAYAN migration ve deploy plani
+
+Asagidaki adimlar yalniz plandir; kullanici yayin zamanini ve her uygulama
+yetkisini ayrica onaylar. 2c onayi yazma/commit/push/deploy onayi degildir.
+
+Guncel kullanici onayi: tam yerel yedek alindi ve `pg_restore --list` ile
+kontrol edildi; bu tam geri yukleme testi degildir. Asagidaki 35 dosyanin
+`assistant-v1` dalina commit/push islemi migrationlardan once onaylandi.
+Push canli migration veya backend deploy yetkisi vermez. Vercel otomatik
+yayin yapabilir; eski backend Grafik AI API'sini sunmuyorsa buton gizlenir.
+001 ve 002 ayri ayri onaylanip uygulanmadan ozellik acilmaz. Sonrasinda
+kullanici Render degiskenlerini girip tek manuel deploy baslatacak:
+`CHART_AI_ENABLED=true`, `CHART_AI_OWNER_ONLY=true`.
+
+1. **Paket ve ortam kimligini sabitle:** mevcut Render servisinin gercek
+   canli branch/SHA, frontend build'i, feature bayraklari, saglik yolu ve
+   graceful shutdown suresi operator tarafindan dogrulansin. Repodaki
+   `render.yaml` autoDeploy=false olarak tutulur. Kullanici Dashboard'da da
+   Auto-Deploy'u kapattigini bildirdi; dis platform ayarlari veya bagimsiz
+   hook'lar bu dosyadan dogrulanmis sayilmaz. Push'un otomatik backend
+   restart tetiklemeyecegi dogrulanmadan push yapilmasin.
+2. **Restart oncesi LIVE koruma kapisi:** kullanicinin sectigi pencerede,
+   herhangi bir deploy veya restart tetikleyebilen ortam degisikliginden
+   once acik LIVE pozisyonlar ve varsa Binance'teki stop emirleri yetkili
+   salt-okunur ekran/API ile kontrol edilsin. Pozisyon/sembol/yon/miktar,
+   stop emrinin etkinligi ve azaltici/kapatma niteligi dogrulansin.
+   Eksik/belirsiz korumada durulsun; emir acma/degistirme/iptal/kapatma yok.
+   Yeni girisleri durdurmak gerekiyorsa mevcut guvenli akis icin ayrica
+   onay alinsin; koruyucu stoplar kaldirilmasin. Bu hesap kontrolu 2c'de
+   yapilmadi ve yapilmis kabul edilmesin.
+3. **Yedek ve kilit onkosullari:** migration oncesi tam `pg_dump -Fc` yedegi
+   yalniz kullanicinin bilgisayarinda, repo ve bulut esitlemesi disindaki
+   klasore alinsin; `pg_restore --list` ile okunabilirligi dogrulansin.
+   Yedek yuklenmesin veya commit edilmesin; liste kontrolu tam geri yukleme
+   garantisi sayilmasin. Bu yerel yedek adimi tamamlandi.
+   Canli trigger fonksiyonlarinin yalniz metadata tanimlari, uygun yeni
+   salt-okunur incelemeyle kontrol edilsin; fark varsa once yerel test.
+   001'in outbox CHECK eklemesi tabloyu dogrulayip DDL kilidi gerektirir;
+   bu yuzden yuk altinda korlemesine uygulanmasin.
+4. **Migration oncesi kapali/drain:** migrationlar tamamlanmadan ozellik
+   acilmasin; bu push icin canli ortam degiskeni degistirilmesin.
+   OWNER kapisi korunsun. Ortam kaydi restart tetikliyorsa
+   ikinci adimdaki LIVE kapisi once uygulanmis olsun. Devam eden Grafik AI
+   isi varsa yeni is alinmadan tamamlansin; analiz 60 sn, uygulamanin
+   chart drain'i 70 sn. Platformun toplam kapanis butcesi tum shutdown
+   adimlarini karsilamali; 70 sn'nin tum backend kapanisi oldugu varsayilmasin.
+5. **Yeniden metadata kontrolu:** yayin penceresinde schema 2c sonucuyla
+   yeniden karsilastirilsin. Beklenmedik tablo/kolon/kisit/indeks varsa durulsun;
+   `IF NOT EXISTS` uyumluluk kaniti sayilmasin.
+6. **Ayrica onayli migration oturumu:** mevcut salt-okunur probe degistirilip
+   yazma araci yapilmasin. Ayri, acikca onayli yazma oturumunda yalniz
+   `20261015_001_chart_ai.sql`, basarisi dogrulandiktan sonra
+   `20261015_002_chart_ai_retry.sql` calissin. Baska migrationlar zincirleme
+   uygulanmasin. Her dosyanin kendi transaction/advisory kilidi korunsun;
+   kisa lock_timeout ve statement_timeout ile kilit/timeout durumunda
+   rollback ve DUR; otomatik tekrar veya sinir yukseltme yok.
+   001 commit olup 002 kalirsa ozellik kapali kalsin ve yeni onay beklensin.
+7. **Migration sonrasi schema kabul:** dort tablo, tam kolon/null/default
+   sozlesmesi, yeni SMALLINT/BIGINT retry alanlari, butce/kota/lease CHECK'leri,
+   FK/PK'ler ve uc Grafik AI indeksi dogrulansin. Outbox'in eski dallari,
+   trigger'lari ve indeksleri korunmus olmali. Maliyet/rezervasyon/kota
+   sifirlanmasin; eski kayit varsa ayrica yetkilendirilmis, kisisel veri
+   gostermeyen muhasebe kontrolu tasarlansin.
+8. **Kullanicinin tek manuel deploy'u:** migrationlar tamamlandiktan sonra,
+   sadece onaylanan release SHA'si kullanicinin sectigi zamanda deploy edilsin.
+   Kullanici ortami `CHART_AI_ENABLED=true` ve `CHART_AI_OWNER_ONLY=true`
+   yapip manuel deploy baslatir; anahtar degeri asistana gosterilmez.
+   Saglik, DB baglantisi, eski ekranlar ve LIVE durumunun salt-okunur
+   kontrolu yapilsin; sadece saglik icin gercek AI/emir/mail uretilmesin.
+9. **OWNER pilot kontrolu:** buton tum oturum acmis Master Trade kullanicilarinda
+   gorunur; musteriler yalniz kilitli pilot duyurusunu gorur.
+   Musterilerin analiz yetkisi kapali kalir; tum sunucu yollarinda OWNER kapisi zorunlu.
+   Asistan saglik kontrolunde AI veya emir cagrisi yapmaz; ilk gercek analizi
+   kullanici kendisi dener. Kota/maliyet/tekrar deneme kayitlari izlenir.
+   Haiku 5.5, 8000/1500 token, deneme basi 30 sn,
+   toplam 60 sn ve en fazla iki uretim sinirlari degismez. Gizlilik metni,
+   24 saatlik sonuc temizleme zamanlayicisi ve butce bildirimi gonderim
+   baglantisi son yayin kontrolunde dogrulanmadan hazir ilan edilmesin;
+   bu planda yeni zamanlayici/mail handler uygulanmadi.
+10. **Geri donus:** hata durumunda ozellik kapatilir; restart gerektiriyorsa
+    LIVE koruma kapisi yeniden uygulanir. Onceki onayli kod surumune donulebilir,
+    ancak Grafik AI tablolari/kolonlari, hesaplanmis maliyetler veya tutulmus
+    rezervasyonlar DROP/UPDATE ile silinmez. Rollback'te eski Grafik AI kodu
+    yeniden etkinlestirilmez; bilinmeyen maliyetler otomatik serbest birakilmaz.
+
+Kullaniciya gosterilip commit/push icin onaylanan 35 dosyalik izin listesi:
+
+```text
+MasterTrade.tsx
+MasterTradeReference.tsx
+ChartAiPanel.tsx
+chart-ai-client.ts
+chart-ai.css
+premium-access.tsx
+tsconfig.access.json
+README.md
+render.yaml
+backend\app\main.py
+backend\app\chart_ai_api.py
+backend\app\chart_ai_models.py
+backend\app\chart_ai_service.py
+backend\app\chart_ai_store.py
+backend\app\chart_ai_validation.py
+backend\app\chart_ai_response_validation.py
+backend\migrations\20261015_001_chart_ai.sql
+backend\migrations\20261015_002_chart_ai_retry.sql
+backend\requirements.txt
+backend\tests\test_chart_ai_analysis.py
+backend\tests\test_chart_ai_api.py
+backend\tests\test_chart_ai_local_guard.py
+backend\tests\test_chart_ai_migration.py
+backend\tests\test_chart_ai_store.py
+backend\tests\test_chart_ai_validation.py
+backend\tests\test_chart_ai_owner_pilot.py
+backend\tests\test_chart_ai_provider.py
+backend\tests\test_chart_ai_response_validation.py
+backend\tests\test_chart_ai_retry.py
+backend\tests\fixtures\chart_ai_haiku_tags_v4.json
+backend\tests\fixtures\chart_ai_models_55_comparison.json
+backend\tests\fixtures\chart_ai_haiku55_retry.json
+backend\tools\verify_chart_ai_postgres.py
+frontend\playwright.chart-ai.config.ts
+frontend\tests\chart-ai.spec.ts
+```
+
+`backend\requirements.txt` bu adimda degistirilmedi; izin listesinde daha onceki
+ozellige ait Pillow sabitlemesi nedeniyle bulunur. Ilgisiz
+`src\assets\coins\logo-manifest.json`, gecici VS Code gorevi, ekran goruntuleri,
+gizli-giris scriptleri ve schema raporlari release'e dahil edilmez. Gerekirse
+temiz worktree'de yalniz bu izin listesinin ozellik degisiklikleri hazirlanir.
+`git add .`/`-A`, onaysiz cherry-pick, commit, push veya deploy yok.
 
 ### Adim 9 yayin kontrol listesi - gizlilik
 

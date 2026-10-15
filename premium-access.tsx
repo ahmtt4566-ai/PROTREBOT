@@ -6,13 +6,13 @@ import {emitKaisTargetReaction} from './kais-reactions'
 import {clearKaisChatHistory, resumeKaisChatHistory} from './frontend/src/kais-chat-storage'
 import './premium-access.css'
 
-type MemberAccess = {premium: boolean; ready: boolean; userId: string | null; error: string; assistantAllowed:boolean; freeTrial:boolean; liveAllowed:boolean; openUpgrade: (label: string) => void}
+type MemberAccess = {premium: boolean; ready: boolean; userId: string | null; owner: boolean; error: string; assistantAllowed:boolean; freeTrial:boolean; liveAllowed:boolean; openUpgrade: (label: string) => void}
 const missingProvider = () => { throw new Error('MemberAccessProvider is required for premium interactions.') }
-const AccessContext = createContext<MemberAccess>({premium: false, ready: false, userId: null, error: '', assistantAllowed:false, freeTrial:false, liveAllowed:false, openUpgrade: missingProvider})
+const AccessContext = createContext<MemberAccess>({premium: false, ready: false, userId: null, owner: false, error: '', assistantAllowed:false, freeTrial:false, liveAllowed:false, openUpgrade: missingProvider})
 export const useMemberAccess = () => useContext(AccessContext)
 
 export function MemberAccessProvider({children}: {children: ReactNode}) {
-  const [access, setAccess] = useState<Omit<MemberAccess, 'openUpgrade'>>({premium: false, ready: false, userId: null, error: '', assistantAllowed:false,freeTrial:false,liveAllowed:false})
+  const [access, setAccess] = useState<Omit<MemberAccess, 'openUpgrade'>>({premium: false, ready: false, userId: null, owner: false, error: '', assistantAllowed:false,freeTrial:false,liveAllowed:false})
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [lockedLabel, setLockedLabel] = useState('')
   const [toast, setToast] = useState('')
@@ -27,7 +27,7 @@ export function MemberAccessProvider({children}: {children: ReactNode}) {
       const sessionToken = userSessionToken()
       if (!sessionToken) {
         clearKaisChatHistory()
-        setAccess({premium: false, ready: true, userId: null, error: 'Üyelik oturumu gerekli.',assistantAllowed:false,freeTrial:false,liveAllowed:false})
+        setAccess({premium: false, ready: true, userId: null, owner: false, error: 'Üyelik oturumu gerekli.',assistantAllowed:false,freeTrial:false,liveAllowed:false})
         return
       }
       void fetch(`${API_BASE}/v22/profile`, {signal: requestController.signal})
@@ -36,7 +36,7 @@ export function MemberAccessProvider({children}: {children: ReactNode}) {
           const payload = await response.json() as {user?: {id?: string; role?: string}; access?: {isPremium?: boolean;assistantAllowed?:boolean;freeTrial?:boolean;canExecuteLive?:boolean}; detail?: string}
           if (!response.ok || !payload.user?.id) throw new Error(payload.detail || 'Üyelik yetkisi doğrulanamadı.')
           if (!requestController.signal.aborted) {
-            setAccess({premium: payload.access?.isPremium === true || payload.user.role === 'OWNER', ready: true, userId: payload.user.id, error: '',
+            setAccess({premium: payload.access?.isPremium === true || payload.user.role === 'OWNER', ready: true, userId: payload.user.id, owner: payload.user.role === 'OWNER', error: '',
               assistantAllowed:payload.access?.assistantAllowed !== false,freeTrial:payload.access?.freeTrial === true,
               liveAllowed:payload.access?.canExecuteLive === true || payload.user.role === 'OWNER'})
             if (userSessionToken() === sessionToken) resumeKaisChatHistory(payload.user.id)
@@ -44,7 +44,7 @@ export function MemberAccessProvider({children}: {children: ReactNode}) {
         })
         .catch((error: unknown) => {
           if (requestController.signal.aborted) return
-          setAccess({premium: false, ready: true, userId: null, error: error instanceof Error ? error.message : 'Üyelik yetkisi doğrulanamadı.',assistantAllowed:false,freeTrial:false,liveAllowed:false})
+          setAccess({premium: false, ready: true, userId: null, owner: false, error: error instanceof Error ? error.message : 'Üyelik yetkisi doğrulanamadı.',assistantAllowed:false,freeTrial:false,liveAllowed:false})
         })
     }
     refreshAccess()

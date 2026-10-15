@@ -61,3 +61,20 @@ def test_stage_nine_checklist_records_approved_privacy_sentence():
     assert "Resmin sitemizde saklanmaz; analiz için yapay zeka sağlayıcımıza gönderilir." in readme
     assert "Ayni cumle yayin oncesinde sitenin gizlilik metnine eklenecek." in readme
     assert "ZDR dogrulamasi\n  canli kullanim onkosulu degildir" in readme
+
+
+def test_retry_migration_is_manual_repeatable_and_preserves_old_state_contracts():
+    sql = (ROOT / "migrations" / "20261015_002_chart_ai_retry.sql").read_text(encoding="utf-8")
+    assert "PREPARE ONLY" in sql and "Manual application requires separate approval" in sql
+    assert "ADD COLUMN IF NOT EXISTS generation_attempts" in sql
+    assert "ADD COLUMN IF NOT EXISTS accounted_microusd" in sql
+    assert "generation_attempts BETWEEN 0 AND 2" in sql
+    assert "accounted_microusd BETWEEN 0 AND 20000" in sql
+    assert "cost_microusd=accounted_microusd" in sql
+    assert "WHERE generation_attempts=0 AND provider_started_at IS NOT NULL" in sql
+    assert "WHERE accounted_microusd=0 AND cost_microusd IS NOT NULL" in sql
+    assert "pg_constraint" in sql and "IF NOT EXISTS" in sql
+    assert "DROP " not in sql and "CREATE TABLE" not in sql
+    assert "hashtextextended('chart-ai-schema-v1',0)" in sql
+    assert "BEGIN;" in sql and "COMMIT;" in sql
+    assert not any(word in sql for word in ("assistant_", "binance_", "api_key", "base64", "result_text"))

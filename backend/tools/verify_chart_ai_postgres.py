@@ -398,6 +398,7 @@ class Checks:
     async def repeat_migration(self) -> None:
         before = await self.snapshot()
         await self.db.execute(MIGRATION.read_text(encoding="utf-8"))
+        await self.db.execute(MIGRATION.with_name("20261015_002_chart_ai_retry.sql").read_text(encoding="utf-8"))
         assert await self.snapshot() == before, "Second migration changed data or notification contracts"
 
     async def run(self) -> None:

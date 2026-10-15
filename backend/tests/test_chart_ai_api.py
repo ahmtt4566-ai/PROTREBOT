@@ -24,6 +24,7 @@ BODY = {"policy_version": POLICY_VERSION, "accepted": True}
 @pytest.fixture(autouse=True)
 def flags(monkeypatch):
     monkeypatch.setenv("CHART_AI_ENABLED", "true")
+    monkeypatch.setenv("CHART_AI_OWNER_ONLY", "false")
     monkeypatch.setenv("FREE_TRIAL_ENABLED", "true")
     monkeypatch.setenv("BINANCE_MANUAL_ACCESS_ENABLED", "true")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

@@ -15,6 +15,8 @@ import {useMasterMarketQuotes} from './useMasterMarketQuotes'
 import {useTradingPreferences} from './useTradingPreferences'
 import {MarketDataFailure, marketDataFailure, marketDataResponseError} from './master-trade-data-error'
 import {parseRequiredMarketQuotes} from './master-market-data'
+import ChartAiPanel from './ChartAiPanel'
+import {chartSnapshot} from './chart-ai-client'
 
 type TradeSide = 'LONG' | 'SHORT'
 type TradeHistoryRow = {
@@ -137,7 +139,7 @@ const fetchMtfAnalyses = async (symbol: string, signal?: AbortSignal) => {
 }
 
 export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () => void; assistantSlotRef?: RefCallback<HTMLDivElement> }) {
-  const {premium} = useMemberAccess()
+  const {premium, owner, userId} = useMemberAccess()
   const layoutTab = useSyncExternalStore(subscribeTab, readTab, () => 'analiz' as MasterTradeTab)
   const referenceEnabled = useSyncExternalStore(subscribePresentation, readPresentation, () => false)
   const masterLayoutV2 = referenceEnabled && layoutTab === 'analiz'
@@ -742,7 +744,15 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
   }, [layoutTab])
 
   const referenceAnalysis = masterLayoutV2 && layoutTab === 'analiz'
+  const chartAiControl = userId && layoutTab === 'analiz' ? <ChartAiPanel key={`${userId}:${owner}`}
+    userId={userId} symbol={draft.market} timeframe={interval}
+    snapshot={() => chartSnapshot(draft.market, interval, currentPrice, analysis, mtfAnalyses,
+      activeSnapshot?.priceUpdatedAt ?? null, activeSnapshot?.marketUpdatedAt ?? null)}
+    chart={() => reactionArea.current?.querySelector<SVGSVGElement>(
+      referenceAnalysis ? 'svg[data-chart-ai-capture="reference"]' : 'svg[data-chart-ai-capture="legacy"]',
+    ) ?? null}/> : null
   const referenceContent = referenceAnalysis ? <MasterTradeReference assistantSlotRef={assistantSlotRef}
+      chartAiControl={chartAiControl}
       symbol={draft.market} interval={interval} query={marketQuery} onQuery={setMarketQuery}
       scores={scannerCandidates.map(candidate => ({symbol: candidate.symbol, direction: candidate.direction, score: candidate.final_decision_score}))}
       marketFeed={marketFeed}
@@ -889,12 +899,12 @@ export default function MasterTrade({ onBack, assistantSlotRef }: { onBack?: () 
 
             <div className="chartToolbar" aria-label="Market chart controls">
               <div className="chartControls">{Array.from(new Set(['1m','5m','15m','1h','4h','1d',interval])).map((range) => <button key={range} type="button" className={range === interval ? 'active' : ''} onClick={() => setInterval(range)}>{range.toUpperCase()}</button>)}</div>
-              <div className="chartViewControls"><button type="button" className={showChartLevels ? 'active' : ''} onClick={() => setShowChartLevels(value => !value)}>LEVELS</button><button type="button" className={showChartVolume ? 'active' : ''} onClick={() => setShowChartVolume(value => !value)}>VOLUME</button></div>
+              <div className="chartViewControls"><button type="button" className={showChartLevels ? 'active' : ''} onClick={() => setShowChartLevels(value => !value)}>LEVELS</button><button type="button" className={showChartVolume ? 'active' : ''} onClick={() => setShowChartVolume(value => !value)}>VOLUME</button>{!referenceAnalysis && chartAiControl}</div>
             </div>
             <span className="chartOhlcLabel">{hoveredCandle ? new Date(hoveredCandle.time * (hoveredCandle.time < 1_000_000_000_000 ? 1000 : 1)).toLocaleString('en-GB') : 'OHLC / REAL MARKET DATA'}</span>
 
             <div className="chartCanvas marketOhlcChart">
-              {dataLoading && !chartCandles.length ? <div className="chartEmpty">LOADING SNAPSHOT</div> : !chartCandles.length ? <div className="chartEmpty">{dataError || 'DATA UNAVAILABLE'}</div> : <svg viewBox="0 0 760 300" preserveAspectRatio="none" aria-label={`${draft.market} ${interval} candlestick chart`} onMouseLeave={() => setChartHoverIndex(null)} onMouseMove={event => { const box = event.currentTarget.getBoundingClientRect(); const index = Math.round(((event.clientX - box.left) / box.width) * (chartCandles.length - 1)); setChartHoverIndex(Math.max(0, Math.min(chartCandles.length - 1, index))) }}>
+              {dataLoading && !chartCandles.length ? <div className="chartEmpty">LOADING SNAPSHOT</div> : !chartCandles.length ? <div className="chartEmpty">{dataError || 'DATA UNAVAILABLE'}</div> : <svg data-chart-ai-capture="legacy" viewBox="0 0 760 300" preserveAspectRatio="none" aria-label={`${draft.market} ${interval} candlestick chart`} onMouseLeave={() => setChartHoverIndex(null)} onMouseMove={event => { const box = event.currentTarget.getBoundingClientRect(); const index = Math.round(((event.clientX - box.left) / box.width) * (chartCandles.length - 1)); setChartHoverIndex(Math.max(0, Math.min(chartCandles.length - 1, index))) }}>
                 <g className="chartGrid">{[...Array(7)].map((_, index) => <line key={`h-${index}`} x1="0" x2="760" y1={22 + index * 35} y2={22 + index * 35} />)}{[...Array(9)].map((_, index) => <line key={`v-${index}`} x1={index * 95} x2={index * 95} y1="0" y2="260" />)}</g>
                 {chartCandles.map((candle, index) => { const x = chartX(index); const bodyTop = chartY(Math.max(candle.open, candle.close)); const bodyBottom = chartY(Math.min(candle.open, candle.close)); const bodyHeight = Math.max(2, bodyBottom - bodyTop); const bullish = candle.close >= candle.open; const candleWidth = Math.max(2, Math.min(10, 700 / chartCandles.length)); return <g key={`${candle.time}-${index}`} className={bullish ? 'candle bullish' : 'candle bearish'}><line x1={x} x2={x} y1={chartY(candle.high)} y2={chartY(candle.low)} /><rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} /></g> })}
                 {showChartVolume && chartCandles.map((candle, index) => { const x = chartX(index); const height = candle.volume / volumeMax * 28; return <rect key={`vol-${candle.time}`} className={`chartVolume ${candle.close >= candle.open ? 'up' : 'down'}`} x={x - 2} y={273 - height} width="4" height={height} /> })}

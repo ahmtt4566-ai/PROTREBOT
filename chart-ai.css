@@ -1,0 +1,33 @@
+.chartAiButton { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #527aa5 !important; color: #bcdcff; white-space: nowrap; }
+.chartAiButton svg { width: 16px; height: 16px; }
+.chartAiDialog { position: fixed; inset: 16px 16px 16px auto; margin: 0; width: min(520px, calc(100vw - 32px)); max-width: none; height: calc(100dvh - 32px); max-height: none; padding: 0; border: 1px solid #34465a; border-radius: 14px; background: #101820; color: #e5edf5; box-shadow: 0 16px 60px #0008; }
+.chartAiDialog[open] { display: flex; flex-direction: column; }
+.chartAiDialog::backdrop { background: #0007; }
+.chartAiDialog header { display: flex; align-items: center; justify-content: space-between; padding: 18px; border-bottom: 1px solid #34465a; }
+.chartAiDialog h2 { margin: 4px 0 0; font-size: 21px; }
+.chartAiDialog small { color: #9bb9d5; }
+.chartAiDialog button, .chartAiInputs label { padding: 9px 12px; border: 1px solid #415971; border-radius: 8px; color: inherit; background: #1a2a3a; cursor: pointer; }
+.chartAiDialog button:disabled, .chartAiInputs label:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+.chartAiDialog button:focus-visible, .chartAiButton:focus-visible, .chartAiDialog input:focus-visible, .chartAiDialog textarea:focus-visible { outline: 2px solid #91c9ff; outline-offset: 3px; }
+.chartAiDialog svg { width: 17px; height: 17px; vertical-align: middle; }
+.chartAiBody { padding: 18px; overflow-y: auto; min-height: 0; overflow-wrap: anywhere; }
+.chartAiBody p { font-size: 13px; line-height: 1.6; }
+.chartAiBody [role=alert] { padding: 10px; border: 1px solid #bd7373; border-radius: 8px; color: #ffd1d1; }
+.chartAiInputs, .chartAiPresets { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.chartAiInputs input { display: block; max-width: 100%; margin-top: 6px; }
+.chartAiInputs label { max-width: 100%; font-size: 13px; }
+.chartAiBody figure { margin: 14px 0; }
+.chartAiBody figure img { display: block; width: 100%; border: 1px solid #34465a; border-radius: 8px; }
+.chartAiBody figcaption { margin-top: 6px; font-size: 12px; color: #adbfce; }
+.chartAiPresets button { font-size: 12px; }
+.chartAiQuestion { display: grid; gap: 6px; font-size: 13px; }
+.chartAiQuestion textarea { width: 100%; min-height: 80px; resize: vertical; box-sizing: border-box; border: 1px solid #415971; border-radius: 8px; padding: 10px; color: inherit; background: #0c141c; }
+.chartAiConsent { display: flex; align-items: flex-start; gap: 8px; margin: 16px 0; font-size: 13px; }
+.chartAiSend { margin-top: 14px; }
+.chartAiResult { white-space: pre-wrap; line-height: 1.65; font-size: 14px; margin-top: 20px; }
+.chartAiDialog footer { white-space: pre-line; flex-shrink: 0; padding: 14px 18px; border-top: 1px solid #34465a; color: #b7c7d6; font-size: 12px; line-height: 1.6; }
+@media (max-width: 700px) {
+  .chartAiDialog { inset: 8px; width: calc(100vw - 16px); height: calc(100dvh - 16px); }
+  .refToolbar:has(.chartAiButton), .chartToolbar:has(.chartAiButton) { flex-wrap: wrap !important; overflow: visible !important; }
+  .chartAiButton { min-height: 38px; }
+}

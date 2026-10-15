@@ -1,0 +1,85 @@
+{
+  "model": "claude-haiku-4-5-20251001",
+  "image_sha256": "06d5f0a841cc9fac5b56cdac850a46ac90187091a740f32fba6b6edf496c5f35",
+  "market_context": {
+    "symbol": "BTCUSDT",
+    "timeframe": "15m",
+    "price": 81800,
+    "confidence": 58,
+    "direction": "NEUTRAL",
+    "signal": "WAIT",
+    "indicators": {"rsi": 46.8, "macd": -24.7, "adx": 19, "atr": 165, "volume_ratio": 0.84},
+    "levels": {"entry": 81820, "stop_loss": 80700, "tp1": 82400, "tp2": 83000, "tp3": 83600, "support": 81350, "resistance": 82080},
+    "mtf": [
+      {"symbol": "BTCUSDT", "timeframe": "1m", "available": true, "direction": "NEUTRAL", "confidence": 45},
+      {"symbol": "BTCUSDT", "timeframe": "5m", "available": true, "direction": "SHORT", "confidence": 52},
+      {"symbol": "BTCUSDT", "timeframe": "15m", "available": true, "direction": "NEUTRAL", "confidence": 58},
+      {"symbol": "BTCUSDT", "timeframe": "1h", "available": true, "direction": "SHORT", "confidence": 65},
+      {"symbol": "BTCUSDT", "timeframe": "4h", "available": true, "direction": "SHORT", "confidence": 70}
+    ]
+  },
+  "responses": [
+    {
+      "case": 1,
+      "question": "Bu grafiği yorumla",
+      "previously_passed": true,
+      "expected_rule": "tag_suffix",
+      "input_tokens": 4584,
+      "output_tokens": 1201,
+      "payload": {
+        "general_direction": "{tf_ana} zaman diliminde {sembol} fiyatı karışık bir görünüm sergilemektedir. RSI {rsi} değeriyle {rsi_50} eşiğinin altında bulunarak hafif yükseliş baskısı göstermektedir. MACD histogramı {macd} seviyesinde negatif konumdadır. Ancak daha geniş zaman dilimlerine bakıldığında, {tf_1h}'da güçlü düşüş trendi ({mtf_1h_guven} güven) ve {tf_4h}'te daha da belirgin düşüş trendi ({mtf_4h_guven} güven) gözlenmektedir. Bu durum {tf_ana} görünümünün daha geniş zaman dilimleriyle uyumlu olmadığını göstermektedir. Genel yönelim belirsizdir; fiyat {destek} ile {direnc} arasında hareket etmektedir.",
+        "important_levels": "Fiyat şu anda {fiyat} seviyesindedir. Kritik direnç {direnc}, giriş seviyesi ise {giris} olarak belirtilmiştir. Yukarı yönlü hedefler sırasıyla {tp1}, {tp2} ve {tp3}'tür. Destek seviyesi {destek}'tedir ve zarara dönüş noktası {stop}'dur. Grafik üzerinde fiyat, destek ve direnç seviyeleri arasında konsolidasyon göstermektedir.",
+        "bullish_scenario": "Fiyat {destek} desteğini kırmazsa ve {direnc} direncini aşarsa yükseliş senaryosu canlanır. Bu durumda {tp1}, {tp2} ve {tp3} hedeflerine doğru ilerleyebilir. RSI {rsi_50}'nin üzerine çıkıp {rsi_70} seviyelenmesine yaklaşırsa, momentum güçlenebilir. MACD histogramının {macd_0} ekseninin üzerine dönmesi yükseliş dürtüsünü destekleyebilir. Özellikle {tf_5m}'de düşüş trendi gözlemlenmekle birlikte, {tf_1m}'de taraflı görünüm fiyat düzeltmelerini engellemeyebilir.",
+        "bearish_scenario": "Fiyat {destek} altına düşerse düşüş senaryosu güçlenecektir. Daha geniş zaman dilimlerinde {tf_1h} ve {tf_4h}'te gözlenen güçlü düşüş trendleri ({mtf_1h_guven} ve {mtf_4h_guven} güven seviyeleriyle) bu riski artırmaktadır. RSI {rsi_30} seviyesinin altına düşmesi aşırı satım koşullarını işaret edebilir. MACD histogramının {macd}'te kalmaya devam etmesi ve negatif yönde genişlemesi düşüş baskısını gösterir. Hacim oranı {hacim_orani} düşük seviyelerdedir; bu, satış hareketinin sinyal gücünü sınırlayabilir ancak trend değişkliğini önlemez.",
+        "risks": "Çelişkili zaman dilimi sinyalleri önemli bir riskdir; {tf_ana}'da nötr ortam varken {tf_1h} ve {tf_4h}'te düşüş hakim durumdadır. Bu uyumsuzluk beklenmedik hareket yaratabilir. ADX {adx} düşük düzeyde olup trendin gücü zayıftır, bu da fiyat dalgalanmalarını artırabilir. Hacim oranı {hacim_orani}'da kalması hareketin yanıtlanabilirliğini sınırlayabilir. Grafikte belirsiz koşullar hakim olması, {stop} seviyesi altında ani kırılmaları ve {tp1} üzerinde dirençleri tetikleyebilir. Piyasa verisi bayat ve hesaplamalarla desteklenmiş olabilir; canlı verilerin doğrulanması gereklidir."
+      }
+    },
+    {
+      "case": 2,
+      "question": "Riskler neler?",
+      "previously_passed": false,
+      "expected_rule": "literal_number",
+      "input_tokens": 4584,
+      "output_tokens": 872,
+      "payload": {
+        "general_direction": "{tf_ana} görünümde fiyat {fiyat} seviyesinde karışık bir yapı göstermektedir. {rsi} değeriyle RSI {rsi_50} ortasında yer almakta, yönü belirsiz bırakmaktadır. {macd} negatif histogram durumu kısmi bir düşüş momentum gösterse de, daha geniş zaman dilimlerinde {tf_1h} ve {tf_4h} güçlü düşüş eğilimi görülmektedir. Genel olarak, kısa vadede dalgalanma beklenmektedir.",
+        "important_levels": "Fiyat şu anda {giris} giriş seviyesi ile {destek} desteği arasında konumlanmıştır. Üst tarafta {direnc} direnci ve hedef seviyeleri {tp1}, {tp2}, {tp3} sırasında yer almaktadır. Aşağı yönde {stop} stop seviyesi tanımlanmıştır. {adx} değeri düşük trend gücünü işaret etmektedir.",
+        "bullish_scenario": "Fiyat {destek} seviyesini kırmaması halinde {direnc} direnç seviyesine doğru toparlanma gerçekleşebilir. Bu durumda ardışık hedefler {tp1}, {tp2}, {tp3} yönünde hareket oluşabilir. RSI {rsi_50} üstüne çıkması ve {macd} histogramının pozitif bölgeye geçmesi, yukarı yönlü momentum confirmasyonu sağlayabilir.",
+        "bearish_scenario": "Fiyat {destek} desteğinin altında kapanırsa, daha düşük seviyelere doğru hızlanma meydana gelebilir. {tf_1h} ve {tf_4h} görünümlerindeki güçlü düşüş eğilimi {tf_ana} kısa vadede de yükseliş fırsatı sınırlayabilir. {stop} seviyesi bu senaryoda temel koruma noktasıdır.",
+        "risks": "Fiyat verisinin test ve doğrulanmamış durumu nedeniyle seviyelerin güvenilirliği sınırlıdır. {tf_1h} ve {tf_4h} trendinin düşüş yönünde olmasına karşın {tf_ana} karışık momentum, köprü yapısı oluşturmaktadır. Düşük {adx} değeri volatilitenin ani hareketlere açık olduğunu göstermektedir. Daha geniş zaman dilimlerinde {tf_4h} %70 güven ile düşüş sinyal vermesi, kısa vadeli toparlanmaların sınırlı kalma riskini artırmaktadır. {hacim_orani} oranı zayıf hacim koşullarını işaret etmektedir.",
+        "image_warning": "grafikte alakasız yazı var"
+      }
+    },
+    {
+      "case": 3,
+      "question": "Yukarı ve aşağı senaryolar",
+      "previously_passed": false,
+      "expected_rule": "written_value",
+      "input_tokens": 4589,
+      "output_tokens": 944,
+      "payload": {
+        "general_direction": "{tf_ana} diliminde fiyat {fiyat} seviyesinde nötr bir yapı göstermektedir. {rsi} değeri {rsi_50} eşiğinin yakınında olup ne aşırı alım ne de aşırı satım bölgesindedir. {macd} histogramı negatif ve sıfırdan uzakta kalarak azalan momentum işareti vermektedir. Daha geniş zaman dilimlerinde ({tf_5m}, {tf_1h}, {tf_4h}) düşüş trendi baskın iken, {tf_ana} dilimi karışık bir yapıda konumlanmıştır.",
+        "important_levels": "Mevcut fiyat {fiyat} ile {destek} desteği arasında yer almaktadır. Üst tarafta {direnc} direnci bulunmaktadır. Daha yüksek hedefler {tp1}, {tp2} ve {tp3} seviyeleridir. Aşağı yönde ise {stop} seviyesi risk çerçevesini tanımlamaktadır. {atr} volatilite değeri orta düzey dalgalanmaları göstermektedir.",
+        "bullish_scenario": "Fiyat {direnc} direnç seviyesini kırıp üzerine çıkması durumunda yükseliş potansiyeli açılır. Bu durumda {tp1} birinci hedef, ardından {tp2} ve {tp3} seviyeleri göz önünde tutulabilir. {rsi} değerinin {rsi_50} üzerine çıkarak {rsi_70} testine yönelmesi ve {macd} histogramının sıfıra yaklaşarak pozitif bölgeye geçmesi beklenir. {hacim_orani} oranının artması bu senaryonun güçlenmesini destekler.",
+        "bearish_scenario": "Fiyat {destek} desteğinin altında kapanması halinde düşüş momentum güçlenebilir. {rsi} değerinin {rsi_30} seviyesine doğru inerek aşırı satım bölgesine girmesi ve {macd} histogramının daha negatif hale gelmesi ile birlikte {stop} seviyesi ve altındaki bölgeler test edilebilir. Özellikle {tf_4h} dilimindeki güçlü düşüş eğilimi ({mtf_4h_guven} güven seviyesiyle) bu riski artırmaktadır.",
+        "risks": "Görsele ait piyasa verisi doğrulanmamıştır. {adx} değeri 19 ile zayıf bir trend gücü göstermekte, volatilite {atr} ile orta seviyededir. Daha geniş zaman dilimlerinde ({tf_1h}, {tf_4h}) kuvvetli düşüş sinyalleri mevcut iken {tf_ana} diliminin nötr yapısı çatışma yaratmaktadır. Beklenti ve gerçek piyasa hareketi arasında uyumsuzluk riski, eksik veri ve piyasa şartlarının ani değişimi söz konusudur. {guven} güven seviyesi yalnızca %{guven}'dir ve karar almak için yeterli kesinlik sunmamaktadır."
+      }
+    },
+    {
+      "case": 4,
+      "question": "Bu grafiği yorumla",
+      "previously_passed": false,
+      "expected_rule": "advice_guarantee_or_instruction",
+      "input_tokens": 4584,
+      "output_tokens": 825,
+      "payload": {
+        "general_direction": "{tf_ana} zaman diliminde fiyat, {destek} ile {direnc} arasında karışık bir yapı sergiliyor. RSI {rsi} olup {rsi_50} eşiğinin altında kalarak durgunluk gösteriyor. MACD histogram {macd} değerindedir ve negatif bölgede kalmaktadır. Daha geniş zaman dilimlerine bakıldığında ({tf_5m}, {tf_1h}, {tf_4h}) güçlü düşüş eğilimi görülmekte ve baskı aşağıya doğru yoğunlaşmaktadır.",
+        "important_levels": "Direnç {direnc} seviyesinde, giriş {giris} seviyesindedir. Destek {destek} üzerinde bulunmakta, stop seviyesi {stop} olarak belirlenmiştir. Hedef seviyeleri sırasıyla {tp1}, {tp2} ve {tp3} şeklindedir. ADX {adx} ise trendin zayıf olduğunu göstermektedir.",
+        "bullish_scenario": "Fiyat {destek} destek seviyesinin üzerinde korunursa ve RSI {rsi_50} eşiğinin üzerine çıkarsa, yükselişe geçebilir. MACD'nin negatif bölgeden pozitif bölgeye dönüş yapması durumunda satın alma sinyali ortaya çıkabilir. Bu senaryoda direnç {direnc} aşılıp {tp1}, {tp2} ve {tp3} hedeflerine doğru ilerleme beklenir.",
+        "bearish_scenario": "Fiyat {destek} seviyesinin altına kırılırsa düşüş momentum kazanabilir. RSI {rsi_30} seviyesine doğru inerek aşırı satım alanına girebilir. MACD histogram negatif kalış gösteriyor ve bu olumsuz yapı devam ederse daha düşük seviyelere test edilebilir.",
+        "risks": "Daha geniş zaman dilimlerinde ({tf_1h} {mtf_1h_guven}% ve {tf_4h} {mtf_4h_guven}% güvenle) düşüş sinyalleri güçlüdür, bu {tf_ana} görünümü ile uyumsuzdur. Hacim oranı {hacim_orani} ortalamanın altında kalmakta ve fiyat hareketine eksik destek sağlamaktadır. Düşük ATR ({atr}) volatilitesi belirgin hareketler için yetersizdir. Gösterilmeyen daha geniş zaman dilimi verisi, mevcut pozisyon tercihini etkileyebilir.",
+        "image_warning": "grafikte alakasız yazı var"
+      }
+    }
+  ]
+}

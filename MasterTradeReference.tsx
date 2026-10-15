@@ -1,4 +1,4 @@
-import {useLayoutEffect, useRef, useState, type RefCallback} from 'react'
+import {useLayoutEffect, useRef, useState, type RefCallback, type ReactNode} from 'react'
 import {Activity, BarChart3, Cable, Camera, Check, ChevronDown, Crosshair, LockKeyhole, Power, RefreshCw, Settings2, SlidersHorizontal, UserRound, Wallet, X} from 'lucide-react'
 import {type DecisionAnalysis, type TradeDecision, type TriggerMonitor} from './masterTradeDecision'
 import {MasterTradeMetricTile, MasterTradeMetricVisual} from './MasterTradeLayout'
@@ -16,6 +16,7 @@ import './master-trade-reference.css'
 type Candle = {time: number; open: number; high: number; low: number; close: number; volume: number}
 type Props = {
   assistantSlotRef?: RefCallback<HTMLDivElement>;
+  chartAiControl?: ReactNode;
   symbol: string; interval: string; query: string; onQuery: (value: string) => void;
   scores: readonly MarketScore[];
   marketFeed: MasterMarketFeed;
@@ -83,7 +84,7 @@ function ReferenceChart({candles, symbol, interval, analysis, trigger, price, le
     <div className="refOhlc"><b>{symbol} · {interval}</b>{selected ? <><span>O {analysisPrice(selected.open)}</span><span>H {analysisPrice(selected.high)}</span><span>L {analysisPrice(selected.low)}</span><span>C {analysisPrice(selected.close)}</span></> : <span>—</span>}</div>
     <div className="refChartCanvas" ref={canvas}>
       {!range || dataIssue ? <div className="refChartEmpty" role="status"><div><BarChart3 aria-hidden="true"/><strong>{refreshing ? 'Veriler yükleniyor...' : 'Analiz yok'}</strong><p>{dataIssue || (refreshing ? `${symbol} mumları ve analizi alınıyor.` : 'Bu sembol için yeterli veri yok')}</p></div></div> : <>
-        <svg viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" data-axis-low={range.low} data-axis-high={range.high} data-price-height={priceHeight} data-plot-height={plotHeight} aria-label={`${symbol} ${interval} candlestick chart`} onMouseLeave={() => setHover(null)} onMouseMove={event => {
+        <svg data-chart-ai-capture="reference" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" data-axis-low={range.low} data-axis-high={range.high} data-price-height={priceHeight} data-plot-height={plotHeight} aria-label={`${symbol} ${interval} candlestick chart`} onMouseLeave={() => setHover(null)} onMouseMove={event => {
           const box = event.currentTarget.getBoundingClientRect()
           const index = Math.floor((event.clientX - box.left - 10) / (plotWidth - 20) * visible.length)
           setHover(Math.max(0, Math.min(visible.length - 1, index)))
@@ -141,6 +142,7 @@ export default function MasterTradeReference(props: Props) {
         <section className="refCard refChart">
           <div className="refToolbar" aria-label="Market chart controls"><span title="Mum grafiği"><BarChart3/><ChevronDown/></span><select aria-label="Zaman dilimi" value={props.interval} onChange={event => props.onInterval(event.target.value)}>{TRADING_TIMEFRAMES.map(range => <option key={range}>{range}</option>)}</select>
             <details className="refIndicators"><summary><SlidersHorizontal/> Göstergeler <ChevronDown/></summary><div><button type="button" aria-pressed={props.levelsVisible} onClick={props.onLevels}>LEVELS</button><button type="button" aria-pressed={props.volumeVisible} onClick={props.onVolume}>VOLUME</button></div></details>
+            {props.chartAiControl}
             <div className="refDrawingTools"><button disabled aria-label="Çizim araçları mevcut değil"><Crosshair/></button><button disabled aria-label="Grafik ayarları mevcut değil"><Settings2/></button><button disabled aria-label="Grafik ekran görüntüsü mevcut değil"><Camera/></button></div>
             <div className="refOrderTools">{['LİMİT', 'PİYASA'].map(label => <span className="refLockedAction" key={label} onClick={lockedOrder}><button type="button" disabled><LockKeyhole/>{label}</button><button type="button" className="refLockInfo" aria-label={`${label} neden kilitli?`} onClick={event => {event.stopPropagation(); lockedOrder()}}><LockKeyhole/></button></span>)}<button type="button" disabled={props.refreshing} onClick={props.onRefresh}><RefreshCw/>YENİLE</button></div>
           </div>

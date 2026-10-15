@@ -158,21 +158,29 @@ class FakeConnection:
                 "lease_expires_at": args[6], "created_at": args[7], "budget_state": "reserved",
                 "provider_started_at": None, "completed_at": None, "result_expires_at": None,
                 "result_text": None, "error_code": None, "cost_microusd": None,
+                "generation_attempts": 0, "accounted_microusd": 0,
             }
         elif query.startswith("UPDATE chart_ai_requests"):
             self.account(args[0])
             row = state.requests[tuple(args[:2])]
             if "provider_started_at=$3" in query:
                 row["provider_started_at"] = args[2]
+                row["generation_attempts"] = 1
+            elif "generation_attempts=2" in query:
+                row.update(generation_attempts=2, accounted_microusd=args[2])
             elif "status=$3" in query:
                 row.update(status=args[2], completed_at=args[3], result_expires_at=args[4], result_text=args[5],
-                           error_code=args[6], budget_state=args[7], cost_microusd=args[8])
+                           error_code=args[6], budget_state=args[7], cost_microusd=args[8],
+                           accounted_microusd=args[9])
             elif "status='expired'" in query:
                 row.update(status="expired", result_text=None)
             elif "budget_state='settled'" in query:
-                row.update(budget_state="settled", cost_microusd=args[2])
+                row.update(budget_state="settled", cost_microusd=args[2], accounted_microusd=args[2])
             else:
                 raise AssertionError(query)
+            assert 0 <= row["generation_attempts"] <= 2
+            assert 0 <= row["accounted_microusd"] <= REQUEST_RESERVATION_MICROUSD
+            assert row["cost_microusd"] is None or row["cost_microusd"] == row["accounted_microusd"]
         elif query.startswith("INSERT INTO notification_outbox"):
             assert self.depth == 2, "Enqueue must be isolated in a savepoint"
             state.outbox.setdefault(args[3], {
