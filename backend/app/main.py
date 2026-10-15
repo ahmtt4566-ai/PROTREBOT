@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from .analysis import analyze
 from .analyst_credits import router as analyst_credits_router
 from .assistant_api import router as assistant_router, shutdown_assistant
-from .chart_ai_api import router as chart_ai_router
+from .chart_ai_api import router as chart_ai_router, shutdown_chart_ai
 from .browser_security import (
     OWNER_ACCESS_COOKIE, USER_SESSION_COOKIE, browser_request, clear_browser_cookie,
     set_browser_cookie, validate_browser_request,
@@ -1238,6 +1238,7 @@ async def lifespan(app: FastAPI):
     await app.state.original_kline_stream.close()
     await bounded_shutdown(shutdown_v27_cloud(app))
     await bounded_shutdown(shutdown_v22_commercial(app))
+    await shutdown_chart_ai(app)
 
     # Endpoint-triggered fire-and-forget work must not keep Uvicorn alive.
     current = asyncio.current_task()
@@ -1454,7 +1455,8 @@ async def owner_preview_gate(request, call_next):
     from .customer_event_writer import record_event
     record_event(request, getattr(request.state, "member", None), "api.error", "server_error" if response.status_code >= 500 else "request_failed", "api", response.status_code) if response.status_code >= 500 or response.status_code in (409, 429) else None
     notification_response = request.url.path == "/api/v21/notifications" or request.url.path.startswith("/api/v21/notifications/")
-    if protected_member_request and (request.method == "GET" or notification_response) and not request.state.premium and response.status_code == 200 and "application/json" in response.headers.get("content-type", "") and not request.url.path.startswith("/api/analyst/") and request.url.path not in {"/api/assistant/usage", "/api/assistant/proactive/preferences"}:
+    chart_result_read = request.method == "GET" and request.url.path.startswith("/api/chart-ai/requests/")
+    if protected_member_request and (request.method == "GET" or notification_response) and not request.state.premium and response.status_code == 200 and "application/json" in response.headers.get("content-type", "") and not chart_result_read and not request.url.path.startswith("/api/analyst/") and request.url.path not in {"/api/assistant/usage", "/api/assistant/proactive/preferences"}:
         chunks = [chunk async for chunk in response.body_iterator]
         body = b"".join(chunk.encode() if isinstance(chunk, str) else chunk for chunk in chunks)
         headers = {key: value for key, value in response.headers.items() if key not in {"content-length", "content-type", "content-encoding"}}

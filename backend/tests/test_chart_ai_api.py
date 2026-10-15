@@ -26,6 +26,7 @@ def flags(monkeypatch):
     monkeypatch.setenv("CHART_AI_ENABLED", "true")
     monkeypatch.setenv("FREE_TRIAL_ENABLED", "true")
     monkeypatch.setenv("BINANCE_MANUAL_ACCESS_ENABLED", "true")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
 @pytest.fixture
@@ -312,13 +313,15 @@ def test_nonchart_paths_preserve_existing_hydration(chart_api):
     main.hydrate_authenticated_user_state.assert_awaited_once()
 
 
-def test_only_metadata_endpoints_are_registered_and_not_public(chart_api):
+def test_chart_endpoints_are_registered_and_not_public(chart_api):
     client, _, _ = chart_api
     paths = main.app.openapi()["paths"]
-    assert {path for path in paths if path.startswith("/api/chart-ai/")} == {USAGE, ACK}
+    assert {path for path in paths if path.startswith("/api/chart-ai/")} == {
+        USAGE, ACK, "/api/chart-ai/analyze", "/api/chart-ai/requests/{request_key}",
+    }
     assert USAGE not in main.MEMBER_PUBLIC_PATHS and ACK not in main.MEMBER_PUBLIC_PATHS
-    assert client.post("/api/chart-ai/analyze", headers=headers("owner", "OWNER"), json={}).status_code == 404
-    assert client.get("/api/chart-ai/requests/not-a-key", headers=headers("owner", "OWNER")).status_code == 404
+    assert client.post("/api/chart-ai/analyze", headers=headers("owner", "OWNER"), json={}).status_code == 422
+    assert client.get("/api/chart-ai/requests/not-a-key", headers=headers("owner", "OWNER")).status_code == 422
 
 
 def test_store_factory_uses_only_existing_server_pool():

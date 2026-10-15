@@ -2,11 +2,13 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
-## Grafik AI - Adim 2/3/4/5 hazirligi (varsayilan kapali)
+## Grafik AI - Adim 2/3/4/5/6 hazirligi (varsayilan kapali)
 
 [Chart AI migration](backend/migrations/20261015_001_chart_ai.sql) yalniz
 hazirlanmistir; otomatik uygulanmaz ve canli veritabanina uygulanmamistir. Kota deposu
-yalniz kullanim/onay API'sine baglidir; scheduler'a, Claude'a veya trading yollarina bagli degildir.
+yalniz Grafik AI API'sine baglidir; trading yollarina bagli degildir.
+Aracsiz Haiku adaptoru hazirdir, ancak ozellik varsayilan kapali ve
+bu adimdaki tum saglayici testleri sahtedir. Gercek AI cagrisi yapilmamistir.
 Mevcut sohbet, analist kredileri, abonelik ve emir davranisi degismez.
 
 Depo yalniz PostgreSQL kullanir; eksik havuz/schema acik hata verir, bellek veya
@@ -57,12 +59,12 @@ Canli migration, commit ve push icin ayri onay gerekir.
 
 ### Adim 4 - ayri erisim, kullanim ve ilk onay API'si
 
-[Grafik AI metadata router'i](backend/app/chart_ai_api.py) yalniz iki korumali
+[Grafik AI router'i](backend/app/chart_ai_api.py) Adim 4'te iki korumali
 ucu kaydeder: `GET /api/chart-ai/usage` ve
 `POST /api/chart-ai/acknowledgement`. `CHART_AI_ENABLED` varsayilan `false`
 oldugundan kapali gelir; `true` veya `1` acabilir. Gecersiz ayar acik 503
 hatasi verir. Bu adimda deployment/ortam dosyalari degistirilmez.
-Analiz ucu, gorsel kabul etme, AI veya e-posta cagrisi yoktur.
+Adim 4'te analiz ucu veya gorsel kabul etme yoktur; Adim 6 asagida ayri anlatilir.
 
 Erisim dogrulanmis oturum ile kullaniciya ve auth surumune bagli sunucu
 uyelik kanitindan belirlenir; `isPremium`, tarayicinin gonderdigi plan/rol
@@ -76,8 +78,10 @@ Kullanim yaniti gercek `limit/used/reserved/remaining/unlimited` degerlerini,
 `period_start/period_end/resets_at/trial_expires_at/server_now` UTC zamanlarini
 ve onay durumunu verir. OWNER'in limit/kalan/donem zamanlari `null` olur.
 Arayuz daha sonraki adimda `resets_at` degerini yerel saate cevirir.
-`analysis_enabled: false` ve `availability.code: analysis_not_enabled`
-bu adimda analiz gonderiminin acik olmadigini belirtir.
+Adim 4'te `analysis_enabled: false` ve `availability.code: analysis_not_enabled`
+analiz gonderiminin acik olmadigini belirtir. Adim 6'da ayni alanlar
+aracsiz servisin yapilandirilmis/kullanilabilir durumunu bildirir;
+kota, ilk onay ve butce gonderimde ayrica denetlenir.
 
 Onay govdesi tam olarak `{"policy_version":"chart-ai-v1","accepted":true}`
 olmalidir; ek alanlar, metin/sayi turunde onay, `false` ve eski surum
@@ -94,8 +98,9 @@ uygulanmaz, gercek saglayici/borsa/mail baglantisi kurulmaz.
 
 ### Adim 5 - yalniz gorsel ve baglam dogrulayicilari
 
-[Girdi dogrulayicisi](backend/app/chart_ai_validation.py) bagimsizdir; router,
-AI, borsa, kota deposu veya mail sistemine baglanmaz. Analiz ucu eklenmez,
+[Girdi dogrulayicisi](backend/app/chart_ai_validation.py) Adim 5'te bagimsizdir;
+Adim 6'da analiz router'i dogrulayiciyi kullanir. Dogrulayici kendi basina
+AI, borsa, kota deposu veya mail sistemini cagirmaya devam etmez.
 `CHART_AI_ENABLED` varsayilan kapali kalir. [Pillow](backend/requirements.txt)
 surumu `12.3.0` olarak sabitlenmistir.
 
@@ -157,7 +162,124 @@ degistirilemez; hicbir veri emir/risk dogrulamasi olarak kullanilamaz.
 uretilen sentetik gorsellerle calisir; hassas gercek gorsel kullanilmaz.
 Sonraki adimda endpoint entegrasyonu yapilirken bu dogrulayicilar kullanilmali,
 gorseli diske tasiyabilen multipart/spooled upload yolu eklenmemelidir.
-Adim 6 icin ayri onay gerekir.
+### Adim 6 - aracsiz analiz, rezervasyon ve kendi sonucunu okuma
+
+[Analiz servisi](backend/app/chart_ai_service.py) sabit
+`claude-haiku-4-5-20251001` modelini kullanir. SDK'ya `tools` veya
+`tool_choice` gonderilmez; generic Kais prompt'u ve yanit filtresi degismez.
+`CHART_AI_ENABLED` varsayilan kapali kalir. Haiku adaptoru yalniz bu flag
+acikken ve analiz istendiginde ag istegi yapabilir; API key `ANTHROPIC_API_KEY`
+ortam ayarindan okunur, gizli tutulur ve loglanmaz. Deployment ayari degistirilmez.
+
+Yeni yollar:
+
+- `POST /api/chart-ai/analyze`: normal oturum, aktif ozel uyelik kaniti,
+  gecerli ilk onay ve uygun kota/butce gerektirir.
+- `GET /api/chart-ai/requests/{request_key}`: dogrulanmis kullanici yalniz
+  kendi kaydini okuyabilir. Deneme/abonelik sonradan bitse de kendi basarili
+  sonucuna 24 saat icinde erisebilir; bu istisna yeni analiz hakki vermez.
+  OWNER baska kullanicinin sonucunu okuyamaz.
+
+POST yalniz sinirli `application/json` kabul eder; multipart, URL, dosya yolu
+ve spooled/gecici dosya kullanilmaz. Gercek akan govde bayt siniri
+`4 * ceil(5 MiB / 3) + 64 KiB`'dir; Content-Length'e guvenilmez.
+Ornek govde (gercek base64 ve Adim 5 baglami kullanilmali):
+
+```json
+{
+  "request_key": "a9645d17-3038-4349-a040-1f6cd8d78924",
+  "symbol": "BTCUSDT",
+  "timeframe": "15m",
+  "question": "Bu grafiği yorumla",
+  "image": {
+    "source": "screenshot",
+    "media_type": "image/png",
+    "data_base64": "<base64>"
+  },
+  "context": {
+    "symbol": "BTCUSDT",
+    "timeframe": "15m",
+    "captured_at": "2026-10-15T10:15:00Z"
+  }
+}
+```
+
+`source` yalniz `screenshot/upload`, soru en fazla 800 karakterdir
+(gonderilmezse sabit "Bu grafiği yorumla" sorusu kullanilir).
+Ek alanlar, bos soru, gizli bilgi belirtecleri, bozuk base64, gorsel/baglam
+uyumsuzlugu rezervasyondan once reddedilir. Hassas girdi hata yanitina
+yansitilmaz. Hash orijinal gorsel baytlari ve normalize edilmis istek
+alanlarindandir; zamana gore turetilen bayatlik uyarilari hash'e girmez.
+Gorsel/soru/baglam depoya yazilmaz; yalniz hash ve dogrulanmis sonuc yazilir.
+
+Rezervasyon atomiktir: ayni UUID ve icerik tekrar yeni hak veya AI uretimi
+tuketmez; farkli icerik ayni UUID ile 409 alir. Kullanici basina tek devam
+eden analiz vardir. Aylik ayri 25 USD butceden 0,02 USD rezervasyon ayrilir;
+OWNER da butceye tabidir. Onaylanan sekilde once ucretsiz `count_tokens`
+kontrolu yapilir, sonra **yalniz bir `messages.create`** cagirilir.
+Sayim ve uretim birlikte 30 saniyeyle sinirlidir, SDK retry sayisi sifirdir.
+Sayim 8.000 tokeni asarsa uretim yapilmaz; cikti en fazla 1.500 tokendir.
+
+Model yalniz dolu JSON aciklama alanlari uretir: `general_direction`,
+`important_levels`, `bullish_scenario`, `bearish_scenario`, `risks`.
+Rakam/fiyat/yaziyla sayisal seviye, islem talimati, al/sat, kesin/garanti,
+kazanma olasiligi iddiasi, gizlenmis karakterler, araca ait blok,
+eksik/fazla/tekrar eden JSON alani, bos veya kesilmis yanit basari sayilmaz.
+Sayisal model metni ihtiyatli bicimde tumden reddedilir; gorunen fiyatlari
+sunucu mevcut `levels` degerlerinden birebir ekler.
+Sonuc: genel yon, onemli seviyeler, yukselis/dusus senaryolari,
+riskler/veri uyarilari ve sabit **"Bu analiz yatırım tavsiyesi değildir."**.
+Yanit denetimi kural tabanlidir; gercek model kalite/uyum dogrulamasi
+ayrica onaylanacak deneme ve yayin kontrollerinde yapilmalidir.
+
+Basari hak tuketir ve sonuc 24 saat saklanir. Basarili uretim maliyeti
+Haiku fiyatlariyla input token basina 1, output token basina 5 mikro-USD'dir;
+normal ust sinir 15.500 mikro-USD'dir. Hata/güvensiz yanit hak tuketmez,
+ancak saglayicinin bilinen gercek maliyeti aylik butceye yazilir.
+Uretimden once hata/sayim hatasi butce rezervasyonunu tamamen serbest
+birakir. Uretim sonrasi timeout/saglayici hatasinda maliyet bilinmiyorsa
+butce rezervasyonu tutulur; kullanici kotasi yine serbest birakilir.
+Yuzde 80 esiginde yalniz mevcut aylik tek outbox kaydi olusur; mail gonderilmez.
+
+HTTP sonucu:
+
+| Durum | HTTP |
+| --- | --- |
+| Basarili sonuc / ayni sonucun tekrari | 200 |
+| Ayni istek halen isleniyor (Retry-After: 2) | 202 |
+| Kimlik yok/gecersiz veya oturum iptal | 401 |
+| Yeni analiz yetkisi/ilk onay yok | 403 |
+| Kullaniciya ait istek bulunamadi | 404 |
+| Icerik cakismasi / baska analiz devam ediyor | 409 |
+| Sonucun 24 saatlik saklama suresi doldu | 410 |
+| Govde/gorsel boyut veya cozunurluk siniri | 413 |
+| Icerik/MIME turu uyusmazligi | 415 |
+| Gecersiz girdi / giris token siniri | 422 |
+| Kullanici kotasi dolu | 429 |
+| Saglayici / bos, kesilmis veya guvensiz yanit | 502 |
+| Kapali ozellik / depo, servis veya butce uygun degil | 503 |
+| AI zaman asimi | 504 |
+
+Kayit yaniti `request_key/status/quota_consumed/created_at/completed_at/
+result_expires_at/result_text/error` alanlarini tasir; tarihler UTC'dir.
+Kayit olusmadan hata durumunda `error:{code,message}, quota_consumed:false`
+doner; mevcut auth/flag kontrollerinin standart `detail` yaniti korunur.
+Suresi dolmus kayitta `result_text:null`, `quota_consumed:true` doner;
+ayni UUID yeni uretim baslatmaz. Yalniz basarili sonucun metni tutulur.
+
+HTTP tuketicisi iptal olsa bile `shield` edilen is gorevi hesaplasmayi
+tamamlar; tarayici teslim teyidi gerekmez. Ayni kullanici ayni anahtarla
+GET yaparak sonucunu ek hak olmadan alir. Uygulama kapanisinda bu gorevler,
+genel task iptali ve veritabani kapanisindan once beklenir.
+Zorunlu kapanis/DB arizasinda yeni AI uretimi denenmez; mevcut lease
+kurtarma ve bilinmeyen maliyet rezervasyonu guvenli tarafta kalir.
+24 saatlik metin temizleme metodu vardir; scheduler baglantisi sonraki
+yayin kontrolunde ayrica dogrulanacaktir.
+
+[Analiz testleri](backend/tests/test_chart_ai_analysis.py) sahte saglayici ve
+sahte SDK kullanir; gercek Anthropic client olusturulmasi testte engellenir.
+Gercek AI, Binance, e-posta veya canli migration calistirilmamistir.
+Gercek model cagrisi ve Adim 7 icin ayri onay gerekir.
 
 ### Adim 9 yayin kontrol listesi - gizlilik
 
