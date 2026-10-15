@@ -2,7 +2,7 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
-## Grafik AI - Adim 2/3/4 hazirligi (varsayilan kapali)
+## Grafik AI - Adim 2/3/4/5 hazirligi (varsayilan kapali)
 
 [Chart AI migration](backend/migrations/20261015_001_chart_ai.sql) yalniz
 hazirlanmistir; otomatik uygulanmaz ve canli veritabanina uygulanmamistir. Kota deposu
@@ -91,7 +91,73 @@ guvenligi ve uyelik dogrulama kontrolleri atlanmaz.
 
 Adim 4 testleri yalniz sahte veritabani/havuzlarla calisir; migration
 uygulanmaz, gercek saglayici/borsa/mail baglantisi kurulmaz.
-Adim 5 icin ayri onay gerekir.
+
+### Adim 5 - yalniz gorsel ve baglam dogrulayicilari
+
+[Girdi dogrulayicisi](backend/app/chart_ai_validation.py) bagimsizdir; router,
+AI, borsa, kota deposu veya mail sistemine baglanmaz. Analiz ucu eklenmez,
+`CHART_AI_ENABLED` varsayilan kapali kalir. [Pillow](backend/requirements.txt)
+surumu `12.3.0` olarak sabitlenmistir.
+
+Gorsel girdisi bellek icinde `bytes` ve bildirilen MIME turudur; dosya yolu,
+URL veya disk tabanli upload kabul edilmez. Yalniz gercek statik PNG/JPEG/WebP,
+en fazla **5 MiB (5.242.880 bayt)** ve **16.000.000 piksel** kabul edilir.
+Dosya adi/uzantisina guvenilmez; Pillow gercek icerigi acar, MIME ile
+karsilastirir, dosya butunlugunu kontrol eder ve pikselleri cozer.
+Sahte MIME, SVG/GIF, bozuk/kesilmis dosya, cozunurluk bombasi ve animasyon
+kapsayicilari (tek kareli APNG/WebP dahil) acik hata ile reddedilir.
+Pillow'un boyut ve kesilmis dosya guvenlik ayarlari gevsetilmez.
+Kesilmis dosyayi kabul eden dis bir Pillow ayari varsa, ayari degistirmek
+yerine guvenli dogrulama yapilamadigi icin 503 ile kapali kalir.
+
+EXIF yonu piksellere uygulanir, uzun kenar en fazla **1568 px** olacak sekilde
+oran korunur; kucuk gorsel buyutulmez. Saydamlik beyaz zemine birlestirilir.
+Pikseller temiz bir RGB gorsele aktarilip **kalite 90 JPEG** olarak yeniden
+kodlanir; EXIF, GPS, ICC, XMP, yorum ve PNG metin alanlari tasinmaz.
+Sonuc da 5 MiB siniriyla kontrol edilir. Orijinal ve sonuc yalniz bellektedir;
+dosya, gecici dosya, veritabani, base64 log veya kalici depolama yoktur.
+
+Pillow'un EXIF alanlarini DEBUG'da yazabildigi dogrulanmistir.
+Decode sirasinda yalniz o is parcaciginin decoder loglari bastirilir;
+baska is parcaciklarinin loglari etkilenmez, onceki filtreler geri yuklenir.
+Decode islemleri surec icinde siralanarak bellek yuku ve log/uyari filtre
+yarislari sinirlanir. Uygulama yalniz sabit hata kodlarini loglar;
+ham decoder hatasi, gorsel, metadata veya baglam girdisi loglanmaz.
+
+Baglam icin tum katmanlarda `extra=forbid` ve kati tip denetimi vardir.
+Izinli kok alanlar: `symbol`, `timeframe`, `captured_at`, `price_updated_at`,
+`market_updated_at`, `price`, `indicators`, `levels`, `direction`,
+`confidence`, `signal`, `mtf`, `data_warnings`.
+Gosterge alanlari: `rsi`, `macd`, `adx`, `atr`, `volume_ratio`.
+Seviye alanlari: `entry`, `stop_loss`, `tp1`, `tp2`, `tp3`, `support`, `resistance`.
+MTF satiri: `symbol`, `timeframe`, `available`, `direction`, `confidence`,
+`trend`, `momentum`, `updated_at`; mevcut 1m/5m/15m/1h/4h satirlarindan
+en fazla bes adet ve her zaman dilimi icin tek satir kabul edilir.
+`data_warnings` yalniz `market_stale/market_missing/price_stale/price_missing/mtf_missing`
+kodlarini kabul eder. Bakiye, hesap, anahtar, secret, kullanici/rol/yetki
+ve diger planlanmamis alanlar ic ice nesnelerde de reddedilir.
+
+Sonlu sayilar, fiyat/gosterge araliklari ve saat dilimi olan ISO tarihler
+kontrol edilir; string sayilar, boolean sayilar, NaN/Infinity ve serbest
+talimat metinleri kabul edilmez. Tarihler UTC'ye cevrilir.
+Grafik/istek sembolu ve zaman dilimi snapshot ile, MTF sembolleri ana sembolle
+karsilastirilir; MTF'nin farkli zaman diliminde olmasi beklenen davranistir.
+Bu kontrol beyan edilen veriler arasinda tutarlilik kontroludur:
+gorseldeki sembol/yazi OCR ile veya borsadan dogrulanmaz.
+
+Onaylanan esik: yakalama/veri zamani **120 saniyeden eskiyse uyari** verilir,
+analiz girdisi reddedilmez. **Sunucu saatinden 30 saniyeden fazla ileride**
+tarih veya yakalamadan 30 saniyeden fazla sonra uretilmis veri reddedilir.
+Eksik degerler `null` kalir ve acik uyari eklenir; sayi/seviye uretilmez.
+Metin ciktiya sunucu tarafinda **"Tarayıcı kaynaklı, doğrulanmamış."**
+etiketi ve MACD'nin histogram tanimi eklenir. Bu etiket browser tarafindan
+degistirilemez; hicbir veri emir/risk dogrulamasi olarak kullanilamaz.
+
+[Dogrulama testleri](backend/tests/test_chart_ai_validation.py) bellekte
+uretilen sentetik gorsellerle calisir; hassas gercek gorsel kullanilmaz.
+Sonraki adimda endpoint entegrasyonu yapilirken bu dogrulayicilar kullanilmali,
+gorseli diske tasiyabilen multipart/spooled upload yolu eklenmemelidir.
+Adim 6 icin ayri onay gerekir.
 
 ### Adim 9 yayin kontrol listesi - gizlilik
 
