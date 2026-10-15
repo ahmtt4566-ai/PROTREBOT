@@ -30,7 +30,7 @@ import math
 import os
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Coroutine, Iterable
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -39,6 +39,9 @@ from urllib.parse import urlencode
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from .binance_rate_limit import (
@@ -65,8 +68,27 @@ ACTIVATE_CONFIRMATIONS = {
 }
 DELETE_CONFIRMATION = "ANAHTARI KALICI SİL"
 
-router = APIRouter(prefix="/api/exchange-connections", tags=["V28 Exchange Connections"])
 logger = logging.getLogger(__name__)
+
+
+class _CredentialRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def validated(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                logger.warning("CONNECTION_REQUEST_REJECTED code=credential_request_invalid type=%s", type(exc).__name__)
+                return JSONResponse(status_code=422, content={"detail": [
+                    {key: error[key] for key in ("loc", "type", "msg") if key in error}
+                    for error in exc.errors()
+                ]})
+
+        return validated
+
+
+router = APIRouter(prefix="/api/exchange-connections", tags=["V28 Exchange Connections"], route_class=_CredentialRoute)
 
 # One Render web process is used by the supplied deployment.  Every process
 # reloads the encrypted rows at startup; plaintext never enters app.state or a
@@ -88,6 +110,16 @@ _SERVER_TIME_LOCKS: dict[str, asyncio.Lock] = {}
 
 class VaultError(RuntimeError):
     pass
+
+
+class BinanceVerificationRejected(VaultError):
+    def __init__(self, message: str, *, endpoint: str, stage: str, fingerprint: str, upstream_status: int, exchange_code: int | None):
+        super().__init__(message)
+        self.endpoint = endpoint
+        self.stage = stage
+        self.fingerprint = fingerprint
+        self.upstream_status = upstream_status
+        self.exchange_code = exchange_code
 
 
 class BinanceServerTimeRejected(VaultError):
@@ -136,6 +168,7 @@ class ConnectionActionRequest(BaseModel):
     mode: Mode
     confirmation: str = Field(min_length=1, max_length=100)
     totp_code: str | None = Field(default=None, min_length=6, max_length=32, repr=False)
+    expected_fingerprint: str | None = Field(default=None, pattern=r"^(?:SHA256:)?[0-9A-Fa-f]{12}$")
 
 
 def now_iso() -> str:
@@ -603,6 +636,8 @@ def session_public_status(application: Any, request: Request) -> dict[str, Any]:
 
 async def ensure_session_cache(request: Request, *, include_live: bool = True) -> None:
     user = getattr(request.state, "member", None)
+    if not user and bool(getattr(request.state, "web_owner_authenticated", False)):
+        user = _require_member(request)
     if not user or not session_id(request):
         return
     async with _credential_lock(request, "LIVE") if include_live else nullcontext():
@@ -629,6 +664,8 @@ async def _read_session_cache(request: Request, *, include_live: bool = True) ->
     pool = getattr(request.app.state, "db_pool", None)
     sid = session_id(request)
     user = getattr(request.state, "member", None)
+    if not user and bool(getattr(request.state, "web_owner_authenticated", False)):
+        user = _require_member(request)
     if not sid or not user:
         return
     mode = "LIVE" if include_live else "TESTNET"
@@ -654,16 +691,7 @@ async def _read_session_cache(request: Request, *, include_live: bool = True) ->
             _SESSION_META[(sid, mode)] = {**_row_meta(row), "active": False, "last_test_ok": False, "last_error": str(exc)}
     if not include_live:
         return
-    live_row = await pool.fetchrow(
-        """
-        SELECT 'owner:' || user_id AS session_id, user_id, mode, encrypted_payload,
-               fingerprint, active, last_test_ok, last_test_at, last_error,
-               account_summary, updated_at
-        FROM protrebot_exchange_account_vault
-        WHERE user_id = $1 AND mode = 'LIVE'
-        """,
-        user["id"],
-    )
+    live_row = await _read_live_vault_record(pool, user["id"])
     async with _controller_lock(request, "LIVE"):
         if not live_row:
             _SESSION_CACHE.pop(key, None)
@@ -699,6 +727,19 @@ async def _read_session_cache(request: Request, *, include_live: bool = True) ->
                 "LIVE credential binding blocked: code=live_binding_blocked status=%s type=%s",
                 exc.status_code, type(exc).__name__,
             )
+
+
+async def _read_live_vault_record(pool: Any, user_id: str) -> Any:
+    return await pool.fetchrow(
+        """
+        SELECT 'owner:' || user_id AS session_id, user_id, mode, encrypted_payload,
+               fingerprint, active, last_test_ok, last_test_at, last_error,
+               account_summary, updated_at
+        FROM protrebot_exchange_account_vault
+        WHERE user_id = $1 AND mode = 'LIVE'
+        """,
+        user_id,
+    )
 
 
 def _row_meta(row: Any) -> dict[str, Any]:
@@ -799,6 +840,7 @@ def _safe_exchange_message(payload: Any, api_key: str) -> str:
 
 def exchange_rejection_message(code: Any) -> str:
     messages = {
+        -2008: "Binance API anahtar kimliğini geçersiz buldu. API Key'in doğru Binance hesabına ve seçilen ortama ait olduğunu kontrol edin; bu kod Futures izninin kapalı olduğunu kanıtlamaz.",
         -2014: "Binance API anahtarı geçersiz; API Key ve Secret Key bilgilerini kontrol edin.",
         -2015: "Binance API anahtarı, IP izni veya Futures yetkisi doğrulanamadı. Anahtar ve izinleri kontrol edin.",
         -1022: "Binance imza doğrulaması başarısız; API Key ve Secret Key eşleşmesini kontrol edin.",
@@ -818,6 +860,13 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
     active_ban = _active_global_ban_error()
     if active_ban is not None:
         raise active_ban
+    fingerprint = key_fingerprint(api_key)
+    verification_stage, stage = {
+        "/sapi/v1/account/apiRestrictions": ("api_permissions", "API izinleri (para çekme/Futures)"),
+        "/fapi/v3/account": ("futures_account", "Futures hesap"),
+        "/fapi/v1/positionSide/dual": ("position_mode", "Futures pozisyon modu"),
+    }.get(path, ("signed_verification", "Binance doğrulama"))
+    logger.info("LIVE_CONNECTION_TEST SIGNED_VERIFY_START path=%s fingerprint=%s", path, fingerprint)
     try:
         async def request() -> httpx.Response:
             async with BINANCE_RATE_LIMITER.slot(
@@ -841,23 +890,20 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
         raise VaultError("Binance bağlantı isteği zaman aşımına uğradı.") from exc
     except httpx.RequestError as exc:
         raise VaultError("Binance sunucusuna ulaşılamadı.") from exc
-    if response.status_code >= 400:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        if response.status_code < 400:
+            raise VaultError("Binance beklenmeyen bir yanıt döndürdü.") from exc
+        payload = None
+    code = payload.get("code") if isinstance(payload, dict) else None
+    exchange_code = code if type(code) is int else None
+    if response.status_code >= 400 or (exchange_code is not None and exchange_code < 0):
         if response.status_code in {418, 429}:
             raise _server_time_error(response)
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = None
-        code = payload.get("code") if isinstance(payload, dict) else None
-        exchange_code = code if type(code) is int else None
-        stage = {
-            "/sapi/v1/account/apiRestrictions": "API izinleri (para çekme/Futures)",
-            "/fapi/v3/account": "Futures hesap",
-            "/fapi/v1/positionSide/dual": "Futures pozisyon modu",
-        }.get(path, "Binance doğrulama")
         logger.warning(
-            "LIVE_CONNECTION_TEST SIGNED_VERIFY_REJECTED path=%s status=%s exchange_code=%s",
-            path, response.status_code, exchange_code,
+            "LIVE_CONNECTION_TEST SIGNED_VERIFY_REJECTED path=%s status=%s exchange_code=%s fingerprint=%s",
+            path, response.status_code, exchange_code, fingerprint,
         )
         context = f"{stage} kontrolü başarısız (HTTP {response.status_code}"
         if exchange_code is not None:
@@ -865,15 +911,19 @@ async def _signed_get(http: httpx.AsyncClient, host: str, path: str, api_key: st
         context += "). "
         if exchange_code is None:
             if response.status_code == 451:
-                raise VaultError(context + "Binance sunucunun bulunduğu bölgeden erişime izin vermiyor (HTTP 451).")
-            if response.status_code >= 500:
-                raise VaultError(context + f"Binance doğrulama servisi geçici sunucu hatası döndürdü (HTTP {response.status_code}); tekrar deneyin.")
-            raise VaultError(context + f"Binance doğrulama erişimini reddetti (HTTP {response.status_code}); key, IP izinleri ve Futures yetkisini kontrol edin.")
-        raise VaultError(context + _safe_exchange_message(payload, api_key))
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise VaultError("Binance beklenmeyen bir yanıt döndürdü.") from exc
+                message = "Binance sunucunun bulunduğu bölgeden erişime izin vermiyor (HTTP 451)."
+            elif response.status_code >= 500:
+                message = f"Binance doğrulama servisi geçici sunucu hatası döndürdü (HTTP {response.status_code}); tekrar deneyin."
+            else:
+                message = f"Binance doğrulama erişimini reddetti (HTTP {response.status_code}); key, IP izinleri ve Futures yetkisini kontrol edin."
+        else:
+            message = _safe_exchange_message(payload, api_key)
+        raise BinanceVerificationRejected(
+            context + message, endpoint=path, stage=verification_stage, fingerprint=fingerprint,
+            upstream_status=response.status_code, exchange_code=exchange_code,
+        )
+    logger.info("LIVE_CONNECTION_TEST SIGNED_VERIFY_DONE path=%s fingerprint=%s", path, fingerprint)
+    return payload
 
 
 def _server_time_error(response: httpx.Response) -> VaultError:
@@ -1068,7 +1118,7 @@ async def _verify_request_credentials(request: Request, mode: str, api_key: str,
     return await test_binance_credentials(request.app.state.http, mode, api_key, secret_key, public_http=public_http)
 
 
-def _exchange_test_http_exception(exc: VaultError) -> HTTPException:
+def _exchange_test_http_exception(exc: VaultError, *, operation: str | None = None, credential_source: str | None = None) -> HTTPException:
     if isinstance(exc, BinanceServerTimeRejected):
         wait = exc.retry_after
         return HTTPException(
@@ -1083,6 +1133,18 @@ def _exchange_test_http_exception(exc: VaultError) -> HTTPException:
             },
             headers={"Retry-After": str(wait)},
         )
+    if isinstance(exc, BinanceVerificationRejected):
+        return HTTPException(502, {
+            "message": str(exc),
+            "code": "BINANCE_API_KEY_ID_INVALID" if exc.exchange_code == -2008 else "BINANCE_VERIFICATION_REJECTED",
+            "verification_stage": exc.stage,
+            "endpoint": exc.endpoint,
+            "credential_fingerprint": exc.fingerprint,
+            "upstream_status": exc.upstream_status,
+            "exchange_code": exc.exchange_code,
+            "operation": operation,
+            "credential_source": credential_source,
+        })
     return HTTPException(502, str(exc))
 
 
@@ -1323,7 +1385,9 @@ async def exchange_connection_test(request: Request, body: TestCredentialsReques
     try:
         account = await _verify_request_credentials(request, mode, api_key, secret_key)
     except VaultError as exc:
-        raise _exchange_test_http_exception(exc) from exc
+        raise _exchange_test_http_exception(
+            exc, operation="test", credential_source="submitted" if body.api_key is not None else "account_vault",
+        ) from exc
     return {
         "ok": True,
         "message": "Bağlantı ve imza doğrulandı; hiçbir emir oluşturulmadı.",
@@ -1342,29 +1406,37 @@ async def exchange_connection_save(request: Request, body: SaveCredentialsReques
 
 async def _save_connection(request: Request, body: SaveCredentialsRequest) -> dict[str, Any]:
     user = _require_member(request)
+    mode = normalize_mode(body.mode)
+    if mode == "LIVE":
+        _require_live_owner(user)
+    fingerprint = key_fingerprint(body.api_key.get_secret_value().strip())
+    _lock_runtime(request.app, mode, request)
+    if mode == "LIVE":
+        logger.info("CONNECTION_SAVE MFA_START mode=%s fingerprint=%s", mode, fingerprint)
     pool = await _require_ready(request.app)
     await ensure_schema(pool)
-    mode = normalize_mode(body.mode)
     if mode == "LIVE":
         await _require_live_mfa(request, user, body.totp_code)
     if body.confirmation.strip().upper() != SAVE_CONFIRMATIONS[mode]:
         raise HTTPException(422, "Güvenli kaydetme onayı eksik.")
-    _lock_runtime(request.app, mode, request)
     api_key = body.api_key.get_secret_value().strip()
     secret_key = body.secret_key.get_secret_value().strip()
+    stored_credentials = (api_key, secret_key)
+    if mode == "LIVE":
+        logger.info("CONNECTION_SAVE MFA_VERIFIED mode=%s fingerprint=%s", mode, fingerprint)
     try:
         validate_key_pair(api_key, secret_key)
         account = await _verify_request_credentials(request, mode, api_key, secret_key)
         encrypted = encrypt_credentials(api_key, secret_key, mode=mode)
     except VaultError as exc:
-        if isinstance(exc, BinanceServerTimeRejected):
-            raise _exchange_test_http_exception(exc) from exc
+        if isinstance(exc, (BinanceServerTimeRejected, BinanceVerificationRejected)):
+            raise _exchange_test_http_exception(exc, operation="save", credential_source="submitted") from exc
         raise HTTPException(422 if "kısa" in str(exc) or "boşluk" in str(exc) else 502, str(exc)) from exc
-    fingerprint = key_fingerprint(api_key)
     scope, owner_id = _vault_scope(request, mode)
     if mode == "LIVE":
         _live_credential_identity(request, fingerprint, account)
     try:
+        logger.info("CONNECTION_SAVE VAULT_WRITE_START mode=%s fingerprint=%s", mode, fingerprint)
         if mode == "LIVE":
             await pool.execute(
                 """
@@ -1406,7 +1478,30 @@ async def _save_connection(request: Request, body: SaveCredentialsRequest) -> di
         from .error_monitoring import log_database_failure
         log_database_failure(logger, "credential_save", exc)
         raise HTTPException(503, "Anahtar kasaya kaydedilemedi; önceki kayıt korundu ve LIVE emir kilidi kapalı kaldı.") from None
-    _SESSION_CACHE[(scope, mode)] = (api_key, secret_key)
+    if mode == "LIVE":
+        try:
+            saved_row = await _read_live_vault_record(pool, owner_id)
+            if (
+                not saved_row or str(saved_row["user_id"]) != owner_id
+                or bytes(saved_row["encrypted_payload"]) != encrypted
+                or normalize_fingerprint(str(saved_row["fingerprint"])) != normalize_fingerprint(fingerprint)
+                or not _row_meta(saved_row)["active"] or not saved_row["last_test_ok"]
+            ):
+                raise HTTPException(409, "Kasa kaydı kaydetme sırasında değişti; yeni kayıt doğrulanamadı ve LIVE kapalı kaldı.")
+            stored_credentials = decrypt_credentials(bytes(saved_row["encrypted_payload"]), mode=mode)
+            if stored_credentials != (api_key, secret_key):
+                raise VaultError("Kaydedilen anahtar çifti doğrulanamadı.")
+        except Exception as exc:
+            _SESSION_CACHE.pop((scope, mode), None)
+            _SESSION_META.pop((scope, mode), None)
+            if isinstance(exc, HTTPException):
+                logger.warning("CONNECTION_SAVE VAULT_READBACK_REJECTED mode=%s fingerprint=%s status=%s", mode, fingerprint, exc.status_code)
+                raise
+            from .error_monitoring import log_database_failure
+            log_database_failure(logger, "credential_save_readback", exc)
+            raise HTTPException(503, "Yeni kasa kaydı yeniden okunup doğrulanamadı; LIVE kapalı. Kasa durumunu kontrol edin.") from None
+        logger.info("CONNECTION_SAVE VAULT_READBACK_VERIFIED mode=%s fingerprint=%s", mode, key_fingerprint(stored_credentials[0]))
+    _SESSION_CACHE[(scope, mode)] = stored_credentials
     _SESSION_META[(scope, mode)] = {
         "user_id": str(user["id"]),
         "encrypted_payload": encrypted,
@@ -1422,7 +1517,14 @@ async def _save_connection(request: Request, body: SaveCredentialsRequest) -> di
     _lock_runtime(request.app, mode, request)
     if mode == "LIVE":
         _bind_live_credential(request, fingerprint, account)
-    return {**session_public_status(request.app, request), "message": "Canlı anahtar OWNER hesabının şifreli kasasına kaydedildi." if mode == "LIVE" else "Anahtarlar bu oturum için güvenli kasaya kaydedildi ve otomasyon için hazır."}
+    return {
+        **session_public_status(request.app, request),
+        "verification": {
+            "submitted_fingerprint": fingerprint, "stored_fingerprint": key_fingerprint(stored_credentials[0]),
+            "readback_verified": mode == "LIVE",
+        },
+        "message": "Canlı anahtar OWNER hesabının şifreli kasasına kaydedildi." if mode == "LIVE" else "Anahtarlar bu oturum için güvenli kasaya kaydedildi ve otomasyon için hazır.",
+    }
 
 
 @router.post("/activate")
@@ -1445,12 +1547,15 @@ async def _activate_connection(request: Request, body: ConnectionActionRequest) 
     api_key, secret_key = session_credentials(request, mode, active_only=False)
     if not api_key or not secret_key:
         raise HTTPException(412, "Bu kanal için kasada kayıtlı anahtar yok.")
+    if body.expected_fingerprint and normalize_fingerprint(body.expected_fingerprint) != normalize_fingerprint(key_fingerprint(api_key)):
+        raise HTTPException(409, "Kasa kaydı son kaydetmeden sonra değişti; farklı anahtarla bağlantı testi yapılmadı.")
     scope, owner_id = _vault_scope(request, mode)
     encrypted_payload = _SESSION_META.get((scope, mode), {}).get("encrypted_payload")
     if mode == "LIVE":
         from .v25_execution import guard_execution_ownership
         guard_execution_ownership(request)
     try:
+        logger.info("CONNECTION_ACTIVATE SAVED_VERIFY_START mode=%s fingerprint=%s", mode, key_fingerprint(api_key))
         account = await _verify_request_credentials(request, mode, api_key, secret_key)
     except VaultError as exc:
         table = "protrebot_exchange_account_vault" if mode == "LIVE" else "protrebot_exchange_session_vault"
@@ -1466,7 +1571,7 @@ async def _activate_connection(request: Request, body: ConnectionActionRequest) 
         public_error = _rate_limit_public_message(exc) if isinstance(exc, BinanceServerTimeRejected) else str(exc)[:240]
         _SESSION_META[(scope, mode)].update({"active": False, "last_test_ok": False, "last_test_at": now_iso(), "last_error": public_error})
         _lock_runtime(request.app, mode, request)
-        raise _exchange_test_http_exception(exc) from exc
+        raise _exchange_test_http_exception(exc, operation="activate", credential_source="account_vault") from exc
     table = "protrebot_exchange_account_vault" if mode == "LIVE" else "protrebot_exchange_session_vault"
     key_column = "user_id" if mode == "LIVE" else "session_id"
     key_value = owner_id if mode == "LIVE" else scope

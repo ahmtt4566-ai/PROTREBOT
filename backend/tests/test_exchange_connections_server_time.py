@@ -404,7 +404,18 @@ class ExchangeConnectionServerTimeTests(unittest.TestCase):
         request.app.state.http = FakeBinanceHttp()
         snapshot = {"wallet_balance": 100.0, "available_balance": 90.0, "positions": [], "open_orders": [], "hedge_mode": False}
         client = SimpleNamespace(time_offset_ms=0)
+        saved_row = {}
+        async def execute(query, *args):
+            if "VALUES ($1, 'LIVE'" in query:
+                saved_row.update(
+                    user_id=args[0], mode="LIVE", encrypted_payload=args[1],
+                    fingerprint=args[2], active=True, last_test_ok=True, account_summary=args[3],
+                )
+            return "UPDATE 1"
+        request.app.state.db_pool.execute.side_effect = execute
+        request.app.state.db_pool.fetchrow.side_effect = lambda *args: saved_row or None
         with patch("app.exchange_connections.encrypt_credentials", return_value=b"encrypted-test-payload"), \
+             patch("app.exchange_connections.decrypt_credentials", return_value=("api-key-safe", "secret-safe")), \
              patch.object(exchange_connections, "_load_session_cache", new=AsyncMock()), \
              patch.object(exchange_connections, "_require_live_mfa", new=AsyncMock()), \
              patch.object(v25_execution, "client_for", return_value=client), \

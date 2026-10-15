@@ -66,6 +66,9 @@ type ConnectionStatus = {
 }
 
 type ConnectionTestResult = {testedAt?: string; fingerprint?: string | null}
+type ConnectionSaveResult = ConnectionStatus & {
+  verification?: {readback_verified?: boolean; submitted_fingerprint?: string; stored_fingerprint?: string}
+}
 type ExternalHistory = {read_only?: boolean; label?: string; external_trades?: Array<Record<string, unknown>>; external_income?: Array<Record<string, unknown>>; errors?: Array<Record<string, unknown>>}
 
 type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MARKET' | 'LIMIT'; margin_usdt: string; leverage: string; limit_price: string; stop_loss: string; tp1: string; tp2: string; tp3: string}
@@ -73,13 +76,14 @@ type OrderDraft = {symbol: string; direction: 'LONG' | 'SHORT'; order_type: 'MAR
 export type SharedLiveStatus = LiveStatus
 export type SharedConnectionStatus = ConnectionStatus
 
+const normalizeCredentialFingerprint = (value: string | null | undefined) => (value || '').trim().toUpperCase().replace(/^SHA256:/, '')
+
 export function liveCredentialStatusMatches(status: SharedLiveStatus, connections: SharedConnectionStatus | null): boolean {
   const connection = connections?.connections?.LIVE
   if (connection?.active !== true) return status.credentials?.configured !== true && status.connected !== true
   if (status.credentials?.configured !== true) return false
-  const normalize = (value: string | null | undefined) => (value || '').trim().toUpperCase().replace(/^SHA256:/, '')
-  const saved = normalize(connection?.fingerprint)
-  return Boolean(saved && saved === normalize(status.credentials?.fingerprint))
+  const saved = normalizeCredentialFingerprint(connection?.fingerprint)
+  return Boolean(saved && saved === normalizeCredentialFingerprint(status.credentials?.fingerprint))
 }
 type Props = {active: boolean; symbol: string; analysis?: {direction?: string | null; confidence?: number; entry?: number; stop_loss?: number; tp1?: number; tp2?: number; tp3?: number} | null; masterTrade?: boolean; masterTradeTab?: 'analiz' | 'canli' | 'pozisyonlar' | 'baglanti'; sharedStatus?: LiveStatus | null; sharedStatusVerified?: boolean; sharedStatusError?: string; sharedConnections?: ConnectionStatus | null; onRefreshStatus?: (force?: boolean) => Promise<void>}
 
@@ -570,19 +574,37 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       setNotice({kind: 'error', text: 'LIVE API Key, Secret Key ve güncel 2FA kodunu girin.'})
       return
     }
+    setTestResult(null)
     void run('connect-save', async () => {
-      await call(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({
-        mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey,
-        confirmation: 'CANLI KASAYA KAYDET',
-        totp_code: keyCode,
-      })})
-      setCredentials({apiKey: '', secretKey: '', accepted: false})
-      setKeyCode('')
-      await refresh()
-      await call(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({
-        mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ',
-      })})
-      await refresh()
+      let saved = false
+      try {
+        const result = await call<ConnectionSaveResult>(CONNECTIONS, '/save', {method: 'POST', body: JSON.stringify({
+          mode: 'LIVE', api_key: credentials.apiKey, secret_key: credentials.secretKey,
+          confirmation: 'CANLI KASAYA KAYDET',
+          totp_code: keyCode,
+        })})
+        const connection = result.connections?.LIVE
+        const fingerprint = normalizeCredentialFingerprint(connection?.fingerprint)
+        if (
+          connection?.configured !== true || connection.active !== true || connection.last_test_ok !== true
+          || result.verification?.readback_verified !== true || !fingerprint
+          || fingerprint !== normalizeCredentialFingerprint(result.verification.submitted_fingerprint)
+          || fingerprint !== normalizeCredentialFingerprint(result.verification.stored_fingerprint)
+        ) throw new Error('Sunucu yeni kasa kaydının anahtar kimliğini doğrulamadı; bağlantı açılmadı.')
+        saved = true
+        setCredentials({apiKey: '', secretKey: '', accepted: false})
+        if (!await refresh()) throw new Error('Güncel LIVE durumu okunamadı; bağlantı isteği gönderilmedi.')
+        const activation = await call<LiveStatus>(CONNECTIONS, '/activate', {method: 'POST', body: JSON.stringify({
+          mode: 'LIVE', confirmation: 'CANLI SALT OKUNUR BAĞLANTIYI AÇ',
+          expected_fingerprint: connection.fingerprint,
+        })})
+        if (activation.connected !== true) throw new Error('Sunucu salt-okunur hesap bağlantısının açıldığını doğrulamadı.')
+      } catch (error) {
+        const phase = saved ? 'Anahtar kasada kayıtlı; salt-okunur bağlantı doğrulanamadı.' : 'Yeni anahtar kaydı doğrulanamadı; bağlantı açılmadı.'
+        throw new Error(`${phase} ${connectionFailureMessage(error, [credentials.apiKey, credentials.secretKey])}`)
+      } finally {
+        setKeyCode('')
+      }
     }, 'API anahtarı şifreli kasaya kaydedildi ve LIVE hesabı salt-okunur bağlandı. Emir kilidi kapalı kaldı.')
   }
 
@@ -1138,11 +1160,11 @@ export default function LiveTradingPanel({active, symbol, analysis, masterTrade,
       <section className="originalSurface" aria-label="Kayıtlı Binance bağlantısı">
         <h3>Binance Futures</h3>
         <p>{connected && statusVerified ? 'Salt-okunur hesap bağlantısı açık. Bu sayfa emir göndermez.' : 'Bağlantıyı doğrula; strateji ayrı başlatılır.'}</p>
-        <p>{liveConnection?.configured ? '✓ Anahtar şifreli kasada kayıtlı' : 'Anahtar henüz kaydedilmedi'}</p>
-        <p>{liveConnection?.last_test_ok ? '✓ Kayıtlı anahtarın son testi başarılı' : 'Kayıtlı anahtarın testi doğrulanamadı'}</p>
+        <p>{liveConnection?.configured === true ? '✓ Mevcut anahtar şifreli kasada kayıtlı' : liveConnection?.configured === false ? 'Anahtar henüz kaydedilmedi' : 'Kayıtlı anahtar durumu okunamadı'}</p>
+        <p>{liveConnection?.last_test_ok === true ? '✓ Kayıtlı anahtarın son testi başarılı' : liveConnection?.last_test_ok === false ? 'Kayıtlı anahtarın testi doğrulanamadı' : 'Son kayıtlı test durumu okunamadı'}</p>
         <p>{liveConnection?.account?.api_permissions?.withdrawal_check === 'VERIFIED' && liveConnection.account.api_permissions.enableWithdrawals === false ? '✓ Para çekme izni kapalı' : 'Para çekme izni henüz doğrulanamadı'}</p>
         <p>IP kısıtlamasını Binance panelinden ayarla. Bu ekran IP kısıtlamasını doğrulamaz.</p>
-        <p>Anahtar izi: <b>{text(liveConnection?.fingerprint || status?.credentials?.fingerprint)}</b></p>
+        <p>Anahtar izi: <b>{text(liveConnection?.fingerprint)}</b></p>
         <p>Son kayıtlı test: {date(liveConnection?.last_test_at)}</p>
         <div className="masterTradeLiveApiActions">
           <button type="button" onClick={deactivateCredentials} disabled={Boolean(busy) || !liveConnection?.active}>Bağlantıyı kapat</button>

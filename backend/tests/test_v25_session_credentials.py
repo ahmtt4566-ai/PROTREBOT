@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import hmac
 import sys
 import time
 import unittest
@@ -12,6 +14,8 @@ sys.path.insert(0, str(BACKEND))
 
 from app import exchange_connections, v22_commercial, v25_execution  # noqa: E402
 from app.commercial_core import issue_token  # noqa: E402
+from test_exchange_connections_server_time import FakeBinanceHttp  # noqa: E402
+import httpx  # noqa: E402
 
 
 class V25SessionCredentialTests(unittest.TestCase):
@@ -132,6 +136,193 @@ class V25SessionCredentialTests(unittest.TestCase):
                 confirmation="CANLI KASAYA KAYDET", totp_code="654321",
             ),
         )
+
+    def verification_http(self, credentials, *, rejected_path=None):
+        http = FakeBinanceHttp()
+        get = http.get
+        seen = []
+
+        async def signed_get(url, headers=None):
+            path = httpx.URL(url).path
+            if headers:
+                seen.append((path, exchange_connections.key_fingerprint(headers["X-MBX-APIKEY"])))
+                self.assertEqual(headers["X-MBX-APIKEY"], credentials[0])
+                query, signature = httpx.URL(url).query.decode().rsplit("&signature=", 1)
+                self.assertTrue(hmac.compare_digest(
+                    signature, hmac.new(credentials[1].encode(), query.encode(), hashlib.sha256).hexdigest(),
+                ))
+            if path == rejected_path:
+                http.paths.append(path)
+                return httpx.Response(400, json={
+                    "code": -2008, "msg": f"{credentials[0]} {credentials[1]} 654321 signature=offline-secret",
+                }, request=httpx.Request("GET", url))
+            response = await get(url, headers=headers)
+            if path == "/fapi/v3/account":
+                return httpx.Response(200, json={**response.json(), "uid": "account-one"}, request=response.request)
+            return response
+
+        http.get = signed_get
+        async def verify(request, mode, key, secret):
+            return await exchange_connections.test_binance_credentials(http, mode, key, secret)
+        exchange_connections._verify_request_credentials.side_effect = verify
+        return http, seen
+
+    def test_wrong_mfa_never_writes_or_tests_keys_and_keeps_live_locked(self):
+        from app import account_settings
+        require_mfa = exchange_connections._require_live_mfa
+        with self.rotation_context() as (request, holder, old, new, account):
+            exchange_connections._require_live_mfa.side_effect = require_mfa
+            with patch.object(account_settings, "enabled", new=AsyncMock(return_value=True)), \
+                 patch.object(account_settings, "require_totp", new=AsyncMock(side_effect=exchange_connections.HTTPException(401, "2FA kodu geçersiz."))) as totp:
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(self.save_rotated_key(request, new))
+                totp.assert_awaited_once()
+            self.assertEqual(failure.exception.status_code, 401)
+            self.assertEqual(exchange_connections.decrypt_credentials(holder["row"]["encrypted_payload"], mode="LIVE"), old)
+            exchange_connections._verify_request_credentials.assert_not_awaited()
+            self.assertEqual(request.app.state.v25_execution["armed_until"], 0)
+            self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+            self.assertFalse(request.app.state.v25_execution["connected"])
+
+    def test_save_and_saved_verification_use_only_the_new_key_and_secret(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            http, seen = self.verification_http(new)
+            with patch.dict(exchange_connections._SERVER_TIME_CACHE, {}, clear=True), \
+                 patch.dict(exchange_connections._SERVER_TIME_LOCKS, {}, clear=True), \
+                 patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock(return_value={"orders_created": False})):
+                async def scenario():
+                    result = await self.save_rotated_key(request, new)
+                    self.assertTrue(result["verification"]["readback_verified"])
+                    self.assertEqual(result["verification"]["submitted_fingerprint"], result["verification"]["stored_fingerprint"])
+                    await exchange_connections.exchange_connection_activate(
+                        request, exchange_connections.ConnectionActionRequest(
+                            mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ",
+                            expected_fingerprint=result["connections"]["LIVE"]["fingerprint"],
+                        ),
+                    )
+                with self.assertLogs(exchange_connections.logger, level="INFO") as logs:
+                    asyncio.run(scenario())
+            self.assertEqual(len(seen), 6)
+            self.assertTrue(all(fingerprint == exchange_connections.key_fingerprint(new[0]) for _, fingerprint in seen))
+            for stage in ("MFA_VERIFIED", "VAULT_WRITE_START", "VAULT_READBACK_VERIFIED", "SAVED_VERIFY_START"):
+                self.assertIn(stage, str(logs.output))
+            for private in (*old, *new, "654321", "signature="):
+                self.assertNotIn(private, str(logs.output))
+
+    def test_binance_invalid_key_rejects_submitted_pair_before_vault_write(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            http, seen = self.verification_http(new, rejected_path="/sapi/v1/account/apiRestrictions")
+            with patch.dict(exchange_connections._SERVER_TIME_CACHE, {}, clear=True), \
+                 patch.dict(exchange_connections._SERVER_TIME_LOCKS, {}, clear=True), \
+                 self.assertLogs(exchange_connections.logger, level="INFO") as logs:
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(self.save_rotated_key(request, new))
+            detail = failure.exception.detail
+            self.assertEqual(failure.exception.status_code, 502)
+            self.assertEqual(detail["verification_stage"], "api_permissions")
+            self.assertEqual(detail["endpoint"], "/sapi/v1/account/apiRestrictions")
+            self.assertEqual(detail["credential_fingerprint"], exchange_connections.key_fingerprint(new[0]))
+            self.assertEqual(detail["exchange_code"], -2008)
+            self.assertEqual(detail["operation"], "save")
+            self.assertEqual(detail["credential_source"], "submitted")
+            self.assertEqual(http.paths, ["/fapi/v1/time", "/sapi/v1/account/apiRestrictions"])
+            self.assertEqual(seen, [("/sapi/v1/account/apiRestrictions", exchange_connections.key_fingerprint(new[0]))])
+            self.assertEqual(exchange_connections.decrypt_credentials(holder["row"]["encrypted_payload"], mode="LIVE"), old)
+            self.assertFalse(any("VALUES ($1, 'LIVE'" in call.args[0] for call in request.app.state.db_pool.execute.await_args_list))
+            self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+            for private in (*old, *new, "654321", "signature=offline-secret"):
+                self.assertNotIn(private, str(detail) + str(logs.output))
+
+    def test_save_readback_failure_never_publishes_unconfirmed_credentials(self):
+        for failure_kind in ("missing", "different", "same_key_different_secret", "database"):
+            with self.subTest(failure_kind=failure_kind), self.rotation_context() as (request, holder, old, new, account):
+                previous_row = dict(holder["row"])
+                if failure_kind == "database":
+                    request.app.state.db_pool.fetchrow.side_effect = RuntimeError(f"{new[0]} {new[1]} 654321")
+                elif failure_kind == "same_key_different_secret":
+                    request.app.state.db_pool.fetchrow.side_effect = None
+                    request.app.state.db_pool.fetchrow.return_value = {
+                        **previous_row, "fingerprint": exchange_connections.key_fingerprint(new[0]),
+                        "encrypted_payload": exchange_connections.encrypt_credentials(new[0], "different-offline-secret", mode="LIVE"),
+                    }
+                else:
+                    request.app.state.db_pool.fetchrow.side_effect = None
+                    request.app.state.db_pool.fetchrow.return_value = previous_row if failure_kind == "different" else None
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(self.save_rotated_key(request, new))
+                self.assertIn(failure.exception.status_code, (409, 503))
+                self.assertEqual(exchange_connections.session_credentials(request, "LIVE", active_only=False), ("", ""))
+                self.assertEqual(request.app.state.v25_execution["armed_until"], 0)
+                self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+                self.assertEqual(request.app.state.v25_execution["live_session_authorization"]["fingerprint"], v25_execution.credential_fingerprint(old[0]))
+                self.assertNotIn(new[0], str(failure.exception.detail))
+                self.assertNotIn(new[1], str(failure.exception.detail))
+
+    def test_saved_key_rejection_during_activation_preserves_record_and_identifies_source(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            result = asyncio.run(self.save_rotated_key(request, new))
+            http, seen = self.verification_http(new, rejected_path="/sapi/v1/account/apiRestrictions")
+            with patch.dict(exchange_connections._SERVER_TIME_CACHE, {}, clear=True), \
+                 patch.dict(exchange_connections._SERVER_TIME_LOCKS, {}, clear=True), \
+                 patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock()) as connect, \
+                 self.assertLogs(exchange_connections.logger, level="INFO") as logs:
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(exchange_connections.exchange_connection_activate(
+                        request, exchange_connections.ConnectionActionRequest(
+                            mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ",
+                            expected_fingerprint=result["connections"]["LIVE"]["fingerprint"],
+                        ),
+                    ))
+                connect.assert_not_awaited()
+            self.assertEqual(failure.exception.status_code, 502)
+            self.assertEqual(failure.exception.detail["operation"], "activate")
+            self.assertEqual(failure.exception.detail["credential_source"], "account_vault")
+            self.assertEqual(failure.exception.detail["verification_stage"], "api_permissions")
+            self.assertEqual(failure.exception.detail["credential_fingerprint"], exchange_connections.key_fingerprint(new[0]))
+            self.assertEqual(seen, [("/sapi/v1/account/apiRestrictions", exchange_connections.key_fingerprint(new[0]))])
+            self.assertEqual(exchange_connections.decrypt_credentials(holder["row"]["encrypted_payload"], mode="LIVE"), new)
+            connection = exchange_connections.session_public_status(request.app, request)["connections"]["LIVE"]
+            self.assertTrue(connection["configured"])
+            self.assertFalse(connection["active"])
+            self.assertFalse(connection["last_test_ok"])
+            self.assertEqual(connection["fingerprint"], exchange_connections.key_fingerprint(new[0]))
+            self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+            for private in (*old, *new, "654321", "signature=offline-secret"):
+                self.assertNotIn(private, str(failure.exception.detail) + str(logs.output))
+
+    def test_activation_fences_a_different_record_than_the_confirmed_save(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            with patch.object(v25_execution, "connect_read_only_for_request", new=AsyncMock(return_value={"orders_created": False})) as connect:
+                with self.assertRaises(exchange_connections.HTTPException) as failure:
+                    asyncio.run(exchange_connections.exchange_connection_activate(
+                        request, exchange_connections.ConnectionActionRequest(
+                            mode="LIVE", confirmation="CANLI SALT OKUNUR BAĞLANTIYI AÇ",
+                            expected_fingerprint=exchange_connections.key_fingerprint(new[0]),
+                        ),
+                    ))
+                self.assertEqual(failure.exception.status_code, 409)
+                connect.assert_not_awaited()
+                exchange_connections._verify_request_credentials.assert_not_awaited()
+            self.assertTrue(request.app.state.v25_execution["real_trading_locked"])
+
+    def test_trusted_web_owner_reloads_canonical_record_instead_of_old_worker_cache(self):
+        with self.rotation_context() as (request, holder, old, new, account):
+            request.state.member = None
+            request.state.web_owner_authenticated = True
+            request.app.state.v25_execution["live_session_authorization"]["user_id"] = "WEB_OWNER"
+            scope = ("owner:WEB_OWNER", "LIVE")
+            exchange_connections._SESSION_CACHE[scope] = old
+            exchange_connections._SESSION_META[scope] = {
+                **self.live_metadata(), "user_id": "WEB_OWNER",
+                "fingerprint": exchange_connections.key_fingerprint(old[0]), "account": account,
+            }
+            holder["row"].update(
+                user_id="WEB_OWNER", encrypted_payload=exchange_connections.encrypt_credentials(*new, mode="LIVE"),
+                fingerprint=exchange_connections.key_fingerprint(new[0]),
+            )
+            asyncio.run(exchange_connections.ensure_session_cache(request))
+            self.assertEqual(exchange_connections.session_credentials(request, "LIVE", active_only=False), new)
+            request.app.state.db_pool.fetchrow.assert_awaited_once()
 
     def test_profile_hydration_does_not_wait_for_live_locks(self):
         from app import main

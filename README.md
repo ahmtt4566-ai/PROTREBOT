@@ -2888,6 +2888,22 @@ Geçerli kasa kaydı ile LIVE oturumunu bağlama izni ayrı kontrol edilir. Otur
 geçişi güvenlik nedeniyle reddedilirse kayıt salt-okunur bağlantı testi için
 okunabilir kalır; eski oturum kimliği korunur ve işlem girişleri kapalı kalır.
 
+LIVE kaydetme sırası: OWNER ve 2FA kontrolü, formdaki yeni anahtarın salt-okunur
+Binance doğrulaması, şifreli kasa yazımı ve kaydın yeniden okunup anahtar çifti
+ile fingerprint'in karşılaştırılmasıdır. Doğrulanmamış anahtar kasaya yazılmaz.
+Sonraki aktivasyon yalnız bu kaydı kullanır; beklenen fingerprint değişmişse
+farklı anahtarla test yapılmadan reddedilir. Yeniden okuma başarısızsa yazımın
+geri alındığı varsayılmaz; eski bellek anahtarına dönülmez ve LIVE kapalı kalır.
+Binance `-2008` geçersiz API anahtar kimliğidir, kapalı Futures izni kanıtı
+değildir. Hata yanıtı endpoint, doğrulama aşaması, HTTP/Binance kodu ve yalnız
+fingerprint içerir. Kayıt/bağlantı başarısızlıkları ile okunamayan kasa durumu
+arayüzde ayrı gösterilir. Frontend ve backend bu yanıt protokolüyle birlikte
+yayımlanmalıdır.
+Mevcut, doğrulanmış `WEB_OWNER` bağlamı da aynı kasa yükleme yolunu kullanır;
+normal üyelik nesnesi bulunmadığı için eski worker cache'i kullanılmaz.
+Bağlantı uçlarının 422 doğrulama yanıtlarında yalnız alan, hata türü ve güvenli
+hata metni döner; girilen anahtarlar ve 2FA değeri yanıta veya loga eklenmez.
+
 ## Bir defalık yayın ayarları
 
 Render arka uç servisinde yalnızca mevcut temel değerler gerekir:

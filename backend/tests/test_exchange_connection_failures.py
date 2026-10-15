@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app import exchange_connections as connections
 from test_exchange_connections_server_time import FakeBinanceHttp
@@ -83,10 +85,53 @@ def test_signed_rejection_preserves_safe_stage_status_and_code(path, stage, code
         asyncio.run(connections._signed_get(http, host, path, key, secret, 1))
     public_error = connections._exchange_test_http_exception(error.value)
     assert public_error.status_code == 502
-    assert stage in public_error.detail
-    assert "HTTP 400" in public_error.detail
-    assert str(code) in public_error.detail
+    assert isinstance(public_error.detail, dict)
+    message = public_error.detail["message"]
+    assert stage in message
+    assert "HTTP 400" in message
+    assert str(code) in message
+    assert public_error.detail["endpoint"] == path
+    assert public_error.detail["credential_fingerprint"] == connections.key_fingerprint(key)
+    assert public_error.detail["exchange_code"] == code
     assert path in caplog.text and str(code) in caplog.text
     for private in (key, secret, "private-signature"):
-        assert private not in public_error.detail + caplog.text
+        assert private not in str(public_error.detail) + caplog.text
     assert http.get.await_count == 1
+
+
+def test_invalid_api_key_id_is_not_misreported_as_disabled_futures_permissions():
+    message = connections.exchange_rejection_message(-2008)
+    assert "anahtar kimliğini geçersiz" in message
+    assert "Futures izni kapalı" not in message
+    assert "veya" not in message
+
+
+def test_error_code_in_success_http_response_is_still_rejected():
+    http = SimpleNamespace(get=AsyncMock(return_value=httpx.Response(
+        200, json={"code": -2008, "msg": "offline-private-key signature=offline-secret"},
+        request=httpx.Request("GET", "https://api.binance.com/sapi/v1/account/apiRestrictions"),
+    )))
+    with pytest.raises(connections.BinanceVerificationRejected) as error:
+        asyncio.run(connections._signed_get(
+            http, "https://api.binance.com", "/sapi/v1/account/apiRestrictions",
+            "offline-private-key", "offline-private-secret", 0,
+        ))
+    assert error.value.exchange_code == -2008
+    assert error.value.stage == "api_permissions"
+    assert "offline-private-key" not in str(error.value)
+
+
+@pytest.mark.parametrize("path,body", [
+    ("/save", {"mode": "LIVE", "api_key": "offline-private-key", "secret_key": "offline-private-secret", "totp_code": "654321"}),
+    ("/save", {"mode": "LIVE", "api_key": "offline-private-key", "secret_key": "offline-private-secret", "confirmation": "CANLI KASAYA KAYDET", "totp_code": "54321"}),
+    ("/activate", {"mode": "LIVE", "confirmation": "CANLI SALT OKUNUR BAĞLANTIYI AÇ", "expected_fingerprint": "offline-private-key"}),
+])
+def test_invalid_connection_request_never_echoes_credentials_or_mfa(path, body, caplog):
+    application = FastAPI()
+    application.include_router(connections.router)
+    with caplog.at_level(logging.WARNING), TestClient(application) as client:
+        response = client.post("/api/exchange-connections" + path, json=body)
+    assert response.status_code == 422
+    for private in ("offline-private-key", "offline-private-secret", "654321", "54321"):
+        assert private not in response.text + caplog.text
+    assert all("input" not in error for error in response.json()["detail"])

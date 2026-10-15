@@ -208,10 +208,13 @@ test('connection keys stay masked and are cleared once saved even if activation 
       expect(route.request().postDataJSON()).toEqual({
         mode:'LIVE',api_key:key,secret_key:secret,confirmation:'CANLI KASAYA KAYDET',totp_code:'123456',
       })
-      await route.fulfill({json:{ok:true}})
+      await route.fulfill({json:{
+        connections:{LIVE:{configured:true,active:true,last_test_ok:true,fingerprint:'SHA256:OFFLINE'}},
+        verification:{readback_verified:true,submitted_fingerprint:'SHA256:OFFLINE',stored_fingerprint:'SHA256:OFFLINE'},
+      }})
     } else {
       expect(route.request().postDataJSON()).toEqual({
-        mode:'LIVE',confirmation:'CANLI SALT OKUNUR BAĞLANTIYI AÇ',
+        mode:'LIVE',confirmation:'CANLI SALT OKUNUR BAĞLANTIYI AÇ',expected_fingerprint:'SHA256:OFFLINE',
       })
       await route.fulfill({status:502,json:{detail:'Binance Futures yetkisi doğrulanamadı.'}})
     }
@@ -239,15 +242,22 @@ test('connection keys stay masked and are cleared once saved even if activation 
 
 for (const activationStatus of [403,500]) test(`activation HTTP ${activationStatus} with ownership rejection shows session recovery without enabling LIVE`, async ({page}) => {
   const fixture = await setup(page)
-  fixture.statusCode = 403
   fixture.statusDetail = 'LIVE kontrolü başka bir kullanıcı veya oturuma ait.'
   await page.route('**/api/exchange-connections/{save,activate}', async route => {
     const path = new URL(route.request().url()).pathname
     fixture.mutations.push(path)
-    await route.fulfill(path.endsWith('/save') ? {json:{ok:true}} : {
-      status:activationStatus,
-      json:{detail:activationStatus === 403 ? `${fixture.statusDetail} Aynı OWNER hesabındaysanız 'LIVE oturumunu geri bağla' düğmesini kullanın; güncel 2FA gerekir.` : 'Internal server error.'},
-    })
+    if (path.endsWith('/save')) {
+      await route.fulfill({json:{
+        connections:{LIVE:{configured:true,active:true,last_test_ok:true,fingerprint:'SHA256:OFFLINE'}},
+        verification:{readback_verified:true,submitted_fingerprint:'SHA256:OFFLINE',stored_fingerprint:'SHA256:OFFLINE'},
+      }})
+    } else {
+      fixture.statusCode = 403
+      await route.fulfill({
+        status:activationStatus,
+        json:{detail:activationStatus === 403 ? `${fixture.statusDetail} Aynı OWNER hesabındaysanız 'LIVE oturumunu geri bağla' düğmesini kullanın; güncel 2FA gerekir.` : 'Internal server error.'},
+      })
+    }
   })
   await page.goto('/master-trade?tab=baglanti',{waitUntil:'domcontentloaded'})
   const card = page.locator('.masterTradeLiveConnectionCard')
