@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from .analysis import analyze
 from .analyst_credits import router as analyst_credits_router
 from .assistant_api import router as assistant_router, shutdown_assistant
+from .chart_ai_api import router as chart_ai_router
 from .browser_security import (
     OWNER_ACCESS_COOKIE, USER_SESSION_COOKIE, browser_request, clear_browser_cookie,
     set_browser_cookie, validate_browser_request,
@@ -1385,6 +1386,7 @@ async def owner_preview_gate(request, call_next):
         and configured_owner == WEB_ACCESS_TOKEN
     )
     protected_member_request = request.url.path.startswith("/api/") and request.method.upper() != "OPTIONS" and request.url.path not in MEMBER_PUBLIC_PATHS
+    chart_ai_request = request.url.path.startswith("/api/chart-ai/")
     if protected_member_request:
         try:
             request.state.member = await authenticated_user_async(request)
@@ -1415,10 +1417,11 @@ async def owner_preview_gate(request, call_next):
         if requires_premium(request.url.path, request.method) and not request.state.premium and not trial_safety_action:
             logger.warning("Premium operation denied user_id=%s path=%s", request.state.member["id"], request.url.path)
             return apply_cors_headers(request, JSONResponse({"detail": "Premium üyelik gerekli.", "code": "PREMIUM_REQUIRED"}, status_code=403))
-        try:
-            await hydrate_authenticated_user_state(request)
-        except HTTPException as exc:
-            return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
+        if not chart_ai_request:
+            try:
+                await hydrate_authenticated_user_state(request)
+            except HTTPException as exc:
+                return apply_cors_headers(request, JSONResponse({"detail": exc.detail}, status_code=exc.status_code))
     request.state.web_owner_authenticated = bool(
         owner_access_authenticated
     )
@@ -1441,12 +1444,13 @@ async def owner_preview_gate(request, call_next):
         )
         response = JSONResponse({"detail": "Internal server error.", "request_id": request.state.request_id}, status_code=500)
     finally:
-        member = getattr(request.state, "member", None)
-        user_id = str((member or {}).get("id") or "").strip()
-        pending = getattr(request.app.state, "_binance_demo_persistence_tasks", {})
-        tasks = pending.pop(user_id, []) if user_id and isinstance(pending, dict) else []
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        if not chart_ai_request:
+            member = getattr(request.state, "member", None)
+            user_id = str((member or {}).get("id") or "").strip()
+            pending = getattr(request.app.state, "_binance_demo_persistence_tasks", {})
+            tasks = pending.pop(user_id, []) if user_id and isinstance(pending, dict) else []
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
     from .customer_event_writer import record_event
     record_event(request, getattr(request.state, "member", None), "api.error", "server_error" if response.status_code >= 500 else "request_failed", "api", response.status_code) if response.status_code >= 500 or response.status_code in (409, 429) else None
     notification_response = request.url.path == "/api/v21/notifications" or request.url.path.startswith("/api/v21/notifications/")
@@ -1495,6 +1499,7 @@ app.include_router(v27_cloud_router)
 app.include_router(exchange_connections_router)
 app.include_router(analyst_credits_router)
 app.include_router(assistant_router)
+app.include_router(chart_ai_router)
 
 
 async def analyst_analysis(symbol: str, timeframe: str) -> dict:

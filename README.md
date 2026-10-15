@@ -2,6 +2,110 @@
 
 Production deployment trigger verified through the repository commit pipeline.
 
+## Grafik AI - Adim 2/3/4 hazirligi (varsayilan kapali)
+
+[Chart AI migration](backend/migrations/20261015_001_chart_ai.sql) yalniz
+hazirlanmistir; otomatik uygulanmaz ve canli veritabanina uygulanmamistir. Kota deposu
+yalniz kullanim/onay API'sine baglidir; scheduler'a, Claude'a veya trading yollarina bagli degildir.
+Mevcut sohbet, analist kredileri, abonelik ve emir davranisi degismez.
+
+Depo yalniz PostgreSQL kullanir; eksik havuz/schema acik hata verir, bellek veya
+SQLite ile devam etmez. Deneme toplam 3, MASTER MODE Pazartesi 00:00 UTC
+baslayan haftada 20, OWNER kotasizdir. Sunucu/veritabani saati esastir;
+panelde yenilenme zamani kullanicinin yerel saatine cevrilecektir.
+Her kullanici icin tek devam eden istek, kullaniciya bagli UUID ve icerik
+SHA-256 ozeti cift tuketimi engeller. Basarili sonuc hak tuketir; ag kopmasi
+ayni anahtarla ucretsiz sonuc okumayi engellemez. Hatali istek yeniden
+uretim baslatmaz; sonuc 24 saatten sonra erisilemez ve metni temizlenir.
+Temizlik metodu hazirdir ancak zamanlayici bu adimda kaydedilmemistir.
+
+Butce ayri UTC takvim ayi icin 25 USD, istek rezervasyonu 0,02 USD'dir.
+Para tam sayi mikro-USD olarak tutulur. Gerceklesmis maliyet 20 USD'ye
+ulastiginda mevcut Resend outbox'ina OWNER icin aylik tek bildirim eklenir.
+Bu adim yalniz bildirim turu/kuyruk kaydini hazirlar; mail sablonu ve
+gonderimi sonraki onayli adimdadir. Bilinmeyen saglayici maliyeti icin
+rezervasyon tutulur, fakat kullanicinin analiz hakki serbest birakilir.
+120 saniyelik eski istek rezervasyonlari tekrar AI cagrisi baslatmadan
+kurtarilir. Gercek saglayici maliyeti belli olunca ayri olarak uzlastirilir.
+Butce ayrilamazsa mesaj:
+"Şu an analiz yapılamıyor, daha sonra tekrar dene".
+
+### Adim 3 - yalniz gecici yerel PostgreSQL dogrulamasi
+
+[Yerel dogrulama komutu](backend/tools/verify_chart_ai_postgres.py) yalniz
+`127.0.0.1:5432` adresini kabul eder. Parola etkilesimli terminalde gizli
+okunur; komut satirina, dosyaya veya ortama yazilmaz. `DATABASE_URL` ve PG
+baglanti ortam ayarlari kullanilmaz. `postgres` yonetim baglantisi yalniz
+yerel sunucu kimligi kontrolu ve rastgele adli test veritabani olusturma/silme
+icindir; migration ve kota sorgulari yeni test veritabaninda calisir.
+
+Onayli yerel PostgreSQL 17.11 testinde 22 migration sirayla uygulanmis ve
+11 entegrasyon kontrolu gecmistir: eszamanli ayni istek, kota sinirlari,
+son hak yarisi, hata iadesi, UTC Pazartesi, 24 saat temizlik, eski lease,
+aylik butce yarisi, yuzde 80 bildirim kaydi, eski bildirim kurallari ve
+ikinci migration calistirma. Test saati yalniz gecici veritabanindaki
+ayri schema ile kontrol edilir; makine veya sunucunun gercek saati degismez.
+Yeni migration tekrar uygulandiginda veri, constraint ve indeksleri degismez.
+Test veritabani silinmis ve yoklugu kontrol edilmistir.
+
+Sunucu IP'si `host(inet_server_addr())` ile karsilastirilir; PostgreSQL
+`inet::text` sonucundaki `/32` eki yanlis adres hatasi olusturmaz.
+Parola reddi, ulasilamayan port, zaman asimi ve calisan sunucunun localhost
+kontrolu ayri guvenli hata kodlariyla raporlanir; ham hata/parola loglanmaz.
+Komut uygulamayi, scheduler'i, modeli, borsayi veya mail gonderimini baslatmaz.
+Canli migration, commit ve push icin ayri onay gerekir.
+
+### Adim 4 - ayri erisim, kullanim ve ilk onay API'si
+
+[Grafik AI metadata router'i](backend/app/chart_ai_api.py) yalniz iki korumali
+ucu kaydeder: `GET /api/chart-ai/usage` ve
+`POST /api/chart-ai/acknowledgement`. `CHART_AI_ENABLED` varsayilan `false`
+oldugundan kapali gelir; `true` veya `1` acabilir. Gecersiz ayar acik 503
+hatasi verir. Bu adimda deployment/ortam dosyalari degistirilmez.
+Analiz ucu, gorsel kabul etme, AI veya e-posta cagrisi yoktur.
+
+Erisim dogrulanmis oturum ile kullaniciya ve auth surumune bagli sunucu
+uyelik kanitindan belirlenir; `isPremium`, tarayicinin gonderdigi plan/rol
+ve JWT rol iddiasi tek basina yetki vermez. Aktif yedi gunluk deneme 3,
+aktif MASTER MODE (mevcut PAST_DUE toleransi dahil) haftada 20, OWNER
+sinirsiz kota gorur. Suresi bitmis/yetkisiz hesap 403, dogrulanamayan
+kanit veya eksik kota deposu 503 alir; sahte kalan hak gosterilmez.
+Genel Kais sohbet kilidi ve mevcut abonelik kurallari degismez.
+
+Kullanim yaniti gercek `limit/used/reserved/remaining/unlimited` degerlerini,
+`period_start/period_end/resets_at/trial_expires_at/server_now` UTC zamanlarini
+ve onay durumunu verir. OWNER'in limit/kalan/donem zamanlari `null` olur.
+Arayuz daha sonraki adimda `resets_at` degerini yerel saate cevirir.
+`analysis_enabled: false` ve `availability.code: analysis_not_enabled`
+bu adimda analiz gonderiminin acik olmadigini belirtir.
+
+Onay govdesi tam olarak `{"policy_version":"chart-ai-v1","accepted":true}`
+olmalidir; ek alanlar, metin/sayi turunde onay, `false` ve eski surum
+reddedilir. Ilk kabul zamani sunucuda kalici ve kullaniciya ozgudur;
+tekrarlanan onay ayni zamani dondurur ve hak tuketmez.
+Yanitta gizlilik cumlesi ve **"Bu analiz yatırım tavsiyesi değildir."**
+birlikte bulunur. Bu iki uc anahtar kasasi/DEMO islem durumu yukleme
+ve bekleyen trading persistence gorevlerini bekleme akislarina girmez;
+diger API yollarinin mevcut davranisi korunur. Kimlik, tarayici
+guvenligi ve uyelik dogrulama kontrolleri atlanmaz.
+
+Adim 4 testleri yalniz sahte veritabani/havuzlarla calisir; migration
+uygulanmaz, gercek saglayici/borsa/mail baglantisi kurulmaz.
+Adim 5 icin ayri onay gerekir.
+
+### Adim 9 yayin kontrol listesi - gizlilik
+
+- Panelde ve ilk kullanim onayinda tam olarak su cumle kullanilacak:
+  **"Resmin sitemizde saklanmaz; analiz için yapay zeka sağlayıcımıza gönderilir."**
+- Ayni cumle yayin oncesinde sitenin gizlilik metnine eklenecek.
+- "Gorsel hicbir yerde saklanmaz" iddiasi kullanilmayacak. ZDR dogrulamasi
+  canli kullanim onkosulu degildir; saglayicinin saklama kosullari ayri kalir.
+- Gorsel/base64 disk, veritabani, object storage, log veya tarayici kalici
+  deposuna yazilmayacak. Sonuc metni icin 24 saatlik temizlik ve
+  log/yedek saklama kapsami yayin oncesinde dogrulanacak.
+- Migration uygulama, aktif API/mail/temizlik baglantilari, commit ve
+  push/yayin icin ayri onaylar alinacak.
+
 ## LIVE ilk okuma ve oturum süresi
 
 LIVE anahtarı oturum kasasından değil, OWNER hesabının şifreli hesap kasasından
